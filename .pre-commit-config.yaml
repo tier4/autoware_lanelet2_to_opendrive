@@ -6,6 +6,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        exclude: '\.osm$'
       - id: check-merge-conflict
       - id: check-toml
       - id: debug-statements
@@ -29,3 +30,13 @@ repos:
     hooks:
       - id: mypy
         args: [--ignore-missing-imports]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
