@@ -9,7 +9,11 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "lanelet2>=1.2.2",
+    "autoware-lanelet2-extension-python",
 ]
+
+[tool.uv.sources]
+autoware-lanelet2-extension-python = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", branch = "feature/poetry" }
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
