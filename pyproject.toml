@@ -14,3 +14,10 @@ dependencies = [
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "black>=25.11.0",
+    "pre-commit>=4.5.0",
+    "pytest>=9.0.1",
+]
