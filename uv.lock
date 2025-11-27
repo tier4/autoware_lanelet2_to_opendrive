@@ -1,0 +1,22 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "autoware-lanelet2-to-opendrive"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "lanelet2" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "lanelet2", specifier = ">=1.2.2" }]
+
+[[package]]
+name = "lanelet2"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/31/79aa1fd8b50f5fb67a0e5537483005131ee347400797749eb50770d83010/lanelet2-1.2.2-cp312-cp312-manylinux_2_31_x86_64.whl", hash = "sha256:c5a9c33e21f7b1d897f0c2f442c6c839edef0b11ace8422103551f3b2e88b527", size = 4274557, upload-time = "2024-10-28T16:31:27.543Z" },
+]
