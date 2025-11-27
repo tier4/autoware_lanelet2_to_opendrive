@@ -9,7 +9,11 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "lanelet2>=1.2.2",
+    "lanelet2-python-api-for-autoware",
 ]
+
+[tool.uv.sources]
+lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", rev = "7745347645fd04aa8e4230cfa8793e253aad6753" }
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
