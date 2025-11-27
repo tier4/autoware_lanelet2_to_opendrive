@@ -24,7 +24,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographic-dev libboost-python-dev  libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
+        sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographiclib-dev libboost-python-dev  libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
 
     - name: Install uv
       uses: astral-sh/setup-uv@v4
@@ -65,7 +65,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographic-dev libboost-python-dev  libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
+        sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographiclib-dev libboost-python-dev  libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
 
     - name: Install uv
       uses: astral-sh/setup-uv@v4
