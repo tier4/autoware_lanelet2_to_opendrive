@@ -100,6 +100,16 @@ def test_find_terminal_lanelets():
     assert all(isinstance(ll, lanelet2.core.Lanelet) for ll in start_lanelets)
     assert all(isinstance(ll, lanelet2.core.Lanelet) for ll in end_lanelets)
 
+    # Check that specific lanelet IDs are included
+    start_ids = {ll.id for ll in start_lanelets}
+    end_ids = {ll.id for ll in end_lanelets}
+    assert (
+        3002084 in start_ids
+    ), f"Lanelet 3002084 should be in start lanelets, but found: {start_ids}"
+    assert (
+        3002082 in end_ids
+    ), f"Lanelet 3002082 should be in end lanelets, but found: {end_ids}"
+
     # Verify consistency with individual functions
     start_lanelets_individual = find_lanelets_without_previous(lanelet_map)
     end_lanelets_individual = find_lanelets_without_next(lanelet_map)
