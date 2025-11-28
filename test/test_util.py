@@ -57,6 +57,12 @@ def test_find_lanelets_without_previous():
     assert isinstance(start_lanelets, set)
     assert all(isinstance(ll, lanelet2.core.Lanelet) for ll in start_lanelets)
 
+    # Check that lanelet 3002084 is included in start lanelets
+    start_ids = {ll.id for ll in start_lanelets}
+    assert (
+        3002084 in start_ids
+    ), f"Lanelet 3002084 should be in start lanelets, but found: {start_ids}"
+
     # Verify these lanelets actually have no previous lanelets
     traffic_rules = lanelet2.traffic_rules.create(
         lanelet2.traffic_rules.Locations.Germany,
