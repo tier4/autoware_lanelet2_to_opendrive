@@ -462,3 +462,66 @@ def test_find_adjacent_groups_specific_lanelets_together():
         f"Found 3002094 in group of size {len(group_with_3002094)}, "
         f"3002093 in group of size {len(group_with_3002093)}"
     )
+
+
+def test_find_adjacent_groups_empty_set_specific_lanelets():
+    """Test that specific lanelets 3002144/3002145/3002146 are in same group with empty target set."""
+    lanelet_map = load_test_map()
+
+    # Find the lanelets with specific IDs
+    lanelet_3002144 = None
+    lanelet_3002145 = None
+    lanelet_3002146 = None
+
+    for ll in lanelet_map.laneletLayer:
+        if ll.id == 3002144:
+            lanelet_3002144 = ll
+        elif ll.id == 3002145:
+            lanelet_3002145 = ll
+        elif ll.id == 3002146:
+            lanelet_3002146 = ll
+
+    # Verify all lanelets exist in the map
+    assert lanelet_3002144 is not None, "Lanelet 3002144 should exist in the test map"
+    assert lanelet_3002145 is not None, "Lanelet 3002145 should exist in the test map"
+    assert lanelet_3002146 is not None, "Lanelet 3002146 should exist in the test map"
+
+    # Find groups with empty target set (should group all lanelets)
+    groups = find_adjacent_groups(lanelet_map, set())
+
+    # Find which groups contain our target lanelets
+    group_with_3002144 = None
+    group_with_3002145 = None
+    group_with_3002146 = None
+
+    for group in groups:
+        if lanelet_3002144 in group:
+            group_with_3002144 = group
+        if lanelet_3002145 in group:
+            group_with_3002145 = group
+        if lanelet_3002146 in group:
+            group_with_3002146 = group
+
+    # All lanelets should be in groups
+    assert group_with_3002144 is not None, "Lanelet 3002144 should be in some group"
+    assert group_with_3002145 is not None, "Lanelet 3002145 should be in some group"
+    assert group_with_3002146 is not None, "Lanelet 3002146 should be in some group"
+
+    # Most importantly: they should all be in the same group
+    assert group_with_3002144 is group_with_3002145, (
+        f"Lanelets 3002144 and 3002145 should be in the same group. "
+        f"Found 3002144 in group of size {len(group_with_3002144)}, "
+        f"3002145 in group of size {len(group_with_3002145)}"
+    )
+
+    assert group_with_3002145 is group_with_3002146, (
+        f"Lanelets 3002145 and 3002146 should be in the same group. "
+        f"Found 3002145 in group of size {len(group_with_3002145)}, "
+        f"3002146 in group of size {len(group_with_3002146)}"
+    )
+
+    assert group_with_3002144 is group_with_3002146, (
+        f"Lanelets 3002144 and 3002146 should be in the same group. "
+        f"Found 3002144 in group of size {len(group_with_3002144)}, "
+        f"3002146 in group of size {len(group_with_3002146)}"
+    )
