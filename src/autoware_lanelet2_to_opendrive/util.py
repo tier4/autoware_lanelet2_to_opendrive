@@ -108,15 +108,48 @@ def find_adjacent_groups(
     Args:
         lanelet_map: The lanelet2 map to analyze
         target_lanelets: Set of lanelets to group. If empty, groups all lanelets in the map.
+                        If not empty, includes target lanelets and their adjacent lanelets.
 
     Returns:
         List of sets, where each set contains lanelets that are adjacent to each other
     """
+    all_lanelets_in_map = set(lanelet_map.laneletLayer)
+
     # If target_lanelets is empty, use all lanelets from the map
     if not target_lanelets:
-        lanelets_to_group = set(lanelet_map.laneletLayer)
+        lanelets_to_group = all_lanelets_in_map
     else:
+        # Start with target lanelets and add their adjacent lanelets
         lanelets_to_group = target_lanelets.copy()
+
+        # Create routing graph to find adjacent lanelets
+        traffic_rules = lanelet2.traffic_rules.create(
+            lanelet2.traffic_rules.Locations.Germany,
+            lanelet2.traffic_rules.Participants.Vehicle,
+        )
+        temp_routing_graph = RoutingGraph(
+            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+        )
+
+        # Add adjacent lanelets to the grouping set
+        for target_ll in target_lanelets:
+            # Add following lanelets
+            for following_ll in temp_routing_graph.following(target_ll):
+                lanelets_to_group.add(following_ll)
+
+            # Add previous lanelets
+            for previous_ll in temp_routing_graph.previous(target_ll):
+                lanelets_to_group.add(previous_ll)
+
+            # Add left adjacent lanelets
+            left_ll = temp_routing_graph.left(target_ll)
+            if left_ll:
+                lanelets_to_group.add(left_ll)
+
+            # Add right adjacent lanelets
+            right_ll = temp_routing_graph.right(target_ll)
+            if right_ll:
+                lanelets_to_group.add(right_ll)
 
     # Create routing graph for connectivity analysis
     traffic_rules = lanelet2.traffic_rules.create(

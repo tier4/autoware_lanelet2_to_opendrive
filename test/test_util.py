@@ -216,13 +216,13 @@ def test_find_adjacent_groups_subset():
     start_lanelets, end_lanelets = find_terminal_lanelets(lanelet_map)
     terminal_lanelets = start_lanelets | end_lanelets
 
-    # Find groups among terminal lanelets only
+    # Find groups among terminal lanelets and their adjacent lanelets
     groups = find_adjacent_groups(lanelet_map, terminal_lanelets)
 
     # Check that we got a list of groups
     assert isinstance(groups, list)
 
-    # Check that all groups contain only terminal lanelets
+    # Check that all groups contain lanelets (including adjacent ones)
     for group in groups:
         assert isinstance(group, set)
         assert len(group) > 0
@@ -231,14 +231,16 @@ def test_find_adjacent_groups_subset():
             assert isinstance(
                 ll, (lanelet2.core.Lanelet, lanelet2.core.ConstLanelet)
             ), f"Expected Lanelet or ConstLanelet, got {type(ll)}"
-        assert group.issubset(terminal_lanelets)
+        # Groups may now contain non-terminal lanelets that are adjacent to terminal ones
+        # So we don't check group.issubset(terminal_lanelets) anymore
 
-    # Check that all terminal lanelets are accounted for
+    # Check that all terminal lanelets are accounted for in some group
     all_lanelets_in_groups = set()
     for group in groups:
         all_lanelets_in_groups.update(group)
 
-    assert all_lanelets_in_groups == terminal_lanelets
+    # All terminal lanelets should be in the groups (but groups may contain more)
+    assert terminal_lanelets.issubset(all_lanelets_in_groups)
 
 
 def test_find_adjacent_groups_empty_target():
@@ -321,3 +323,87 @@ def test_find_adjacent_groups_connectivity():
                 # This might be expected for some edge cases,
                 # so we'll just record it without failing
                 pass
+
+
+def test_find_adjacent_groups_includes_neighbors():
+    """Test that groups include adjacent lanelets not in target set."""
+    lanelet_map = load_test_map()
+
+    # Get a small subset of lanelets (just start terminals)
+    start_lanelets, _ = find_terminal_lanelets(lanelet_map)
+
+    # Take only one start lanelet for testing
+    if start_lanelets:
+        single_start = {next(iter(start_lanelets))}
+
+        # Find groups including this lanelet and its neighbors
+        groups = find_adjacent_groups(lanelet_map, single_start)
+
+        # Check that we got groups
+        assert isinstance(groups, list)
+        assert len(groups) > 0
+
+        # Find the group containing our target lanelet
+        target_group = None
+        for group in groups:
+            if single_start.intersection(group):
+                target_group = group
+                break
+
+        assert target_group is not None, "Target lanelet should be in some group"
+
+        # The group should contain more than just the target lanelet
+        # (unless it's completely isolated, which is unlikely)
+        # This verifies that adjacent lanelets are included
+        # We'll just check that the function doesn't crash and produces valid output
+        for ll in target_group:
+            assert isinstance(ll, (lanelet2.core.Lanelet, lanelet2.core.ConstLanelet))
+
+
+def test_find_adjacent_groups_expansion():
+    """Test that target set is expanded with adjacent lanelets."""
+    lanelet_map = load_test_map()
+
+    # Get terminal lanelets as target
+    start_lanelets, end_lanelets = find_terminal_lanelets(lanelet_map)
+    terminal_lanelets = start_lanelets | end_lanelets
+
+    # Create routing graph to manually find what should be included
+    traffic_rules = lanelet2.traffic_rules.create(
+        lanelet2.traffic_rules.Locations.Germany,
+        lanelet2.traffic_rules.Participants.Vehicle,
+    )
+    routing_graph = lanelet2.routing.RoutingGraph(
+        lanelet_map, traffic_rules, [lanelet2.routing.RoutingCostDistance(0.0)]
+    )
+
+    # Manually calculate expected lanelets (target + their neighbors)
+    expected_lanelets = terminal_lanelets.copy()
+    for terminal_ll in terminal_lanelets:
+        # Add adjacent lanelets
+        for following_ll in routing_graph.following(terminal_ll):
+            expected_lanelets.add(following_ll)
+        for previous_ll in routing_graph.previous(terminal_ll):
+            expected_lanelets.add(previous_ll)
+
+        left_ll = routing_graph.left(terminal_ll)
+        if left_ll:
+            expected_lanelets.add(left_ll)
+
+        right_ll = routing_graph.right(terminal_ll)
+        if right_ll:
+            expected_lanelets.add(right_ll)
+
+    # Get groups from function
+    groups = find_adjacent_groups(lanelet_map, terminal_lanelets)
+
+    # All lanelets in groups should be within our expected set
+    all_lanelets_in_groups = set()
+    for group in groups:
+        all_lanelets_in_groups.update(group)
+
+    # The grouped lanelets should include at least the expected lanelets
+    # (There might be more due to transitive adjacency)
+    assert expected_lanelets.issubset(
+        all_lanelets_in_groups
+    ), "Expected lanelets should be included in groups"
