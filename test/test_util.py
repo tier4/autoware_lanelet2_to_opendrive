@@ -30,6 +30,12 @@ def test_find_lanelets_without_next():
     assert isinstance(terminal_lanelets, set)
     assert all(isinstance(ll, lanelet2.core.Lanelet) for ll in terminal_lanelets)
 
+    # Check that lanelet 3002082 is included in terminal lanelets
+    terminal_ids = {ll.id for ll in terminal_lanelets}
+    assert (
+        3002082 in terminal_ids
+    ), f"Lanelet 3002082 should be in terminal lanelets, but found: {terminal_ids}"
+
     # Verify these lanelets actually have no following lanelets
     traffic_rules = lanelet2.traffic_rules.create(
         lanelet2.traffic_rules.Locations.Germany,
