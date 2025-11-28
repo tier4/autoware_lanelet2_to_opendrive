@@ -43,7 +43,7 @@ uv venv
 ## Dependencies
 
 - **lanelet2** (>=1.2.2) - Core library for working with Lanelet2 map format
-- Python 3.12 or higher is required
+- Python 3.10 or higher is required
 
 ## Architecture Notes
 
@@ -52,6 +52,6 @@ This is a converter package designed to transform Lanelet2 map data (commonly us
 ## Development Guidelines
 
 1. Type hints should be used throughout the codebase (package includes py.typed marker)
-2. Follow Python 3.12+ syntax and features
+2. Follow Python 3.10 syntax and features
 3. The package name uses hyphens externally (`autoware-lanelet2-to-opendrive`) but underscores internally (`autoware_lanelet2_to_opendrive`)
 4. Use uv for all dependency management operations rather than pip directly
