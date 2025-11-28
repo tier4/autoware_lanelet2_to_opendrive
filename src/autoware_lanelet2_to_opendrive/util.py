@@ -108,7 +108,7 @@ def find_adjacent_groups(
     Args:
         lanelet_map: The lanelet2 map to analyze
         target_lanelets: Set of lanelets to group. If empty, groups all lanelets in the map.
-                        If not empty, includes target lanelets and their left/right adjacent lanelets.
+                        If not empty, includes target lanelets and recursively all their left/right adjacent lanelets.
 
     Returns:
         List of sets, where each set contains lanelets that are adjacent to each other
@@ -131,17 +131,30 @@ def find_adjacent_groups(
             lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
         )
 
-        # Add left/right adjacent lanelets to the grouping set
-        for target_ll in target_lanelets:
-            # Add left adjacent lanelets
-            left_ll = temp_routing_graph.left(target_ll)
-            if left_ll:
-                lanelets_to_group.add(left_ll)
+        # Recursively add all left/right adjacent lanelets to the grouping set
+        visited_for_expansion = set()
 
-            # Add right adjacent lanelets
-            right_ll = temp_routing_graph.right(target_ll)
-            if right_ll:
-                lanelets_to_group.add(right_ll)
+        def add_left_right_recursively(lanelet):
+            """Recursively add all left and right adjacent lanelets."""
+            if lanelet in visited_for_expansion:
+                return
+
+            visited_for_expansion.add(lanelet)
+            lanelets_to_group.add(lanelet)
+
+            # Add left adjacent lanelets recursively
+            left_ll = temp_routing_graph.left(lanelet)
+            if left_ll and left_ll not in visited_for_expansion:
+                add_left_right_recursively(left_ll)
+
+            # Add right adjacent lanelets recursively
+            right_ll = temp_routing_graph.right(lanelet)
+            if right_ll and right_ll not in visited_for_expansion:
+                add_left_right_recursively(right_ll)
+
+        # Start recursion from all target lanelets
+        for target_ll in target_lanelets:
+            add_left_right_recursively(target_ll)
 
     # Create routing graph for connectivity analysis
     traffic_rules = lanelet2.traffic_rules.create(

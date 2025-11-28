@@ -361,7 +361,7 @@ def test_find_adjacent_groups_includes_neighbors():
 
 
 def test_find_adjacent_groups_expansion():
-    """Test that target set is expanded with left/right adjacent lanelets."""
+    """Test that target set is expanded with recursively all left/right adjacent lanelets."""
     lanelet_map = load_test_map()
 
     # Get terminal lanelets as target
@@ -377,17 +377,31 @@ def test_find_adjacent_groups_expansion():
         lanelet_map, traffic_rules, [lanelet2.routing.RoutingCostDistance(0.0)]
     )
 
-    # Manually calculate expected lanelets (target + their left/right neighbors only)
-    expected_lanelets = terminal_lanelets.copy()
-    for terminal_ll in terminal_lanelets:
-        # Add only left/right adjacent lanelets (not following/previous)
-        left_ll = routing_graph.left(terminal_ll)
-        if left_ll:
-            expected_lanelets.add(left_ll)
+    # Manually calculate expected lanelets (target + recursively all their left/right neighbors)
+    expected_lanelets = set()
+    visited_manual = set()
 
-        right_ll = routing_graph.right(terminal_ll)
-        if right_ll:
-            expected_lanelets.add(right_ll)
+    def add_left_right_manually(lanelet):
+        """Manually calculate what should be included by recursively adding left/right."""
+        if lanelet in visited_manual:
+            return
+
+        visited_manual.add(lanelet)
+        expected_lanelets.add(lanelet)
+
+        # Add left adjacent lanelets recursively
+        left_ll = routing_graph.left(lanelet)
+        if left_ll and left_ll not in visited_manual:
+            add_left_right_manually(left_ll)
+
+        # Add right adjacent lanelets recursively
+        right_ll = routing_graph.right(lanelet)
+        if right_ll and right_ll not in visited_manual:
+            add_left_right_manually(right_ll)
+
+    # Start from all terminal lanelets
+    for terminal_ll in terminal_lanelets:
+        add_left_right_manually(terminal_ll)
 
     # Get groups from function
     groups = find_adjacent_groups(lanelet_map, terminal_lanelets)
