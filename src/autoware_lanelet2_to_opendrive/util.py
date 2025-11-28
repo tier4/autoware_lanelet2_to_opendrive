@@ -108,7 +108,7 @@ def find_adjacent_groups(
     Args:
         lanelet_map: The lanelet2 map to analyze
         target_lanelets: Set of lanelets to group. If empty, groups all lanelets in the map.
-                        If not empty, includes target lanelets and their adjacent lanelets.
+                        If not empty, includes target lanelets and their left/right adjacent lanelets.
 
     Returns:
         List of sets, where each set contains lanelets that are adjacent to each other
@@ -131,16 +131,8 @@ def find_adjacent_groups(
             lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
         )
 
-        # Add adjacent lanelets to the grouping set
+        # Add left/right adjacent lanelets to the grouping set
         for target_ll in target_lanelets:
-            # Add following lanelets
-            for following_ll in temp_routing_graph.following(target_ll):
-                lanelets_to_group.add(following_ll)
-
-            # Add previous lanelets
-            for previous_ll in temp_routing_graph.previous(target_ll):
-                lanelets_to_group.add(previous_ll)
-
             # Add left adjacent lanelets
             left_ll = temp_routing_graph.left(target_ll)
             if left_ll:

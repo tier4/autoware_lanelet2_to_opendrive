@@ -216,7 +216,7 @@ def test_find_adjacent_groups_subset():
     start_lanelets, end_lanelets = find_terminal_lanelets(lanelet_map)
     terminal_lanelets = start_lanelets | end_lanelets
 
-    # Find groups among terminal lanelets and their adjacent lanelets
+    # Find groups among terminal lanelets and their left/right adjacent lanelets
     groups = find_adjacent_groups(lanelet_map, terminal_lanelets)
 
     # Check that we got a list of groups
@@ -231,7 +231,7 @@ def test_find_adjacent_groups_subset():
             assert isinstance(
                 ll, (lanelet2.core.Lanelet, lanelet2.core.ConstLanelet)
             ), f"Expected Lanelet or ConstLanelet, got {type(ll)}"
-        # Groups may now contain non-terminal lanelets that are adjacent to terminal ones
+        # Groups may now contain non-terminal lanelets that are left/right adjacent to terminal ones
         # So we don't check group.issubset(terminal_lanelets) anymore
 
     # Check that all terminal lanelets are accounted for in some group
@@ -336,7 +336,7 @@ def test_find_adjacent_groups_includes_neighbors():
     if start_lanelets:
         single_start = {next(iter(start_lanelets))}
 
-        # Find groups including this lanelet and its neighbors
+        # Find groups including this lanelet and its left/right neighbors
         groups = find_adjacent_groups(lanelet_map, single_start)
 
         # Check that we got groups
@@ -354,14 +354,14 @@ def test_find_adjacent_groups_includes_neighbors():
 
         # The group should contain more than just the target lanelet
         # (unless it's completely isolated, which is unlikely)
-        # This verifies that adjacent lanelets are included
+        # This verifies that left/right adjacent lanelets are included
         # We'll just check that the function doesn't crash and produces valid output
         for ll in target_group:
             assert isinstance(ll, (lanelet2.core.Lanelet, lanelet2.core.ConstLanelet))
 
 
 def test_find_adjacent_groups_expansion():
-    """Test that target set is expanded with adjacent lanelets."""
+    """Test that target set is expanded with left/right adjacent lanelets."""
     lanelet_map = load_test_map()
 
     # Get terminal lanelets as target
@@ -377,15 +377,10 @@ def test_find_adjacent_groups_expansion():
         lanelet_map, traffic_rules, [lanelet2.routing.RoutingCostDistance(0.0)]
     )
 
-    # Manually calculate expected lanelets (target + their neighbors)
+    # Manually calculate expected lanelets (target + their left/right neighbors only)
     expected_lanelets = terminal_lanelets.copy()
     for terminal_ll in terminal_lanelets:
-        # Add adjacent lanelets
-        for following_ll in routing_graph.following(terminal_ll):
-            expected_lanelets.add(following_ll)
-        for previous_ll in routing_graph.previous(terminal_ll):
-            expected_lanelets.add(previous_ll)
-
+        # Add only left/right adjacent lanelets (not following/previous)
         left_ll = routing_graph.left(terminal_ll)
         if left_ll:
             expected_lanelets.add(left_ll)
@@ -407,3 +402,49 @@ def test_find_adjacent_groups_expansion():
     assert expected_lanelets.issubset(
         all_lanelets_in_groups
     ), "Expected lanelets should be included in groups"
+
+
+def test_find_adjacent_groups_specific_lanelets_together():
+    """Test that specific lanelets 3002094 and 3002093 are in the same group."""
+    lanelet_map = load_test_map()
+
+    # Find the lanelets with specific IDs
+    lanelet_3002094 = None
+    lanelet_3002093 = None
+
+    for ll in lanelet_map.laneletLayer:
+        if ll.id == 3002094:
+            lanelet_3002094 = ll
+        elif ll.id == 3002093:
+            lanelet_3002093 = ll
+
+    # Verify both lanelets exist in the map
+    assert lanelet_3002094 is not None, "Lanelet 3002094 should exist in the test map"
+    assert lanelet_3002093 is not None, "Lanelet 3002093 should exist in the test map"
+
+    # Create target set with these two lanelets
+    target_lanelets = {lanelet_3002094, lanelet_3002093}
+
+    # Find groups including these lanelets and their left/right neighbors
+    groups = find_adjacent_groups(lanelet_map, target_lanelets)
+
+    # Find which groups contain our target lanelets
+    group_with_3002094 = None
+    group_with_3002093 = None
+
+    for group in groups:
+        if lanelet_3002094 in group:
+            group_with_3002094 = group
+        if lanelet_3002093 in group:
+            group_with_3002093 = group
+
+    # Both lanelets should be in groups
+    assert group_with_3002094 is not None, "Lanelet 3002094 should be in some group"
+    assert group_with_3002093 is not None, "Lanelet 3002093 should be in some group"
+
+    # Most importantly: they should be in the same group
+    assert group_with_3002094 is group_with_3002093, (
+        f"Lanelets 3002094 and 3002093 should be in the same group. "
+        f"Found 3002094 in group of size {len(group_with_3002094)}, "
+        f"3002093 in group of size {len(group_with_3002093)}"
+    )
