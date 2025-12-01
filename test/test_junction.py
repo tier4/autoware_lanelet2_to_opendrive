@@ -23,6 +23,9 @@ def test_filter_lanelets_inside_junction():
 
     junction_lanelets = filter_lanelets_inside_junction(lanelets)
 
+    junction_ids = {ll.id for ll in junction_lanelets}
+    assert 3002084 in junction_ids  # Example junction lanelet ID
+
     # Check that the filtered lanelets have the 'turn_direction' attribute
     for lanelet in junction_lanelets:
         assert "turn_direction" in lanelet.attributes
