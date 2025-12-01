@@ -3,6 +3,7 @@
 from typing import Set, List, Optional, Union
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
+from lanelet2.geometry import intersects2d
 
 
 def find_lanelets_without_next(
@@ -294,3 +295,23 @@ def filter_lanelets_by_subtype(
                 filtered_lanelets.add(lanelet)
 
     return filtered_lanelets
+
+
+def check_lanelet_groups_intersect(
+    group1: Set[lanelet2.core.Lanelet],
+    group2: Set[lanelet2.core.Lanelet],
+) -> bool:
+    """Check if two lanelet groups have any intersecting lanelets.
+
+    Args:
+        group1: First group of lanelets
+        group2: Second group of lanelets
+
+    Returns:
+        True if any lanelet in group1 intersects with any lanelet in group2
+    """
+    for lanelet_1 in group1:
+        for lanelet_2 in group2:
+            if intersects2d(lanelet_1, lanelet_2):
+                return True
+    return False

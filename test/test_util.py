@@ -9,6 +9,7 @@ from autoware_lanelet2_to_opendrive.util import (
     find_terminal_lanelets,
     find_adjacent_groups,
     filter_lanelets_by_subtype,
+    check_lanelet_groups_intersect,
 )
 
 
@@ -755,3 +756,34 @@ def test_filter_lanelets():
     )
     walkway_ids = {ll.id for ll in walkway_lanelets}
     assert 301105 in walkway_ids
+
+
+def test_check_lanelet_groups_intersect():
+    """Test checking intersection between lanelet groups."""
+    lanelet_map = load_test_map()
+
+    # Create two groups of lanelets
+    group1 = set()
+    group2 = set()
+
+    for ll in lanelet_map.laneletLayer:
+        if ll.id in {3002082, 3002083}:
+            group1.add(ll)
+        elif ll.id in {3002093, 3002094}:
+            group2.add(ll)
+
+    # Check intersection (these groups should not intersect)
+    assert not check_lanelet_groups_intersect(group1, group2)
+
+    # Now create intersecting groups
+    group3 = set()
+    group4 = set()
+
+    for ll in lanelet_map.laneletLayer:
+        if ll.id in {3002082, 3002083}:
+            group3.add(ll)
+        elif ll.id in {3002084, 3002085}:
+            group4.add(ll)
+
+    # Check intersection (these groups should intersect)
+    assert check_lanelet_groups_intersect(group3, group4)
