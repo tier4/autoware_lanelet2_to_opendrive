@@ -81,24 +81,26 @@ def estimate_lanelet_width_as_spline(
         normal = np.array([-tangent[1], tangent[0], 0])
         normal = normal / np.linalg.norm(normal)
 
+        # Find closest distance to left boundary (use simple point-to-line distance)
         min_left_dist = float("inf")
         for i in range(len(left_bound_points) - 1):
             seg_start = left_bound_points[i]
             seg_end = left_bound_points[i + 1]
 
             dist = point_to_line_segment_distance(
-                center_point, seg_start, seg_end, normal
+                center_point, seg_start, seg_end, None
             )
             if dist is not None and dist < min_left_dist:
                 min_left_dist = dist
 
+        # Find closest distance to right boundary
         min_right_dist = float("inf")
         for i in range(len(right_bound_points) - 1):
             seg_start = right_bound_points[i]
             seg_end = right_bound_points[i + 1]
 
             dist = point_to_line_segment_distance(
-                center_point, seg_start, seg_end, -normal
+                center_point, seg_start, seg_end, None
             )
             if dist is not None and dist < min_right_dist:
                 min_right_dist = dist

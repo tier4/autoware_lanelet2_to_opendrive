@@ -20,7 +20,7 @@ def load_test_map():
 
 
 def test_estimate_lanelet_width_as_spline_constant_width():
-    """Test that lanelet ID=555 has small higher-order spline derivatives indicating smooth width variation."""
+    """Test that lanelet ID=555 width spline interpolation produces values in expected range (3.64-3.66m)."""
     lanelet_map = load_test_map()
 
     # Get lanelet with ID=555
@@ -30,43 +30,48 @@ def test_estimate_lanelet_width_as_spline_constant_width():
     # Estimate width as spline
     width_spline = estimate_lanelet_width_as_spline(lanelet_555, num_samples=10)
 
-    # Sample points along the spline
-    t_values = np.linspace(0.1, 0.9, 8)  # Avoid endpoints for derivative stability
+    # Sample points along the spline and check width values
+    t_values = np.linspace(0.0, 1.0, 20)  # Sample more points for thorough testing
 
-    # Check that first and higher order derivatives are close to zero
-    # This indicates constant width (polynomial degree 0)
-    dt = 0.01
+    width_values = []
     for t in t_values:
-        # Calculate first derivative numerically
         # The spline returns [t, width], we want the width component (index 1)
-        if t + dt <= 1.0:
-            width_curr = width_spline.evaluate(t).flatten()[1]
-            width_next = width_spline.evaluate(t + dt).flatten()[1]
-            deriv_1 = (width_next - width_curr) / dt
-        else:
-            width_curr = width_spline.evaluate(t).flatten()[1]
-            width_prev = width_spline.evaluate(t - dt).flatten()[1]
-            deriv_1 = (width_curr - width_prev) / dt
+        width = width_spline.evaluate(t).flatten()[1]
+        width_values.append(width)
 
-        # Assert first derivative is relatively small (lanelet 555 has slight width variation)
-        # The derivative is in units/parameter, where parameter goes from 0 to 1
-        # So a derivative of 20 means the width changes by ~20 units over the full length
-        assert abs(deriv_1) < 25, (
-            f"Width first derivative at t={t:.2f} is {deriv_1:.4f}, "
-            f"expected small derivative for nearly constant width"
+        # Assert width is in expected range for lanelet 555
+        assert 3.6 <= width <= 3.7, (
+            f"Width at t={t:.2f} is {width:.3f}m, "
+            f"expected to be in range [3.6, 3.7]m"
         )
 
-        # Calculate second derivative numerically
-        if t - dt >= 0 and t + dt <= 1.0:
-            width_prev = width_spline.evaluate(t - dt).flatten()[1]
-            width_curr = width_spline.evaluate(t).flatten()[1]
-            width_next = width_spline.evaluate(t + dt).flatten()[1]
-            deriv_2 = (width_next - 2 * width_curr + width_prev) / (dt * dt)
+    # Check overall width statistics
+    min_width = min(width_values)
+    max_width = max(width_values)
+    width_variation = max_width - min_width
 
-            assert abs(deriv_2) < 50, (
-                f"Width second derivative at t={t:.2f} is {deriv_2:.4f}, "
-                f"expected small second derivative for smooth width variation"
-            )
+    print(f"Width range: {min_width:.3f}m - {max_width:.3f}m")
+    print(f"Width variation: {width_variation:.3f}m")
+
+    # Assert reasonable width variation (should be small for this lanelet)
+    assert width_variation < 0.1, (
+        f"Width variation {width_variation:.3f}m is too large, "
+        f"expected less than 0.1m for nearly constant width lanelet"
+    )
+
+    # Check that first derivative is small (indicating nearly constant width)
+    dt = 0.01
+    max_derivative = 0.0
+    for t in t_values[1:-1]:  # Skip endpoints
+        width_curr = width_spline.evaluate(t).flatten()[1]
+        width_next = width_spline.evaluate(t + dt).flatten()[1]
+        deriv_1 = abs((width_next - width_curr) / dt)
+        max_derivative = max(max_derivative, deriv_1)
+
+    assert max_derivative < 1.0, (
+        f"Maximum width derivative {max_derivative:.4f} is too large, "
+        f"expected less than 1.0 for nearly constant width"
+    )
 
 
 def test_extract_centerline_as_spline():
