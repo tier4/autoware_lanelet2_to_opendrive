@@ -415,3 +415,39 @@ class TestArcLengthParameterizedCatmullRomSpline:
         assert abs(tangent_start[1]) < 0.1
         assert abs(normal_start[0]) < 0.1
         assert abs(abs(normal_start[1]) - 1.0) < 0.1
+
+    def test_well_formed_spline_no_exceptions(self):
+        """Test that well-formed splines do not raise exceptions during Frenet evaluation."""
+        # Create a straight line along x-axis (well-formed case)
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+            ]
+        )
+
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        # This should succeed without raising exceptions
+        frenet_frame = spline.evaluate(spline.total_length / 2, frenet=True)
+
+        # Verify the result contains all expected components
+        assert "position" in frenet_frame
+        assert "tangent" in frenet_frame
+        assert "normal" in frenet_frame
+
+        # For a straight line along x-axis, verify expected directions
+        tangent = frenet_frame["tangent"]
+        normal = frenet_frame["normal"]
+
+        # Tangent should be approximately along x-axis
+        assert abs(tangent[0]) > 0.9  # Strong x-component
+        assert abs(tangent[1]) < 0.1  # Minimal y-component
+        assert abs(tangent[2]) < 0.1  # Minimal z-component
+
+        # Normal should be approximately along y-axis
+        assert abs(normal[0]) < 0.1  # Minimal x-component
+        assert abs(normal[1]) > 0.9  # Strong y-component
+        assert abs(normal[2]) < 0.1  # Should be in XY plane

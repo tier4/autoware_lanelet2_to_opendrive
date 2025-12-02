@@ -99,6 +99,26 @@ class ArcLengthParameterizer:
         t = self.s_to_t(s)
         return self.spline.evaluate(t)
 
+    def evaluate_derivative(self, s: float, order: int = 1) -> np.ndarray:
+        """Evaluate derivative of spline at arc length s."""
+        t = self.s_to_t(s)
+
+        # Get ds/dt using chain rule
+        dt_ds = 1.0 / self._compute_speed_at_t(t)
+
+        # Get dr/dt from the spline
+        dr_dt = self.spline.evaluate(t, n=order)
+
+        # Apply chain rule: dr/ds = (dr/dt) * (dt/ds)
+        return dr_dt * dt_ds
+
+    def _compute_speed_at_t(self, t: float) -> float:
+        """Compute speed (ds/dt) at parameter t."""
+        # Get velocity vector dr/dt
+        velocity = self.spline.evaluate(t, n=1)
+        # Speed is the magnitude of velocity
+        return np.linalg.norm(velocity)
+
 
 class ArcLengthParameterizedCatmullRomSpline:
     """
@@ -152,32 +172,19 @@ class ArcLengthParameterizedCatmullRomSpline:
         # Calculate Frenet frame
         position = self._arc_length_spline.evaluate(s).flatten()
 
-        # Calculate tangent using small arc length increment
-        dl = 0.01  # Small arc length increment (1cm)
-        if s + dl <= self.total_length:
-            next_point = self._arc_length_spline.evaluate(s + dl).flatten()
-            tangent = (next_point - position) / dl
-        elif s - dl >= 0:
-            prev_point = self._arc_length_spline.evaluate(s - dl).flatten()
-            tangent = (position - prev_point) / dl
-        else:
-            # Fallback: use derivative at the closest valid point
-            if s <= dl:
-                next_point = self._arc_length_spline.evaluate(dl).flatten()
-                tangent = (next_point - position) / dl
-            else:
-                prev_point = self._arc_length_spline.evaluate(
-                    self.total_length - dl
-                ).flatten()
-                tangent = (position - prev_point) / dl
+        # Calculate tangent using first derivative
+        tangent = self._arc_length_spline.evaluate_derivative(s, order=1).flatten()
 
         # Normalize tangent
         tangent_magnitude = np.linalg.norm(tangent)
         if tangent_magnitude > 1e-10:
             tangent = tangent / tangent_magnitude
         else:
-            # Fallback for degenerate case
-            tangent = np.array([1.0, 0.0, 0.0])
+            raise ValueError(
+                f"Degenerate tangent vector at arc length s={s:.6f}. "
+                f"Tangent magnitude: {tangent_magnitude:.2e}. "
+                "This indicates a singular point in the spline where the derivative is zero."
+            )
 
         # Calculate normal (perpendicular to tangent in XY plane)
         normal = np.array([-tangent[1], tangent[0], 0.0])
@@ -185,7 +192,10 @@ class ArcLengthParameterizedCatmullRomSpline:
         if normal_magnitude > 1e-10:
             normal = normal / normal_magnitude
         else:
-            # Fallback for degenerate case
-            normal = np.array([0.0, 1.0, 0.0])
+            raise ValueError(
+                f"Degenerate normal vector at arc length s={s:.6f}. "
+                f"Normal magnitude: {normal_magnitude:.2e}. "
+                "This indicates the tangent vector is parallel to the z-axis."
+            )
 
         return {"position": position, "tangent": tangent, "normal": normal}

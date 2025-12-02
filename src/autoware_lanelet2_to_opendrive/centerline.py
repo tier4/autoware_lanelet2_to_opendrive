@@ -7,7 +7,9 @@ from .geometry import (
 )
 
 
-def extract_centerline_as_spline(lanelet: lanelet2.core.Lanelet, alpha: float = 0.5):
+def extract_centerline_as_spline(
+    lanelet: lanelet2.core.Lanelet, alpha: float = 0.5
+) -> ArcLengthParameterizedCatmullRomSpline:
     """
     Extract centerline from a Lanelet and return as arc length parameterized spline.
 
@@ -99,11 +101,4 @@ def estimate_lanelet_width_as_spline(
     # CatmullRom expects points as rows: [[length0, width0], [length1, width1], ...]
     width_points = np.column_stack([length_values, total_widths])
 
-    if num_samples >= 4:
-        width_spline = CatmullRom(width_points, alpha=alpha)
-    else:
-        raise ValueError(
-            "num_samples must be at least 4 for Catmull-Rom spline interpolation"
-        )
-
-    return width_spline
+    return ArcLengthParameterizedCatmullRomSpline(width_points, alpha=alpha)
