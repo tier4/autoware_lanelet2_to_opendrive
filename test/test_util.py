@@ -472,6 +472,8 @@ def test_find_adjacent_groups_specific_lanelets_together():
     assert len(group_with_3002093) == 2
     for i in range(len(group_with_3002094)):
         assert group_with_3002094[i].id == group_with_3002093[i].id
+    assert group_with_3002094[0].id == 3002093
+    assert group_with_3002094[1].id == 3002094
 
 
 def test_find_adjacent_groups_empty_set_specific_lanelets():
