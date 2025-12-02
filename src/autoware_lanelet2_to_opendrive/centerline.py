@@ -1,7 +1,7 @@
 import numpy as np
 import lanelet2
 from splines import CatmullRom
-from typing import Optional
+from .geometry import point_to_line_segment_distance
 
 
 def extract_centerline_as_spline(
@@ -122,59 +122,3 @@ def estimate_lanelet_width_as_spline(
         )
 
     return width_spline
-
-
-def point_to_line_segment_distance(
-    point: np.ndarray,
-    seg_start: np.ndarray,
-    seg_end: np.ndarray,
-    direction: Optional[np.ndarray] = None,
-) -> Optional[float]:
-    """
-    Calculate perpendicular distance from point to line segment in specified direction.
-
-    Args:
-        point: Point from which to measure distance
-        seg_start: Start of line segment
-        seg_end: End of line segment
-        direction: Direction vector for perpendicular (if None, uses shortest distance)
-
-    Returns:
-        Distance if perpendicular intersects segment, None otherwise
-    """
-    seg_vec = seg_end - seg_start
-    seg_length = np.linalg.norm(seg_vec)
-
-    if seg_length < 1e-10:
-        return np.linalg.norm(point[:2] - seg_start[:2])
-
-    seg_unit = seg_vec / seg_length
-
-    if direction is not None:
-        direction = direction[:2] / np.linalg.norm(direction[:2])
-
-        denom = np.dot(direction[:2], seg_unit[:2])
-        if abs(denom) < 1e-10:
-            return None
-
-        to_start = seg_start[:2] - point[:2]
-        t = np.dot(to_start, seg_unit[:2]) / denom
-
-        if t < 0:
-            return None
-
-        intersection = point[:2] + t * direction[:2]
-
-        projection = np.dot(intersection - seg_start[:2], seg_unit[:2])
-
-        if 0 <= projection <= seg_length:
-            return abs(t)
-        else:
-            return None
-    else:
-        point_vec = point[:2] - seg_start[:2]
-        projection = np.dot(point_vec, seg_unit[:2])
-        projection = np.clip(projection, 0, seg_length)
-
-        closest = seg_start[:2] + projection * seg_unit[:2]
-        return np.linalg.norm(point[:2] - closest)
