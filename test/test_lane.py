@@ -104,18 +104,6 @@ class TestLane:
         assert data["widths"] == [3.5]
         assert data["lane_type"] == "driving"
 
-    def test_to_standard_lane_without_scenariogeneration(self, monkeypatch):
-        """Test XODR conversion when scenariogeneration is not available."""
-        # Mock the xodr import to None
-        import autoware_lanelet2_to_opendrive.opendrive.lane as lane_module
-
-        monkeypatch.setattr(lane_module, "xodr", None)
-
-        lane = Lane(lane_id=1, lane_type=LaneType.DRIVING)
-
-        with pytest.raises(ImportError, match="scenariogeneration library is required"):
-            lane.to_standard_lane()
-
 
 class TestLaneSection:
     """Test cases for LaneSection class."""

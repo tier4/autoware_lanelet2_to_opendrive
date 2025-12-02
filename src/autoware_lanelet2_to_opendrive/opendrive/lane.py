@@ -5,11 +5,7 @@ from enum import Enum
 from typing import List, Optional, Any, Dict
 import numpy as np
 
-try:
-    from scenariogeneration import xodr
-except ImportError:
-    # Fallback in case scenariogeneration is not available
-    xodr = None
+from scenariogeneration import xodr
 
 
 class LaneType(Enum):
@@ -228,12 +224,6 @@ class Lane:
         Returns:
             List of XODR RoadMark objects
         """
-        if xodr is None:
-            raise ImportError(
-                "scenariogeneration library is required for XODR conversion. "
-                "Install with: pip install scenariogeneration"
-            )
-
         road_marks = []
         for road_mark in self.road_marks:
             # Convert enum values to scenariogeneration enums
@@ -266,12 +256,6 @@ class Lane:
         Returns:
             Standard Lane object from scenariogeneration
         """
-        if xodr is None:
-            raise ImportError(
-                "scenariogeneration library is required for XODR conversion. "
-                "Install with: pip install scenariogeneration"
-            )
-
         # Determine lane width
         if lane_width is None:
             if self.widths:
@@ -354,11 +338,6 @@ class LaneSection:
         Returns:
             LaneDef object for use with scenariogeneration road creation
         """
-        if xodr is None:
-            raise ImportError(
-                "scenariogeneration library is required for XODR conversion."
-            )
-
         # Count lanes
         n_lanes = len(self.left_lanes) + len(self.right_lanes)
 
