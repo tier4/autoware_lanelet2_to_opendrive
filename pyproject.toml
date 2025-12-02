@@ -11,6 +11,7 @@ dependencies = [
     "lanelet2>=1.2.2",
     "lanelet2-python-api-for-autoware",
     "splines>=0.3.3",
+    "scipy>=1.9.0",
 ]
 
 [tool.uv.sources]
