@@ -7,8 +7,6 @@ from scenariogeneration import xodr
 
 from .opendrive_dataclass import (
     LaneType,
-    RoadMarkType,
-    RoadMarkColor,
     LaneWidth,
     RoadMark,
     LaneLink,
@@ -185,38 +183,3 @@ class Lane:
             f"Lane(id={self.lane_id}, type={self.lane_type.value}, "
             f"widths={len(self.widths)}, marks={len(self.road_marks)})"
         )
-
-
-def create_driving_lane_from_lanelet(
-    lane_id: int,
-    width_spline,
-    road_length: Optional[float] = None,
-    num_width_samples: int = 10,
-) -> Lane:
-    """
-    Create a driving lane from a lanelet with width spline.
-
-    Args:
-        lane_id: Lane ID for the OpenDRIVE lane
-        width_spline: ArcLengthParameterizedCatmullRomSpline for width
-        road_length: Total road length
-        num_width_samples: Number of width samples
-
-    Returns:
-        Configured Lane object
-    """
-    lane = Lane(lane_id=lane_id, lane_type=LaneType.DRIVING)
-
-    # Add width from spline
-    lane.add_width_from_spline(
-        width_spline=width_spline,
-        num_samples=num_width_samples,
-        road_length=road_length,
-    )
-
-    # Add default road marking
-    lane.add_road_mark(
-        RoadMark(s_offset=0.0, type=RoadMarkType.SOLID, color=RoadMarkColor.WHITE)
-    )
-
-    return lane

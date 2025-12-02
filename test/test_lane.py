@@ -1,11 +1,7 @@
 """Tests for Lane class implementation."""
 
 import pytest
-import numpy as np
-from autoware_lanelet2_to_opendrive.opendrive.lane import (
-    Lane,
-    create_driving_lane_from_lanelet,
-)
+from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     LaneType,
     RoadMark,
@@ -126,35 +122,3 @@ class TestLaneEnums:
         assert RoadMarkColor.WHITE.value == "white"
         assert RoadMarkColor.YELLOW.value == "yellow"
         assert RoadMarkColor.STANDARD.value == "standard"
-
-
-class TestUtilityFunctions:
-    """Test cases for utility functions."""
-
-    def test_create_driving_lane_from_lanelet(self):
-        """Test creating driving lane from lanelet data."""
-
-        # Create a mock width spline
-        class MockWidthSpline:
-            total_length = 100.0
-
-            def evaluate(self, s):
-                # Return [s, width] where width is constant 3.5m
-                return np.array([s, 3.5])
-
-        width_spline = MockWidthSpline()
-        lane = create_driving_lane_from_lanelet(
-            lane_id=-1,
-            width_spline=width_spline,
-            road_length=100.0,
-            num_width_samples=5,
-        )
-
-        assert lane.lane_id == -1
-        assert lane.lane_type == LaneType.DRIVING
-        assert len(lane.widths) == 5  # num_width_samples
-        assert len(lane.road_marks) == 1
-
-        # Check that all widths are approximately 3.5
-        for width in lane.widths:
-            assert abs(width.a - 3.5) < 0.1
