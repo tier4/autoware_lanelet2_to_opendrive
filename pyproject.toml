@@ -12,6 +12,7 @@ dependencies = [
     "lanelet2-python-api-for-autoware",
     "splines>=0.3.3",
     "scipy>=1.9.0",
+    "scenariogeneration>=0.16.3",
 ]
 
 [tool.uv.sources]
