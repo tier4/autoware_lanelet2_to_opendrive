@@ -13,6 +13,7 @@ source = { editable = "." }
 dependencies = [
     { name = "lanelet2" },
     { name = "lanelet2-python-api-for-autoware" },
+    { name = "splines" },
 ]
 
 [package.dev-dependencies]
@@ -27,6 +28,7 @@ dev = [
 requires-dist = [
     { name = "lanelet2", specifier = ">=1.2.2" },
     { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
+    { name = "splines", specifier = ">=0.3.3" },
 ]
 
 [package.metadata.requires-dev]
@@ -1032,6 +1034,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "splines"
+version = "0.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f8/3d/3a20cbef41deec4597e5a442297900f8c4f9fa8d92d6bbca71b11f639e5e/splines-0.3.3.tar.gz", hash = "sha256:9d9108303f0f3b0e1be8e014c4a724c674a6c0558ab101e14dd04c74505c4eb9", size = 128819, upload-time = "2025-06-25T17:55:43.801Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/a5/2a1c72741acd5383ff320496ba7d449407491f1513a7dba72ed053e7142e/splines-0.3.3-py3-none-any.whl", hash = "sha256:47b68f370b17c68d9ebe24fc6525532f61d5796bb655c3b9e7e8a76d2518ff09", size = 17699, upload-time = "2025-06-25T17:55:42.352Z" },
 ]
 
 [[package]]
