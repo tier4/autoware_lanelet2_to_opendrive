@@ -166,15 +166,14 @@ class Lane:
     def add_width_from_spline(
         self,
         width_spline: ArcLengthParameterizedCatmullRomSpline,
-        num_samples: int = 10,
         road_length: Optional[float] = None,
     ) -> None:
         """
         Add width definitions from an arc length parameterized spline using cubic parameters.
+        Creates one width definition per spline segment.
 
         Args:
             width_spline: ArcLengthParameterizedCatmullRomSpline for width
-            num_samples: Number of width samples (used for sampling within each segment)
             road_length: Total road length (uses spline length if None)
         """
         if road_length is None:
@@ -193,23 +192,14 @@ class Lane:
                 break
             s_end = min(s_end, road_length)
 
-            # Sample points within this segment
+            # Skip if segment is outside valid range
             segment_length = s_end - s_start
             if segment_length <= 0:
                 continue
 
-            # Calculate number of samples for this segment based on its relative length
-            segment_samples = max(1, int(num_samples * segment_length / road_length))
-            s_values = np.linspace(s_start, s_end, segment_samples + 1)
-
-            for s in s_values:
-                # Calculate local coordinate relative to segment start
-                local_s = s - s_start
-
-                # Evaluate cubic polynomial: width = a + b*s + c*s^2 + d*s^3
-                width = a + b * local_s + c * local_s**2 + d * local_s**3
-
-                self.add_width(LaneWidth(s_offset=s, a=width))
+            # Create one width definition per segment using cubic polynomial coefficients
+            # OpenDRIVE width format: width = a + b*s + c*s^2 + d*s^3
+            self.add_width(LaneWidth(s_offset=s_start, a=a, b=b, c=c, d=d))
 
     def to_xodr_roadmark(self) -> List[Any]:
         """
