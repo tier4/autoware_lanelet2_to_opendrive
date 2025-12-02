@@ -10,6 +10,7 @@ from autoware_lanelet2_to_opendrive.util import (
     find_adjacent_groups,
     filter_lanelets_by_subtype,
     check_lanelet_groups_intersect,
+    sort_adjacent_groups,
 )
 
 
@@ -464,6 +465,13 @@ def test_find_adjacent_groups_specific_lanelets_together():
         f"Found 3002094 in group of size {len(group_with_3002094)}, "
         f"3002093 in group of size {len(group_with_3002093)}"
     )
+    group_with_3002094 = sort_adjacent_groups(lanelet_map, group_with_3002094)
+    group_with_3002093 = sort_adjacent_groups(lanelet_map, group_with_3002093)
+    assert len(group_with_3002094) == len(group_with_3002093)
+    assert len(group_with_3002094) == 2
+    assert len(group_with_3002093) == 2
+    for i in range(len(group_with_3002094)):
+        assert group_with_3002094[i].id == group_with_3002093[i].id
 
 
 def test_find_adjacent_groups_empty_set_specific_lanelets():

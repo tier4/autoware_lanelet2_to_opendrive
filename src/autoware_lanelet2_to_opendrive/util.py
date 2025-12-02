@@ -315,3 +315,67 @@ def check_lanelet_groups_intersect(
             if intersects2d(lanelet_1, lanelet_2):
                 return True
     return False
+
+
+def sort_adjacent_groups(
+    lanelet_map: lanelet2.core.LaneletMap,
+    target_lanelets: Set[lanelet2.core.Lanelet],
+) -> List[lanelet2.core.Lanelet]:
+    """Sort lanelets from left to right by following their adjacent relationships.
+
+    Args:
+        lanelet_map: The lanelet2 map containing the lanelets
+        target_lanelets: Set of lanelets to sort
+
+    Returns:
+        List of lanelets sorted from left to right
+    """
+    if not target_lanelets:
+        return []
+
+    # Create routing graph for finding adjacent relationships
+    traffic_rules = lanelet2.traffic_rules.create(
+        lanelet2.traffic_rules.Locations.Germany,
+        lanelet2.traffic_rules.Participants.Vehicle,
+    )
+    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+
+    # Find the leftmost lanelet by traversing left until no more left neighbors
+    def find_leftmost_lanelet(
+        start_lanelet: lanelet2.core.Lanelet,
+    ) -> lanelet2.core.Lanelet:
+        current = start_lanelet
+        while True:
+            left_neighbor = routing_graph.left(current)
+            if left_neighbor and left_neighbor in target_lanelets:
+                current = left_neighbor
+            else:
+                break
+        return current
+
+    # Start with any lanelet from the set
+    start_lanelet = next(iter(target_lanelets))
+    leftmost = find_leftmost_lanelet(start_lanelet)
+
+    # Build sorted list from left to right
+    sorted_lanelets = []
+    remaining_lanelets = target_lanelets.copy()
+    current = leftmost
+
+    while current and current in remaining_lanelets:
+        sorted_lanelets.append(current)
+        remaining_lanelets.remove(current)
+
+        # Move to the right neighbor
+        right_neighbor = routing_graph.right(current)
+        if right_neighbor and right_neighbor in remaining_lanelets:
+            current = right_neighbor
+        else:
+            break
+
+    # Handle case where some lanelets might not be connected in left-right chain
+    # Add any remaining lanelets that weren't part of the main chain
+    for remaining_lanelet in remaining_lanelets:
+        sorted_lanelets.append(remaining_lanelet)
+
+    return sorted_lanelets
