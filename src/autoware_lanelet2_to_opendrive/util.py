@@ -298,8 +298,16 @@ def filter_lanelets_by_subtype(
 
 
 def check_lanelet_groups_intersect(
-    group1: Set[lanelet2.core.Lanelet],
-    group2: Set[lanelet2.core.Lanelet],
+    group1: Union[
+        Set[lanelet2.core.Lanelet],
+        List[lanelet2.core.Lanelet],
+        lanelet2.core.LaneletLayer,
+    ],
+    group2: Union[
+        Set[lanelet2.core.Lanelet],
+        List[lanelet2.core.Lanelet],
+        lanelet2.core.LaneletLayer,
+    ],
 ) -> bool:
     """Check if two lanelet groups have any intersecting lanelets.
 
@@ -319,7 +327,11 @@ def check_lanelet_groups_intersect(
 
 def sort_adjacent_groups(
     lanelet_map: lanelet2.core.LaneletMap,
-    target_lanelets: Set[lanelet2.core.Lanelet],
+    target_lanelets: Union[
+        Set[lanelet2.core.Lanelet],
+        List[lanelet2.core.Lanelet],
+        lanelet2.core.LaneletLayer,
+    ],
 ) -> List[lanelet2.core.Lanelet]:
     """Sort lanelets from left to right by following their adjacent relationships.
 

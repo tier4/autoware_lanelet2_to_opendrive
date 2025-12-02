@@ -55,15 +55,7 @@ class ReferenceLine(Lane):
         # Sort the lanelets from left to right
         from ..util import sort_adjacent_groups
 
-        # Convert lanelet_group to set if needed
-        if isinstance(lanelet_group, set):
-            lanelet_set = lanelet_group
-        elif isinstance(lanelet_group, list):
-            lanelet_set = set(lanelet_group)
-        else:  # lanelet2.core.LaneletLayer
-            lanelet_set = set(lanelet_group)
-
-        sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_set)
+        sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_group)
 
         num_lanes = len(sorted_lanelets)
 
