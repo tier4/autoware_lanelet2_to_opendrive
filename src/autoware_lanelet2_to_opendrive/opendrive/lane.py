@@ -1,7 +1,6 @@
 """Lane implementation for OpenDRIVE conversion."""
 
 from typing import List, Optional, Any, Dict
-import numpy as np
 import lanelet2
 
 from scenariogeneration import xodr
@@ -56,21 +55,59 @@ class Lane:
         self.borders: List[LaneBorder] = []
         self.heights: List[LaneHeight] = []
 
-    def add_width(self, width: LaneWidth) -> None:
+    def _add_width(self, width: LaneWidth) -> None:
         """Add a width definition to the lane."""
         self.widths.append(width)
 
-    def add_road_mark(self, road_mark: RoadMark) -> None:
+    def _add_road_mark(self, road_mark: RoadMark) -> None:
         """Add a road mark to the lane."""
         self.road_marks.append(road_mark)
 
-    def add_border(self, border: LaneBorder) -> None:
+    def _add_border(self, border: LaneBorder) -> None:
         """Add a border definition to the lane."""
         self.borders.append(border)
 
-    def add_height(self, height: LaneHeight) -> None:
+    def _add_height(self, height: LaneHeight) -> None:
         """Add a height definition to the lane."""
         self.heights.append(height)
+
+    def _add_width_from_spline(
+        self,
+        width_spline: ArcLengthParameterizedCatmullRomSpline,
+        road_length: Optional[float] = None,
+    ) -> None:
+        """
+        Add width definitions from an arc length parameterized spline using cubic parameters.
+        Creates one width definition per spline segment.
+
+        Args:
+            width_spline: ArcLengthParameterizedCatmullRomSpline for width
+            road_length: Total road length (uses spline length if None)
+        """
+        if road_length is None:
+            road_length = width_spline.total_length
+
+        # Get cubic spline parameters for each segment
+        segments = width_spline.as_cubic_spline_parameters()
+
+        for segment in segments:
+            s_start = segment["s_start"]
+            s_end = segment["s_end"]
+            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
+
+            # Clamp segment to road_length
+            if s_start >= road_length:
+                break
+            s_end = min(s_end, road_length)
+
+            # Skip if segment is outside valid range
+            segment_length = s_end - s_start
+            if segment_length <= 0:
+                continue
+
+            # Create one width definition per segment using cubic polynomial coefficients
+            # OpenDRIVE width format: width = a + b*s + c*s^2 + d*s^3
+            self._add_width(LaneWidth(s_offset=s_start, a=a, b=b, c=c, d=d))
 
     @staticmethod
     def construct_from_lanelet(
@@ -117,89 +154,13 @@ class Lane:
         )
 
         # Calculate lane width using spline curve from estimate_lanelet_width_as_spline
-        try:
-            width_spline = estimate_lanelet_width_as_spline(lanelet)
+        width_spline = estimate_lanelet_width_as_spline(lanelet)
 
-            # Sample the spline at multiple points to create width definitions
-            total_length = width_spline.total_length
-            num_samples = 10
-
-            for i in range(num_samples):
-                s_offset = (
-                    (i / (num_samples - 1)) * total_length if num_samples > 1 else 0.0
-                )
-                width_value = width_spline.evaluate(s_offset)["position"][
-                    1
-                ]  # y-component is width
-
-                # Add width definition at this s-coordinate
-                lane.add_width(LaneWidth(s_offset=s_offset, a=width_value))
-
-        except Exception:
-            # Fallback to simple average width calculation if spline method fails
-            left_bound = lanelet.leftBound
-            right_bound = lanelet.rightBound
-
-            if len(left_bound) > 0 and len(right_bound) > 0:
-                # Calculate average width along the lanelet
-                widths = []
-                for i in range(min(len(left_bound), len(right_bound))):
-                    left_point = left_bound[i]
-                    right_point = right_bound[i]
-                    width = np.linalg.norm(
-                        [left_point.x - right_point.x, left_point.y - right_point.y]
-                    )
-                    widths.append(width)
-
-                if widths:
-                    avg_width = np.mean(widths)
-                    lane.add_constant_width(avg_width)
-
+        # Sample the spline at multiple points to create width definitions
+        lane._add_width_from_spline(width_spline)
         # TODO: Add road marks based on lanelet line types
 
         return lane
-
-    def add_constant_width(self, width: float, s_start: float = 0.0) -> None:
-        """Add a constant width definition."""
-        self.add_width(LaneWidth(s_offset=s_start, a=width))
-
-    def add_width_from_spline(
-        self,
-        width_spline: ArcLengthParameterizedCatmullRomSpline,
-        road_length: Optional[float] = None,
-    ) -> None:
-        """
-        Add width definitions from an arc length parameterized spline using cubic parameters.
-        Creates one width definition per spline segment.
-
-        Args:
-            width_spline: ArcLengthParameterizedCatmullRomSpline for width
-            road_length: Total road length (uses spline length if None)
-        """
-        if road_length is None:
-            road_length = width_spline.total_length
-
-        # Get cubic spline parameters for each segment
-        segments = width_spline.as_cubic_spline_parameters()
-
-        for segment in segments:
-            s_start = segment["s_start"]
-            s_end = segment["s_end"]
-            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
-
-            # Clamp segment to road_length
-            if s_start >= road_length:
-                break
-            s_end = min(s_end, road_length)
-
-            # Skip if segment is outside valid range
-            segment_length = s_end - s_start
-            if segment_length <= 0:
-                continue
-
-            # Create one width definition per segment using cubic polynomial coefficients
-            # OpenDRIVE width format: width = a + b*s + c*s^2 + d*s^3
-            self.add_width(LaneWidth(s_offset=s_start, a=a, b=b, c=c, d=d))
 
     def to_xodr_roadmark(self) -> List[Any]:
         """
