@@ -144,10 +144,10 @@ class ArcLengthParameterizedCatmullRomSpline:
             )
 
         # Create the base CatmullRom spline
-        base_spline = CatmullRom(points, alpha=alpha)
+        self._base_spline = CatmullRom(points, alpha=alpha)
 
         # Wrap it with arc length parameterization
-        self._arc_length_spline = ArcLengthParameterizer(base_spline, num_samples)
+        self._arc_length_spline = ArcLengthParameterizer(self._base_spline, num_samples)
 
     @property
     def total_length(self) -> float:
@@ -199,3 +199,136 @@ class ArcLengthParameterizedCatmullRomSpline:
             )
 
         return {"position": position, "tangent": tangent, "normal": normal}
+
+    def as_cubic_spline_parameters(self) -> list[dict]:
+        """
+        Export spline shape as cubic polynomial parameters using CatmullRom's native segments.
+
+        Returns:
+            List of dictionaries containing cubic polynomial parameters for each segment.
+            Each dictionary contains:
+            - 't_start': Start parameter t of the segment
+            - 't_end': End parameter t of the segment
+            - 's_start': Start arc length of the segment
+            - 's_end': End arc length of the segment
+            - 'a': Constant coefficient
+            - 'b': Linear coefficient
+            - 'c': Quadratic coefficient
+            - 'd': Cubic coefficient
+            - 'segment_length': Actual length of this segment
+        """
+        segments = []
+        grid = self._base_spline.grid
+
+        # CatmullRom has N-1 segments for N control points (but only N-3 valid segments for 4+ points)
+        # The valid range is from grid[1] to grid[-2]
+        num_valid_segments = len(grid) - 3
+
+        for i in range(num_valid_segments):
+            t_start = grid[i + 1]  # Skip first grid point
+            t_end = grid[i + 2]  # Skip last grid point
+
+            # Convert t parameters to arc lengths
+            s_start = 0.0
+            s_end = 0.0
+
+            # Find corresponding arc lengths by searching through the parameterizer
+            for j, t_val in enumerate(self._arc_length_spline.t_values):
+                if abs(t_val - t_start) < 1e-6:
+                    s_start = self._arc_length_spline.arc_lengths[j]
+                if abs(t_val - t_end) < 1e-6:
+                    s_end = self._arc_length_spline.arc_lengths[j]
+
+            # If exact match not found, interpolate
+            if s_start == 0.0:
+                s_start = np.interp(
+                    t_start,
+                    self._arc_length_spline.t_values,
+                    self._arc_length_spline.arc_lengths,
+                )
+            if s_end == 0.0:
+                s_end = np.interp(
+                    t_end,
+                    self._arc_length_spline.t_values,
+                    self._arc_length_spline.arc_lengths,
+                )
+
+            segment_length = s_end - s_start
+
+            # Sample points within this t range for polynomial fitting
+            num_samples = 20
+            t_samples = np.linspace(t_start, t_end, num_samples)
+
+            # Get positions in Frenet coordinate (relative to segment start)
+            start_frame = self.evaluate(s_start, frenet=True)
+            start_position = start_frame["position"]
+            start_tangent = start_frame["tangent"]
+            start_normal = start_frame["normal"]
+
+            # Transform sampled points to local Frenet coordinates
+            local_coords = []
+            for t_val in t_samples:
+                # Evaluate spline at t parameter directly
+                global_pos = self._base_spline.evaluate(t_val).flatten()
+
+                # Vector from segment start to current point
+                delta = global_pos - start_position
+
+                # Project onto Frenet frame
+                local_s = np.dot(delta, start_tangent)  # Longitudinal coordinate
+                local_t = np.dot(
+                    delta, start_normal
+                )  # Lateral coordinate (non-normalized t)
+
+                local_coords.append([local_s, local_t])
+
+            local_coords_array = np.array(local_coords)
+
+            # Fit cubic polynomial: t = a + b*s + c*s^2 + d*s^3
+            # Where s is local longitudinal coordinate, t is lateral coordinate (non-normalized)
+            s_local = local_coords_array[:, 0]
+            t_local = local_coords_array[:, 1]
+
+            # Use actual segment length without normalization
+            if len(s_local) >= 4:
+                # Fit cubic polynomial using least squares
+                # Create Vandermonde matrix [1, s, s^2, s^3] with actual s values
+                A = np.vander(s_local, 4, increasing=True)
+
+                try:
+                    # Solve least squares problem
+                    coeffs = np.linalg.lstsq(A, t_local, rcond=None)[0]
+                    a, b, c, d = coeffs
+                except np.linalg.LinAlgError:
+                    # Fallback to linear interpolation if fitting fails
+                    if len(t_local) >= 2:
+                        s_range = s_local[-1] - s_local[0]
+                        slope = (t_local[-1] - t_local[0]) / max(s_range, 1e-10)
+                        a, b, c, d = t_local[0], slope, 0.0, 0.0
+                    else:
+                        a, b, c, d = (
+                            t_local[0] if len(t_local) > 0 else 0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                        )
+            else:
+                # Not enough points for cubic fit, use constant
+                a = np.mean(t_local) if len(t_local) > 0 else 0.0
+                b, c, d = 0.0, 0.0, 0.0
+
+            segments.append(
+                {
+                    "t_start": t_start,
+                    "t_end": t_end,
+                    "s_start": s_start,
+                    "s_end": s_end,
+                    "a": a,
+                    "b": b,
+                    "c": c,
+                    "d": d,
+                    "segment_length": segment_length,
+                }
+            )
+
+        return segments

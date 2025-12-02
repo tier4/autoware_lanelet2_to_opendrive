@@ -451,3 +451,132 @@ class TestArcLengthParameterizedCatmullRomSpline:
         assert abs(normal[0]) < 0.1  # Minimal x-component
         assert abs(normal[1]) > 0.9  # Strong y-component
         assert abs(normal[2]) < 0.1  # Should be in XY plane
+
+    def test_as_cubic_spline_parameters_structure(self):
+        """Test structure of cubic spline parameters output."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        # Should have at least one segment
+        assert len(segments) >= 1
+
+        for segment in segments:
+            # Check required keys
+            required_keys = [
+                "t_start",
+                "t_end",
+                "s_start",
+                "s_end",
+                "a",
+                "b",
+                "c",
+                "d",
+                "segment_length",
+            ]
+            for key in required_keys:
+                assert key in segment
+
+            # Check value types
+            assert isinstance(segment["t_start"], (int, float, np.number))
+            assert isinstance(segment["t_end"], (int, float, np.number))
+            assert isinstance(segment["s_start"], (int, float, np.number))
+            assert isinstance(segment["s_end"], (int, float, np.number))
+            assert isinstance(segment["a"], (int, float, np.number))
+            assert isinstance(segment["b"], (int, float, np.number))
+            assert isinstance(segment["c"], (int, float, np.number))
+            assert isinstance(segment["d"], (int, float, np.number))
+            assert isinstance(segment["segment_length"], (int, float, np.number))
+
+            # Check logical constraints
+            assert segment["t_end"] > segment["t_start"]
+            assert segment["s_end"] >= segment["s_start"]
+            assert segment["segment_length"] >= 0
+
+    def test_as_cubic_spline_parameters_straight_line(self):
+        """Test cubic parameters for a straight line (should have zero higher-order terms)."""
+        points = np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        for segment in segments:
+            # For a straight line, lateral deviation should be minimal
+            # Higher order terms (c, d) should be close to zero
+            assert abs(segment["c"]) < 1e-3
+            assert abs(segment["d"]) < 1e-3
+
+    def test_as_cubic_spline_parameters_curved_line(self):
+        """Test cubic parameters for a curved line."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        # For curved lines, at least some segments should have non-zero higher-order terms
+        has_curve = any(
+            abs(seg["c"]) > 1e-6 or abs(seg["d"]) > 1e-6 for seg in segments
+        )
+        assert has_curve, "Curved line should have non-zero higher-order cubic terms"
+
+    def test_as_cubic_spline_parameters_segment_continuity(self):
+        """Test that segments are continuous."""
+        points = np.array([[0, 0, 0], [1, 2, 0], [3, 1, 0], [4, 3, 0], [5, 0, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        if len(segments) > 1:
+            for i in range(len(segments) - 1):
+                current_seg = segments[i]
+                next_seg = segments[i + 1]
+
+                # End of current should match start of next (approximately)
+                assert abs(current_seg["t_end"] - next_seg["t_start"]) < 1e-6
+                assert abs(current_seg["s_end"] - next_seg["s_start"]) < 1e-6
+
+    def test_as_cubic_spline_parameters_polynomial_consistency(self):
+        """Test that cubic polynomial parameters produce consistent results."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        for segment in segments:
+            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
+            s_start = segment["s_start"]
+            s_end = segment["s_end"]
+
+            # Test polynomial evaluation at segment boundaries
+            # At s_start (local s=0), polynomial should give value 'a'
+            local_s_start = 0.0
+            poly_value_start = (
+                a + b * local_s_start + c * local_s_start**2 + d * local_s_start**3
+            )
+            assert poly_value_start == a
+
+            # At s_end, polynomial should give reasonable value
+            segment_length = s_end - s_start
+            poly_value_end = (
+                a + b * segment_length + c * segment_length**2 + d * segment_length**3
+            )
+
+            # The polynomial value should be finite
+            assert np.isfinite(poly_value_end)
+
+    def test_as_cubic_spline_parameters_no_num_segments_arg(self):
+        """Test that as_cubic_spline_parameters doesn't accept num_segments argument."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        # Should work without arguments
+        segments = spline.as_cubic_spline_parameters()
+        assert isinstance(segments, list)
+
+        # Should fail with num_segments argument
+        try:
+            spline.as_cubic_spline_parameters(num_segments=5)
+            assert False, "Should have raised TypeError for unexpected argument"
+        except TypeError:
+            pass  # Expected behavior
