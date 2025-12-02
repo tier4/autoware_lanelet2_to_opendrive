@@ -220,13 +220,13 @@ class ArcLengthParameterizedCatmullRomSpline:
         segments = []
         grid = self._base_spline.grid
 
-        # CatmullRom has N-1 segments for N control points (but only N-3 valid segments for 4+ points)
-        # The valid range is from grid[1] to grid[-2]
-        num_valid_segments = len(grid) - 3
+        # CatmullRom has N-1 segments for N grid points
+        # All segments from grid[0] to grid[-1] are valid for evaluation
+        num_segments = len(grid) - 1
 
-        for i in range(num_valid_segments):
-            t_start = grid[i + 1]  # Skip first grid point
-            t_end = grid[i + 2]  # Skip last grid point
+        for i in range(num_segments):
+            t_start = grid[i]
+            t_end = grid[i + 1]
 
             # Convert t parameters to arc lengths
             s_start = 0.0
