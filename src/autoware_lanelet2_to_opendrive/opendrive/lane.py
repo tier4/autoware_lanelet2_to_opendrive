@@ -6,6 +6,7 @@ import lanelet2
 
 from scenariogeneration import xodr
 from ..centerline import estimate_lanelet_width_as_spline
+from ..geometry import ArcLengthParameterizedCatmullRomSpline
 
 from .opendrive_dataclass import (
     LaneType,
@@ -163,34 +164,52 @@ class Lane:
         self.add_width(LaneWidth(s_offset=s_start, a=width))
 
     def add_width_from_spline(
-        self, width_spline, num_samples: int = 10, road_length: Optional[float] = None
+        self,
+        width_spline: ArcLengthParameterizedCatmullRomSpline,
+        num_samples: int = 10,
+        road_length: Optional[float] = None,
     ) -> None:
         """
-        Add width definitions from an arc length parameterized spline.
+        Add width definitions from an arc length parameterized spline using cubic parameters.
 
         Args:
             width_spline: ArcLengthParameterizedCatmullRomSpline for width
-            num_samples: Number of width samples
+            num_samples: Number of width samples (used for sampling within each segment)
             road_length: Total road length (uses spline length if None)
         """
         if road_length is None:
             road_length = width_spline.total_length
 
-        # Sample width at regular intervals
-        s_values = np.linspace(0, road_length, num_samples)
+        # Get cubic spline parameters for each segment
+        segments = width_spline.as_cubic_spline_parameters()
 
-        for s in s_values:
-            # Evaluate width at arc length s
-            # The spline returns [s, width], we want the width (index 1)
-            if s <= width_spline.total_length:
-                width_point = width_spline.evaluate(s).flatten()
-                width = width_point[1] if len(width_point) > 1 else width_point[0]
-            else:
-                # Use last available width if beyond spline range
-                width_point = width_spline.evaluate(width_spline.total_length).flatten()
-                width = width_point[1] if len(width_point) > 1 else width_point[0]
+        for segment in segments:
+            s_start = segment["s_start"]
+            s_end = segment["s_end"]
+            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
 
-            self.add_width(LaneWidth(s_offset=s, a=width))
+            # Clamp segment to road_length
+            if s_start >= road_length:
+                break
+            s_end = min(s_end, road_length)
+
+            # Sample points within this segment
+            segment_length = s_end - s_start
+            if segment_length <= 0:
+                continue
+
+            # Calculate number of samples for this segment based on its relative length
+            segment_samples = max(1, int(num_samples * segment_length / road_length))
+            s_values = np.linspace(s_start, s_end, segment_samples + 1)
+
+            for s in s_values:
+                # Calculate local coordinate relative to segment start
+                local_s = s - s_start
+
+                # Evaluate cubic polynomial: width = a + b*s + c*s^2 + d*s^3
+                width = a + b * local_s + c * local_s**2 + d * local_s**3
+
+                self.add_width(LaneWidth(s_offset=s, a=width))
 
     def to_xodr_roadmark(self) -> List[Any]:
         """

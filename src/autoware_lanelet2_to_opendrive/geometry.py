@@ -143,6 +143,9 @@ class ArcLengthParameterizedCatmullRomSpline:
                 "Points must have at least 4 points for Catmull-Rom spline. Use linear interpolation for fewer points."
             )
 
+        # Store original points for dimension checking
+        self._points = points
+
         # Create the base CatmullRom spline
         self._base_spline = CatmullRom(points, alpha=alpha)
 
@@ -259,28 +262,46 @@ class ArcLengthParameterizedCatmullRomSpline:
             num_samples = 20
             t_samples = np.linspace(t_start, t_end, num_samples)
 
-            # Get positions in Frenet coordinate (relative to segment start)
-            start_frame = self.evaluate(s_start, frenet=True)
-            start_position = start_frame["position"]
-            start_tangent = start_frame["tangent"]
-            start_normal = start_frame["normal"]
+            # Handle different dimensions appropriately
+            if self._points.shape[1] == 2:
+                # For 2D splines (like width splines), directly use the spline values
+                # The first coordinate is arc length (s), second is the dependent value (width)
+                local_coords = []
+                for t_val in t_samples:
+                    global_pos = self._base_spline.evaluate(t_val).flatten()
 
-            # Transform sampled points to local Frenet coordinates
-            local_coords = []
-            for t_val in t_samples:
-                # Evaluate spline at t parameter directly
-                global_pos = self._base_spline.evaluate(t_val).flatten()
+                    # Convert arc length parameter t to actual arc length s
+                    s_val = np.interp(
+                        t_val,
+                        self._arc_length_spline.t_values,
+                        self._arc_length_spline.arc_lengths,
+                    )
+                    local_s = s_val - s_start  # Local s coordinate within this segment
+                    local_t = global_pos[1]  # Width value (second coordinate)
 
-                # Vector from segment start to current point
-                delta = global_pos - start_position
+                    local_coords.append([local_s, local_t])
+            else:
+                # For 3D splines, use Frenet coordinate transformation
+                start_frame = self.evaluate(s_start, frenet=True)
+                start_position = start_frame["position"]
+                start_tangent = start_frame["tangent"]
+                start_normal = start_frame["normal"]
 
-                # Project onto Frenet frame
-                local_s = np.dot(delta, start_tangent)  # Longitudinal coordinate
-                local_t = np.dot(
-                    delta, start_normal
-                )  # Lateral coordinate (non-normalized t)
+                local_coords = []
+                for t_val in t_samples:
+                    # Evaluate spline at t parameter directly
+                    global_pos = self._base_spline.evaluate(t_val).flatten()
 
-                local_coords.append([local_s, local_t])
+                    # Vector from segment start to current point
+                    delta = global_pos - start_position
+
+                    # Project onto Frenet frame
+                    local_s = np.dot(delta, start_tangent)  # Longitudinal coordinate
+                    local_t = np.dot(
+                        delta, start_normal
+                    )  # Lateral coordinate (non-normalized t)
+
+                    local_coords.append([local_s, local_t])
 
             local_coords_array = np.array(local_coords)
 
