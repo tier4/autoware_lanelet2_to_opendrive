@@ -329,6 +329,9 @@ def sort_adjacent_groups(
 
     Returns:
         List of lanelets sorted from left to right
+
+    Raises:
+        ValueError: If target_lanelets contains non-adjacent lanelets
     """
     if not target_lanelets:
         return []
@@ -373,9 +376,12 @@ def sort_adjacent_groups(
         else:
             break
 
-    # Handle case where some lanelets might not be connected in left-right chain
-    # Add any remaining lanelets that weren't part of the main chain
-    for remaining_lanelet in remaining_lanelets:
-        sorted_lanelets.append(remaining_lanelet)
+    # Check if all lanelets were processed (i.e., all are adjacent)
+    if remaining_lanelets:
+        remaining_ids = [ll.id for ll in remaining_lanelets]
+        raise ValueError(
+            f"Target lanelets contain non-adjacent lanelets. "
+            f"Non-adjacent lanelet IDs: {remaining_ids}"
+        )
 
     return sorted_lanelets
