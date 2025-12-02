@@ -1,9 +1,11 @@
 import numpy as np
 import lanelet2
+from typing import Set
 from .geometry import (
     point_to_line_segment_distance,
     ArcLengthParameterizedCatmullRomSpline,
 )
+from .util import sort_adjacent_groups
 
 
 def extract_centerline_as_spline(
@@ -101,3 +103,47 @@ def estimate_lanelet_width_as_spline(
     width_points = np.column_stack([length_values, total_widths])
 
     return ArcLengthParameterizedCatmullRomSpline(width_points, alpha=alpha)
+
+
+def extract_centerline_as_spline_from_two_lanelets(
+    lanelet_map: lanelet2.core.LaneletMap,
+    two_lanelets: Set[lanelet2.core.Lanelet],
+    alpha: float = 0.5,
+) -> ArcLengthParameterizedCatmullRomSpline:
+    """
+    Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
+
+    Args:
+        lanelet_map: The lanelet2 map containing the lanelets
+        two_lanelets: Set containing exactly two lanelets
+        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
+
+    Returns:
+        ArcLengthParameterizedCatmullRomSpline representing the right bound of the left lanelet
+
+    Raises:
+        ValueError: If two_lanelets does not contain exactly 2 lanelets
+    """
+    if len(two_lanelets) != 2:
+        raise ValueError(f"Expected exactly 2 lanelets, got {len(two_lanelets)}")
+
+    # Sort the two lanelets from left to right
+    sorted_lanelets = sort_adjacent_groups(lanelet_map, two_lanelets)
+
+    # Get the left lanelet (first in sorted order)
+    left_lanelet = sorted_lanelets[0]
+
+    # Extract points from the right bound of the left lanelet
+    right_bound = left_lanelet.rightBound
+
+    if len(right_bound) < 2:
+        raise ValueError("Left lanelet must have at least 2 points in its right bound")
+
+    points = []
+    for point in right_bound:
+        points.append([point.x, point.y, point.z])
+
+    points = np.array(points)
+
+    # Create and return the spline
+    return ArcLengthParameterizedCatmullRomSpline(points, alpha)
