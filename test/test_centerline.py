@@ -85,12 +85,13 @@ def test_extract_centerline_as_spline():
     # Extract centerline as spline
     spline = extract_centerline_as_spline(lanelet)
 
-    # Test that spline can be evaluated
-    t_values = np.linspace(0, 1, 10)
-    for t in t_values:
-        point = spline.evaluate(t)
+    # Test that spline can be evaluated with arc length parameters
+    total_length = spline.total_length
+    s_values = np.linspace(0, total_length, 10)
+    for s in s_values:
+        point = spline.evaluate(s)
         assert point.shape[0] == 3, "Spline should return 3D points"
 
-    # Test that spline can be evaluated at specific point
-    point_mid = spline.evaluate(0.5)
+    # Test that spline can be evaluated at specific arc length
+    point_mid = spline.evaluate(total_length / 2)
     assert point_mid.shape[0] == 3, "Spline should return 3D points"
