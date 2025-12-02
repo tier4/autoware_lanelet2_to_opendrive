@@ -5,6 +5,7 @@ import numpy as np
 import lanelet2
 
 from scenariogeneration import xodr
+from ..centerline import estimate_lanelet_width_as_spline
 
 from .opendrive_dataclass import (
     LaneType,
@@ -114,24 +115,44 @@ class Lane:
             successor=successor,
         )
 
-        # Calculate lane width from left and right bounds
-        left_bound = lanelet.leftBound
-        right_bound = lanelet.rightBound
+        # Calculate lane width using spline curve from estimate_lanelet_width_as_spline
+        try:
+            width_spline = estimate_lanelet_width_as_spline(lanelet)
 
-        if len(left_bound) > 0 and len(right_bound) > 0:
-            # Calculate average width along the lanelet
-            widths = []
-            for i in range(min(len(left_bound), len(right_bound))):
-                left_point = left_bound[i]
-                right_point = right_bound[i]
-                width = np.linalg.norm(
-                    [left_point.x - right_point.x, left_point.y - right_point.y]
+            # Sample the spline at multiple points to create width definitions
+            total_length = width_spline.total_length
+            num_samples = 10
+
+            for i in range(num_samples):
+                s_offset = (
+                    (i / (num_samples - 1)) * total_length if num_samples > 1 else 0.0
                 )
-                widths.append(width)
+                width_value = width_spline.evaluate(s_offset)["position"][
+                    1
+                ]  # y-component is width
 
-            if widths:
-                avg_width = np.mean(widths)
-                lane.add_constant_width(avg_width)
+                # Add width definition at this s-coordinate
+                lane.add_width(LaneWidth(s_offset=s_offset, a=width_value))
+
+        except Exception:
+            # Fallback to simple average width calculation if spline method fails
+            left_bound = lanelet.leftBound
+            right_bound = lanelet.rightBound
+
+            if len(left_bound) > 0 and len(right_bound) > 0:
+                # Calculate average width along the lanelet
+                widths = []
+                for i in range(min(len(left_bound), len(right_bound))):
+                    left_point = left_bound[i]
+                    right_point = right_bound[i]
+                    width = np.linalg.norm(
+                        [left_point.x - right_point.x, left_point.y - right_point.y]
+                    )
+                    widths.append(width)
+
+                if widths:
+                    avg_width = np.mean(widths)
+                    lane.add_constant_width(avg_width)
 
         # TODO: Add road marks based on lanelet line types
 
