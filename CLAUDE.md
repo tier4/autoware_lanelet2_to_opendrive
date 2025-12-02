@@ -55,3 +55,83 @@ This is a converter package designed to transform Lanelet2 map data (commonly us
 2. Follow Python 3.10 syntax and features
 3. The package name uses hyphens externally (`autoware-lanelet2-to-opendrive`) but underscores internally (`autoware_lanelet2_to_opendrive`)
 4. Use uv for all dependency management operations rather than pip directly
+
+## Git Operation Restrictions
+
+**IMPORTANT**: The following dangerous git operations are STRICTLY PROHIBITED for safety:
+
+### Forbidden Commands:
+- `git push --force` or `git push -f` (destroys history)
+- `git push --force-with-lease` (can still overwrite others' work)
+- `git push origin master` or `git push origin main` (direct push to protected branches)
+- `git commit --no-verify` (bypasses pre-commit hooks and safety checks)
+- `git push --no-verify` (bypasses push hooks and safety checks)
+
+### Safe Alternatives:
+- Use `git push` (normal push) - will fail safely if there are conflicts
+- Use `git pull --rebase` followed by `git push` to handle conflicts
+- Create pull requests instead of direct pushes to main/master
+- Always let pre-commit hooks run to maintain code quality
+
+### Exception Handling:
+If a push is rejected due to conflicts or hook failures:
+1. **DO NOT** use --force or --no-verify flags
+2. Fix the underlying issue (resolve conflicts, fix formatting, etc.)
+3. Use `git pull --rebase` to update your branch
+4. Re-run tests and hooks to ensure everything passes
+5. Use normal `git push` after issues are resolved
+
+### Rationale:
+- Force pushes can destroy other developers' work
+- Bypassing hooks can introduce bugs, formatting issues, or security problems
+- Direct pushes to main branches bypass code review processes
+- These restrictions ensure code quality and collaborative safety
+
+## Claude Code Settings Configuration
+
+**IMPORTANT**: This CLAUDE.md file should be reflected in the Claude Code settings configuration file to enforce these guidelines automatically.
+
+### Settings File Location:
+`.claude/settings.local.json` (if it exists, otherwise create `.claude/settings.json`)
+
+### Required Configuration:
+The settings file should include these git operation restrictions using the permissions system to prevent dangerous commands:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git pull:*)",
+      "... other allowed commands ..."
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git push origin master:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git push --no-verify:*)"
+    ],
+    "ask": []
+  }
+}
+```
+
+**Note**: The Claude Code settings schema only supports the `permissions` system. Custom fields like `git.prohibitedCommands` are not supported by the official schema.
+
+### Instructions for Claude:
+1. Always check `.claude/settings.local.json` for project-specific configurations
+2. The `permissions.deny` list prevents execution of dangerous git commands
+3. Only use `git push` (without flags) for safe pushes that respect remote conflicts
+4. Suggest safe alternatives when dangerous commands are requested
+5. Ensure pre-commit hooks always run (never bypass with --no-verify)
+6. Follow the development guidelines specified in this CLAUDE.md file
+
+### Enforcement:
+- `.claude/settings.local.json` now contains explicit deny rules for dangerous git operations
+- These settings will prevent Claude from executing prohibited commands
+- The permissions system provides automatic enforcement without requiring manual checks

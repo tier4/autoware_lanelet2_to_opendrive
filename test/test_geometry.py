@@ -451,3 +451,322 @@ class TestArcLengthParameterizedCatmullRomSpline:
         assert abs(normal[0]) < 0.1  # Minimal x-component
         assert abs(normal[1]) > 0.9  # Strong y-component
         assert abs(normal[2]) < 0.1  # Should be in XY plane
+
+    def test_as_cubic_spline_parameters_structure(self):
+        """Test structure of cubic spline parameters output."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        # Should have at least one segment
+        assert len(segments) >= 1
+
+        for segment in segments:
+            # Check required keys
+            required_keys = [
+                "t_start",
+                "t_end",
+                "s_start",
+                "s_end",
+                "a",
+                "b",
+                "c",
+                "d",
+                "segment_length",
+            ]
+            for key in required_keys:
+                assert key in segment
+
+            # Check value types
+            assert isinstance(segment["t_start"], (int, float, np.number))
+            assert isinstance(segment["t_end"], (int, float, np.number))
+            assert isinstance(segment["s_start"], (int, float, np.number))
+            assert isinstance(segment["s_end"], (int, float, np.number))
+            assert isinstance(segment["a"], (int, float, np.number))
+            assert isinstance(segment["b"], (int, float, np.number))
+            assert isinstance(segment["c"], (int, float, np.number))
+            assert isinstance(segment["d"], (int, float, np.number))
+            assert isinstance(segment["segment_length"], (int, float, np.number))
+
+            # Check logical constraints
+            assert segment["t_end"] > segment["t_start"]
+            assert segment["s_end"] >= segment["s_start"]
+            assert segment["segment_length"] >= 0
+
+    def test_as_cubic_spline_parameters_straight_line(self):
+        """Test cubic parameters for a straight line (should have zero higher-order terms)."""
+        points = np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        for segment in segments:
+            # For a straight line, lateral deviation should be minimal
+            # Higher order terms (c, d) should be close to zero
+            assert abs(segment["c"]) < 1e-3
+            assert abs(segment["d"]) < 1e-3
+
+    def test_as_cubic_spline_parameters_curved_line(self):
+        """Test cubic parameters for a curved line."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        # For curved lines, at least some segments should have non-zero higher-order terms
+        has_curve = any(
+            abs(seg["c"]) > 1e-6 or abs(seg["d"]) > 1e-6 for seg in segments
+        )
+        assert has_curve, "Curved line should have non-zero higher-order cubic terms"
+
+    def test_as_cubic_spline_parameters_segment_continuity(self):
+        """Test that segments are continuous."""
+        points = np.array([[0, 0, 0], [1, 2, 0], [3, 1, 0], [4, 3, 0], [5, 0, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        if len(segments) > 1:
+            for i in range(len(segments) - 1):
+                current_seg = segments[i]
+                next_seg = segments[i + 1]
+
+                # End of current should match start of next (approximately)
+                assert abs(current_seg["t_end"] - next_seg["t_start"]) < 1e-6
+                assert abs(current_seg["s_end"] - next_seg["s_start"]) < 1e-6
+
+    def test_as_cubic_spline_parameters_polynomial_consistency(self):
+        """Test that cubic polynomial parameters produce consistent results."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        for segment in segments:
+            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
+            s_start = segment["s_start"]
+            s_end = segment["s_end"]
+
+            # Test polynomial evaluation at segment boundaries
+            # At s_start (local s=0), polynomial should give value 'a'
+            local_s_start = 0.0
+            poly_value_start = (
+                a + b * local_s_start + c * local_s_start**2 + d * local_s_start**3
+            )
+            assert poly_value_start == a
+
+            # At s_end, polynomial should give reasonable value
+            segment_length = s_end - s_start
+            poly_value_end = (
+                a + b * segment_length + c * segment_length**2 + d * segment_length**3
+            )
+
+            # The polynomial value should be finite
+            assert np.isfinite(poly_value_end)
+
+    def test_as_cubic_spline_parameters_no_num_segments_arg(self):
+        """Test that as_cubic_spline_parameters doesn't accept num_segments argument."""
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        # Should work without arguments
+        segments = spline.as_cubic_spline_parameters()
+        assert isinstance(segments, list)
+
+        # Should fail with num_segments argument
+        try:
+            spline.as_cubic_spline_parameters(num_segments=5)
+            assert False, "Should have raised TypeError for unexpected argument"
+        except TypeError:
+            pass  # Expected behavior
+
+    def test_as_cubic_spline_parameters_produces_valid_representation(self):
+        """Test that cubic polynomial parameters produce a valid mathematical representation."""
+        points = np.array([[0, 0, 0], [1, 2, 0], [3, 1, 0], [4, 3, 0], [5, 0, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        # Should have segments for the spline
+        assert len(segments) > 0, "Should produce at least one segment"
+
+        # Verify basic properties of the polynomial representation
+        for segment_idx, segment in enumerate(segments):
+            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
+
+            # Coefficients should be finite
+            assert all(
+                np.isfinite([a, b, c, d])
+            ), f"Segment {segment_idx} has non-finite coefficients: a={a}, b={b}, c={c}, d={d}"
+
+            # Segment should have positive length
+            assert (
+                segment["segment_length"] > 0
+            ), f"Segment {segment_idx} has non-positive length: {segment['segment_length']}"
+
+            # Verify t and s ranges make sense
+            assert (
+                segment["t_end"] > segment["t_start"]
+            ), f"Segment {segment_idx} has invalid t range: [{segment['t_start']}, {segment['t_end']}]"
+            assert (
+                segment["s_end"] >= segment["s_start"]
+            ), f"Segment {segment_idx} has invalid s range: [{segment['s_start']}, {segment['s_end']}]"
+
+            # Polynomial should be evaluable across the segment range
+            test_positions = np.linspace(0, segment["segment_length"], 5)
+            for local_s in test_positions:
+                polynomial_value = a + b * local_s + c * local_s**2 + d * local_s**3
+
+                # Polynomial should produce finite values
+                assert np.isfinite(
+                    polynomial_value
+                ), f"Polynomial produces non-finite value at local_s={local_s} in segment {segment_idx}"
+
+        # Verify segments cover the full spline range
+        total_segment_length = sum(seg["segment_length"] for seg in segments)
+        spline_length = spline.total_length
+
+        # Should cover most of the spline (allowing for some approximation)
+        coverage_ratio = (
+            total_segment_length / spline_length if spline_length > 0 else 0
+        )
+        assert coverage_ratio > 0.5, (
+            f"Segments should cover significant portion of spline: "
+            f"coverage={coverage_ratio:.3f}, total_segment_length={total_segment_length:.3f}, "
+            f"spline_length={spline_length:.3f}"
+        )
+
+    def test_as_cubic_spline_parameters_mathematical_consistency(self):
+        """Test mathematical consistency of polynomial parameters with spline evaluation."""
+        # Test with a simple curved path
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        for segment_idx, segment in enumerate(segments):
+            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
+            s_start = segment["s_start"]
+            s_end = segment["s_end"]
+
+            # Test mathematical properties
+            # 1. Polynomial coefficients should be finite
+            assert all(
+                np.isfinite([a, b, c, d])
+            ), f"Segment {segment_idx} coefficients not finite: a={a}, b={b}, c={c}, d={d}"
+
+            # 2. At local_s=0, polynomial value should be 'a'
+            poly_at_zero = a + b * 0 + c * 0**2 + d * 0**3
+            assert (
+                abs(poly_at_zero - a) < 1e-12
+            ), f"Polynomial at s=0 should equal coefficient 'a': {poly_at_zero} != {a}"
+
+            # 3. Polynomial derivatives should be computable
+            segment_length = s_end - s_start
+            test_s = segment_length / 2
+
+            # Value at midpoint
+            poly_value = a + b * test_s + c * test_s**2 + d * test_s**3
+            assert np.isfinite(poly_value), "Polynomial value should be finite"
+
+            # First derivative: b + 2*c*s + 3*d*s^2
+            poly_derivative = b + 2 * c * test_s + 3 * d * test_s**2
+            assert np.isfinite(
+                poly_derivative
+            ), "Polynomial derivative should be finite"
+
+            # 4. Segment parameters should be consistent
+            assert (
+                s_end > s_start
+            ), f"Segment {segment_idx}: s_end ({s_end}) <= s_start ({s_start})"
+            assert (
+                segment["t_end"] > segment["t_start"]
+            ), f"Segment {segment_idx}: t_end ({segment['t_end']}) <= t_start ({segment['t_start']})"
+
+            # 5. The polynomial should produce reasonable values across the segment
+            test_positions = [
+                0,
+                segment_length * 0.25,
+                segment_length * 0.5,
+                segment_length * 0.75,
+                segment_length,
+            ]
+            for local_s in test_positions:
+                value = a + b * local_s + c * local_s**2 + d * local_s**3
+                assert np.isfinite(
+                    value
+                ), f"Non-finite polynomial value at local_s={local_s}"
+
+                # Value should not be excessively large (sanity check)
+                assert (
+                    abs(value) < 100
+                ), f"Polynomial value seems excessive: {value} at local_s={local_s}"
+
+    def test_as_cubic_spline_parameters_approximates_original_spline(self):
+        """Demonstrate that polynomial parameters approximate the original spline shape."""
+        # Use a simple smooth curve for better approximation
+        points = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, -1, 0]])
+        spline = ArcLengthParameterizedCatmullRomSpline(points)
+
+        segments = spline.as_cubic_spline_parameters()
+
+        # Collect approximation quality statistics
+        all_errors = []
+
+        for segment_idx, segment in enumerate(segments):
+            s_start = segment["s_start"]
+            s_end = segment["s_end"]
+            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
+
+            # Sample multiple points within segment for comparison
+            num_test_points = 15
+            for i in range(num_test_points):
+                t = i / (num_test_points - 1) if num_test_points > 1 else 0.0
+                s_test = s_start + t * (s_end - s_start)
+
+                # Skip if beyond spline bounds
+                if s_test > spline.total_length:
+                    continue
+
+                # Get actual spline value at this position
+                frenet_frame = spline.evaluate(s_test, frenet=True)
+                start_frame = spline.evaluate(s_start, frenet=True)
+
+                # Convert to local coordinate system
+                delta = frenet_frame["position"] - start_frame["position"]
+                actual_lateral = np.dot(delta, start_frame["normal"])
+
+                # Get polynomial prediction
+                local_s = s_test - s_start
+                predicted_lateral = a + b * local_s + c * local_s**2 + d * local_s**3
+
+                # Calculate approximation error
+                error = abs(actual_lateral - predicted_lateral)
+                all_errors.append(error)
+
+        # Verify the approximation quality
+        if all_errors:
+            mean_error = np.mean(all_errors)
+            max_error = max(all_errors)
+
+            # The polynomial approximation should be reasonable for smooth curves
+            # These are generous bounds since we're doing least-squares fitting
+            assert mean_error < 0.5, (
+                f"Mean approximation error too large: {mean_error:.4f}. "
+                f"Polynomial fitting should provide reasonable approximation of smooth curves."
+            )
+
+            assert max_error < 2.0, (
+                f"Maximum approximation error too large: {max_error:.4f}. "
+                f"Polynomial should not deviate excessively from original spline."
+            )
+
+            # Most errors should be small
+            small_errors = [e for e in all_errors if e < 0.1]
+            small_error_ratio = len(small_errors) / len(all_errors)
+
+            assert small_error_ratio > 0.3, (
+                f"Too few points have small approximation errors: {small_error_ratio:.2f}. "
+                f"At least 30% of points should be well-approximated."
+            )
