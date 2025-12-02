@@ -1,9 +1,9 @@
-"""Tests for OpenDRIVE lane functions."""
+"""Tests for OpenDRIVE reference line functions."""
 
 from pathlib import Path
 import lanelet2
 from autoware_lanelet2_extension_python.projection import MGRSProjector
-from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+from autoware_lanelet2_to_opendrive.opendrive.reference_line import ReferenceLine
 
 
 def load_test_map():
@@ -17,5 +17,7 @@ def load_test_map():
 
 def test_to_standard_lane():
     lanelet_map = load_test_map()
-    lanelet_555 = lanelet_map.laneletLayer.get(555)
-    Lane.construct_from_lanelet(lanelet_map, lanelet_555).to_standard_lane()
+    ReferenceLine.construct_from_lanelet_groups(
+        lanelet_map,
+        [lanelet_map.laneletLayer.get(3002094), lanelet_map.laneletLayer.get(3002093)],
+    ).to_standard_lane()

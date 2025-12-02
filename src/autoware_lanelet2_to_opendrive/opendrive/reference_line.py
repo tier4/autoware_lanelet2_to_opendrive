@@ -1,10 +1,10 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
-from typing import Optional
 import lanelet2
-
+from typing import Union, List, Set
 from .lane import Lane
-from .opendrive_dataclass import LaneType
+from .opendrive_dataclass import LaneType, LaneWidth
+from ..geometry import ArcLengthParameterizedCatmullRomSpline
 
 
 class ReferenceLine(Lane):
@@ -16,62 +16,87 @@ class ReferenceLine(Lane):
     functionality but is specifically designed for reference line purposes.
     """
 
-    def __init__(
-        self,
-        predecessor: Optional[int] = None,
-        successor: Optional[int] = None,
-    ):
+    calculated_centerline_spline: ArcLengthParameterizedCatmullRomSpline
+
+    def __init__(self, centerline_spline: ArcLengthParameterizedCatmullRomSpline):
+        self.centerline_spline = centerline_spline
         """
         Initialize a ReferenceLine object.
-
-        Args:
-            predecessor: ID of predecessor reference line
-            successor: ID of successor reference line
         """
         # Reference line always has lane_id = 0 and is always a driving type
         super().__init__(
             lane_id=0,
             lane_type=LaneType.DRIVING,
             level=False,
-            predecessor=None,  # Reference lines don't use LaneLink objects
-            successor=None,
         )
-
-        # Store reference line specific connections
-        self.predecessor_id = predecessor
-        self.successor_id = successor
 
     @staticmethod
-    def construct_from_lanelet(
-        lanelet_map: lanelet2.core.LaneletMap, lanelet: lanelet2.core.Lanelet
+    def construct_from_lanelet_groups(
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet_group: Union[
+            Set[lanelet2.core.Lanelet],
+            List[lanelet2.core.Lanelet],
+            lanelet2.core.LaneletLayer,
+        ],
     ) -> "ReferenceLine":
         """
-        Construct a ReferenceLine from a Lanelet2 lanelet.
+        Construct a ReferenceLine from a group of Lanelet2 lanelets.
 
         Args:
-            lanelet_map: The Lanelet2 map containing the lanelet
-            lanelet: The lanelet to convert to ReferenceLine
+            lanelet_map: The Lanelet2 map containing the lanelets
+            lanelet_group: List of lanelets representing lanes in a road
 
         Returns:
-            ReferenceLine instance constructed from the lanelet
+            ReferenceLine instance constructed from the center of the lanelet group
         """
-        # TODO: Determine predecessor and successor from lanelet connections
-        predecessor_id = None
-        successor_id = None
+        if not lanelet_group:
+            raise ValueError("Lanelet group cannot be empty")
+
+        # Sort the lanelets from left to right
+        from ..util import sort_adjacent_groups
+
+        # Convert lanelet_group to set if needed
+        if isinstance(lanelet_group, set):
+            lanelet_set = lanelet_group
+        elif isinstance(lanelet_group, list):
+            lanelet_set = set(lanelet_group)
+        else:  # lanelet2.core.LaneletLayer
+            lanelet_set = set(lanelet_group)
+
+        sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_set)
+
+        num_lanes = len(sorted_lanelets)
+
+        # Calculate centerline spline based on the number of lanes
+        if num_lanes % 2 == 1:
+            # Odd number of lanes: use the center lane's centerline
+            center_lane_index = num_lanes // 2
+            center_lanelet = sorted_lanelets[center_lane_index]
+
+            from ..centerline import extract_centerline_as_spline
+
+            centerline_spline = extract_centerline_as_spline(center_lanelet)
+        else:
+            # Even number of lanes: use the line between X/2 and X/2+1 lanes
+            left_lane_index = num_lanes // 2 - 1  # X/2 (0-indexed)
+            right_lane_index = num_lanes // 2  # X/2+1 (0-indexed)
+
+            two_lanelets = {
+                sorted_lanelets[left_lane_index],
+                sorted_lanelets[right_lane_index],
+            }
+
+            from ..centerline import extract_centerline_as_spline_from_two_lanelets
+
+            centerline_spline = extract_centerline_as_spline_from_two_lanelets(
+                lanelet_map, two_lanelets
+            )
 
         # Create the ReferenceLine instance
-        reference_line = ReferenceLine(
-            predecessor=predecessor_id,
-            successor=successor_id,
-        )
+        reference_line = ReferenceLine(centerline_spline=centerline_spline)
 
-        # Calculate reference line width using spline curve from estimate_lanelet_width_as_spline
-        from ..centerline import estimate_lanelet_width_as_spline
-
-        width_spline = estimate_lanelet_width_as_spline(lanelet)
-
-        # Add width definitions using the inherited method
-        reference_line._add_width_from_spline(width_spline)
+        # Reference line is a virtual line, so I hardcode a small constant width
+        reference_line._add_width(LaneWidth(s_offset=0, a=0.1))
 
         # TODO: Add road marks based on lanelet line types
 
@@ -79,8 +104,4 @@ class ReferenceLine(Lane):
 
     def __repr__(self) -> str:
         """String representation of the reference line."""
-        return (
-            f"ReferenceLine(predecessor_id={self.predecessor_id}, "
-            f"successor_id={self.successor_id}, "
-            f"widths={len(self.widths)}, marks={len(self.road_marks)})"
-        )
+        return f"ReferenceLine(widths={len(self.widths)}, marks={len(self.road_marks)})"
