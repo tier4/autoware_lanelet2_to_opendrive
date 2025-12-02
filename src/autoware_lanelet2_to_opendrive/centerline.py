@@ -1,6 +1,5 @@
 import numpy as np
 import lanelet2
-from splines import CatmullRom
 from .geometry import (
     point_to_line_segment_distance,
     ArcLengthParameterizedCatmullRomSpline,
@@ -37,7 +36,7 @@ def extract_centerline_as_spline(
 
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet, num_samples: int = 20, alpha: float = 0.5
-) -> CatmullRom:
+) -> ArcLengthParameterizedCatmullRomSpline:
     """
     Estimate lanelet total width along its centerline using Frenet coordinates.
 
