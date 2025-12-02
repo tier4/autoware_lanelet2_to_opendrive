@@ -1,132 +1,20 @@
 """Lane implementation for OpenDRIVE conversion."""
 
-from dataclasses import dataclass
-from enum import Enum
 from typing import List, Optional, Any, Dict
 import numpy as np
 
 from scenariogeneration import xodr
 
-
-class LaneType(Enum):
-    """OpenDRIVE lane types."""
-
-    NONE = "none"
-    DRIVING = "driving"
-    STOP = "stop"
-    SHOULDER = "shoulder"
-    BIKING = "biking"
-    SIDEWALK = "sidewalk"
-    BORDER = "border"
-    RESTRICTED = "restricted"
-    PARKING = "parking"
-    BIDIRECTIONAL = "bidirectional"
-    MEDIAN = "median"
-    SPECIAL1 = "special1"
-    SPECIAL2 = "special2"
-    SPECIAL3 = "special3"
-    ROAD_WORKS = "roadWorks"
-    TRAM = "tram"
-    RAIL = "rail"
-    ENTRY = "entry"
-    EXIT = "exit"
-    OFF_RAMP = "offRamp"
-    ON_RAMP = "onRamp"
-    CONNECTING_RAMP = "connectingRamp"
-    BUS = "bus"
-    TAXI = "taxi"
-    HOV = "hov"
-
-
-class RoadMarkType(Enum):
-    """OpenDRIVE road mark types."""
-
-    NONE = "none"
-    SOLID = "solid"
-    BROKEN = "broken"
-    SOLID_SOLID = "solid solid"
-    SOLID_BROKEN = "solid broken"
-    BROKEN_SOLID = "broken solid"
-    BROKEN_BROKEN = "broken broken"
-    BOTTS_DOTS = "botts dots"
-    REFLECTORS = "reflectors"
-    GRASS = "grass"
-    COBBLE = "cobble"
-    PAVING_STONES = "paving stones"
-    PAVING = "paving"
-    CONCRETE = "concrete"
-    ASPHALT = "asphalt"
-
-
-class RoadMarkColor(Enum):
-    """OpenDRIVE road mark colors."""
-
-    STANDARD = "standard"
-    BLUE = "blue"
-    GREEN = "green"
-    RED = "red"
-    WHITE = "white"
-    YELLOW = "yellow"
-    ORANGE = "orange"
-
-
-class LaneChangeType(Enum):
-    """OpenDRIVE lane change types."""
-
-    INCREASE = "increase"
-    DECREASE = "decrease"
-    BOTH = "both"
-    NONE = "none"
-
-
-@dataclass
-class LaneWidth:
-    """Lane width definition."""
-
-    s_offset: float
-    a: float  # Width at s_offset
-    b: float = 0.0  # Linear coefficient
-    c: float = 0.0  # Quadratic coefficient
-    d: float = 0.0  # Cubic coefficient
-
-
-@dataclass
-class RoadMark:
-    """Road mark definition."""
-
-    s_offset: float
-    type: RoadMarkType
-    weight: str = "standard"
-    color: RoadMarkColor = RoadMarkColor.STANDARD
-    width: float = 0.12
-    lane_change: LaneChangeType = LaneChangeType.BOTH
-
-
-@dataclass
-class LaneLink:
-    """Lane link definition for predecessors and successors."""
-
-    id: int
-
-
-@dataclass
-class LaneBorder:
-    """Lane border definition."""
-
-    s_offset: float
-    a: float  # Border position at s_offset
-    b: float = 0.0  # Linear coefficient
-    c: float = 0.0  # Quadratic coefficient
-    d: float = 0.0  # Cubic coefficient
-
-
-@dataclass
-class LaneHeight:
-    """Lane height definition."""
-
-    s_offset: float
-    inner: float
-    outer: float
+from .opendrive_dataclass import (
+    LaneType,
+    RoadMarkType,
+    RoadMarkColor,
+    LaneWidth,
+    RoadMark,
+    LaneLink,
+    LaneBorder,
+    LaneHeight,
+)
 
 
 class Lane:
@@ -296,112 +184,6 @@ class Lane:
         return (
             f"Lane(id={self.lane_id}, type={self.lane_type.value}, "
             f"widths={len(self.widths)}, marks={len(self.road_marks)})"
-        )
-
-
-class LaneSection:
-    """
-    OpenDRIVE lane section containing multiple lanes.
-    """
-
-    def __init__(self, s_start: float = 0.0):
-        """
-        Initialize a lane section.
-
-        Args:
-            s_start: Start position along the road
-        """
-        self.s_start = s_start
-        self.left_lanes: List[Lane] = []
-        self.center_lane: Optional[Lane] = None
-        self.right_lanes: List[Lane] = []
-
-    def add_left_lane(self, lane: Lane) -> None:
-        """Add a left lane to the section."""
-        self.left_lanes.append(lane)
-
-    def add_right_lane(self, lane: Lane) -> None:
-        """Add a right lane to the section."""
-        self.right_lanes.append(lane)
-
-    def set_center_lane(self, lane: Lane) -> None:
-        """Set the center lane."""
-        self.center_lane = lane
-
-    def to_lane_def(self, s_end: float) -> Any:
-        """
-        Convert lane section to LaneDef for scenariogeneration.
-
-        Args:
-            s_end: End position of the lane section
-
-        Returns:
-            LaneDef object for use with scenariogeneration road creation
-        """
-        # Count lanes
-        n_lanes = len(self.left_lanes) + len(self.right_lanes)
-
-        # Collect lane widths (right lanes have negative IDs, left lanes positive)
-        widths = []
-
-        # Add right lanes (negative IDs, in reverse order for scenariogeneration)
-        for lane in sorted(self.right_lanes, key=lambda x: x.lane_id):
-            if lane.widths:
-                widths.append(lane.widths[0].a)
-            else:
-                widths.append(3.5)
-
-        # Add left lanes (positive IDs)
-        for lane in sorted(self.left_lanes, key=lambda x: x.lane_id):
-            if lane.widths:
-                widths.append(lane.widths[0].a)
-            else:
-                widths.append(3.5)
-
-        # Create LaneDef
-        lane_def = xodr.LaneDef(
-            s_start=self.s_start,
-            s_end=s_end,
-            n_lanes_start=n_lanes,
-            n_lanes_end=n_lanes,
-            lane_start_widths=widths,
-            lane_end_widths=widths,
-        )
-
-        return lane_def
-
-    def get_lane_data(self) -> Dict[str, Any]:
-        """
-        Get lane data for manual XODR construction.
-
-        Returns:
-            Dictionary with organized lane data
-        """
-        data: Dict[str, Any] = {
-            "s_start": self.s_start,
-            "left_lanes": [],
-            "right_lanes": [],
-            "center_lane": None,
-        }
-
-        for lane in self.left_lanes:
-            data["left_lanes"].append(lane.to_lane_def_data())
-
-        for lane in self.right_lanes:
-            data["right_lanes"].append(lane.to_lane_def_data())
-
-        if self.center_lane:
-            data["center_lane"] = self.center_lane.to_lane_def_data()
-
-        return data
-
-    def __repr__(self) -> str:
-        """String representation of the lane section."""
-        return (
-            f"LaneSection(s={self.s_start}, "
-            f"left={len(self.left_lanes)}, "
-            f"center={1 if self.center_lane else 0}, "
-            f"right={len(self.right_lanes)})"
         )
 
 

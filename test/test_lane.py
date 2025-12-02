@@ -4,12 +4,13 @@ import pytest
 import numpy as np
 from autoware_lanelet2_to_opendrive.opendrive.lane import (
     Lane,
+    create_driving_lane_from_lanelet,
+)
+from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     LaneType,
     RoadMark,
     RoadMarkType,
     RoadMarkColor,
-    LaneSection,
-    create_driving_lane_from_lanelet,
 )
 
 # Check if scenariogeneration is available
@@ -103,48 +104,6 @@ class TestLane:
         assert data["lane_id"] == -1
         assert data["widths"] == [3.5]
         assert data["lane_type"] == "driving"
-
-
-class TestLaneSection:
-    """Test cases for LaneSection class."""
-
-    def test_lane_section_creation(self):
-        """Test basic lane section creation."""
-        section = LaneSection(s_start=0.0)
-
-        assert section.s_start == 0.0
-        assert len(section.left_lanes) == 0
-        assert len(section.right_lanes) == 0
-        assert section.center_lane is None
-
-    def test_add_lanes_to_section(self):
-        """Test adding lanes to section."""
-        section = LaneSection()
-
-        left_lane = Lane(lane_id=1, lane_type=LaneType.DRIVING)
-        right_lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
-        center_lane = Lane(lane_id=0, lane_type=LaneType.NONE)
-
-        section.add_left_lane(left_lane)
-        section.add_right_lane(right_lane)
-        section.set_center_lane(center_lane)
-
-        assert len(section.left_lanes) == 1
-        assert len(section.right_lanes) == 1
-        assert section.center_lane is not None
-        assert section.center_lane.lane_id == 0
-
-    def test_lane_section_repr(self):
-        """Test lane section string representation."""
-        section = LaneSection(s_start=10.0)
-        section.add_left_lane(Lane(lane_id=1, lane_type=LaneType.DRIVING))
-        section.add_right_lane(Lane(lane_id=-1, lane_type=LaneType.DRIVING))
-
-        repr_str = repr(section)
-        assert "LaneSection(s=10.0" in repr_str
-        assert "left=1" in repr_str
-        assert "right=1" in repr_str
-        assert "center=0" in repr_str
 
 
 class TestLaneEnums:
