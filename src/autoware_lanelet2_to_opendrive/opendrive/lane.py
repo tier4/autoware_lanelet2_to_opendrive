@@ -2,6 +2,7 @@
 
 from typing import List, Optional, Any, Dict
 import numpy as np
+import lanelet2
 
 from scenariogeneration import xodr
 
@@ -68,6 +69,73 @@ class Lane:
     def add_height(self, height: LaneHeight) -> None:
         """Add a height definition to the lane."""
         self.heights.append(height)
+
+    @staticmethod
+    def construct_from_lanelet(
+        lanelet_map: lanelet2.core.LaneletMap, lanelet: lanelet2.core.Lanelet
+    ) -> "Lane":
+        """
+        Construct a Lane from a Lanelet2 lanelet.
+
+        Args:
+            lanelet_map: The Lanelet2 map containing the lanelet
+            lanelet: The lanelet to convert to Lane
+
+        Returns:
+            Lane instance constructed from the lanelet
+        """
+        # TODO: Determine lane ID based on lanelet position and direction
+        lane_id = 0
+
+        # Determine lane type from lanelet attributes
+        if "subtype" in lanelet.attributes:
+            subtype = lanelet.attributes["subtype"]
+            if subtype in ["road", "highway"]:
+                lane_type = LaneType.DRIVING
+            elif subtype == "walkway":
+                lane_type = LaneType.SIDEWALK
+            elif subtype == "bicycle_lane":
+                lane_type = LaneType.BIKING
+            else:
+                lane_type = LaneType.DRIVING
+        else:
+            lane_type = LaneType.DRIVING
+
+        # TODO: Calculate predecessor and successor from lanelet connections
+        predecessor = None
+        successor = None
+
+        # Create the Lane instance
+        lane = Lane(
+            lane_id=lane_id,
+            lane_type=lane_type,
+            level=False,
+            predecessor=predecessor,
+            successor=successor,
+        )
+
+        # Calculate lane width from left and right bounds
+        left_bound = lanelet.leftBound
+        right_bound = lanelet.rightBound
+
+        if len(left_bound) > 0 and len(right_bound) > 0:
+            # Calculate average width along the lanelet
+            widths = []
+            for i in range(min(len(left_bound), len(right_bound))):
+                left_point = left_bound[i]
+                right_point = right_bound[i]
+                width = np.linalg.norm(
+                    [left_point.x - right_point.x, left_point.y - right_point.y]
+                )
+                widths.append(width)
+
+            if widths:
+                avg_width = np.mean(widths)
+                lane.add_constant_width(avg_width)
+
+        # TODO: Add road marks based on lanelet line types
+
+        return lane
 
     def add_constant_width(self, width: float, s_start: float = 0.0) -> None:
         """Add a constant width definition."""
