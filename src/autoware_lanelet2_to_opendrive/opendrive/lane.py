@@ -2,6 +2,7 @@
 
 from typing import List, Optional, Any, Dict
 import lanelet2
+import lxml.etree as ET
 
 from scenariogeneration import xodr
 from ..centerline import estimate_lanelet_width_as_spline
@@ -235,6 +236,41 @@ class Lane:
             "widths": widths if widths else [3.5],
             "lane_type": self.lane_type.value,
         }
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("lane")
+        elem.set("id", str(self.lane_id))
+        elem.set("type", self.lane_type.value)
+        elem.set("level", "true" if self.level else "false")
+
+        # Add predecessor and successor links if available
+        if self.predecessor or self.successor:
+            link_elem = ET.SubElement(elem, "link")
+            if self.predecessor:
+                pred_elem = ET.SubElement(link_elem, "predecessor")
+                pred_elem.set("id", str(self.predecessor.id))
+            if self.successor:
+                succ_elem = ET.SubElement(link_elem, "successor")
+                succ_elem.set("id", str(self.successor.id))
+
+        # Add width definitions
+        for width in self.widths:
+            elem.append(width.to_xml())
+
+        # Add road marks
+        for road_mark in self.road_marks:
+            elem.append(road_mark.to_xml())
+
+        # Add borders
+        for border in self.borders:
+            elem.append(border.to_xml())
+
+        # Add heights
+        for height in self.heights:
+            elem.append(height.to_xml())
+
+        return elem
 
     def __repr__(self) -> str:
         """String representation of the lane."""

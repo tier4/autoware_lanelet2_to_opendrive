@@ -1,0 +1,69 @@
+"""OpenDRIVE root element and export functionality."""
+
+from dataclasses import dataclass
+from typing import Optional, List
+import lxml.etree as ET
+
+from .header import Header
+from .road import Road
+
+
+@dataclass
+class OpenDRIVE:
+    """Root OpenDRIVE element."""
+
+    header: Optional[Header] = None
+    roads: Optional[List[Road]] = None
+
+    def __post_init__(self):
+        if self.roads is None:
+            self.roads = []
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("OpenDRIVE")
+
+        if self.header:
+            elem.append(self.header.to_xml())
+
+        if self.roads:
+            for road in self.roads:
+                elem.append(road.to_xml())
+
+        return elem
+
+
+# Export functionality
+
+
+def export_to_xml(opendrive: OpenDRIVE) -> str:
+    """
+    Export OpenDRIVE object to XML string.
+
+    Args:
+        opendrive: OpenDRIVE object to export
+
+    Returns:
+        XML string representation
+    """
+    xml_element = opendrive.to_xml()
+
+    # Pretty print
+    xml_str = ET.tostring(
+        xml_element, pretty_print=True, xml_declaration=True, encoding="UTF-8"
+    ).decode("utf-8")
+
+    return xml_str
+
+
+def save_opendrive_to_file(opendrive: OpenDRIVE, filepath: str) -> None:
+    """
+    Save OpenDRIVE object to XML file.
+
+    Args:
+        opendrive: OpenDRIVE object to save
+        filepath: Path to save the XML file
+    """
+    xml_str = export_to_xml(opendrive)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(xml_str)
