@@ -1,10 +1,18 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
 from typing import Set, List, Optional, Union
+from enum import Enum
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from lanelet2.geometry import intersects2d
 import mgrs
+
+
+class ConnectionDirection(Enum):
+    """Enum for specifying connection direction in lanelet relationships."""
+
+    FOLLOWING = "following"
+    PREVIOUS = "previous"
 
 
 def find_lanelets_without_next(
@@ -96,6 +104,52 @@ def find_terminal_lanelets(
             lanelets_without_next.add(lanelet)
 
     return lanelets_without_previous, lanelets_without_next
+
+
+def find_connecting_lanelet_groups(
+    lanelet_map: lanelet2.core.LaneletMap,
+    lanelet_group: Union[
+        Set[lanelet2.core.Lanelet],
+        List[lanelet2.core.Lanelet],
+        lanelet2.core.LaneletLayer,
+    ],
+    direction: ConnectionDirection,
+) -> List[Set[lanelet2.core.Lanelet]]:
+    """Find and group the connecting lanelets of a given lanelet group.
+
+    Args:
+        lanelet_map: The lanelet2 map to analyze
+        lanelet_group: Set of lanelets to find connections for
+        direction: ConnectionDirection enum value to specify which connections to find
+
+    Returns:
+        List of sets, where each set contains lanelets that are adjacent to each other
+    """
+    # Create routing graph
+    traffic_rules = lanelet2.traffic_rules.create(
+        lanelet2.traffic_rules.Locations.Germany,
+        lanelet2.traffic_rules.Participants.Vehicle,
+    )
+    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+
+    # Collect all connecting lanelets
+    connecting_lanelets = set()
+    for lanelet in lanelet_group:
+        if direction == ConnectionDirection.FOLLOWING:
+            connections = routing_graph.following(lanelet)
+        elif direction == ConnectionDirection.PREVIOUS:
+            connections = routing_graph.previous(lanelet)
+        else:
+            # This should never happen with enum, but provides safety
+            raise ValueError(f"Invalid direction: {direction}")
+
+        for connected_ll in connections:
+            connecting_lanelets.add(connected_ll)
+
+    # Group the connecting lanelets by their adjacency
+    groups = find_adjacent_groups(lanelet_map, connecting_lanelets)
+
+    return groups
 
 
 def find_adjacent_groups(

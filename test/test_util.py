@@ -808,3 +808,83 @@ def test_check_lanelet_groups_intersect():
 
     # Check intersection (these groups should intersect)
     assert check_lanelet_groups_intersect(group3, group4)
+
+
+def test_find_connecting_lanelet_groups():
+    """Test find_connecting_lanelet_groups with specific lanelets 228/229/230."""
+    from autoware_lanelet2_to_opendrive.util import (
+        find_connecting_lanelet_groups,
+        ConnectionDirection,
+    )
+
+    lanelet_map = load_test_map()
+
+    # Find the specific lanelets 228, 229, 230
+    lanelet_228 = None
+    lanelet_229 = None
+    lanelet_230 = None
+
+    for ll in lanelet_map.laneletLayer:
+        if ll.id == 228:
+            lanelet_228 = ll
+        elif ll.id == 229:
+            lanelet_229 = ll
+        elif ll.id == 230:
+            lanelet_230 = ll
+
+    # Verify all lanelets exist
+    assert lanelet_228 is not None, "Lanelet 228 should exist in the test map"
+    assert lanelet_229 is not None, "Lanelet 229 should exist in the test map"
+    assert lanelet_230 is not None, "Lanelet 230 should exist in the test map"
+
+    # Create input group with lanelets 228, 229, 230
+    input_group = {lanelet_228, lanelet_229, lanelet_230}
+
+    # Test FOLLOWING direction
+    following_groups = find_connecting_lanelet_groups(
+        lanelet_map, input_group, ConnectionDirection.FOLLOWING
+    )
+
+    # Following should return 4 groups: [359], [360], [361], [451]
+    assert (
+        len(following_groups) == 4
+    ), f"Expected 4 groups in FOLLOWING direction, but got {len(following_groups)}"
+
+    # Check that lanelet 451 is in one of the following groups
+    group_with_451 = None
+    for group in following_groups:
+        group_ids = {ll.id for ll in group}
+        if 451 in group_ids:
+            group_with_451 = group
+
+    assert group_with_451 is not None, (
+        f"Lanelet 451 should be in one of the following groups. "
+        f"Group IDs found: {[{ll.id for ll in g} for g in following_groups]}"
+    )
+
+    # Test PREVIOUS direction
+    previous_groups = find_connecting_lanelet_groups(
+        lanelet_map, input_group, ConnectionDirection.PREVIOUS
+    )
+
+    # Previous should return 1 group containing lanelets 225, 226, 227
+    assert (
+        len(previous_groups) == 1
+    ), f"Expected 1 group in PREVIOUS direction, but got {len(previous_groups)}"
+
+    # Check that lanelet 225 is in the previous group
+    group_with_225 = None
+    for group in previous_groups:
+        group_ids = {ll.id for ll in group}
+        if 225 in group_ids:
+            group_with_225 = group
+
+    assert group_with_225 is not None, (
+        f"Lanelet 225 should be in the previous group. "
+        f"Group IDs found: {[{ll.id for ll in g} for g in previous_groups]}"
+    )
+
+    # Verify that group with 225 also contains 226 and 227 (they are adjacent)
+    group_225_ids = {ll.id for ll in group_with_225}
+    assert 226 in group_225_ids, "Lanelet 226 should be in the same group as 225"
+    assert 227 in group_225_ids, "Lanelet 227 should be in the same group as 225"
