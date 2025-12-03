@@ -6,8 +6,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import lanelet2
-from autoware_lanelet2_extension_python.projection import MGRSProjector
+# Import autoware extensions before any tests to ensure proper registration
+from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
+import lanelet2  # noqa: F401
+
 from autoware_lanelet2_to_opendrive.util import mgrs_to_lanelet2_origin
 
 from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
