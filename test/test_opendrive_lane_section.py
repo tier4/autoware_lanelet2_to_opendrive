@@ -117,3 +117,4 @@ def test_get_all_lanes():
     # Check order: left lanes, center, right lanes
     lane_ids = [lane.lane_id for lane in all_lanes]
     assert lane_ids == [1, 0, -1]
+    # print(lane_section.to_xml().to_string(pretty_print=True).decode())
