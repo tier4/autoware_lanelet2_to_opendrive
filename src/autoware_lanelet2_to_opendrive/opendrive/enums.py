@@ -6,6 +6,7 @@ from enum import Enum
 class LaneType(Enum):
     """Lane types according to OpenDRIVE standard."""
 
+    NONE = "none"
     DRIVING = "driving"
     STOP = "stop"
     SHOULDER = "shoulder"

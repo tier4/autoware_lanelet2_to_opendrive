@@ -4,6 +4,7 @@ from typing import Set, List, Optional, Union
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from lanelet2.geometry import intersects2d
+import mgrs
 
 
 def find_lanelets_without_next(
@@ -397,3 +398,66 @@ def sort_adjacent_groups(
         )
 
     return sorted_lanelets
+
+
+def mgrs_to_lanelet2_origin(mgrs_grid: str) -> lanelet2.io.Origin:
+    """Convert MGRS grid name to lanelet2.io.Origin.
+
+    If the input is a partial MGRS grid (e.g., "54SUE" without meter coordinates),
+    it will be zero-padded to get the origin coordinates of that grid.
+
+    Args:
+        mgrs_grid: MGRS grid reference string (e.g., "54SUE1234567890" or "54SUE")
+
+    Returns:
+        lanelet2.io.Origin object with coordinates converted from MGRS
+
+    Raises:
+        ValueError: If the MGRS grid string is invalid
+    """
+    try:
+        # Create MGRS converter
+        m = mgrs.MGRS()
+
+        # Handle partial MGRS grid by padding with zeros if needed
+        processed_mgrs = mgrs_grid.strip()
+
+        # Check if we have a partial grid (missing meter coordinates)
+        # Full MGRS format: ZONE BAND SQUARE_ID EASTING NORTHING
+        # e.g., "54SUE1234567890" where "54S" is zone, "UE" is square, "1234567890" is coordinates
+        if len(processed_mgrs) >= 3:
+            # Extract the grid zone designator and square identifier
+            # Typical format: [0-9]+[A-Z][A-Z][A-Z]
+            import re
+
+            match = re.match(r"^(\d+[A-Z][A-Z][A-Z])(.*)$", processed_mgrs)
+            if match:
+                grid_square = match.group(1)
+                coordinates = match.group(2)
+
+                # If coordinates are missing or incomplete, pad with zeros
+                if len(coordinates) == 0:
+                    # No coordinates provided, use origin (00000 00000)
+                    processed_mgrs = grid_square + "0000000000"
+                elif len(coordinates) < 10:
+                    # Partial coordinates provided
+                    # MGRS coordinates should be even length (easting + northing pairs)
+                    # If odd length, pad to even, then pad to 10 total
+                    if len(coordinates) % 2 == 1:
+                        # Odd length - pad one zero to make even pairs
+                        coordinates += "0"
+
+                    # Now pad to 10 digits total (5 easting + 5 northing)
+                    padded_coords = coordinates.ljust(10, "0")
+                    processed_mgrs = grid_square + padded_coords
+
+        # Convert MGRS to latitude/longitude
+        lat, lon = m.toLatLon(processed_mgrs)
+
+        # Create lanelet2 Origin with the converted coordinates
+        origin = lanelet2.io.Origin(lat, lon)
+
+        return origin
+
+    except Exception as e:
+        raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e

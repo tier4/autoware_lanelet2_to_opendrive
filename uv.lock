@@ -14,6 +14,7 @@ dependencies = [
     { name = "lanelet2" },
     { name = "lanelet2-python-api-for-autoware" },
     { name = "lxml" },
+    { name = "mgrs" },
     { name = "scenariogeneration" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -34,6 +35,7 @@ requires-dist = [
     { name = "lanelet2", specifier = ">=1.2.2" },
     { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
     { name = "lxml", specifier = ">=6.0.2" },
+    { name = "mgrs", specifier = ">=1.5.0" },
     { name = "scenariogeneration", specifier = ">=0.16.3" },
     { name = "scipy", specifier = ">=1.9.0" },
     { name = "splines", specifier = ">=0.3.3" },
@@ -802,6 +804,39 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/58/8f/76d5dc21ac64a49e5498d7f0472c0781dae442dd266a67458baec38288ec/matplotlib-3.10.7-pp311-pypy311_pp73-macosx_10_15_x86_64.whl", hash = "sha256:15112bcbaef211bd663fa935ec33313b948e214454d949b723998a43357b17b0", size = 8252283, upload-time = "2025-10-09T00:27:54.739Z" },
     { url = "https://files.pythonhosted.org/packages/27/0d/9c5d4c2317feb31d819e38c9f947c942f42ebd4eb935fc6fd3518a11eaa7/matplotlib-3.10.7-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:d2a959c640cdeecdd2ec3136e8ea0441da59bcaf58d67e9c590740addba2cb68", size = 8116733, upload-time = "2025-10-09T00:27:56.406Z" },
     { url = "https://files.pythonhosted.org/packages/9a/cc/3fe688ff1355010937713164caacf9ed443675ac48a997bab6ed23b3f7c0/matplotlib-3.10.7-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:3886e47f64611046bc1db523a09dd0a0a6bed6081e6f90e13806dd1d1d1b5e91", size = 8693919, upload-time = "2025-10-09T00:27:58.41Z" },
+]
+
+[[package]]
+name = "mgrs"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/16/6d6f90f43d6ca1b5560c763f60bf5142ce54024f14164d404c9311cb1137/mgrs-1.5.0.tar.gz", hash = "sha256:bff4f7e806ed29d46f8a31a01e6e0e6629e1eca425f745d39af639260bbc89c6", size = 31958, upload-time = "2024-07-07T12:13:05.222Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/81/549d72d039a57be0a14fe556f6cf670251a703a00aca9f83b64e4910086d/mgrs-1.5.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:785e50655360fc14de732591d53479144c2b980bb1f1d8e3130969e7bda28ff2", size = 56901, upload-time = "2024-07-07T12:12:15.344Z" },
+    { url = "https://files.pythonhosted.org/packages/28/62/a62d73338b74c3e3d5e921d10136c5b1f8476ea613bc5369db8035194b12/mgrs-1.5.0-cp310-cp310-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:bfa656b865224552c738486629a117f76e20ab0e309d87fa8c94a4f96b8bf555", size = 83294, upload-time = "2024-07-07T12:12:16.826Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/d5/3dbc98e74b1b5892907b3be7dd8c76b6ddd141db53d158b91f824b409238/mgrs-1.5.0-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:06c02a5d5bf8b0e58bedd9f216bc3cc63b49db5b302f3982a5f8f80d2d4c60de", size = 88581, upload-time = "2024-07-07T12:12:18.383Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/04/20c3d6a423bb6bce71cf3b254af5abb601db3076e676d4216bffdd4a443a/mgrs-1.5.0-cp310-cp310-musllinux_1_2_i686.whl", hash = "sha256:137296c2df8fdfdfcaa6e21d81a27da5451846bca7460862072908f804639431", size = 84847, upload-time = "2024-07-07T12:12:19.65Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/a2/542124c526e03cf37e2c7ee88efbdc13771eed9cc0b5f7e984a4416823bd/mgrs-1.5.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:42a47c3feed7cac9dcdf5fcc6066a77a878c30083e75acbfb5566cf446441d99", size = 86744, upload-time = "2024-07-07T12:12:21.079Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/ec/2d85fbd95921acbf25a7cbb94d4cda24b895e52ec92c790d95baaba820e8/mgrs-1.5.0-cp310-cp310-win32.whl", hash = "sha256:4f60fb1bad0923215a3156d9b833dcd5eeeb64e3309513159f0ab2d7829c1068", size = 57922, upload-time = "2024-07-07T12:12:22.264Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/62/d91cf1995aa2cd14061a2be1b1569b430913381a685da544590f95b713f4/mgrs-1.5.0-cp310-cp310-win_amd64.whl", hash = "sha256:f78c7e5014e5cae6c5513221a299379306561de432ff7373c0aee2a4ed90b560", size = 60028, upload-time = "2024-07-07T12:12:23.425Z" },
+    { url = "https://files.pythonhosted.org/packages/36/45/384af3dafdbcc181b84eb93a28d55a291b4c1cc3e2b2f112923037f7ad68/mgrs-1.5.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:8f29e88b7fb458c2d574dd1f771347e6ec5bd548ca8a5aeab1b1a39cb93b25f6", size = 56900, upload-time = "2024-07-07T12:12:24.573Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/41/5c554b4eae8f13ae341cb3380c3b2b47b56213934a0f418bb879c21c7bcc/mgrs-1.5.0-cp311-cp311-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:73e175cd4795bc08309a33499294c85cdae2f2e86e7fbe2b79ea5fc7e6663e87", size = 83297, upload-time = "2024-07-07T12:12:25.918Z" },
+    { url = "https://files.pythonhosted.org/packages/20/0a/b9418799e067893035171dea1ab97a623a856fc72505fa98d9594895b013/mgrs-1.5.0-cp311-cp311-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:805455e5475681074125381381035434929fec27abdeeb2ff633e5feb41ce1f1", size = 88580, upload-time = "2024-07-07T12:12:27.406Z" },
+    { url = "https://files.pythonhosted.org/packages/37/86/5a922b43be0732bb0e510200f194d72af0de7f8904707b4fbe9863eeb902/mgrs-1.5.0-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:9364a70e067ad1c346fe02094007ba9077d2b53672922251de243268e6cc54a4", size = 84852, upload-time = "2024-07-07T12:12:28.603Z" },
+    { url = "https://files.pythonhosted.org/packages/59/ac/669bf04b4288412ba58cdcd66e083d9278c3f876e54e236e59734446e085/mgrs-1.5.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:9416e237680877fa79e71fa7ed98e3de412320dcc17590d241bfff21d4db952f", size = 86748, upload-time = "2024-07-07T12:12:29.804Z" },
+    { url = "https://files.pythonhosted.org/packages/95/9b/1c5839ad344243748d91ac64d981b018db3fd13e8b2f44f159fd431c24d9/mgrs-1.5.0-cp311-cp311-win32.whl", hash = "sha256:b0a9a2ef778e9477647f154d40b5c2a0f723061a12a349ddb30cb9c20f153108", size = 57924, upload-time = "2024-07-07T12:12:31.216Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/d3/28d979d725ecc58d748135e3226ca18ecdefd699d4d8c1d6440bb67daba5/mgrs-1.5.0-cp311-cp311-win_amd64.whl", hash = "sha256:7904c2c454cf5afbe2fa11e898d3881625e817c66fe24dfdf098a9153cda4023", size = 60030, upload-time = "2024-07-07T12:12:32.281Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/bd/6a0d2692c38708b559cb9fe4f3ee59f2a0c5f5a9f392f4133e27add12acd/mgrs-1.5.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:3171ae9581238bbb5467e4dc85dfb0299ae17085e3a196640615e20ddb6a24c8", size = 56903, upload-time = "2024-07-07T12:12:33.565Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/e8/fe7e363459174bfa68069bd523ad160b6f63f24b7b86dfb776ad7e027200/mgrs-1.5.0-cp312-cp312-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:89d67dbdc337bc4ca5f212bc5cdf3be754862a2310c552fc13cc4cce264bfbff", size = 83325, upload-time = "2024-07-07T12:12:34.813Z" },
+    { url = "https://files.pythonhosted.org/packages/50/08/b46cc09916d1b1753d0144b3135e70d0d5aa0bf29acf92ce3b0ba0e0b61d/mgrs-1.5.0-cp312-cp312-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:40c0193c57fccdc4031f69fe65803767e3d25e99e28199fdd893ea939e301be6", size = 88596, upload-time = "2024-07-07T12:12:36.066Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/09/dcf0ec8b0e97ab0ecb7f9ab019d13e02bc2d9b10ea306ccd390576820980/mgrs-1.5.0-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:b6fea82cc17069ab866e93abbf37913a0044a66e0d21255f06862b2feaa248fd", size = 84852, upload-time = "2024-07-07T12:12:37.184Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/f8/3002f71ca4d37a68dc363538ffe32d76bd77416405af6faff0ae5b0dc3cd/mgrs-1.5.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:36021894edff1c53f8775b299b4b29e20fe79365a2ace8d42f90c49f5c2c9e81", size = 86754, upload-time = "2024-07-07T12:12:38.397Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/0b/c1c3163c395c2e92f4556b2cf5e541fa8e9ddfcf10a88f99bfeee30f6429/mgrs-1.5.0-cp312-cp312-win32.whl", hash = "sha256:749b019e5f3cc40a4a642e8937bdb0c85c30ceb9c5ca11dc98e40b6854c780f1", size = 57921, upload-time = "2024-07-07T12:12:39.761Z" },
+    { url = "https://files.pythonhosted.org/packages/90/89/91bd50c37b059c226e46d300247b015d29d50c8ddff2cf46f127cce2fbc5/mgrs-1.5.0-cp312-cp312-win_amd64.whl", hash = "sha256:134343e425204c3503f7d71a79ade41ef09baa9537a5eac54ed9124df0b567f1", size = 60029, upload-time = "2024-07-07T12:12:40.861Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/71/89c12d2dd3cddc98978c7763e7b276e776e1da42cf4c2877144e93ee920d/mgrs-1.5.0-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:d40c9f5d95fc14796444dba16a6dbb74ec61d22d9689d2cdc003b33a589bd355", size = 56518, upload-time = "2024-07-07T12:12:52.017Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/f2/6eb7d883aa4886df975068873fc8d2828c3efcf379e396346c582de0d71f/mgrs-1.5.0-pp310-pypy310_pp73-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:3be147a68dd0b45f0afb8b8425515028e8576a3c9089ba38f2f3f669f7e10a0d", size = 61680, upload-time = "2024-07-07T12:12:54.456Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/57/67de35d289365e8fbd66fb55cfd3910e8e1ab8fa27dc327b61cddb516a55/mgrs-1.5.0-pp310-pypy310_pp73-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ed6a47f008ddbc24743de3cd507a7cd6a31c582552c89c807854e6c2fa55e0a8", size = 61326, upload-time = "2024-07-07T12:12:55.727Z" },
+    { url = "https://files.pythonhosted.org/packages/91/06/ceccc1633bf4734b3fbb8048c2eeb1bb395dda7e6544868782604f0aff70/mgrs-1.5.0-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:0aceeed9b1f321e081c790c3263b383688bd0a7ad4e2e79312d3438af1209bbd", size = 60067, upload-time = "2024-07-07T12:12:57.379Z" },
 ]
 
 [[package]]

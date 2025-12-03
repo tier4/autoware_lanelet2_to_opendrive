@@ -117,3 +117,11 @@ def test_get_all_lanes():
     # Check order: left lanes, center, right lanes
     lane_ids = [lane.lane_id for lane in all_lanes]
     assert lane_ids == [1, 0, -1]
+
+    # Verify center lane type is "none"
+    xml_element = lane_section.to_xml()
+    center_section = xml_element.find("center")
+    assert center_section is not None
+    center_lane = center_section.find("lane")
+    assert center_lane is not None
+    assert center_lane.get("type") == "none"
