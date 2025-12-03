@@ -13,6 +13,7 @@ source = { editable = "." }
 dependencies = [
     { name = "lanelet2" },
     { name = "lanelet2-python-api-for-autoware" },
+    { name = "lxml" },
     { name = "scenariogeneration" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -32,6 +33,7 @@ dev = [
 requires-dist = [
     { name = "lanelet2", specifier = ">=1.2.2" },
     { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
+    { name = "lxml", specifier = ">=6.0.2" },
     { name = "scenariogeneration", specifier = ">=0.16.3" },
     { name = "scipy", specifier = ">=1.9.0" },
     { name = "splines", specifier = ">=0.3.3" },

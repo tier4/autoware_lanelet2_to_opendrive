@@ -1,99 +1,48 @@
-"""OpenDRIVE dataclass definitions."""
+"""OpenDRIVE dataclass definitions - Main module for backward compatibility."""
 
-from enum import Enum
-from dataclasses import dataclass
+# Import all classes from the split modules for backward compatibility
+from .enums import LaneType, RoadMarkType, RoadMarkColor, GeometryType
+from .lane_elements import LaneWidth, RoadMark, LaneLink, LaneBorder, LaneHeight
+from .geometry import GeometryBase, Line, Arc, Spiral, PlanView
+from .elevation import Elevation, ElevationProfile
+from .lane_sections import Left, Center, Right, LaneSection, Lanes
+from .road import Road
+from .header import Header
+from .opendrive import OpenDRIVE, export_to_xml, save_opendrive_to_file
 
-
-class LaneType(Enum):
-    """Lane types according to OpenDRIVE standard."""
-
-    DRIVING = "driving"
-    STOP = "stop"
-    SHOULDER = "shoulder"
-    BIKING = "biking"
-    SIDEWALK = "sidewalk"
-    BORDER = "border"
-    RESTRICTED = "restricted"
-    PARKING = "parking"
-    BIDIRECTIONAL = "bidirectional"
-    MEDIAN = "median"
-    SPECIAL1 = "special1"
-    SPECIAL2 = "special2"
-    SPECIAL3 = "special3"
-    ROADWORKS = "roadWorks"
-    TRAM = "tram"
-    RAIL = "rail"
-    ENTRY = "entry"
-    EXIT = "exit"
-    OFF_RAMP = "offRamp"
-    ON_RAMP = "onRamp"
-    CONNECTING_RAMP = "connectingRamp"
-
-
-class RoadMarkType(Enum):
-    """Road mark types according to OpenDRIVE standard."""
-
-    SOLID = "solid"
-    BROKEN = "broken"
-    SOLID_SOLID = "solid_solid"
-    SOLID_BROKEN = "solid_broken"
-    BROKEN_SOLID = "broken_solid"
-
-
-class RoadMarkColor(Enum):
-    """Road mark colors according to OpenDRIVE standard."""
-
-    STANDARD = "standard"
-    WHITE = "white"
-    YELLOW = "yellow"
-    RED = "red"
-    BLUE = "blue"
-    GREEN = "green"
-    ORANGE = "orange"
-
-
-@dataclass
-class LaneWidth:
-    """Lane width definition with cubic polynomial coefficients."""
-
-    s_offset: float
-    a: float
-    b: float = 0.0
-    c: float = 0.0
-    d: float = 0.0
-
-
-@dataclass
-class RoadMark:
-    """Road marking definition."""
-
-    s_offset: float
-    type: RoadMarkType
-    color: RoadMarkColor
-
-
-@dataclass
-class LaneLink:
-    """Lane link definition for predecessor/successor."""
-
-    id: int
-
-
-@dataclass
-class LaneBorder:
-    """Lane border definition."""
-
-    s_offset: float
-    a: float
-    b: float = 0.0
-    c: float = 0.0
-    d: float = 0.0
-
-
-@dataclass
-class LaneHeight:
-    """Lane height definition."""
-
-    s_offset: float
-    inner: float
-    outer: float
+# Re-export everything for backward compatibility
+__all__ = [
+    # Enums
+    "LaneType",
+    "RoadMarkType",
+    "RoadMarkColor",
+    "GeometryType",
+    # Lane elements
+    "LaneWidth",
+    "RoadMark",
+    "LaneLink",
+    "LaneBorder",
+    "LaneHeight",
+    # Geometry
+    "GeometryBase",
+    "Line",
+    "Arc",
+    "Spiral",
+    "PlanView",
+    # Elevation
+    "Elevation",
+    "ElevationProfile",
+    # Lane sections
+    "Left",
+    "Center",
+    "Right",
+    "LaneSection",
+    "Lanes",
+    # Road and structure
+    "Road",
+    "Header",
+    "OpenDRIVE",
+    # Export functions
+    "export_to_xml",
+    "save_opendrive_to_file",
+]
