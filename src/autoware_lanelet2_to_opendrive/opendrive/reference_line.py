@@ -1,30 +1,35 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
 import lanelet2
-from typing import Union, List, Set
-from .lane import Lane
-from .opendrive_dataclass import LaneType, LaneWidth
+from typing import Union, List, Set, TYPE_CHECKING
 from ..geometry import ArcLengthParameterizedCatmullRomSpline
 
+if TYPE_CHECKING:
+    pass
 
-class ReferenceLine(Lane):
+# Import enums directly to avoid circular import
+from .enums import LaneType
+from .lane_elements import LaneWidth
+
+
+class ReferenceLine:
     """
-    OpenDRIVE reference line representation that inherits from Lane.
+    OpenDRIVE reference line representation.
 
     The reference line is the center line of a road and serves as the basis
-    for defining lane geometry in OpenDRIVE format. It inherits all lane
-    functionality but is specifically designed for reference line purposes.
+    for defining lane geometry in OpenDRIVE format. It contains a Lane
+    instance for compatibility but is specifically designed for reference line purposes.
     """
-
-    calculated_centerline_spline: ArcLengthParameterizedCatmullRomSpline
 
     def __init__(self, centerline_spline: ArcLengthParameterizedCatmullRomSpline):
         self.centerline_spline = centerline_spline
-        """
-        Initialize a ReferenceLine object.
-        """
+
+        # Create a Lane instance for the reference line
+        # Import here to avoid circular import
+        from .lane import Lane
+
         # Reference line always has lane_id = 0 and type = none for center lane
-        super().__init__(
+        self._lane = Lane(
             lane_id=0,
             lane_type=LaneType.NONE,
             level=False,
@@ -88,11 +93,44 @@ class ReferenceLine(Lane):
         reference_line = ReferenceLine(centerline_spline=centerline_spline)
 
         # Reference line is a virtual line, so I hardcode a small constant width
-        reference_line._add_width(LaneWidth(s_offset=0, a=0.1))
+        reference_line._lane._add_width(LaneWidth(s_offset=0, a=0.1))
 
         # TODO: Add road marks based on lanelet line types
 
         return reference_line
+
+    @property
+    def widths(self):
+        """Access to lane widths."""
+        return self._lane.widths
+
+    @property
+    def road_marks(self):
+        """Access to road marks."""
+        return self._lane.road_marks
+
+    @property
+    def lane_id(self):
+        """Access to lane ID."""
+        return self._lane.lane_id
+
+    @property
+    def lane_type(self):
+        """Access to lane type."""
+        return self._lane.lane_type
+
+    @property
+    def level(self):
+        """Access to lane level."""
+        return self._lane.level
+
+    def to_xml(self):
+        """Convert to XML element via the internal lane."""
+        return self._lane.to_xml()
+
+    def to_standard_lane(self, lane_width=None):
+        """Convert to standard lane via the internal lane."""
+        return self._lane.to_standard_lane(lane_width)
 
     def __repr__(self) -> str:
         """String representation of the reference line."""

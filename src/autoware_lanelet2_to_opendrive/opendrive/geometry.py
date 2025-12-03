@@ -74,6 +74,37 @@ class Spiral(GeometryBase):
 
 
 @dataclass
+class ParamPoly3(GeometryBase):
+    """Parametric cubic polynomial geometry."""
+
+    aU: float = 0.0  # coefficient a for u coordinate
+    bU: float = 0.0  # coefficient b for u coordinate
+    cU: float = 0.0  # coefficient c for u coordinate
+    dU: float = 0.0  # coefficient d for u coordinate
+    aV: float = 0.0  # coefficient a for v coordinate
+    bV: float = 0.0  # coefficient b for v coordinate
+    cV: float = 0.0  # coefficient c for v coordinate
+    dV: float = 0.0  # coefficient d for v coordinate
+    pRange: str = "arcLength"  # range of parameter p (arcLength or normalized)
+    geometry_type = GeometryType.PARAMPOLY3
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = super().to_xml()
+        poly_elem = ET.SubElement(elem, "paramPoly3")
+        poly_elem.set("aU", str(self.aU))
+        poly_elem.set("bU", str(self.bU))
+        poly_elem.set("cU", str(self.cU))
+        poly_elem.set("dU", str(self.dU))
+        poly_elem.set("aV", str(self.aV))
+        poly_elem.set("bV", str(self.bV))
+        poly_elem.set("cV", str(self.cV))
+        poly_elem.set("dV", str(self.dV))
+        poly_elem.set("pRange", self.pRange)
+        return elem
+
+
+@dataclass
 class PlanView:
     """Plan view container for geometry."""
 

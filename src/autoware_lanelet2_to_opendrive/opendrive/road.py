@@ -1,12 +1,15 @@
 """OpenDRIVE road definitions."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union, Set, List
 import lxml.etree as ET
+import lanelet2
+import numpy as np
 
-from .geometry import PlanView
+from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
+from .reference_line import ReferenceLine
 
 
 @dataclass
@@ -39,3 +42,112 @@ class Road:
             elem.append(self.lanes.to_xml())
 
         return elem
+
+    @staticmethod
+    def construct_from_lanelet_groups(
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet_group: Union[
+            Set[lanelet2.core.Lanelet],
+            List[lanelet2.core.Lanelet],
+            lanelet2.core.LaneletLayer,
+        ],
+        road_id: int,
+        s_offset: float = 0.0,
+    ) -> "Road":
+        """Construct a Road from a group of lanelets.
+
+        Args:
+            lanelet_map: The lanelet2 map containing the lanelets
+            lanelet_group: Group of lanelets to convert to a road
+            s_offset: Starting s-coordinate offset for the road
+
+        Returns:
+            Road object constructed from the lanelet group
+
+        Raises:
+            ValueError: If lanelet_group is empty or contains non-adjacent lanelets
+        """
+        if not lanelet_group:
+            raise ValueError("Lanelet group cannot be empty")
+
+        # Convert input to list for consistent processing
+        if isinstance(lanelet_group, (set, lanelet2.core.LaneletLayer)):
+            lanelet_list = list(lanelet_group)
+        else:
+            lanelet_list = lanelet_group
+
+        centerline_spline = ReferenceLine.construct_from_lanelet_groups(
+            lanelet_map, lanelet_list
+        ).centerline_spline
+
+        # Get cubic spline parameters from centerline_spline
+        cubic_segments = centerline_spline.as_cubic_spline_parameters()
+
+        # Create paramPoly3 geometries from spline segments
+        geometries: List[GeometryBase] = []
+        for segment in cubic_segments:
+            # For paramPoly3, we use the cubic polynomial coefficients
+            # u(p) = aU + bU*p + cU*p² + dU*p³ (longitudinal)
+            # v(p) = aV + bV*p + cV*p² + dV*p³ (lateral)
+
+            # Get start position and heading for this segment
+            start_pos = centerline_spline.evaluate(segment["s_start"])
+            start_frame = centerline_spline.evaluate(segment["s_start"], frenet=True)
+            tangent = start_frame["tangent"]
+
+            # Calculate heading from tangent vector
+            hdg = np.arctan2(tangent[1], tangent[0])
+
+            # For centerline, lateral coefficients (V) are based on the spline's lateral deviation
+            param_poly3 = ParamPoly3(
+                s=segment["s_start"],
+                x=float(start_pos[0]),
+                y=float(start_pos[1]),
+                hdg=float(hdg),
+                length=segment["segment_length"],
+                aU=0.0,  # Start at local origin
+                bU=1.0,  # Linear progression along path
+                cU=0.0,  # No quadratic term for U
+                dU=0.0,  # No cubic term for U
+                aV=segment["a"],  # Lateral polynomial coefficients
+                bV=segment["b"],
+                cV=segment["c"],
+                dV=segment["d"],
+                pRange="arcLength",
+            )
+
+            geometries.append(param_poly3)
+
+        # Create plan view with the paramPoly3 geometries
+        plan_view = PlanView(geometries=geometries)
+
+        # Calculate total road length from spline
+        road_length = centerline_spline.total_length
+
+        def get_lanes() -> Lanes:
+            """Create Lanes object from lanelet group."""
+            from .lane_section import LaneSection
+
+            lane_section = LaneSection.construct_from_lanelet_groups(
+                lanelet_map, lanelet_group, s_offset=s_offset
+            )
+            lanes = Lanes(lane_sections=[lane_section])
+            return lanes
+
+        # Create a basic road with the extracted information
+        # Note: This is a simplified implementation
+        # A complete implementation would also need to:
+        # - Create proper lane sections from the lanelets
+        # - Handle elevation profile
+        # - Set appropriate road ID and other attributes
+        road = Road(
+            id=road_id,
+            name=f"Road_{road_id}",
+            length=road_length,
+            junction=-1,  # Not in a junction by default
+            plan_view=plan_view,
+            elevation_profile=None,  # TODO: Extract elevation from lanelets
+            lanes=get_lanes(),
+        )
+
+        return road
