@@ -24,6 +24,9 @@ lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_py
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
 
+[project.scripts]
+convert = "autoware_lanelet2_to_opendrive.main:main"
+
 [dependency-groups]
 dev = [
     "black>=25.11.0",
