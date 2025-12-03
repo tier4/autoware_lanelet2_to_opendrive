@@ -29,5 +29,6 @@ def test_construct_road_from_two_lanes():
         lanelet_map, lanelet_group, road_id=0, s_offset=0.0
     )
 
+    # from lxml import etree
     # print("")
     # print(etree.tostring(road.to_xml(), pretty_print=True).decode())
