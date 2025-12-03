@@ -33,19 +33,19 @@ class LaneSection:
         self.center_lane: Optional[ReferenceLine] = None  # ID = 0
         self.right_lanes: Dict[int, Lane] = {}  # Negative IDs
 
-    def add_left_lane(self, lane: Lane) -> None:
+    def _add_left_lane(self, lane: Lane) -> None:
         """Add a left lane to the section."""
         if lane.lane_id <= 0:
             raise ValueError(f"Left lane must have positive ID, got {lane.lane_id}")
         self.left_lanes[lane.lane_id] = lane
 
-    def add_right_lane(self, lane: Lane) -> None:
+    def _add_right_lane(self, lane: Lane) -> None:
         """Add a right lane to the section."""
         if lane.lane_id >= 0:
             raise ValueError(f"Right lane must have negative ID, got {lane.lane_id}")
         self.right_lanes[lane.lane_id] = lane
 
-    def set_center_lane(self, reference_line: ReferenceLine) -> None:
+    def _set_center_lane(self, reference_line: ReferenceLine) -> None:
         """Set the center/reference lane."""
         if reference_line.lane_id != 0:
             raise ValueError(
@@ -98,7 +98,7 @@ class LaneSection:
         reference_line = ReferenceLine.construct_from_lanelet_groups(
             lanelet_map, lanelet_group
         )
-        lane_section.set_center_lane(reference_line)
+        lane_section._set_center_lane(reference_line)
 
         # Determine the center position for lane ID assignment
         # For odd number of lanes: center lane gets ID closest to 0
@@ -114,13 +114,13 @@ class LaneSection:
                     lane_id = center_index - i
                     lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
                     lane.lane_id = lane_id
-                    lane_section.add_left_lane(lane)
+                    lane_section._add_left_lane(lane)
                 elif i > center_index:
                     # Right lanes (negative IDs, starting from center outward)
                     lane_id = center_index - i  # This will be negative
                     lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
                     lane.lane_id = lane_id
-                    lane_section.add_right_lane(lane)
+                    lane_section._add_right_lane(lane)
                 # Skip center lane (i == center_index) as it's represented by the reference line
         else:
             # Even number of lanes
@@ -132,13 +132,13 @@ class LaneSection:
                     lane_id = mid_point - i
                     lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
                     lane.lane_id = lane_id
-                    lane_section.add_left_lane(lane)
+                    lane_section._add_left_lane(lane)
                 else:
                     # Right lanes (ensure negative ID)
                     lane_id = mid_point - i - 1  # This will be -1, -2, etc.
                     lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
                     lane.lane_id = lane_id
-                    lane_section.add_right_lane(lane)
+                    lane_section._add_right_lane(lane)
 
         return lane_section
 
