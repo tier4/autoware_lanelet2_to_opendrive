@@ -14,6 +14,7 @@ dependencies = [
     "scipy>=1.9.0",
     "scenariogeneration>=0.16.3",
     "lxml>=6.0.2",
+    "mgrs>=1.5.0",
 ]
 
 [tool.uv.sources]
@@ -22,6 +23,9 @@ lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_py
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
+
+[project.scripts]
+convert = "autoware_lanelet2_to_opendrive.main:main"
 
 [dependency-groups]
 dev = [

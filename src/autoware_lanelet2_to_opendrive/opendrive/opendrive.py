@@ -1,11 +1,13 @@
 """OpenDRIVE root element and export functionality."""
 
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Union
 import lxml.etree as ET
 
 from .header import Header
 from .road import Road
+
+from pathlib import Path
 
 
 @dataclass
@@ -56,7 +58,7 @@ def export_to_xml(opendrive: OpenDRIVE) -> str:
     return xml_str
 
 
-def save_opendrive_to_file(opendrive: OpenDRIVE, filepath: str) -> None:
+def save_opendrive_to_file(opendrive: OpenDRIVE, filepath: Union[str, Path]) -> None:
     """
     Save OpenDRIVE object to XML file.
 
