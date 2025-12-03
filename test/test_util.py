@@ -10,6 +10,7 @@ from autoware_lanelet2_to_opendrive.util import (
     find_adjacent_groups,
     filter_lanelets_by_subtype,
     check_lanelet_groups_intersect,
+    sort_adjacent_groups,
 )
 
 
@@ -427,16 +428,20 @@ def test_find_adjacent_groups_specific_lanelets_together():
     # Find the lanelets with specific IDs
     lanelet_3002094 = None
     lanelet_3002093 = None
+    lanelet_3002095 = None
 
     for ll in lanelet_map.laneletLayer:
         if ll.id == 3002094:
             lanelet_3002094 = ll
         elif ll.id == 3002093:
             lanelet_3002093 = ll
+        elif ll.id == 3002095:
+            lanelet_3002095 = ll
 
     # Verify both lanelets exist in the map
     assert lanelet_3002094 is not None, "Lanelet 3002094 should exist in the test map"
     assert lanelet_3002093 is not None, "Lanelet 3002093 should exist in the test map"
+    assert lanelet_3002095 is not None, "Lanelet 3002095 should exist in the test map"
 
     # Create target set with these two lanelets
     target_lanelets = {lanelet_3002094, lanelet_3002093}
@@ -464,6 +469,22 @@ def test_find_adjacent_groups_specific_lanelets_together():
         f"Found 3002094 in group of size {len(group_with_3002094)}, "
         f"3002093 in group of size {len(group_with_3002093)}"
     )
+    group_with_3002094 = sort_adjacent_groups(lanelet_map, group_with_3002094)
+    group_with_3002093 = sort_adjacent_groups(lanelet_map, group_with_3002093)
+    assert len(group_with_3002094) == len(group_with_3002093)
+    assert len(group_with_3002094) == 2
+    assert len(group_with_3002093) == 2
+    for i in range(len(group_with_3002094)):
+        assert group_with_3002094[i].id == group_with_3002093[i].id
+    assert group_with_3002094[0].id == 3002093
+    assert group_with_3002094[1].id == 3002094
+
+    # Should raise ValueError
+    try:
+        sort_adjacent_groups(lanelet_map, {lanelet_3002094, lanelet_3002095})
+        assert False, "Should have raised ValueError"
+    except ValueError:
+        assert True, "Correctly raised ValueError"
 
 
 def test_find_adjacent_groups_empty_set_specific_lanelets():

@@ -298,8 +298,16 @@ def filter_lanelets_by_subtype(
 
 
 def check_lanelet_groups_intersect(
-    group1: Set[lanelet2.core.Lanelet],
-    group2: Set[lanelet2.core.Lanelet],
+    group1: Union[
+        Set[lanelet2.core.Lanelet],
+        List[lanelet2.core.Lanelet],
+        lanelet2.core.LaneletLayer,
+    ],
+    group2: Union[
+        Set[lanelet2.core.Lanelet],
+        List[lanelet2.core.Lanelet],
+        lanelet2.core.LaneletLayer,
+    ],
 ) -> bool:
     """Check if two lanelet groups have any intersecting lanelets.
 
@@ -315,3 +323,77 @@ def check_lanelet_groups_intersect(
             if intersects2d(lanelet_1, lanelet_2):
                 return True
     return False
+
+
+def sort_adjacent_groups(
+    lanelet_map: lanelet2.core.LaneletMap,
+    target_lanelets: Union[
+        Set[lanelet2.core.Lanelet],
+        List[lanelet2.core.Lanelet],
+        lanelet2.core.LaneletLayer,
+    ],
+) -> List[lanelet2.core.Lanelet]:
+    """Sort lanelets from left to right by following their adjacent relationships.
+
+    Args:
+        lanelet_map: The lanelet2 map containing the lanelets
+        target_lanelets: Set of lanelets to sort
+
+    Returns:
+        List of lanelets sorted from left to right
+
+    Raises:
+        ValueError: If target_lanelets contains non-adjacent lanelets
+    """
+    if not target_lanelets:
+        return []
+
+    # Create routing graph for finding adjacent relationships
+    traffic_rules = lanelet2.traffic_rules.create(
+        lanelet2.traffic_rules.Locations.Germany,
+        lanelet2.traffic_rules.Participants.Vehicle,
+    )
+    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+
+    # Find the leftmost lanelet by traversing left until no more left neighbors
+    def find_leftmost_lanelet(
+        start_lanelet: lanelet2.core.Lanelet,
+    ) -> lanelet2.core.Lanelet:
+        current = start_lanelet
+        while True:
+            left_neighbor = routing_graph.left(current)
+            if left_neighbor and left_neighbor in target_lanelets:
+                current = left_neighbor
+            else:
+                break
+        return current
+
+    # Start with any lanelet from the set
+    start_lanelet = next(iter(target_lanelets))
+    leftmost = find_leftmost_lanelet(start_lanelet)
+
+    # Build sorted list from left to right
+    sorted_lanelets = []
+    remaining_lanelets = target_lanelets.copy()
+    current = leftmost
+
+    while current and current in remaining_lanelets:
+        sorted_lanelets.append(current)
+        remaining_lanelets.remove(current)
+
+        # Move to the right neighbor
+        right_neighbor = routing_graph.right(current)
+        if right_neighbor and right_neighbor in remaining_lanelets:
+            current = right_neighbor
+        else:
+            break
+
+    # Check if all lanelets were processed (i.e., all are adjacent)
+    if remaining_lanelets:
+        remaining_ids = [ll.id for ll in remaining_lanelets]
+        raise ValueError(
+            f"Target lanelets contain non-adjacent lanelets. "
+            f"Non-adjacent lanelet IDs: {remaining_ids}"
+        )
+
+    return sorted_lanelets
