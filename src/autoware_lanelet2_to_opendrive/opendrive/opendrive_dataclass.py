@@ -5,7 +5,10 @@ from .enums import LaneType, RoadMarkType, RoadMarkColor, GeometryType
 from .lane_elements import LaneWidth, RoadMark, LaneLink, LaneBorder, LaneHeight
 from .geometry import GeometryBase, Line, Arc, Spiral, PlanView
 from .elevation import Elevation, ElevationProfile
-from .lane_sections import Left, Center, Right, LaneSection, Lanes
+
+# Import LaneSection directly for code that needs it
+# Note: Lane is imported separately to avoid circular imports
+from .lane_sections import Left, Center, Right, Lanes
 from .road import Road
 from .header import Header
 from .opendrive import OpenDRIVE, export_to_xml, save_opendrive_to_file
@@ -36,7 +39,6 @@ __all__ = [
     "Left",
     "Center",
     "Right",
-    "LaneSection",
     "Lanes",
     # Road and structure
     "Road",
