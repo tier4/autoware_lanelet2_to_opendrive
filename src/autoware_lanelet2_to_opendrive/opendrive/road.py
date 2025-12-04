@@ -10,6 +10,7 @@ from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
+from ..centerline import AsymmetryLaneletException
 
 
 @dataclass
@@ -171,6 +172,12 @@ class Road:
                     s_offset=0.0,
                 )
                 roads.append(road)
+            except AsymmetryLaneletException as e:
+                # Log asymmetric lanelet warning and skip this road
+                tqdm.write(
+                    f"Warning: Skipping road {road_id} due to asymmetric lanelet: {e}"
+                )
+                continue
             except Exception as e:
                 # Log warning but continue with other groups
                 tqdm.write(f"Warning: Failed to create road from group {road_id}: {e}")

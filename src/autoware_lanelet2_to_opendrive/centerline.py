@@ -8,6 +8,12 @@ from .geometry import (
 from .util import sort_adjacent_groups
 
 
+class AsymmetryLaneletException(Exception):
+    """Exception raised when a lanelet has asymmetric left and right widths."""
+
+    pass
+
+
 def extract_centerline_as_spline(
     lanelet: lanelet2.core.Lanelet, alpha: float = 0.5
 ) -> ArcLengthParameterizedCatmullRomSpline:
@@ -96,6 +102,17 @@ def estimate_lanelet_width_as_spline(
 
         left_width = min_left_dist if min_left_dist != float("inf") else 0.0
         right_width = min_right_dist if min_right_dist != float("inf") else 0.0
+
+        # Check for asymmetry between left and right widths
+        # Threshold of 0.3m is hardcoded as a parameter for detecting asymmetric lanelets
+        ASYMMETRY_THRESHOLD = 0.3  # meters
+        if abs(left_width - right_width) > ASYMMETRY_THRESHOLD:
+            raise AsymmetryLaneletException(
+                f"Lanelet {lanelet.id} has asymmetric widths: "
+                f"left={left_width:.2f}m, right={right_width:.2f}m, "
+                f"difference={abs(left_width - right_width):.2f}m > {ASYMMETRY_THRESHOLD}m threshold"
+            )
+
         total_widths.append(left_width + right_width)
 
     # Create 1D spline for total width values
