@@ -75,7 +75,7 @@ def convert_lanelet2_to_opendrive(
     # Create header
     header = Header(
         rev_major="1",
-        rev_minor="7",
+        rev_minor="4",
         name="Converted from Lanelet2",
         version="1.0",
         date="2024-01-01T00:00:00",
