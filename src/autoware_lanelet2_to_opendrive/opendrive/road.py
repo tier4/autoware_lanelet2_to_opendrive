@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, Union, Set, List, cast
 import lxml.etree as ET
 import lanelet2
+from tqdm import tqdm
 
 from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
@@ -155,7 +156,11 @@ class Road:
         roads = []
 
         print(f"Creating roads from {len(adjacent_groups)} lanelet groups...")
-        for road_id, adjacent_group in enumerate(adjacent_groups):
+        for road_id, adjacent_group in tqdm(
+            enumerate(adjacent_groups),
+            total=len(adjacent_groups),
+            desc="Building roads",
+        ):
             try:
                 road = Road.construct_from_lanelet_groups(
                     lanelet_map=lanelet_map,  # Use original map for proper connectivity
@@ -166,7 +171,7 @@ class Road:
                 roads.append(road)
             except Exception as e:
                 # Log warning but continue with other groups
-                print(f"Warning: Failed to create road from group {road_id}: {e}")
+                tqdm.write(f"Warning: Failed to create road from group {road_id}: {e}")
                 continue
 
         if not roads:

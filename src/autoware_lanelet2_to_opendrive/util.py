@@ -156,18 +156,18 @@ def find_adjacent_groups(
     lanelet_map: lanelet2.core.LaneletMap,
     target_lanelets: Set[lanelet2.core.Lanelet],
 ) -> List[Set[lanelet2.core.Lanelet]]:
-    """Find groups of adjacent lanelets.
+    """Find groups of laterally adjacent lanelets.
 
-    Groups lanelets that are connected to each other (either by following/previous
-    or left/right adjacency) into separate groups.
+    Groups lanelets that are connected to each other by left/right adjacency
+    into separate groups. Does not consider longitudinal (following/previous) connections.
 
     Args:
         lanelet_map: The lanelet2 map to analyze
         target_lanelets: Set of lanelets to group. If empty, groups all lanelets in the map.
-                        If not empty, includes target lanelets and recursively all their left/right adjacent lanelets.
+                        If not empty, groups only the target lanelets into adjacent groups.
 
     Returns:
-        List of sets, where each set contains lanelets that are adjacent to each other
+        List of sets, where each set contains lanelets that are laterally adjacent to each other
     """
     all_lanelets_in_map = set(lanelet_map.laneletLayer)
 
@@ -175,42 +175,9 @@ def find_adjacent_groups(
     if not target_lanelets:
         lanelets_to_group = all_lanelets_in_map
     else:
-        # Start with target lanelets and add their adjacent lanelets
+        # Use only the target lanelets without adding adjacent ones from other groups
+        # The adjacency relationships will be found in the DFS below
         lanelets_to_group = target_lanelets.copy()
-
-        # Create routing graph to find adjacent lanelets
-        traffic_rules = lanelet2.traffic_rules.create(
-            lanelet2.traffic_rules.Locations.Germany,
-            lanelet2.traffic_rules.Participants.Vehicle,
-        )
-        temp_routing_graph = RoutingGraph(
-            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
-        )
-
-        # Recursively add all left/right adjacent lanelets to the grouping set
-        visited_for_expansion = set()
-
-        def add_left_right_recursively(lanelet):
-            """Recursively add all left and right adjacent lanelets."""
-            if lanelet in visited_for_expansion:
-                return
-
-            visited_for_expansion.add(lanelet)
-            lanelets_to_group.add(lanelet)
-
-            # Add left adjacent lanelets recursively
-            left_ll = temp_routing_graph.left(lanelet)
-            if left_ll and left_ll not in visited_for_expansion:
-                add_left_right_recursively(left_ll)
-
-            # Add right adjacent lanelets recursively
-            right_ll = temp_routing_graph.right(lanelet)
-            if right_ll and right_ll not in visited_for_expansion:
-                add_left_right_recursively(right_ll)
-
-        # Start recursion from all target lanelets
-        for target_ll in target_lanelets:
-            add_left_right_recursively(target_ll)
 
     # Create routing graph for connectivity analysis
     traffic_rules = lanelet2.traffic_rules.create(
@@ -223,18 +190,8 @@ def find_adjacent_groups(
     visited = set()
 
     def get_adjacent_lanelets(lanelet):
-        """Get all lanelets adjacent to the given lanelet."""
+        """Get laterally adjacent lanelets (left/right only, not following/previous)."""
         adjacent = set()
-
-        # Add following lanelets
-        for following_ll in routing_graph.following(lanelet):
-            if following_ll in lanelets_to_group:
-                adjacent.add(following_ll)
-
-        # Add previous lanelets
-        for previous_ll in routing_graph.previous(lanelet):
-            if previous_ll in lanelets_to_group:
-                adjacent.add(previous_ll)
 
         # Add left adjacent lanelets
         left_ll = routing_graph.left(lanelet)

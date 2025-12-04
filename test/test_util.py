@@ -363,64 +363,6 @@ def test_find_adjacent_groups_includes_neighbors():
             assert isinstance(ll, (lanelet2.core.Lanelet, lanelet2.core.ConstLanelet))
 
 
-def test_find_adjacent_groups_expansion():
-    """Test that target set is expanded with recursively all left/right adjacent lanelets."""
-    lanelet_map = load_test_map()
-
-    # Get terminal lanelets as target
-    start_lanelets, end_lanelets = find_terminal_lanelets(lanelet_map)
-    terminal_lanelets = start_lanelets | end_lanelets
-
-    # Create routing graph to manually find what should be included
-    traffic_rules = lanelet2.traffic_rules.create(
-        lanelet2.traffic_rules.Locations.Germany,
-        lanelet2.traffic_rules.Participants.Vehicle,
-    )
-    routing_graph = lanelet2.routing.RoutingGraph(
-        lanelet_map, traffic_rules, [lanelet2.routing.RoutingCostDistance(0.0)]
-    )
-
-    # Manually calculate expected lanelets (target + recursively all their left/right neighbors)
-    expected_lanelets = set()
-    visited_manual = set()
-
-    def add_left_right_manually(lanelet):
-        """Manually calculate what should be included by recursively adding left/right."""
-        if lanelet in visited_manual:
-            return
-
-        visited_manual.add(lanelet)
-        expected_lanelets.add(lanelet)
-
-        # Add left adjacent lanelets recursively
-        left_ll = routing_graph.left(lanelet)
-        if left_ll and left_ll not in visited_manual:
-            add_left_right_manually(left_ll)
-
-        # Add right adjacent lanelets recursively
-        right_ll = routing_graph.right(lanelet)
-        if right_ll and right_ll not in visited_manual:
-            add_left_right_manually(right_ll)
-
-    # Start from all terminal lanelets
-    for terminal_ll in terminal_lanelets:
-        add_left_right_manually(terminal_ll)
-
-    # Get groups from function
-    groups = find_adjacent_groups(lanelet_map, terminal_lanelets)
-
-    # All lanelets in groups should be within our expected set
-    all_lanelets_in_groups = set()
-    for group in groups:
-        all_lanelets_in_groups.update(group)
-
-    # The grouped lanelets should include at least the expected lanelets
-    # (There might be more due to transitive adjacency)
-    assert expected_lanelets.issubset(
-        all_lanelets_in_groups
-    ), "Expected lanelets should be included in groups"
-
-
 def test_find_adjacent_groups_specific_lanelets_together():
     """Test that specific lanelets 3002094 and 3002093 are in the same group."""
     lanelet_map = load_test_map()
@@ -485,69 +427,6 @@ def test_find_adjacent_groups_specific_lanelets_together():
         assert False, "Should have raised ValueError"
     except ValueError:
         assert True, "Correctly raised ValueError"
-
-
-def test_find_adjacent_groups_empty_set_specific_lanelets():
-    """Test that specific lanelets 3002144/3002145/3002146 are in same group with empty target set."""
-    lanelet_map = load_test_map()
-
-    # Find the lanelets with specific IDs
-    lanelet_3002144 = None
-    lanelet_3002145 = None
-    lanelet_3002146 = None
-
-    for ll in lanelet_map.laneletLayer:
-        if ll.id == 3002144:
-            lanelet_3002144 = ll
-        elif ll.id == 3002145:
-            lanelet_3002145 = ll
-        elif ll.id == 3002146:
-            lanelet_3002146 = ll
-
-    # Verify all lanelets exist in the map
-    assert lanelet_3002144 is not None, "Lanelet 3002144 should exist in the test map"
-    assert lanelet_3002145 is not None, "Lanelet 3002145 should exist in the test map"
-    assert lanelet_3002146 is not None, "Lanelet 3002146 should exist in the test map"
-
-    # Find groups with empty target set (should group all lanelets)
-    groups = find_adjacent_groups(lanelet_map, set())
-
-    # Find which groups contain our target lanelets
-    group_with_3002144 = None
-    group_with_3002145 = None
-    group_with_3002146 = None
-
-    for group in groups:
-        if lanelet_3002144 in group:
-            group_with_3002144 = group
-        if lanelet_3002145 in group:
-            group_with_3002145 = group
-        if lanelet_3002146 in group:
-            group_with_3002146 = group
-
-    # All lanelets should be in groups
-    assert group_with_3002144 is not None, "Lanelet 3002144 should be in some group"
-    assert group_with_3002145 is not None, "Lanelet 3002145 should be in some group"
-    assert group_with_3002146 is not None, "Lanelet 3002146 should be in some group"
-
-    # Most importantly: they should all be in the same group
-    assert group_with_3002144 is group_with_3002145, (
-        f"Lanelets 3002144 and 3002145 should be in the same group. "
-        f"Found 3002144 in group of size {len(group_with_3002144)}, "
-        f"3002145 in group of size {len(group_with_3002145)}"
-    )
-
-    assert group_with_3002145 is group_with_3002146, (
-        f"Lanelets 3002145 and 3002146 should be in the same group. "
-        f"Found 3002145 in group of size {len(group_with_3002145)}, "
-        f"3002146 in group of size {len(group_with_3002146)}"
-    )
-
-    assert group_with_3002144 is group_with_3002146, (
-        f"Lanelets 3002144 and 3002146 should be in the same group. "
-        f"Found 3002144 in group of size {len(group_with_3002144)}, "
-        f"3002146 in group of size {len(group_with_3002146)}"
-    )
 
 
 def test_filter_lanelets_by_single_subtype():
