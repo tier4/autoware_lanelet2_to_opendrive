@@ -1,10 +1,14 @@
 """OpenDRIVE geometry definitions."""
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, TYPE_CHECKING
 import lxml.etree as ET
+import numpy as np
 
 from .enums import GeometryType
+
+if TYPE_CHECKING:
+    from ..geometry import ArcLengthParameterizedCatmullRomSpline
 
 
 @dataclass
@@ -87,6 +91,130 @@ class ParamPoly3(GeometryBase):
     dV: float = 0.0  # coefficient d for v coordinate
     pRange: str = "arcLength"  # range of parameter p (arcLength or normalized)
     geometry_type = GeometryType.PARAMPOLY3
+
+    @classmethod
+    def from_spline(
+        cls, spline: "ArcLengthParameterizedCatmullRomSpline"
+    ) -> List["ParamPoly3"]:
+        """
+        Create ParamPoly3 list from ArcLengthParameterizedCatmullRomSpline.
+
+        Args:
+            spline: Arc length parameterized Catmull-Rom spline
+
+        Returns:
+            List of ParamPoly3 instances with normalized pRange for all segments
+        """
+
+        def solve_cubic_coeffs(
+            p0: float, v0: float, p1: float, v1: float, dt: float
+        ) -> tuple[float, float, float, float]:
+            """
+            Calculate cubic polynomial coefficients from start/end positions and velocities.
+            f(t) = a + bt + ct^2 + dt^3
+            """
+            if dt == 0:
+                print("Warning: dt is zero, returning zero coefficients.")
+                return p0, v0, 0.0, 0.0
+
+            inv_dt = 1.0 / dt
+            inv_dt2 = inv_dt * inv_dt
+            inv_dt3 = inv_dt2 * inv_dt
+
+            delta_p = p1 - p0
+
+            a = p0
+            b = v0
+            c = (3 * delta_p * inv_dt2) - ((2 * v0 + v1) * inv_dt)
+            d = (2 * -delta_p * inv_dt3) + ((v0 + v1) * inv_dt2)
+            return a, b, c, d
+
+        # Get spline segments data
+        segments = spline.as_cubic_spline_parameters()
+
+        if not segments:
+            raise ValueError("Spline has no segments.")
+
+        param_poly_list = []
+
+        for segment_index, segment in enumerate(segments):
+            # Get segment start and end arc lengths
+            s_start = segment["s_start"]
+            s_end = segment["s_end"]
+            segment_length = s_end - s_start
+
+            if segment_length <= 0:
+                raise ValueError(
+                    f"Invalid segment length: {segment_length} for segment {segment_index}"
+                )
+
+            # Evaluate spline at segment boundaries to get positions and velocities
+            start_frame = spline.evaluate(s_start, frenet=True)
+            end_frame = spline.evaluate(s_end, frenet=True)
+
+            start_position = start_frame["position"]
+            start_tangent = start_frame["tangent"]
+            start_normal = start_frame["normal"]
+
+            end_position = end_frame["position"]
+            end_tangent = end_frame["tangent"]
+            end_normal = end_frame["normal"]
+
+            # Calculate local U/V coordinates using Frenet frame at segment start
+            start_global = start_position
+            end_global = end_position
+
+            # Project end position onto start frame
+            delta = end_global - start_global
+            u_end = np.dot(delta, start_tangent)  # longitudinal
+            v_end = np.dot(delta, start_normal)  # lateral
+
+            # Calculate proper velocities using spline derivatives
+            # For normalized parameterization, dt = 1.0 and we need du/dp, dv/dp where p ∈ [0,1]
+            dt_normalized = 1.0
+
+            # Get velocity vectors at start and end points in global coordinates
+            start_velocity = spline._arc_length_spline.evaluate_derivative(
+                s_start, order=1
+            )
+            end_velocity = spline._arc_length_spline.evaluate_derivative(s_end, order=1)
+
+            # Project velocities onto local Frenet frame and scale for normalized parameter
+            # For normalized parameter, we need to scale by segment_length
+            u_vel_start = np.dot(start_velocity, start_tangent) * segment_length
+            v_vel_start = np.dot(start_velocity, start_normal) * segment_length
+
+            u_vel_end = np.dot(end_velocity, end_tangent) * segment_length
+            v_vel_end = np.dot(end_velocity, end_normal) * segment_length
+
+            # Calculate cubic coefficients for U and V coordinates with normalized parameter
+            aU, bU, cU, dU = solve_cubic_coeffs(
+                0.0, u_vel_start, u_end, u_vel_end, dt_normalized
+            )
+            aV, bV, cV, dV = solve_cubic_coeffs(
+                0.0, v_vel_start, v_end, v_vel_end, dt_normalized
+            )
+
+            param_poly = cls(
+                s=s_start,
+                x=start_position[0],
+                y=start_position[1],
+                hdg=float(np.arctan2(start_tangent[1], start_tangent[0])),
+                length=segment_length,
+                aU=aU,
+                bU=bU,
+                cU=cU,
+                dU=dU,
+                aV=aV,
+                bV=bV,
+                cV=cV,
+                dV=dV,
+                pRange="normalized",
+            )
+
+            param_poly_list.append(param_poly)
+
+        return param_poly_list
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""

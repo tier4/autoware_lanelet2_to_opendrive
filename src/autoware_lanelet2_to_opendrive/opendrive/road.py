@@ -1,10 +1,9 @@
 """OpenDRIVE road definitions."""
 
 from dataclasses import dataclass
-from typing import Optional, Union, Set, List
+from typing import Optional, Union, Set, List, cast
 import lxml.etree as ET
 import lanelet2
-import numpy as np
 
 from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
@@ -80,43 +79,10 @@ class Road:
             lanelet_map, lanelet_list
         ).centerline_spline
 
-        # Get cubic spline parameters from centerline_spline
-        cubic_segments = centerline_spline.as_cubic_spline_parameters()
-
-        # Create paramPoly3 geometries from spline segments
-        geometries: List[GeometryBase] = []
-        for segment in cubic_segments:
-            # For paramPoly3, we use the cubic polynomial coefficients
-            # u(p) = aU + bU*p + cU*p² + dU*p³ (longitudinal)
-            # v(p) = aV + bV*p + cV*p² + dV*p³ (lateral)
-
-            # Get start position and heading for this segment
-            start_pos = centerline_spline.evaluate(segment["s_start"])
-            start_frame = centerline_spline.evaluate(segment["s_start"], frenet=True)
-            tangent = start_frame["tangent"]
-
-            # Calculate heading from tangent vector
-            hdg = np.arctan2(tangent[1], tangent[0])
-
-            # For centerline, lateral coefficients (V) are based on the spline's lateral deviation
-            param_poly3 = ParamPoly3(
-                s=segment["s_start"],
-                x=float(start_pos[0]),
-                y=float(start_pos[1]),
-                hdg=float(hdg),
-                length=segment["segment_length"],
-                aU=0.0,  # Start at local origin
-                bU=1.0,  # Linear progression along path
-                cU=0.0,  # No quadratic term for U
-                dU=0.0,  # No cubic term for U
-                aV=segment["a"],  # Lateral polynomial coefficients
-                bV=segment["b"],
-                cV=segment["c"],
-                dV=segment["d"],
-                pRange="arcLength",
-            )
-
-            geometries.append(param_poly3)
+        # Create paramPoly3 geometries from spline using from_spline method
+        geometries: List[GeometryBase] = cast(
+            List[GeometryBase], ParamPoly3.from_spline(centerline_spline)
+        )
 
         # Create plan view with the paramPoly3 geometries
         plan_view = PlanView(geometries=geometries)
