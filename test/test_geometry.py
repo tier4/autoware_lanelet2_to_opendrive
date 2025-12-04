@@ -256,7 +256,7 @@ class TestArcLengthParameterizedCatmullRomSpline:
             ArcLengthParameterizedCatmullRomSpline(points_1)
             assert False, "Should have raised ValueError"
         except ValueError as e:
-            assert "single point" in str(e)
+            assert "At least 2 points are required" in str(e)
 
     def test_arc_length_consistency(self):
         """Test that arc length parameterization is consistent."""
