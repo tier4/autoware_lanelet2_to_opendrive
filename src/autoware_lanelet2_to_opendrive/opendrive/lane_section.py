@@ -106,9 +106,16 @@ class LaneSection:
         lane_section._set_center_lane(reference_line)
 
         # Determine the center position for lane ID assignment
+        # For single lane: treat as right lane with reference line as left boundary
         # For odd number of lanes: center lane gets ID closest to 0
         # For even number: lanes are split evenly between left and right
-        if num_lanes % 2 == 1:
+        if num_lanes == 1:
+            # Single lane: use the lanelet as a right lane (ID = -1)
+            single_lanelet = sorted_lanelets[0]
+            lane = Lane.construct_from_lanelet(lanelet_map, single_lanelet)
+            lane.lane_id = -1
+            lane_section._add_right_lane(lane)
+        elif num_lanes % 2 == 1:
             # Odd number of lanes
             center_index = num_lanes // 2
 

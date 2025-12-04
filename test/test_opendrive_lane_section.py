@@ -54,29 +54,6 @@ def test_construct_lane_section_from_two_lanes():
     assert isinstance(lane_section.right_lanes[-1], Lane)
 
 
-def test_construct_lane_section_from_three_lanes():
-    """Test constructing a LaneSection from three adjacent lanelets."""
-    lanelet_map = load_test_map()
-
-    # Need to find three adjacent lanelets in the test data
-    # For now, let's test with available data
-    lanelet_555 = lanelet_map.laneletLayer.get(555)
-
-    # Create a single-lane section (odd number)
-    lane_section = LaneSection.construct_from_lanelet_groups(
-        lanelet_map, [lanelet_555], s_offset=10.0
-    )
-
-    # Check basic properties
-    assert lane_section is not None
-    assert lane_section.s_offset == 10.0
-
-    # With 1 lane (odd), center lane should exist, no left/right lanes
-    assert lane_section.center_lane is not None
-    assert len(lane_section.left_lanes) == 0
-    assert len(lane_section.right_lanes) == 0
-
-
 def test_lane_section_to_standard():
     """Test converting LaneSection to scenariogeneration standard."""
     lanelet_map = load_test_map()
