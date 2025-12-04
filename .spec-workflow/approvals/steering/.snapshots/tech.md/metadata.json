@@ -1,0 +1,22 @@
+{
+  "filePath": ".spec-workflow/steering/tech.md",
+  "currentVersion": 2,
+  "snapshots": [
+    {
+      "version": 1,
+      "filename": "snapshot-001.json",
+      "timestamp": "2025-12-04T02:05:44.212Z",
+      "trigger": "initial",
+      "approvalId": "approval_1764813944210_ltp6948u1",
+      "approvalTitle": "Technical Architecture Document for Lanelet2 to OpenDRIVE Converter"
+    },
+    {
+      "version": 2,
+      "filename": "snapshot-002.json",
+      "timestamp": "2025-12-04T02:16:06.515Z",
+      "trigger": "approved",
+      "approvalId": "approval_1764813944210_ltp6948u1",
+      "approvalTitle": "Technical Architecture Document for Lanelet2 to OpenDRIVE Converter"
+    }
+  ]
+}

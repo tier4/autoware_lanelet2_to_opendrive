@@ -1,0 +1,22 @@
+{
+  "filePath": ".spec-workflow/steering/product.md",
+  "currentVersion": 2,
+  "snapshots": [
+    {
+      "version": 1,
+      "filename": "snapshot-001.json",
+      "timestamp": "2025-12-04T01:40:52.100Z",
+      "trigger": "initial",
+      "approvalId": "approval_1764812452095_sqk51pzfx",
+      "approvalTitle": "Product Vision Document for Lanelet2 to OpenDRIVE Converter"
+    },
+    {
+      "version": 2,
+      "filename": "snapshot-002.json",
+      "timestamp": "2025-12-04T02:04:05.428Z",
+      "trigger": "approved",
+      "approvalId": "approval_1764812452095_sqk51pzfx",
+      "approvalTitle": "Product Vision Document for Lanelet2 to OpenDRIVE Converter"
+    }
+  ]
+}
