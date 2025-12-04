@@ -65,7 +65,14 @@ class ReferenceLine:
         num_lanes = len(sorted_lanelets)
 
         # Calculate centerline spline based on the number of lanes
-        if num_lanes % 2 == 1:
+        if num_lanes == 1:
+            # Single lane: use the left boundary as reference line
+            single_lanelet = sorted_lanelets[0]
+
+            from ..centerline import extract_left_boundary_as_spline
+
+            centerline_spline = extract_left_boundary_as_spline(single_lanelet)
+        elif num_lanes % 2 == 1:
             # Odd number of lanes: use the center lane's centerline
             center_lane_index = num_lanes // 2
             center_lanelet = sorted_lanelets[center_lane_index]

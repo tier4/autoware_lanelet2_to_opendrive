@@ -138,45 +138,135 @@ class ArcLengthParameterizedCatmullRomSpline:
             alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
             num_samples: Number of samples used for arc length computation
         """
-        if len(points) < 4:
-            raise ValueError(
-                "Points must have at least 4 points for Catmull-Rom spline. Use linear interpolation for fewer points."
-            )
+        if len(points) < 2:
+            raise ValueError("At least 2 points are required")
 
         # Store original points for dimension checking
-        self._points = points
+        self._original_points = points.copy()
+        self._original_count = len(points)
 
-        # Create the base CatmullRom spline
-        self._base_spline = CatmullRom(points, alpha=alpha)
+        # Add extrapolated points for smoother tangent calculation
+        extended_points = self._add_extrapolated_points(points)
+        self._points = extended_points
+
+        # Create the base CatmullRom spline with extended points
+        self._base_spline = CatmullRom(extended_points, alpha=alpha)
 
         # Wrap it with arc length parameterization
         self._arc_length_spline = ArcLengthParameterizer(self._base_spline, num_samples)
 
+    def _add_extrapolated_points(self, points: np.ndarray) -> np.ndarray:
+        """
+        Add extrapolated points at the beginning and end for smoother tangent calculation.
+
+        Args:
+            points: Original control points
+
+        Returns:
+            Extended points array with extrapolated points (original + 2 extra points)
+        """
+        if len(points) < 2:
+            return points
+
+        # Calculate unit direction vectors
+        first_direction = points[1] - points[0]
+        first_length = np.linalg.norm(first_direction)
+        if first_length > 1e-10:
+            first_unit = first_direction / first_length
+        else:
+            # If points are too close, use a default direction
+            first_unit = np.array([1.0, 0.0, 0.0])[: points.shape[1]]
+
+        last_direction = points[-1] - points[-2]
+        last_length = np.linalg.norm(last_direction)
+        if last_length > 1e-10:
+            last_unit = last_direction / last_length
+        else:
+            # If points are too close, use a default direction
+            last_unit = np.array([1.0, 0.0, 0.0])[: points.shape[1]]
+
+        # Extrapolate 1m in each direction
+        extrapolation_length = 1.0
+
+        # Add point before first point
+        pre_point = points[0] - first_unit * extrapolation_length
+
+        # Add point after last point
+        post_point = points[-1] + last_unit * extrapolation_length
+
+        # Combine: [pre_point] + original_points + [post_point]
+        extended_points = np.vstack(
+            [pre_point.reshape(1, -1), points, post_point.reshape(1, -1)]
+        )
+
+        return extended_points
+
     @property
     def total_length(self) -> float:
-        """Get the total arc length of the spline."""
-        return self._arc_length_spline.total_length
+        """Get the total arc length of the spline (excluding extrapolated segments)."""
+        # Calculate length only for the original segments
+        if self._original_count < 2:
+            return 0.0
+
+        # The original points correspond to grid indices 1 to original_count (0-based indexing)
+        # in the extended spline that has extrapolated points at indices 0 and original_count+1
+        grid = self._base_spline.grid
+        original_start_t = grid[1]  # First original point
+        original_end_t = grid[self._original_count]  # Last original point
+
+        # Convert to arc lengths
+        original_start_s = np.interp(
+            original_start_t,
+            self._arc_length_spline.t_values,
+            self._arc_length_spline.arc_lengths,
+        )
+        original_end_s = np.interp(
+            original_end_t,
+            self._arc_length_spline.t_values,
+            self._arc_length_spline.arc_lengths,
+        )
+
+        return original_end_s - original_start_s
 
     def evaluate(self, s: float, frenet: bool = False) -> np.ndarray:
         """
-        Evaluate the spline at arc length s.
+        Evaluate the spline at arc length s (within original segment range only).
 
         Args:
-            s: Arc length parameter (0 to total_length)
+            s: Arc length parameter (0 to total_length, based on original segments only)
             frenet: If True, return Frenet frame (position, tangent, normal)
 
         Returns:
             If frenet=False: position vector [x, y, z]
             If frenet=True: dictionary with 'position', 'tangent', 'normal'
         """
+        # Clamp s to valid range of original segments
+        s = np.clip(s, 0.0, self.total_length)
+
+        # Map s to the actual arc length in the extended spline
+        grid = self._base_spline.grid
+        original_start_t = grid[1]  # First original point
+
+        # Get the starting arc length of original segments
+        original_start_s = np.interp(
+            original_start_t,
+            self._arc_length_spline.t_values,
+            self._arc_length_spline.arc_lengths,
+        )
+
+        # Offset s to account for extrapolated segment at the beginning
+        actual_s = original_start_s + s
+
         if not frenet:
-            return self._arc_length_spline.evaluate(s)
+            return self._arc_length_spline.evaluate(actual_s)
 
         # Calculate Frenet frame
-        position = self._arc_length_spline.evaluate(s).flatten()
+        position = self._arc_length_spline.evaluate(actual_s).flatten()
 
         # Calculate tangent using first derivative
-        tangent = self._arc_length_spline.evaluate_derivative(s, order=1).flatten()
+        tangent = self._arc_length_spline.evaluate_derivative(
+            actual_s, order=1
+        ).flatten()
 
         # Normalize tangent
         tangent_magnitude = np.linalg.norm(tangent)
@@ -206,14 +296,15 @@ class ArcLengthParameterizedCatmullRomSpline:
     def as_cubic_spline_parameters(self) -> list[dict]:
         """
         Export spline shape as cubic polynomial parameters using CatmullRom's native segments.
+        Only includes original segments, excluding extrapolated segments.
 
         Returns:
             List of dictionaries containing cubic polynomial parameters for each segment.
             Each dictionary contains:
             - 't_start': Start parameter t of the segment
             - 't_end': End parameter t of the segment
-            - 's_start': Start arc length of the segment
-            - 's_end': End arc length of the segment
+            - 's_start': Start arc length of the segment (relative to original segments)
+            - 's_end': End arc length of the segment (relative to original segments)
             - 'a': Constant coefficient
             - 'b': Linear coefficient
             - 'c': Quadratic coefficient
@@ -223,47 +314,47 @@ class ArcLengthParameterizedCatmullRomSpline:
         segments = []
         grid = self._base_spline.grid
 
-        # CatmullRom has N-1 segments for N grid points
-        # All segments from grid[0] to grid[-1] are valid for evaluation
-        num_segments = len(grid) - 1
+        # Only process original segments (exclude extrapolated segments at start and end)
+        # Original segments are from grid[1] to grid[original_count] (indices 1 to original_count-1)
+        original_start_idx = 1
+        original_end_idx = self._original_count
 
-        for i in range(num_segments):
+        for i in range(original_start_idx, original_end_idx):
             t_start = grid[i]
             t_end = grid[i + 1]
 
-            # Convert t parameters to arc lengths
-            s_start = 0.0
-            s_end = 0.0
+            # Convert t parameters to actual arc lengths in extended spline
+            s_start_actual = np.interp(
+                t_start,
+                self._arc_length_spline.t_values,
+                self._arc_length_spline.arc_lengths,
+            )
+            s_end_actual = np.interp(
+                t_end,
+                self._arc_length_spline.t_values,
+                self._arc_length_spline.arc_lengths,
+            )
 
-            # Find corresponding arc lengths by searching through the parameterizer
-            for j, t_val in enumerate(self._arc_length_spline.t_values):
-                if abs(t_val - t_start) < 1e-6:
-                    s_start = self._arc_length_spline.arc_lengths[j]
-                if abs(t_val - t_end) < 1e-6:
-                    s_end = self._arc_length_spline.arc_lengths[j]
+            segment_length = s_end_actual - s_start_actual
 
-            # If exact match not found, interpolate
-            if s_start == 0.0:
-                s_start = np.interp(
-                    t_start,
-                    self._arc_length_spline.t_values,
-                    self._arc_length_spline.arc_lengths,
-                )
-            if s_end == 0.0:
-                s_end = np.interp(
-                    t_end,
-                    self._arc_length_spline.t_values,
-                    self._arc_length_spline.arc_lengths,
-                )
+            # Get the starting arc length of original segments
+            original_start_t = grid[1]  # First original point
+            original_start_s_actual = np.interp(
+                original_start_t,
+                self._arc_length_spline.t_values,
+                self._arc_length_spline.arc_lengths,
+            )
 
-            segment_length = s_end - s_start
+            # Convert to relative arc lengths (relative to original segments start)
+            s_start = s_start_actual - original_start_s_actual
+            s_end = s_end_actual - original_start_s_actual
 
             # Sample points within this t range for polynomial fitting
             num_samples = 20
             t_samples = np.linspace(t_start, t_end, num_samples)
 
             # Handle different dimensions appropriately
-            if self._points.shape[1] == 2:
+            if self._original_points.shape[1] == 2:
                 # For 2D splines (like width splines), directly use the spline values
                 # The first coordinate is arc length (s), second is the dependent value (width)
                 local_coords = []
@@ -276,7 +367,9 @@ class ArcLengthParameterizedCatmullRomSpline:
                         self._arc_length_spline.t_values,
                         self._arc_length_spline.arc_lengths,
                     )
-                    local_s = s_val - s_start  # Local s coordinate within this segment
+                    local_s = (
+                        s_val - s_start_actual
+                    )  # Local s coordinate within this segment
                     local_t = global_pos[1]  # Width value (second coordinate)
 
                     local_coords.append([local_s, local_t])
