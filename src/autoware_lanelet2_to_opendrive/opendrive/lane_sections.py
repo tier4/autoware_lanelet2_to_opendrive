@@ -1,11 +1,12 @@
 """OpenDRIVE lane section definitions."""
 
 from dataclasses import dataclass
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 import lxml.etree as ET
 
 if TYPE_CHECKING:
     from ..lane import Lane
+    from .lane_section import LaneSection
 
 
 @dataclass
@@ -57,34 +58,10 @@ class Right:
 
 
 @dataclass
-class LaneSection:
-    """Lane section definition."""
-
-    s: float = 0.0
-    left: Optional[Left] = None
-    center: Optional[Center] = None
-    right: Optional[Right] = None
-
-    def to_xml(self) -> ET.Element:
-        """Convert to XML element."""
-        elem = ET.Element("laneSection")
-        elem.set("s", str(self.s))
-
-        if self.left:
-            elem.append(self.left.to_xml())
-        if self.center:
-            elem.append(self.center.to_xml())
-        if self.right:
-            elem.append(self.right.to_xml())
-
-        return elem
-
-
-@dataclass
 class Lanes:
     """Lanes container."""
 
-    lane_sections: List[LaneSection]
+    lane_sections: List["LaneSection"]
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""

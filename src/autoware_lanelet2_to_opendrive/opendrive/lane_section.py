@@ -1,10 +1,12 @@
 """LaneSection implementation for OpenDRIVE conversion."""
 
-from typing import List, Optional, Dict, Union, Set
+from typing import List, Optional, Dict, Union, Set, TYPE_CHECKING
 import lanelet2
+import lxml.etree as ET
 from scenariogeneration import xodr
 
-from .lane import Lane
+if TYPE_CHECKING:
+    from .lane import Lane
 from .reference_line import ReferenceLine
 
 
@@ -29,17 +31,17 @@ class LaneSection:
         self.s_offset = s_offset
 
         # Lanes are stored by ID: negative for right, positive for left, 0 for center
-        self.left_lanes: Dict[int, Lane] = {}  # Positive IDs
+        self.left_lanes: Dict[int, "Lane"] = {}  # Positive IDs
         self.center_lane: Optional[ReferenceLine] = None  # ID = 0
-        self.right_lanes: Dict[int, Lane] = {}  # Negative IDs
+        self.right_lanes: Dict[int, "Lane"] = {}  # Negative IDs
 
-    def _add_left_lane(self, lane: Lane) -> None:
+    def _add_left_lane(self, lane: "Lane") -> None:
         """Add a left lane to the section."""
         if lane.lane_id <= 0:
             raise ValueError(f"Left lane must have positive ID, got {lane.lane_id}")
         self.left_lanes[lane.lane_id] = lane
 
-    def _add_right_lane(self, lane: Lane) -> None:
+    def _add_right_lane(self, lane: "Lane") -> None:
         """Add a right lane to the section."""
         if lane.lane_id >= 0:
             raise ValueError(f"Right lane must have negative ID, got {lane.lane_id}")
@@ -79,6 +81,9 @@ class LaneSection:
 
         # Create the LaneSection instance
         lane_section = LaneSection(s_offset=s_offset)
+
+        # Import Lane here to avoid circular import
+        from .lane import Lane
 
         # Sort lanelets from left to right
         from ..util import sort_adjacent_groups
@@ -171,7 +176,7 @@ class LaneSection:
 
         return standard_section
 
-    def get_all_lanes(self) -> List[Lane]:
+    def get_all_lanes(self) -> List["Lane"]:
         """Get all lanes in the section (left + center + right)."""
         all_lanes = []
 
@@ -188,6 +193,30 @@ class LaneSection:
             all_lanes.append(self.right_lanes[lane_id])
 
         return all_lanes
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("laneSection")
+        elem.set("s", str(self.s_offset))
+
+        # Add left lanes
+        if self.left_lanes:
+            left_elem = ET.SubElement(elem, "left")
+            for lane_id in sorted(self.left_lanes.keys()):
+                left_elem.append(self.left_lanes[lane_id].to_xml())
+
+        # Add center lane
+        if self.center_lane:
+            center_elem = ET.SubElement(elem, "center")
+            center_elem.append(self.center_lane.to_xml())
+
+        # Add right lanes
+        if self.right_lanes:
+            right_elem = ET.SubElement(elem, "right")
+            for lane_id in sorted(self.right_lanes.keys(), reverse=True):
+                right_elem.append(self.right_lanes[lane_id].to_xml())
+
+        return elem
 
     def __repr__(self) -> str:
         """String representation of the lane section."""

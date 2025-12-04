@@ -23,10 +23,10 @@ class ReferenceLine(Lane):
         """
         Initialize a ReferenceLine object.
         """
-        # Reference line always has lane_id = 0 and is always a driving type
+        # Reference line always has lane_id = 0 and type = none for center lane
         super().__init__(
             lane_id=0,
-            lane_type=LaneType.DRIVING,
+            lane_type=LaneType.NONE,
             level=False,
         )
 
