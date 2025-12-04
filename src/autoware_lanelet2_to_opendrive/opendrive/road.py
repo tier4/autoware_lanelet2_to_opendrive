@@ -117,3 +117,59 @@ class Road:
         )
 
         return road
+
+    @staticmethod
+    def construct_from_lanelet_map(
+        lanelet_map: lanelet2.core.LaneletMap,
+    ) -> List["Road"]:
+        """Construct Roads from a lanelet map.
+
+        Args:
+            lanelet_map: The lanelet2 map containing all lanelets
+
+        Returns:
+            List of Road objects constructed from non-junction lanelets grouped by adjacency
+
+        Raises:
+            ValueError: If lanelet_map is empty or contains no valid lanelets
+        """
+        if not lanelet_map or not lanelet_map.laneletLayer:
+            raise ValueError("Lanelet map is empty or contains no lanelets")
+
+        # Get all lanelets from the map
+        all_lanelets = list(lanelet_map.laneletLayer)
+
+        # Filter out lanelets inside junctions
+        from ..junction import filter_lanelets_outside_junction
+        road_lanelets = filter_lanelets_outside_junction(all_lanelets)
+
+        if not road_lanelets:
+            raise ValueError("No lanelets found outside junctions")
+
+        # Find adjacent groups of lanelets
+        from ..util import find_adjacent_groups
+        # Pass the road_lanelets set to find_adjacent_groups so it only groups these
+        adjacent_groups = find_adjacent_groups(lanelet_map, set(road_lanelets))
+
+        # Create roads from adjacent groups
+        roads = []
+
+        print(f"Creating roads from {len(adjacent_groups)} lanelet groups...")
+        for road_id, adjacent_group in enumerate(adjacent_groups):
+            try:
+                road = Road.construct_from_lanelet_groups(
+                    lanelet_map=lanelet_map,  # Use original map for proper connectivity
+                    lanelet_group=adjacent_group,
+                    road_id=road_id,
+                    s_offset=0.0,
+                )
+                roads.append(road)
+            except Exception as e:
+                # Log warning but continue with other groups
+                print(f"Warning: Failed to create road from group {road_id}: {e}")
+                continue
+
+        if not roads:
+            raise ValueError("No valid roads could be constructed from the lanelet map")
+
+        return roads
