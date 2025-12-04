@@ -6,6 +6,12 @@
 uv pip install -e .
 ```
 
+## Development
+
+### Spec Driven Development
+
+This project uses Spec Driven Development workflow powered by [@pimzino/spec-workflow-mcp](https://www.npmjs.com/package/@pimzino/spec-workflow-mcp). This MCP (Model Context Protocol) server helps manage the specification-driven development process, ensuring systematic feature development from requirements through implementation.
+
 ## How to use
 
 ### Using the convert command
