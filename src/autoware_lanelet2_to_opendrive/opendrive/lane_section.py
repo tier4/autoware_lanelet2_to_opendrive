@@ -186,7 +186,7 @@ class LaneSection:
 
         # Add center lane
         if self.center_lane:
-            all_lanes.append(self.center_lane)
+            all_lanes.append(self.center_lane._lane)
 
         # Add right lanes (sorted)
         for lane_id in sorted(self.right_lanes.keys(), reverse=True):

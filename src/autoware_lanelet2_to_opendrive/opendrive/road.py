@@ -1,12 +1,14 @@
 """OpenDRIVE road definitions."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union, Set, List, cast
 import lxml.etree as ET
+import lanelet2
 
-from .geometry import PlanView
+from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
+from .reference_line import ReferenceLine
 
 
 @dataclass
@@ -39,3 +41,79 @@ class Road:
             elem.append(self.lanes.to_xml())
 
         return elem
+
+    @staticmethod
+    def construct_from_lanelet_groups(
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet_group: Union[
+            Set[lanelet2.core.Lanelet],
+            List[lanelet2.core.Lanelet],
+            lanelet2.core.LaneletLayer,
+        ],
+        road_id: int,
+        s_offset: float = 0.0,
+    ) -> "Road":
+        """Construct a Road from a group of lanelets.
+
+        Args:
+            lanelet_map: The lanelet2 map containing the lanelets
+            lanelet_group: Group of lanelets to convert to a road
+            s_offset: Starting s-coordinate offset for the road
+
+        Returns:
+            Road object constructed from the lanelet group
+
+        Raises:
+            ValueError: If lanelet_group is empty or contains non-adjacent lanelets
+        """
+        if not lanelet_group:
+            raise ValueError("Lanelet group cannot be empty")
+
+        # Convert input to list for consistent processing
+        if isinstance(lanelet_group, (set, lanelet2.core.LaneletLayer)):
+            lanelet_list = list(lanelet_group)
+        else:
+            lanelet_list = lanelet_group
+
+        centerline_spline = ReferenceLine.construct_from_lanelet_groups(
+            lanelet_map, lanelet_list
+        ).centerline_spline
+
+        # Create paramPoly3 geometries from spline using from_spline method
+        geometries: List[GeometryBase] = cast(
+            List[GeometryBase], ParamPoly3.from_spline(centerline_spline)
+        )
+
+        # Create plan view with the paramPoly3 geometries
+        plan_view = PlanView(geometries=geometries)
+
+        # Calculate total road length from spline
+        road_length = centerline_spline.total_length
+
+        def get_lanes() -> Lanes:
+            """Create Lanes object from lanelet group."""
+            from .lane_section import LaneSection
+
+            lane_section = LaneSection.construct_from_lanelet_groups(
+                lanelet_map, lanelet_group, s_offset=s_offset
+            )
+            lanes = Lanes(lane_sections=[lane_section])
+            return lanes
+
+        # Create a basic road with the extracted information
+        # Note: This is a simplified implementation
+        # A complete implementation would also need to:
+        # - Create proper lane sections from the lanelets
+        # - Handle elevation profile
+        # - Set appropriate road ID and other attributes
+        road = Road(
+            id=road_id,
+            name=f"Road_{road_id}",
+            length=road_length,
+            junction=-1,  # Not in a junction by default
+            plan_view=plan_view,
+            elevation_profile=None,  # TODO: Extract elevation from lanelets
+            lanes=get_lanes(),
+        )
+
+        return road
