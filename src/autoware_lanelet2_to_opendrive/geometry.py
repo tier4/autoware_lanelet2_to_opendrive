@@ -138,10 +138,13 @@ class ArcLengthParameterizedCatmullRomSpline:
             alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
             num_samples: Number of samples used for arc length computation
         """
-        if len(points) < 4:
-            raise ValueError(
-                "Points must have at least 4 points for Catmull-Rom spline. Use linear interpolation for fewer points."
-            )
+        if len(points) < 1:
+            raise ValueError("At least 1 point is required")
+        elif len(points) == 1:
+            raise ValueError("Cannot create a spline from a single point")
+        elif len(points) < 4:
+            # Use linear interpolation to create at least 4 points
+            points = self._interpolate_to_minimum_points(points)
 
         # Store original points for dimension checking
         self._points = points
@@ -151,6 +154,37 @@ class ArcLengthParameterizedCatmullRomSpline:
 
         # Wrap it with arc length parameterization
         self._arc_length_spline = ArcLengthParameterizer(self._base_spline, num_samples)
+
+    def _interpolate_to_minimum_points(self, points: np.ndarray) -> np.ndarray:
+        """
+        Interpolate points to ensure at least 4 points for Catmull-Rom spline.
+
+        Args:
+            points: Input points (2 or 3 points)
+
+        Returns:
+            Interpolated points array with at least 4 points
+        """
+        if len(points) == 2:
+            # Linear interpolation: add 2 intermediate points between the 2 points
+            p0, p1 = points[0], points[1]
+            # Insert points at 1/3 and 2/3 positions
+            p_interp1 = p0 + (p1 - p0) * (1 / 3)
+            p_interp2 = p0 + (p1 - p0) * (2 / 3)
+            return np.array([p0, p_interp1, p_interp2, p1])
+
+        elif len(points) == 3:
+            # Insert one point between each pair: 1->2 and 2->3
+            p0, p1, p2 = points[0], points[1], points[2]
+            # Insert point at midpoint between p0 and p1
+            p_interp1 = (p0 + p1) * 0.5
+            # Insert point at midpoint between p1 and p2
+            p_interp2 = (p1 + p2) * 0.5
+            return np.array([p0, p_interp1, p1, p_interp2, p2])
+
+        else:
+            # This should not happen given our input validation
+            raise ValueError(f"Unexpected number of points: {len(points)}")
 
     @property
     def total_length(self) -> float:
