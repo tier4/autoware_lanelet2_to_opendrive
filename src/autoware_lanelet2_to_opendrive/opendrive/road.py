@@ -142,6 +142,7 @@ class Road:
 
         # Filter out lanelets inside junctions
         from ..junction import filter_lanelets_outside_junction
+
         road_lanelets = filter_lanelets_outside_junction(all_lanelets)
 
         if not road_lanelets:
@@ -149,6 +150,7 @@ class Road:
 
         # Find adjacent groups of lanelets
         from ..util import find_adjacent_groups
+
         # Pass the road_lanelets set to find_adjacent_groups so it only groups these
         adjacent_groups = find_adjacent_groups(lanelet_map, set(road_lanelets))
 
