@@ -15,6 +15,7 @@ dependencies = [
     "scenariogeneration>=0.16.3",
     "lxml>=6.0.2",
     "mgrs>=1.5.0",
+    "tqdm>=4.67.1",
 ]
 
 [tool.uv.sources]

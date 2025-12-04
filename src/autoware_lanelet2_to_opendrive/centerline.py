@@ -147,3 +147,30 @@ def extract_centerline_as_spline_from_two_lanelets(
 
     # Create and return the spline
     return ArcLengthParameterizedCatmullRomSpline(points, alpha)
+
+
+def extract_left_boundary_as_spline(
+    lanelet: lanelet2.core.Lanelet, alpha: float = 0.5
+) -> ArcLengthParameterizedCatmullRomSpline:
+    """
+    Extract left boundary from a Lanelet and return as arc length parameterized spline.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
+
+    Returns:
+        ArcLengthParameterizedCatmullRomSpline representing the left boundary
+    """
+    left_bound = lanelet.leftBound
+
+    if len(left_bound) < 2:
+        raise ValueError("Lanelet must have at least 2 points in its left bound")
+
+    points = []
+    for point in left_bound:
+        points.append([point.x, point.y, point.z])
+
+    points = np.array(points)
+
+    return ArcLengthParameterizedCatmullRomSpline(points, alpha)

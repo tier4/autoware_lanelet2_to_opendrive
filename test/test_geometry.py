@@ -224,9 +224,9 @@ class TestArcLengthParameterizedCatmullRomSpline:
         assert end_point.shape[0] == 3
 
     def test_arc_length_spline_with_insufficient_points(self):
-        """Test that function raises error with insufficient points."""
-        # Only 3 points (need at least 4 for Catmull-Rom)
-        points = np.array(
+        """Test that function handles points correctly with linear interpolation."""
+        # Test with 3 points (should work with interpolation)
+        points_3 = np.array(
             [
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -234,12 +234,29 @@ class TestArcLengthParameterizedCatmullRomSpline:
             ]
         )
 
-        # Should raise ValueError
+        # Should work now with interpolation
+        spline_3 = ArcLengthParameterizedCatmullRomSpline(points_3)
+        assert spline_3.total_length > 0
+
+        # Test with 2 points (should work with interpolation)
+        points_2 = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ]
+        )
+
+        spline_2 = ArcLengthParameterizedCatmullRomSpline(points_2)
+        assert spline_2.total_length > 0
+
+        # Test with 1 point (should raise ValueError)
+        points_1 = np.array([[0.0, 0.0, 0.0]])
+
         try:
-            ArcLengthParameterizedCatmullRomSpline(points)
+            ArcLengthParameterizedCatmullRomSpline(points_1)
             assert False, "Should have raised ValueError"
         except ValueError as e:
-            assert "at least 4 points" in str(e)
+            assert "single point" in str(e)
 
     def test_arc_length_consistency(self):
         """Test that arc length parameterization is consistent."""

@@ -18,6 +18,7 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     Header,
     save_opendrive_to_file,
 )
+from autoware_lanelet2_to_opendrive.opendrive.road import Road
 
 
 def load_lanelet2_map(lanelet2_path: Path, mgrs: str) -> lanelet2.core.LaneletMap:
@@ -75,7 +76,7 @@ def convert_lanelet2_to_opendrive(
     # Create header
     header = Header(
         rev_major="1",
-        rev_minor="7",
+        rev_minor="4",
         name="Converted from Lanelet2",
         version="1.0",
         date="2024-01-01T00:00:00",
@@ -89,7 +90,9 @@ def convert_lanelet2_to_opendrive(
     # TODO: Extract roads from lanelet groups
 
     # For now, create an empty OpenDRIVE structure
-    opendrive = OpenDRIVE(header=header, roads=[])
+    opendrive = OpenDRIVE(
+        header=header, roads=Road.construct_from_lanelet_map(lanelet_map)
+    )
 
     print("Conversion completed (stub implementation)")
 
