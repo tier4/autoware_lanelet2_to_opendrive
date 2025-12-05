@@ -1,6 +1,6 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
-from typing import Set, List, Optional, Union
+from typing import Set, List, Union
 from enum import Enum
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
@@ -235,43 +235,34 @@ def filter_lanelets_by_subtype(
         List[lanelet2.core.Lanelet],
         lanelet2.core.LaneletLayer,
     ],
-    subtype: Optional[str] = None,
-    subtypes: Optional[List[str]] = None,
+    subtypes: List[str],
 ) -> Set[lanelet2.core.Lanelet]:
     """Filter lanelets by their subtype attribute.
 
     Args:
         lanelets: Collection of lanelets to filter. Can be a set, list, or LaneletLayer.
-        subtype: Single subtype to filter by (e.g., "road", "highway", "merging").
-                 If specified, only lanelets with this exact subtype will be returned.
-        subtypes: List of subtypes to filter by. If specified, lanelets with any of these
-                  subtypes will be returned. Cannot be used together with 'subtype'.
+        subtypes: List of subtypes to filter by. Lanelets with any of these
+                  subtypes will be returned.
 
     Returns:
         Set of lanelets that match the specified subtype(s).
-        If neither subtype nor subtypes is specified, returns empty set.
+        If subtypes is empty, returns empty set.
         If a lanelet doesn't have a subtype attribute, it is not included.
-
-    Raises:
-        ValueError: If both 'subtype' and 'subtypes' are specified.
 
     Examples:
         # Filter for road lanelets only
-        road_lanelets = filter_lanelets_by_subtype(lanelet_map.laneletLayer, subtype="road")
+        road_lanelets = filter_lanelets_by_subtype(lanelet_map.laneletLayer, ["road"])
 
         # Filter for multiple subtypes
         main_lanelets = filter_lanelets_by_subtype(
             lanelet_map.laneletLayer,
-            subtypes=["road", "highway"]
+            ["road", "highway"]
         )
 
         # Filter from a specific set of lanelets
-        terminal_roads = filter_lanelets_by_subtype(terminal_lanelets, subtype="road")
+        terminal_roads = filter_lanelets_by_subtype(terminal_lanelets, ["road"])
     """
-    if subtype is not None and subtypes is not None:
-        raise ValueError("Cannot specify both 'subtype' and 'subtypes' parameters")
-
-    if subtype is None and subtypes is None:
+    if not subtypes:
         return set()
 
     # Convert input to a set for consistent processing
@@ -290,12 +281,8 @@ def filter_lanelets_by_subtype(
                 f"lanelets must be a set, list, or LaneletLayer, got {type(lanelets)}"
             )
 
-    # Prepare the list of subtypes to check
-    if subtype is not None:
-        target_subtypes = {subtype}
-    else:
-        # subtypes is guaranteed to not be None here due to earlier check
-        target_subtypes = set(subtypes) if subtypes is not None else set()
+    # Prepare the set of subtypes to check
+    target_subtypes = set(subtypes)
 
     # Filter lanelets by subtype
     filtered_lanelets = set()

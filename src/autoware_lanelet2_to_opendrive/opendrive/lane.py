@@ -7,6 +7,7 @@ import lxml.etree as ET
 from scenariogeneration import xodr
 from ..centerline import estimate_lanelet_width_as_spline
 from ..geometry import ArcLengthParameterizedCatmullRomSpline
+from ..util import find_adjacent_groups
 
 from .opendrive_dataclass import (
     LaneType,
@@ -154,8 +155,15 @@ class Lane:
             successor=successor,
         )
 
-        # Calculate lane width using spline curve from estimate_lanelet_width_as_spline
-        width_spline = estimate_lanelet_width_as_spline(lanelet)
+        group = find_adjacent_groups(lanelet_map, {lanelet})
+
+        if len(group) == 1:
+            width_spline = estimate_lanelet_width_as_spline(
+                lanelet, reference="left_bound"
+            )
+        else:
+            # Calculate lane width using spline curve from estimate_lanelet_width_as_spline
+            width_spline = estimate_lanelet_width_as_spline(lanelet, reference="center")
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)

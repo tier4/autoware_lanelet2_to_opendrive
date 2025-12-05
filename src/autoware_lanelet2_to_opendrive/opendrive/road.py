@@ -11,6 +11,7 @@ from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
 from ..centerline import AsymmetryLaneletException
+from ..util import filter_lanelets_by_subtype
 
 
 @dataclass
@@ -144,7 +145,9 @@ class Road:
         # Filter out lanelets inside junctions
         from ..junction import filter_lanelets_outside_junction
 
-        road_lanelets = filter_lanelets_outside_junction(all_lanelets)
+        road_lanelets = filter_lanelets_outside_junction(
+            filter_lanelets_by_subtype(all_lanelets, ["road"])
+        )
 
         if not road_lanelets:
             raise ValueError("No lanelets found outside junctions")
