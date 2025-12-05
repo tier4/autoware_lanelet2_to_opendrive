@@ -43,22 +43,34 @@ def extract_centerline_as_spline(
 
 
 def estimate_lanelet_width_as_spline(
-    lanelet: lanelet2.core.Lanelet, num_samples: int = 20, alpha: float = 0.5
+    lanelet: lanelet2.core.Lanelet,
+    num_samples: int = 20,
+    alpha: float = 0.5,
+    reference: str = "center_line",
 ) -> ArcLengthParameterizedCatmullRomSpline:
     """
-    Estimate lanelet total width along its centerline using Frenet coordinates.
+    Estimate lanelet total width along its centerline or left boundary using Frenet coordinates.
 
     Args:
         lanelet: A Lanelet2 lanelet object
-        num_samples: Number of sample points along the centerline
+        num_samples: Number of sample points along the reference line
         alpha: Alpha parameter for Catmull-Rom spline
+        reference: Reference line for width calculation - "center_line" or "left_bound"
 
     Returns:
         CatmullRom spline object representing the total width (left + right distances)
     """
+    if reference not in ["center_line", "left_bound"]:
+        raise ValueError(
+            f"Invalid reference: {reference}. Must be 'center_line' or 'left_bound'"
+        )
 
-    # Get arc length parameterized centerline spline
-    length_based_spline = extract_centerline_as_spline(lanelet, alpha)
+    # Get arc length parameterized reference spline based on mode
+    if reference == "center_line":
+        length_based_spline = extract_centerline_as_spline(lanelet, alpha)
+    else:  # left_bound
+        length_based_spline = extract_left_boundary_as_spline(lanelet, alpha)
+
     total_length = length_based_spline.total_length
 
     left_bound = lanelet.leftBound
@@ -74,44 +86,64 @@ def estimate_lanelet_width_as_spline(
     for length in length_values:
         # Use Frenet coordinate calculation from the spline class
         frenet_frame = length_based_spline.evaluate(length, frenet=True)
-        center_point = frenet_frame["position"]
+        reference_point = frenet_frame["position"]
 
-        # Find closest distance to left boundary (use simple point-to-line distance)
-        min_left_dist = float("inf")
-        for i in range(len(left_bound_points) - 1):
-            seg_start = left_bound_points[i]
-            seg_end = left_bound_points[i + 1]
+        if reference == "center_line":
+            # Find closest distance to left boundary (use simple point-to-line distance)
+            min_left_dist = float("inf")
+            for i in range(len(left_bound_points) - 1):
+                seg_start = left_bound_points[i]
+                seg_end = left_bound_points[i + 1]
 
-            dist = point_to_line_segment_distance(
-                center_point, seg_start, seg_end, None
-            )
-            if dist is not None and dist < min_left_dist:
-                min_left_dist = dist
+                dist = point_to_line_segment_distance(
+                    reference_point, seg_start, seg_end, None
+                )
+                if dist is not None and dist < min_left_dist:
+                    min_left_dist = dist
 
-        # Find closest distance to right boundary
-        min_right_dist = float("inf")
-        for i in range(len(right_bound_points) - 1):
-            seg_start = right_bound_points[i]
-            seg_end = right_bound_points[i + 1]
+            # Find closest distance to right boundary
+            min_right_dist = float("inf")
+            for i in range(len(right_bound_points) - 1):
+                seg_start = right_bound_points[i]
+                seg_end = right_bound_points[i + 1]
 
-            dist = point_to_line_segment_distance(
-                center_point, seg_start, seg_end, None
-            )
-            if dist is not None and dist < min_right_dist:
-                min_right_dist = dist
+                dist = point_to_line_segment_distance(
+                    reference_point, seg_start, seg_end, None
+                )
+                if dist is not None and dist < min_right_dist:
+                    min_right_dist = dist
 
-        left_width = min_left_dist if min_left_dist != float("inf") else 0.0
-        right_width = min_right_dist if min_right_dist != float("inf") else 0.0
+            left_width = min_left_dist if min_left_dist != float("inf") else 0.0
+            right_width = min_right_dist if min_right_dist != float("inf") else 0.0
 
-        # Check for asymmetry between left and right widths
-        # Threshold of 0.3m is hardcoded as a parameter for detecting asymmetric lanelets
-        ASYMMETRY_THRESHOLD = 0.3  # meters
-        if abs(left_width - right_width) > ASYMMETRY_THRESHOLD:
-            raise AsymmetryLaneletException(
-                f"Lanelet {lanelet.id} has asymmetric widths: "
-                f"left={left_width:.2f}m, right={right_width:.2f}m, "
-                f"difference={abs(left_width - right_width):.2f}m > {ASYMMETRY_THRESHOLD}m threshold"
-            )
+            # Check for asymmetry between left and right widths only for center_line reference
+            # Threshold of 0.3m is hardcoded as a parameter for detecting asymmetric lanelets
+            ASYMMETRY_THRESHOLD = 0.3  # meters
+            if abs(left_width - right_width) > ASYMMETRY_THRESHOLD:
+                raise AsymmetryLaneletException(
+                    f"Lanelet {lanelet.id} has asymmetric widths: "
+                    f"left={left_width:.2f}m, right={right_width:.2f}m, "
+                    f"difference={abs(left_width - right_width):.2f}m > {ASYMMETRY_THRESHOLD}m threshold"
+                )
+
+        else:  # reference == "left_bound"
+            # When using left boundary as reference, left width is always 0
+            left_width = 0.0
+
+            # Find closest distance to right boundary only
+            min_right_dist = float("inf")
+            for i in range(len(right_bound_points) - 1):
+                seg_start = right_bound_points[i]
+                seg_end = right_bound_points[i + 1]
+
+                dist = point_to_line_segment_distance(
+                    reference_point, seg_start, seg_end, None
+                )
+                if dist is not None and dist < min_right_dist:
+                    min_right_dist = dist
+
+            right_width = min_right_dist if min_right_dist != float("inf") else 0.0
+            # No asymmetry check needed for left_bound reference mode
 
         total_widths.append(left_width + right_width)
 
