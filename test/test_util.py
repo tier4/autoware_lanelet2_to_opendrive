@@ -444,9 +444,7 @@ def test_filter_lanelets_by_single_subtype():
         test_subtype = next(iter(subtypes_in_map))
 
         # Filter lanelets by this subtype
-        filtered = filter_lanelets_by_subtype(
-            lanelet_map.laneletLayer, subtype=test_subtype
-        )
+        filtered = filter_lanelets_by_subtype(lanelet_map.laneletLayer, [test_subtype])
 
         # Verify that all returned lanelets have the correct subtype
         assert isinstance(filtered, set)
@@ -479,9 +477,7 @@ def test_filter_lanelets_by_multiple_subtypes():
         # Test with first two subtypes
         test_subtypes = list(subtypes_in_map)[:2]
 
-        filtered = filter_lanelets_by_subtype(
-            lanelet_map.laneletLayer, subtypes=test_subtypes
-        )
+        filtered = filter_lanelets_by_subtype(lanelet_map.laneletLayer, test_subtypes)
 
         # Verify all returned lanelets have one of the specified subtypes
         assert isinstance(filtered, set)
@@ -496,7 +492,7 @@ def test_filter_lanelets_with_nonexistent_subtype():
 
     # Use a subtype that definitely doesn't exist
     filtered = filter_lanelets_by_subtype(
-        lanelet_map.laneletLayer, subtype="nonexistent_subtype_xyz"
+        lanelet_map.laneletLayer, ["nonexistent_subtype_xyz"]
     )
 
     # Should return empty set
@@ -509,7 +505,7 @@ def test_filter_lanelets_with_empty_input():
     empty_set = set()
 
     # Filter empty set
-    filtered = filter_lanelets_by_subtype(empty_set, subtype="road")
+    filtered = filter_lanelets_by_subtype(empty_set, ["road"])
 
     assert isinstance(filtered, set)
     assert len(filtered) == 0
@@ -519,26 +515,12 @@ def test_filter_lanelets_with_no_subtype_specified():
     """Test filtering when no subtype is specified."""
     lanelet_map = load_test_map()
 
-    # Call without subtype or subtypes
-    filtered = filter_lanelets_by_subtype(lanelet_map.laneletLayer)
+    # Call with empty list
+    filtered = filter_lanelets_by_subtype(lanelet_map.laneletLayer, [])
 
     # Should return empty set
     assert isinstance(filtered, set)
     assert len(filtered) == 0
-
-
-def test_filter_lanelets_both_params_error():
-    """Test that specifying both subtype and subtypes raises an error."""
-    lanelet_map = load_test_map()
-
-    # Should raise ValueError
-    try:
-        filter_lanelets_by_subtype(
-            lanelet_map.laneletLayer, subtype="road", subtypes=["highway", "merging"]
-        )
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "Cannot specify both" in str(e)
 
 
 def test_filter_lanelets_from_list():
@@ -558,7 +540,7 @@ def test_filter_lanelets_from_list():
         test_subtype = next(iter(subtypes_in_subset))
 
         # Filter the list
-        filtered = filter_lanelets_by_subtype(lanelet_list, subtype=test_subtype)
+        filtered = filter_lanelets_by_subtype(lanelet_list, [test_subtype])
 
         # Verify results
         assert isinstance(filtered, set)
@@ -586,7 +568,7 @@ def test_filter_lanelets_from_set():
         test_subtype = next(iter(subtypes_in_terminals))
 
         # Filter the set
-        filtered = filter_lanelets_by_subtype(terminal_lanelets, subtype=test_subtype)
+        filtered = filter_lanelets_by_subtype(terminal_lanelets, [test_subtype])
 
         # Verify results
         assert isinstance(filtered, set)
@@ -629,7 +611,7 @@ def test_filter_lanelets_without_subtype_attribute():
     empty_map.add(lanelet_without_subtype)
 
     # Filter for road subtype
-    filtered = filter_lanelets_by_subtype(empty_map.laneletLayer, subtype="road")
+    filtered = filter_lanelets_by_subtype(empty_map.laneletLayer, ["road"])
 
     # Should only include the lanelet with subtype
     assert len(filtered) == 1
@@ -642,7 +624,7 @@ def test_filter_lanelets():
     lanelet_map = load_test_map()
 
     # Filter lanelets with subtype 'road'
-    road_lanelets = filter_lanelets_by_subtype(lanelet_map.laneletLayer, subtype="road")
+    road_lanelets = filter_lanelets_by_subtype(lanelet_map.laneletLayer, ["road"])
 
     # Verify that all returned lanelets have subtype 'road'
     assert isinstance(road_lanelets, set)
@@ -651,9 +633,7 @@ def test_filter_lanelets():
         assert ll.attributes["subtype"] == "road"
         assert ll.id not in {301105}
 
-    walkway_lanelets = filter_lanelets_by_subtype(
-        lanelet_map.laneletLayer, subtype="walkway"
-    )
+    walkway_lanelets = filter_lanelets_by_subtype(lanelet_map.laneletLayer, ["walkway"])
     walkway_ids = {ll.id for ll in walkway_lanelets}
     assert 301105 in walkway_ids
 
