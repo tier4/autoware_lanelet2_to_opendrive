@@ -674,6 +674,59 @@ class TestSplinesEdgeCases:
         end_pos = spline.spline(1.0, nu=0)
         assert np.allclose(end_pos, points[-1] - spline._origin_offset, atol=1e-6)
 
+    def test_soft_constraints_warning(self):
+        """Test that soft constraint violations generate warnings."""
+        import warnings
+
+        # Create a complex curve that will be hard to fit with few control points
+        t = np.linspace(0, 4 * np.pi, 50)
+        points = np.column_stack(
+            [t, 5 * np.sin(t), 5 * np.cos(t)]  # High amplitude oscillation
+        )
+
+        # Use very few control points to force poor fitting
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            # This should generate a warning due to poor fitting
+            _ = Splines(points, num_control_points=4)
+
+            # Check that a warning was issued
+            assert len(w) > 0
+            assert issubclass(w[-1].category, UserWarning)
+            assert "Spline fitting quality warning" in str(w[-1].message)
+            assert "Consider increasing num_control_points" in str(w[-1].message)
+
+    def test_soft_constraints_no_warning(self):
+        """Test that good fitting doesn't generate warnings."""
+        import warnings
+
+        # Create a simple smooth curve
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.5, 0.0],
+                [2.0, 0.8, 0.0],
+                [3.0, 1.0, 0.0],
+                [4.0, 1.0, 0.0],
+            ]
+        )
+
+        # Use sufficient control points for good fitting
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            # This should NOT generate a warning
+            _ = Splines(points, num_control_points=10)
+
+            # Check that no fitting warning was issued
+            fitting_warnings = [
+                warning
+                for warning in w
+                if "Spline fitting quality warning" in str(warning.message)
+            ]
+            assert len(fitting_warnings) == 0
+
 
 class TestSplinesNumericalStability:
     """Tests for numerical stability."""

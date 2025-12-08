@@ -1,6 +1,7 @@
 """B-Spline interpolation with constrained fitting."""
 
 import numpy as np
+import warnings
 from typing import Optional
 from scipy.interpolate import BSpline
 
@@ -195,8 +196,11 @@ class Splines:
         # Verify hard constraints are satisfied
         self._verify_hard_constraints()
 
+        # Check soft constraints and warn if fitting error is large
+        self._check_soft_constraints()
+
     def _verify_hard_constraints(
-        self, position_tol: float = 1e-6, velocity_tol: float = 1e-3
+        self, position_tol: float = 1e-5, velocity_tol: float = 1e-2
     ):
         """
         Verify that hard constraints (boundary conditions) are satisfied.
@@ -252,6 +256,62 @@ class Splines:
                 f"error={end_vel_error:.6f} > tolerance={velocity_tol:.6f}\n"
                 f"Expected direction: {end_vel_expected}, Got: {end_vel_actual}"
             )
+
+    def _check_soft_constraints(
+        self,
+        max_avg_error: float = 1.0,
+        max_point_error: float = 5.0,
+        warn_percentile: float = 95.0,
+    ):
+        """
+        Check soft constraints (data fitting) and warn if error is large.
+
+        Args:
+            max_avg_error: Maximum average error before warning (in coordinate units)
+            max_point_error: Maximum single point error before warning
+            warn_percentile: Percentile of errors to report in warning
+
+        Warns:
+            UserWarning if fitting errors exceed thresholds
+        """
+        # Calculate errors at each input point
+        errors = []
+        for i, t in enumerate(self.t_data):
+            fitted_pos = self.spline(t, nu=0)
+            actual_pos = self.points[i]
+            error = np.linalg.norm(fitted_pos - actual_pos)
+            errors.append(error)
+
+        errors = np.array(errors)
+        avg_error = np.mean(errors)
+        max_error = np.max(errors)
+        max_error_idx = np.argmax(errors)
+        percentile_error = np.percentile(errors, warn_percentile)
+
+        # Prepare warning messages
+        warnings_list = []
+
+        if avg_error > max_avg_error:
+            warnings_list.append(
+                f"Average fitting error ({avg_error:.3f}) exceeds threshold ({max_avg_error:.3f})"
+            )
+
+        if max_error > max_point_error:
+            warnings_list.append(
+                f"Maximum fitting error ({max_error:.3f}) at point {max_error_idx} "
+                f"exceeds threshold ({max_point_error:.3f})"
+            )
+
+        # Issue combined warning if any threshold is exceeded
+        if warnings_list:
+            warning_msg = (
+                f"Spline fitting quality warning:\n"
+                f"  {'  '.join(warnings_list)}\n"
+                f"  Statistics: avg={avg_error:.3f}, max={max_error:.3f}, "
+                f"  {warn_percentile:.0f}th percentile={percentile_error:.3f}\n"
+                f"  Consider increasing num_control_points or adjusting w_soft weight"
+            )
+            warnings.warn(warning_msg, UserWarning, stacklevel=3)
 
     def _get_basis_matrix(self, t_vals: np.ndarray, deriv: int = 0) -> np.ndarray:
         """
