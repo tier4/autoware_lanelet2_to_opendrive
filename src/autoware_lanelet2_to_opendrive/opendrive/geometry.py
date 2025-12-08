@@ -93,7 +93,7 @@ class ParamPoly3(GeometryBase):
     geometry_type = GeometryType.PARAMPOLY3
 
     @classmethod
-    def from_spline(
+    def from_spline_old(
         cls, spline: "ArcLengthParameterizedCatmullRomSpline"
     ) -> List["ParamPoly3"]:
         """

@@ -82,9 +82,9 @@ class Road:
             lanelet_map, lanelet_list
         ).centerline_spline
 
-        # Create paramPoly3 geometries from spline using from_spline method
+        # Create paramPoly3 geometries from spline using from_spline_old method
         geometries: List[GeometryBase] = cast(
-            List[GeometryBase], ParamPoly3.from_spline(centerline_spline)
+            List[GeometryBase], ParamPoly3.from_spline_old(centerline_spline)
         )
 
         # Create plan view with the paramPoly3 geometries
