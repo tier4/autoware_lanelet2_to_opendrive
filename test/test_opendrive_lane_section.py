@@ -102,3 +102,53 @@ def test_get_all_lanes():
     center_lane = center_section.find("lane")
     assert center_lane is not None
     assert center_lane.get("type") == "none"
+
+
+def test_single_lane_section_with_lane_offset():
+    """Test constructing a LaneSection from a single lanelet with laneOffset."""
+    lanelet_map = load_test_map()
+
+    # Use a single lanelet
+    single_lanelet = lanelet_map.laneletLayer.get(3002094)
+    lanelet_group = [single_lanelet]
+
+    lane_section = LaneSection.construct_from_lanelet_groups(
+        lanelet_map, lanelet_group, s_offset=0.0
+    )
+
+    # Check that lane section was created
+    assert lane_section is not None
+    assert lane_section.s_offset == 0.0
+
+    # Check center lane (reference line)
+    assert lane_section.center_lane is not None
+    assert isinstance(lane_section.center_lane, ReferenceLine)
+    assert lane_section.center_lane.lane_id == 0
+
+    # For single lane: should have 0 left lanes and 1 right lane
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 1
+
+    # Check lane ID for single lane
+    assert -1 in lane_section.right_lanes
+
+    # Check that laneOffset was set
+    assert lane_section.lane_offset is not None
+    assert lane_section.lane_offset["s"] == 0.0
+    assert lane_section.lane_offset["b"] == 0.0
+    assert lane_section.lane_offset["c"] == 0.0
+    assert lane_section.lane_offset["d"] == 0.0
+    # Width should be calculated from the lanelet width, so check it's a reasonable value
+    assert 1.0 <= lane_section.lane_offset["a"] <= 3.0  # Reasonable lane offset range
+
+    # Test XML output includes laneOffset
+    xml_element = lane_section.to_xml()
+    offset_element = xml_element.find("laneOffset")
+    assert offset_element is not None
+    assert offset_element.get("s") == "0.0"
+    assert offset_element.get("b") == "0.0"
+    assert offset_element.get("c") == "0.0"
+    assert offset_element.get("d") == "0.0"
+    # Check that 'a' value is reasonable (calculated from lanelet width)
+    offset_a = float(offset_element.get("a"))
+    assert 1.0 <= offset_a <= 3.0

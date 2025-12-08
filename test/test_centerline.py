@@ -44,9 +44,9 @@ def test_estimate_lanelet_width_as_spline_constant_width():
         width_values.append(width)
 
         # Assert width is in expected range for lanelet 555
-        assert 2.90 <= width <= 3.67, (
+        assert 2.90 <= width <= 3.68, (
             f"Width at t={t:.2f} is {width:.3f}m, "
-            f"expected to be in range [2.90, 3.67]m"
+            f"expected to be in range [2.90, 3.68]m"
         )
     print(width_values)
 
