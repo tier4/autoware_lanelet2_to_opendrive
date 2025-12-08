@@ -205,47 +205,18 @@ class Splines:
             mat.append(val)
         return np.array(mat).T
 
-    def evaluate(self, t: float, derivative: int = 0) -> np.ndarray:
+    def evaluate(self, s: float, derivative: int = 0) -> np.ndarray:
         """
-        Evaluate the spline at a given parameter value.
+        Evaluate the spline at a given arc length in Frenet coordinate system.
 
         Args:
-            t: Parameter value (0.0 to 1.0)
-            derivative: Derivative order (0=position, 1=velocity, 2=acceleration)
-
-        Returns:
-            3D point or derivative vector at parameter t
-        """
-        return self.spline(t, nu=derivative)
-
-    def _compute_arc_length_table(self, num_samples: int = 1000):
-        """Compute arc length lookup table for accurate parameterization."""
-        if hasattr(self, "_arc_length_table"):
-            return
-
-        t_vals = np.linspace(0.0, 1.0, num_samples)
-        positions = np.array([self.evaluate(t) for t in t_vals])
-
-        # Compute arc lengths
-        distances = np.linalg.norm(np.diff(positions, axis=0), axis=1)
-        arc_lengths = np.concatenate(([0], np.cumsum(distances)))
-
-        self._arc_length_table = arc_lengths
-        self._param_table = t_vals
-        self._computed_total_length = arc_lengths[-1]
-
-    def evaluate_arc_length(self, s: float, derivative: int = 0) -> np.ndarray:
-        """
-        Evaluate the spline at a given arc length using accurate parameterization.
-
-        Args:
-            s: Arc length value (0.0 to total_length)
+            s: Arc length value from the first point (0.0 to total_length)
             derivative: Derivative order (0=position, 1=velocity, 2=acceleration)
 
         Returns:
             3D point or derivative vector at arc length s
         """
-        # Compute arc length table if not done yet
+        # Convert arc length to normalized parameter t
         self._compute_arc_length_table()
 
         # Clamp s to valid range
@@ -260,7 +231,82 @@ class Splines:
             # Interpolate to find parameter t
             t = np.interp(s, self._arc_length_table, self._param_table)
 
-        return self.evaluate(t, derivative)
+        if derivative == 0:
+            return self.spline(t, nu=0)
+        else:
+            # For derivatives with respect to arc length, we need to apply the chain rule
+            # ds/dt = ||dx/dt|| where x is position
+            # d/ds = (d/dt) * (dt/ds) = (d/dt) / (ds/dt)
+
+            velocity_t = self.spline(t, nu=1)  # dx/dt
+            speed = np.linalg.norm(velocity_t)  # ds/dt = ||dx/dt||
+
+            if derivative == 1:
+                # dx/ds = (dx/dt) / (ds/dt)
+                if speed > 1e-12:
+                    return velocity_t / speed
+                else:
+                    return np.array([1.0, 0.0, 0.0])  # Fallback direction
+            elif derivative == 2:
+                # For second derivative: d²x/ds²
+                if speed > 1e-12:
+                    accel_t = self.spline(t, nu=2)  # d²x/dt²
+                    # Apply chain rule for second derivative
+                    # d²x/ds² = (d²x/dt²) / (ds/dt)² - (dx/dt) * (d²s/dt²) / (ds/dt)³
+                    # where d²s/dt² = (dx/dt · d²x/dt²) / ||dx/dt||
+                    dsdt_squared_derivative = np.dot(velocity_t, accel_t) / speed
+                    return accel_t / (
+                        speed * speed
+                    ) - velocity_t * dsdt_squared_derivative / (speed * speed * speed)
+                else:
+                    return np.array([0.0, 0.0, 0.0])
+            else:
+                # Higher order derivatives not implemented
+                raise NotImplementedError(
+                    f"Derivative order {derivative} not supported"
+                )
+
+    def _evaluate_normalized(self, t: float, derivative: int = 0) -> np.ndarray:
+        """
+        Evaluate the spline at a given normalized parameter value.
+
+        Args:
+            t: Normalized parameter value (0.0 to 1.0)
+            derivative: Derivative order (0=position, 1=velocity, 2=acceleration)
+
+        Returns:
+            3D point or derivative vector at parameter t
+        """
+        return self.spline(t, nu=derivative)
+
+    def _compute_arc_length_table(self, num_samples: int = 1000):
+        """Compute arc length lookup table for accurate parameterization."""
+        if hasattr(self, "_arc_length_table"):
+            return
+
+        t_vals = np.linspace(0.0, 1.0, num_samples)
+        positions = np.array([self._evaluate_normalized(t) for t in t_vals])
+
+        # Compute arc lengths
+        distances = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+        arc_lengths = np.concatenate(([0], np.cumsum(distances)))
+
+        self._arc_length_table = arc_lengths
+        self._param_table = t_vals
+        self._computed_total_length = arc_lengths[-1]
+
+    def evaluate_arc_length(self, s: float, derivative: int = 0) -> np.ndarray:
+        """
+        Evaluate the spline at a given arc length (alias for evaluate method).
+
+        Args:
+            s: Arc length value (0.0 to total_length)
+            derivative: Derivative order (0=position, 1=velocity, 2=acceleration)
+
+        Returns:
+            3D point or derivative vector at arc length s
+        """
+        return self.evaluate(s, derivative)
 
     @property
     def total_length(self) -> float:
@@ -268,18 +314,18 @@ class Splines:
         self._compute_arc_length_table()
         return self._computed_total_length
 
-    def get_frenet_frame(self, t: float) -> dict:
+    def get_frenet_frame(self, s: float) -> dict:
         """
-        Get the Frenet frame at a given parameter value.
+        Get the Frenet frame at a given arc length.
 
         Args:
-            t: Parameter value (0.0 to 1.0)
+            s: Arc length value from the first point (0.0 to total_length)
 
         Returns:
             Dictionary with 'position', 'tangent', and 'normal' vectors
         """
-        position = self.evaluate(t, derivative=0)
-        tangent = self.evaluate(t, derivative=1)
+        position = self.evaluate(s, derivative=0)
+        tangent = self.evaluate(s, derivative=1)
 
         # Normalize tangent
         tangent_norm = np.linalg.norm(tangent)

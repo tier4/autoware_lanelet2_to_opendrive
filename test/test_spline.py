@@ -19,7 +19,7 @@ class TestSplinesBasic:
 
         # Check start and end positions
         start_pos = spline.evaluate(0.0)
-        end_pos = spline.evaluate(1.0)
+        end_pos = spline.evaluate(spline.total_length)
 
         assert np.allclose(start_pos, points[0], atol=1e-6)
         assert np.allclose(end_pos, points[1], atol=1e-6)
@@ -43,7 +43,7 @@ class TestSplinesBasic:
 
         # Verify spline passes close to start and end points
         start_pos = spline.evaluate(0.0)
-        end_pos = spline.evaluate(1.0)
+        end_pos = spline.evaluate(spline.total_length)
 
         assert np.allclose(start_pos, points[0], atol=1e-3)
         assert np.allclose(end_pos, points[-1], atol=1e-3)
@@ -54,10 +54,17 @@ class TestSplinesBasic:
 
         spline = Splines(points, num_control_points=6)
 
-        # Evaluate at various parameter values
+        # Evaluate at various arc length values
         positions = []
-        for t in [0.0, 0.25, 0.5, 0.75, 1.0]:
-            pos = spline.evaluate(t)
+        total_length = spline.total_length
+        for s in [
+            0.0,
+            total_length * 0.25,
+            total_length * 0.5,
+            total_length * 0.75,
+            total_length,
+        ]:
+            pos = spline.evaluate(s)
             positions.append(pos)
             assert pos.shape == (3,)
             assert np.all(np.isfinite(pos))
@@ -112,7 +119,7 @@ class TestSplinesConstraints:
 
         # Check that tangents approximately match at endpoints
         start_tangent = spline.evaluate(0.0, derivative=1)
-        end_tangent = spline.evaluate(1.0, derivative=1)
+        end_tangent = spline.evaluate(spline.total_length, derivative=1)
 
         # Normalize for comparison
         start_tangent_norm = start_tangent / np.linalg.norm(start_tangent)
@@ -133,7 +140,7 @@ class TestSplinesConstraints:
 
         # Check that tangents are automatically estimated and reasonable
         start_tangent = spline.evaluate(0.0, derivative=1)
-        end_tangent = spline.evaluate(1.0, derivative=1)
+        end_tangent = spline.evaluate(spline.total_length, derivative=1)
 
         assert np.all(np.isfinite(start_tangent))
         assert np.all(np.isfinite(end_tangent))
@@ -164,7 +171,7 @@ class TestSplinesConstraints:
         # Check that both respect endpoint constraints
         for spline in [spline_smooth, spline_detailed]:
             start_pos = spline.evaluate(0.0)
-            end_pos = spline.evaluate(1.0)
+            end_pos = spline.evaluate(spline.total_length)
             assert np.allclose(start_pos, points[0], atol=1e-2)
             assert np.allclose(end_pos, points[-1], atol=1e-2)
 
@@ -178,9 +185,10 @@ class TestSplinesDerivatives:
 
         spline = Splines(points)
 
-        # Test velocity at different parameters
-        for t in [0.0, 0.5, 1.0]:
-            velocity = spline.evaluate(t, derivative=1)
+        # Test velocity at different arc lengths
+        total_length = spline.total_length
+        for s in [0.0, total_length * 0.5, total_length]:
+            velocity = spline.evaluate(s, derivative=1)
             assert velocity.shape == (3,)
             assert np.all(np.isfinite(velocity))
 
@@ -192,9 +200,10 @@ class TestSplinesDerivatives:
 
         spline = Splines(points, num_control_points=8)
 
-        # Test acceleration at different parameters
-        for t in [0.0, 0.5, 1.0]:
-            acceleration = spline.evaluate(t, derivative=2)
+        # Test acceleration at different arc lengths
+        total_length = spline.total_length
+        for s in [0.0, total_length * 0.5, total_length]:
+            acceleration = spline.evaluate(s, derivative=2)
             assert acceleration.shape == (3,)
             assert np.all(np.isfinite(acceleration))
 
@@ -206,20 +215,20 @@ class TestSplinesDerivatives:
 
         spline = Splines(points)
 
-        # Test at a middle parameter value
-        t = 0.5
-        dt = 1e-6
+        # Test at a middle arc length value
+        total_length = spline.total_length
+        s = total_length * 0.5
+        ds = total_length * 1e-6
 
         # Compute velocity using derivative
-        velocity = spline.evaluate(t, derivative=1)
+        velocity = spline.evaluate(s, derivative=1)
 
         # Approximate velocity using finite differences
-        pos_plus = spline.evaluate(t + dt)
-        pos_minus = spline.evaluate(t - dt)
-        velocity_approx = (pos_plus - pos_minus) / (2 * dt)
+        pos_plus = spline.evaluate(s + ds)
+        pos_minus = spline.evaluate(s - ds)
+        velocity_approx = (pos_plus - pos_minus) / (2 * ds)
 
-        # The derivative is with respect to the normalized parameter t (0 to 1)
-        # So we just compare directly without scaling
+        # The derivative is with respect to arc length
         assert np.allclose(velocity, velocity_approx, rtol=1e-3)
 
 
@@ -234,9 +243,16 @@ class TestSplinesFrenetFrame:
 
         spline = Splines(points)
 
-        # Test Frenet frame at different parameters
-        for t in [0.0, 0.25, 0.5, 0.75, 1.0]:
-            frame = spline.get_frenet_frame(t)
+        # Test Frenet frame at different arc lengths
+        total_length = spline.total_length
+        for s in [
+            0.0,
+            total_length * 0.25,
+            total_length * 0.5,
+            total_length * 0.75,
+            total_length,
+        ]:
+            frame = spline.get_frenet_frame(s)
 
             # Check that all components are present
             assert "position" in frame
@@ -265,8 +281,9 @@ class TestSplinesFrenetFrame:
 
         spline = Splines(points, num_control_points=8)
 
-        for t in np.linspace(0.0, 1.0, 10):
-            frame = spline.get_frenet_frame(t)
+        total_length = spline.total_length
+        for s in np.linspace(0.0, total_length, 10):
+            frame = spline.get_frenet_frame(s)
             tangent = frame["tangent"]
             normal = frame["normal"]
 
@@ -288,8 +305,9 @@ class TestSplinesFrenetFrame:
 
         spline = Splines(points)
 
-        for t in np.linspace(0.0, 1.0, 10):
-            frame = spline.get_frenet_frame(t)
+        total_length = spline.total_length
+        for s in np.linspace(0.0, total_length, 10):
+            frame = spline.get_frenet_frame(s)
             tangent = frame["tangent"]
             normal = frame["normal"]
 
@@ -305,8 +323,9 @@ class TestSplinesFrenetFrame:
 
         spline = Splines(points)
 
-        for t in np.linspace(0.0, 1.0, 5):
-            frame = spline.get_frenet_frame(t)
+        total_length = spline.total_length
+        for s in np.linspace(0.0, total_length, 5):
+            frame = spline.get_frenet_frame(s)
             normal = frame["normal"]
 
             # Normal should be in XY plane (z component = 0)
@@ -403,23 +422,32 @@ class TestSplinesEdgeCases:
 
         # Check that intermediate points stay reasonably close to the line
         # (B-spline with constraints may not produce perfect straight lines)
-        for t in np.linspace(0, 1, 5):
-            pos = spline.evaluate(t)
+        total_length = spline.total_length
+        for s in np.linspace(0, total_length, 5):
+            pos = spline.evaluate(s)
             assert np.abs(pos[1]) < 0.5  # y should stay reasonably close to 0
             assert np.abs(pos[2]) < 0.5  # z should stay reasonably close to 0
 
     def test_evaluate_outside_range(self):
-        """Test evaluation outside the parameter range [0, 1]."""
+        """Test evaluation outside the arc length range [0, total_length]."""
         points = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]])
 
         spline = Splines(points)
+        total_length = spline.total_length
 
-        # Evaluate outside range - should still work (B-spline extrapolation)
+        # Evaluate outside range - should clamp to valid range
         pos_negative = spline.evaluate(-0.1)
-        pos_large = spline.evaluate(1.1)
+        pos_large = spline.evaluate(total_length + 0.1)
 
         assert np.all(np.isfinite(pos_negative))
         assert np.all(np.isfinite(pos_large))
+
+        # Should clamp to start and end positions
+        pos_start = spline.evaluate(0.0)
+        pos_end = spline.evaluate(total_length)
+
+        assert np.allclose(pos_negative, pos_start)
+        assert np.allclose(pos_large, pos_end)
 
     def test_arc_length_outside_range(self):
         """Test arc length evaluation with out-of-range values."""
@@ -480,6 +508,7 @@ class TestSplinesNumericalStability:
         assert spline.total_length > 0
 
         # Test evaluation
-        for param in [0.0, 0.5, 1.0]:
-            pos = spline.evaluate(param)
+        total_length = spline.total_length
+        for s in [0.0, total_length * 0.5, total_length]:
+            pos = spline.evaluate(s)
             assert np.all(np.isfinite(pos))
