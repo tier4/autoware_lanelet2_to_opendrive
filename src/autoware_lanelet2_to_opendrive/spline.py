@@ -154,7 +154,7 @@ class Splines:
 
         # 4. Setup Least Squares with weights
         w_hard = 100.0  # Weight for hard constraints (reduced from 1e4)
-        w_soft = 1.0  # Weight for data fitting
+        w_soft = 0.01  # Weight for data fitting (restored to allow curve following)
 
         # Combine matrices
         A_combined = np.vstack(

@@ -92,8 +92,8 @@ def _get_start_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
     segment = right_first - left_first  # Vector from left to right
 
     # Calculate perpendicular vector (2D) pointing forward along the lanelet
-    # Rotate 90 degrees clockwise: (x, y) -> (y, -x)
-    perp_2d = np.array([segment[1], -segment[0]])
+    # Rotate 90 degrees counter-clockwise: (x, y) -> (-y, x)
+    perp_2d = np.array([-segment[1], segment[0]])
 
     # Normalize to unit vector
     length = np.linalg.norm(perp_2d)
@@ -133,8 +133,8 @@ def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
     segment = right_last - left_last  # Vector from left to right
 
     # Calculate perpendicular vector (2D) pointing forward along the lanelet
-    # Rotate 90 degrees clockwise: (x, y) -> (y, -x)
-    perp_2d = np.array([segment[1], -segment[0]])
+    # Rotate 90 degrees counter-clockwise: (x, y) -> (-y, x)
+    perp_2d = np.array([-segment[1], segment[0]])
 
     # Normalize to unit vector
     length = np.linalg.norm(perp_2d)

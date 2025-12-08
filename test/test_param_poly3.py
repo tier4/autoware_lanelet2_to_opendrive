@@ -25,7 +25,7 @@ class TestParamPoly3FromSpline:
         # Verify basic properties
         assert len(param_polys) == 5
         assert all(isinstance(poly, ParamPoly3) for poly in param_polys)
-        assert all(poly.pRange == "normalized" for poly in param_polys)
+        assert all(poly.pRange == "arcLength" for poly in param_polys)
 
         # Verify total length matches spline
         total_poly_length = sum(poly.length for poly in param_polys)
@@ -105,4 +105,4 @@ class TestParamPoly3FromSpline:
             # Check that paramPoly3 child element exists
             poly3_elem = xml_elem.find("paramPoly3")
             assert poly3_elem is not None
-            assert poly3_elem.get("pRange") == "normalized"
+            assert poly3_elem.get("pRange") == "arcLength"
