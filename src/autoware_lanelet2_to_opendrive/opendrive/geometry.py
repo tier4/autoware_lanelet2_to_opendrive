@@ -9,6 +9,7 @@ from .enums import GeometryType
 
 if TYPE_CHECKING:
     from ..geometry import ArcLengthParameterizedCatmullRomSpline
+    from ..spline import Splines
 
 
 @dataclass
@@ -201,6 +202,118 @@ class ParamPoly3(GeometryBase):
                 y=start_position[1],
                 hdg=float(np.arctan2(start_tangent[1], start_tangent[0])),
                 length=segment_length,
+                aU=aU,
+                bU=bU,
+                cU=cU,
+                dU=dU,
+                aV=aV,
+                bV=bV,
+                cV=cV,
+                dV=dV,
+                pRange="normalized",
+            )
+
+            param_poly_list.append(param_poly)
+
+        return param_poly_list
+
+    @classmethod
+    def from_spline(
+        cls, spline: "Splines", num_segments: int = 10
+    ) -> List["ParamPoly3"]:
+        """
+        Create ParamPoly3 list from Splines class using B-spline interpolation.
+
+        Args:
+            spline: B-spline object with arc length parameterization
+            num_segments: Number of segments to divide the spline into
+
+        Returns:
+            List of ParamPoly3 instances with normalized pRange
+        """
+
+        def solve_cubic_coeffs(
+            p0: float, v0: float, p1: float, v1: float, dt: float
+        ) -> tuple[float, float, float, float]:
+            """
+            Calculate cubic polynomial coefficients from start/end positions and velocities.
+            f(t) = a + bt + ct^2 + dt^3
+            """
+            if dt == 0:
+                return p0, v0, 0.0, 0.0
+
+            inv_dt = 1.0 / dt
+            inv_dt2 = inv_dt * inv_dt
+            inv_dt3 = inv_dt2 * inv_dt
+
+            delta_p = p1 - p0
+
+            a = p0
+            b = v0
+            c = (3 * delta_p * inv_dt2) - ((2 * v0 + v1) * inv_dt)
+            d = (2 * -delta_p * inv_dt3) + ((v0 + v1) * inv_dt2)
+            return a, b, c, d
+
+        total_length = spline.total_length
+        if total_length <= 0:
+            raise ValueError("Spline has zero length")
+
+        segment_length = total_length / num_segments
+        param_poly_list = []
+
+        for i in range(num_segments):
+            # Calculate segment boundaries in arc length
+            s_start = i * segment_length
+            s_end = min((i + 1) * segment_length, total_length)
+            current_segment_length = s_end - s_start
+
+            if current_segment_length <= 0:
+                continue
+
+            # Get Frenet frames at segment boundaries
+            start_frame = spline.get_frenet_frame(s_start)
+            end_frame = spline.get_frenet_frame(s_end)
+
+            start_position = start_frame["position"]
+            start_tangent = start_frame["tangent"]
+            start_normal = start_frame["normal"]
+
+            end_position = end_frame["position"]
+            end_tangent = end_frame["tangent"]
+            end_normal = end_frame["normal"]
+
+            # Calculate local U/V coordinates using Frenet frame at segment start
+            delta = end_position - start_position
+            u_end = np.dot(delta, start_tangent)  # longitudinal
+            v_end = np.dot(delta, start_normal)  # lateral
+
+            # Get velocity vectors at start and end points
+            start_velocity = spline.evaluate(s_start, derivative=1)
+            end_velocity = spline.evaluate(s_end, derivative=1)
+
+            # Project velocities onto local Frenet frame and scale for normalized parameter
+            # For normalized parameter [0,1], we need to scale by segment_length
+            u_vel_start = np.dot(start_velocity, start_tangent) * current_segment_length
+            v_vel_start = np.dot(start_velocity, start_normal) * current_segment_length
+
+            u_vel_end = np.dot(end_velocity, end_tangent) * current_segment_length
+            v_vel_end = np.dot(end_velocity, end_normal) * current_segment_length
+
+            # Calculate cubic coefficients for U and V coordinates with normalized parameter
+            dt_normalized = 1.0
+            aU, bU, cU, dU = solve_cubic_coeffs(
+                0.0, u_vel_start, u_end, u_vel_end, dt_normalized
+            )
+            aV, bV, cV, dV = solve_cubic_coeffs(
+                0.0, v_vel_start, v_end, v_vel_end, dt_normalized
+            )
+
+            param_poly = cls(
+                s=s_start,
+                x=start_position[0],
+                y=start_position[1],
+                hdg=float(np.arctan2(start_tangent[1], start_tangent[0])),
+                length=current_segment_length,
                 aU=aU,
                 bU=bU,
                 cU=cU,
