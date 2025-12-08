@@ -192,6 +192,67 @@ class Splines:
         # Create the B-Spline object
         self.spline = BSpline(self.knots, self.coeffs, self.k)
 
+        # Verify hard constraints are satisfied
+        self._verify_hard_constraints()
+
+    def _verify_hard_constraints(
+        self, position_tol: float = 1e-6, velocity_tol: float = 1e-3
+    ):
+        """
+        Verify that hard constraints (boundary conditions) are satisfied.
+
+        Args:
+            position_tol: Tolerance for position constraints
+            velocity_tol: Tolerance for velocity constraints
+
+        Raises:
+            ValueError: If any hard constraint is violated beyond tolerance
+        """
+        # Check start position constraint
+        start_pos_actual = self.spline(0.0, nu=0)
+        start_pos_expected = self.points[0]
+        start_pos_error = np.linalg.norm(start_pos_actual - start_pos_expected)
+        if start_pos_error > position_tol:
+            raise ValueError(
+                f"Start position constraint violated: "
+                f"error={start_pos_error:.6f} > tolerance={position_tol:.6f}\n"
+                f"Expected: {start_pos_expected}, Got: {start_pos_actual}"
+            )
+
+        # Check end position constraint
+        end_pos_actual = self.spline(1.0, nu=0)
+        end_pos_expected = self.points[-1]
+        end_pos_error = np.linalg.norm(end_pos_actual - end_pos_expected)
+        if end_pos_error > position_tol:
+            raise ValueError(
+                f"End position constraint violated: "
+                f"error={end_pos_error:.6f} > tolerance={position_tol:.6f}\n"
+                f"Expected: {end_pos_expected}, Got: {end_pos_actual}"
+            )
+
+        # Check start velocity constraint
+        # Note: velocities in normalized parameter space need to be scaled
+        start_vel_actual = self.spline(0.0, nu=1) / self.t_max
+        start_vel_expected = self.start_vel
+        start_vel_error = np.linalg.norm(start_vel_actual - start_vel_expected)
+        if start_vel_error > velocity_tol:
+            raise ValueError(
+                f"Start velocity constraint violated: "
+                f"error={start_vel_error:.6f} > tolerance={velocity_tol:.6f}\n"
+                f"Expected direction: {start_vel_expected}, Got: {start_vel_actual}"
+            )
+
+        # Check end velocity constraint
+        end_vel_actual = self.spline(1.0, nu=1) / self.t_max
+        end_vel_expected = self.end_vel
+        end_vel_error = np.linalg.norm(end_vel_actual - end_vel_expected)
+        if end_vel_error > velocity_tol:
+            raise ValueError(
+                f"End velocity constraint violated: "
+                f"error={end_vel_error:.6f} > tolerance={velocity_tol:.6f}\n"
+                f"Expected direction: {end_vel_expected}, Got: {end_vel_actual}"
+            )
+
     def _get_basis_matrix(self, t_vals: np.ndarray, deriv: int = 0) -> np.ndarray:
         """
         Calculate basis function values at given parameter values.

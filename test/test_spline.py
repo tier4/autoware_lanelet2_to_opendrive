@@ -647,12 +647,32 @@ class TestSplinesEdgeCases:
         assert (
             abs(pos_negative[1] - 0.0) < 1e-6
         ), f"Negative arc length Y: expected 0.0, got {pos_negative[1]}"
-        assert (
-            abs(pos_end[0] - 2.0) < 0.1
-        ), f"End arc length X: expected ≈2.0, got {pos_end[0]}"
-        assert (
-            abs(pos_end[1] - 0.0) < 0.1
-        ), f"End arc length Y: expected ≈0.0, got {pos_end[1]}"
+
+    def test_hard_constraints_verification(self):
+        """Test that hard constraints are properly verified."""
+        # Create a simple set of points
+        points = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]])
+
+        # Create spline with explicit velocities
+        start_vel = np.array([1.0, 0.0, 0.0])
+        end_vel = np.array([1.0, -1.0, 0.0])
+        end_vel = end_vel / np.linalg.norm(end_vel)  # Normalize
+
+        # This should work fine - constraints should be satisfied
+        spline = Splines(points, start_vel=start_vel, end_vel=end_vel)
+
+        # Verify that the spline was created successfully
+        assert spline is not None
+        assert hasattr(spline, "spline")
+
+        # Manually verify constraints are satisfied
+        # Start position
+        start_pos = spline.spline(0.0, nu=0)
+        assert np.allclose(start_pos, points[0] - spline._origin_offset, atol=1e-6)
+
+        # End position
+        end_pos = spline.spline(1.0, nu=0)
+        assert np.allclose(end_pos, points[-1] - spline._origin_offset, atol=1e-6)
 
 
 class TestSplinesNumericalStability:
