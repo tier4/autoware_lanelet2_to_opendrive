@@ -154,9 +154,8 @@ def extract_centerline_as_spline(
     """
     Extract centerline from a Lanelet using midpoints between left and right borders.
 
-    Uses extract_border_from_spline to get left and right border splines, then samples
-    points from both borders using normalized 0-1 Frenet coordinates and calculates
-    midpoints to create the centerline spline.
+    Uses line segment representation of borders to calculate centerline points
+    by interpolating along both borders using normalized coordinates.
 
     Args:
         lanelet: A Lanelet2 lanelet object
@@ -165,35 +164,48 @@ def extract_centerline_as_spline(
     Returns:
         Splines object that can be evaluated using arc length
     """
-    # Extract left and right border splines
-    left_border_spline = extract_border_from_spline(lanelet, "left", num_control_points)
-    right_border_spline = extract_border_from_spline(
-        lanelet, "right", num_control_points
-    )
+    # Get raw boundary points
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
 
-    # Number of sample points for midpoint calculation
+    if len(left_bound) < 2 or len(right_bound) < 2:
+        raise ValueError("Both boundaries must have at least 2 points")
+
+    # Convert to numpy arrays
+    left_points = np.array([[p.x, p.y, p.z] for p in left_bound])
+    right_points = np.array([[p.x, p.y, p.z] for p in right_bound])
+
+    # Calculate cumulative arc lengths for both boundaries
+    left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
+    left_cumulative = np.concatenate(([0], np.cumsum(left_dists)))
+    left_total_length = left_cumulative[-1]
+
+    right_dists = np.linalg.norm(np.diff(right_points, axis=0), axis=1)
+    right_cumulative = np.concatenate(([0], np.cumsum(right_dists)))
+    right_total_length = right_cumulative[-1]
+
+    # Number of sample points for centerline
     num_samples = max(20, num_control_points * 2)
 
-    # Sample points from both borders using normalized coordinates (0-1)
     centerline_points = []
     for i in range(num_samples):
         # Normalized coordinate from 0 to 1
         t_normalized = i / (num_samples - 1) if num_samples > 1 else 0.0
 
-        # Convert to arc length for each border
-        left_s = t_normalized * left_border_spline.total_length
-        right_s = t_normalized * right_border_spline.total_length
+        # Convert to arc length for each boundary
+        left_s = t_normalized * left_total_length
+        right_s = t_normalized * right_total_length
 
-        # Sample points from both borders
-        left_point = left_border_spline.evaluate(left_s)
-        right_point = right_border_spline.evaluate(right_s)
+        # Interpolate on left boundary line segments
+        left_point = _interpolate_on_line_segments(left_points, left_cumulative, left_s)
+
+        # Interpolate on right boundary line segments
+        right_point = _interpolate_on_line_segments(
+            right_points, right_cumulative, right_s
+        )
 
         # Calculate midpoint
-        midpoint = [
-            (left_point[0] + right_point[0]) / 2.0,
-            (left_point[1] + right_point[1]) / 2.0,
-            (left_point[2] + right_point[2]) / 2.0,
-        ]
+        midpoint = (left_point + right_point) / 2.0
         centerline_points.append(midpoint)
 
     centerline_points = np.array(centerline_points)
@@ -205,6 +217,44 @@ def extract_centerline_as_spline(
         end_vel=_get_end_vel(lanelet),
         num_control_points=num_control_points,
     )
+
+
+def _interpolate_on_line_segments(
+    points: np.ndarray, cumulative_lengths: np.ndarray, s: float
+) -> np.ndarray:
+    """
+    Interpolate a point along line segments at given arc length.
+
+    Args:
+        points: Array of points defining the line segments (N x 3)
+        cumulative_lengths: Cumulative arc lengths at each point (N,)
+        s: Target arc length for interpolation
+
+    Returns:
+        Interpolated 3D point
+    """
+    # Clamp s to valid range
+    s = np.clip(s, 0.0, cumulative_lengths[-1])
+
+    # Find which segment contains the target arc length
+    segment_idx = np.searchsorted(cumulative_lengths, s) - 1
+    segment_idx = np.clip(segment_idx, 0, len(points) - 2)
+
+    # Get segment endpoints
+    p1 = points[segment_idx]
+    p2 = points[segment_idx + 1]
+
+    # Get arc lengths at segment endpoints
+    s1 = cumulative_lengths[segment_idx]
+    s2 = cumulative_lengths[segment_idx + 1]
+
+    # Avoid division by zero for zero-length segments
+    if abs(s2 - s1) < 1e-10:
+        return p1
+
+    # Linear interpolation within the segment
+    t = (s - s1) / (s2 - s1)
+    return p1 + t * (p2 - p1)
 
 
 def extract_border_from_spline(
