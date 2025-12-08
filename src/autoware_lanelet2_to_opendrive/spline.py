@@ -48,25 +48,51 @@ class Splines:
 
         # Estimate tangent vectors if not provided
         if start_vel is None:
-            if self.n_points >= 2:
+            if self.n_points >= 3:
+                # Use second-order estimation for better accuracy
                 start_vel = self.points[1] - self.points[0]
                 start_norm = np.linalg.norm(start_vel)
                 if start_norm > 1e-10:
                     start_vel = start_vel / start_norm
                 else:
-                    # Fall back to default direction if points are duplicate
+                    # Fall back to longer distance if points are duplicate
+                    start_vel = self.points[2] - self.points[0]
+                    start_norm = np.linalg.norm(start_vel)
+                    if start_norm > 1e-10:
+                        start_vel = start_vel / start_norm
+                    else:
+                        start_vel = np.array([1.0, 0.0, 0.0])
+            elif self.n_points >= 2:
+                start_vel = self.points[1] - self.points[0]
+                start_norm = np.linalg.norm(start_vel)
+                if start_norm > 1e-10:
+                    start_vel = start_vel / start_norm
+                else:
                     start_vel = np.array([1.0, 0.0, 0.0])
             else:
                 start_vel = np.array([1.0, 0.0, 0.0])
 
         if end_vel is None:
-            if self.n_points >= 2:
+            if self.n_points >= 3:
+                # Use second-order estimation for better accuracy
                 end_vel = self.points[-1] - self.points[-2]
                 end_norm = np.linalg.norm(end_vel)
                 if end_norm > 1e-10:
                     end_vel = end_vel / end_norm
                 else:
-                    # Fall back to default direction if points are duplicate
+                    # Fall back to longer distance if points are duplicate
+                    end_vel = self.points[-1] - self.points[-3]
+                    end_norm = np.linalg.norm(end_vel)
+                    if end_norm > 1e-10:
+                        end_vel = end_vel / end_norm
+                    else:
+                        end_vel = np.array([1.0, 0.0, 0.0])
+            elif self.n_points >= 2:
+                end_vel = self.points[-1] - self.points[-2]
+                end_norm = np.linalg.norm(end_vel)
+                if end_norm > 1e-10:
+                    end_vel = end_vel / end_norm
+                else:
                     end_vel = np.array([1.0, 0.0, 0.0])
             else:
                 end_vel = np.array([1.0, 0.0, 0.0])
@@ -121,7 +147,7 @@ class Splines:
         A_vel_end = self._get_basis_matrix([1.0], deriv=1)
 
         # 4. Setup Least Squares with weights
-        w_hard = 1e4  # Weight for hard constraints
+        w_hard = 100.0  # Weight for hard constraints (reduced from 1e4)
         w_soft = 1.0  # Weight for data fitting
 
         # Combine matrices
@@ -192,9 +218,25 @@ class Splines:
         """
         return self.spline(t, nu=derivative)
 
+    def _compute_arc_length_table(self, num_samples: int = 1000):
+        """Compute arc length lookup table for accurate parameterization."""
+        if hasattr(self, "_arc_length_table"):
+            return
+
+        t_vals = np.linspace(0.0, 1.0, num_samples)
+        positions = np.array([self.evaluate(t) for t in t_vals])
+
+        # Compute arc lengths
+        distances = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+        arc_lengths = np.concatenate(([0], np.cumsum(distances)))
+
+        self._arc_length_table = arc_lengths
+        self._param_table = t_vals
+        self._computed_total_length = arc_lengths[-1]
+
     def evaluate_arc_length(self, s: float, derivative: int = 0) -> np.ndarray:
         """
-        Evaluate the spline at a given arc length.
+        Evaluate the spline at a given arc length using accurate parameterization.
 
         Args:
             s: Arc length value (0.0 to total_length)
@@ -203,15 +245,28 @@ class Splines:
         Returns:
             3D point or derivative vector at arc length s
         """
-        # Convert arc length to parameter t
-        t = s / self.t_max if self.t_max > 0 else 0.0
-        t = np.clip(t, 0.0, 1.0)
+        # Compute arc length table if not done yet
+        self._compute_arc_length_table()
+
+        # Clamp s to valid range
+        s = np.clip(s, 0.0, self._computed_total_length)
+
+        # Find parameter t corresponding to arc length s
+        if s <= 0:
+            t = 0.0
+        elif s >= self._computed_total_length:
+            t = 1.0
+        else:
+            # Interpolate to find parameter t
+            t = np.interp(s, self._arc_length_table, self._param_table)
+
         return self.evaluate(t, derivative)
 
     @property
     def total_length(self) -> float:
         """Get the total arc length of the spline."""
-        return self.t_max
+        self._compute_arc_length_table()
+        return self._computed_total_length
 
     def get_frenet_frame(self, t: float) -> dict:
         """
