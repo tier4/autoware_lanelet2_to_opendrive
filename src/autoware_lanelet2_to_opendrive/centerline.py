@@ -42,6 +42,48 @@ def extract_centerline_as_spline(
     return Splines(points, num_control_points=num_control_points)
 
 
+def extract_border_from_spline(
+    lanelet: lanelet2.core.Lanelet, border: str, num_control_points: int = 10
+) -> Splines:
+    """
+    Extract border line from a Lanelet and return as B-spline with arc length parameterization.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+        border: Border specification - "left" or "right"
+        num_control_points: Number of control points for B-spline interpolation
+
+    Returns:
+        Splines object that can be evaluated using arc length
+
+    Raises:
+        ValueError: If border is not "left" or "right", or if insufficient points
+    """
+    if border not in ["left", "right"]:
+        raise ValueError(f"Invalid border: {border}. Must be 'left' or 'right'")
+
+    # Get the appropriate boundary
+    if border == "left":
+        boundary = lanelet.leftBound
+    else:  # border == "right"
+        boundary = lanelet.rightBound
+
+    if len(boundary) < 2:
+        raise ValueError(
+            f"Lanelet must have at least 2 points in its {border} boundary"
+        )
+
+    # Extract points from the boundary
+    points = []
+    for point in boundary:
+        points.append([point.x, point.y, point.z])
+
+    points = np.array(points)
+
+    # Create B-spline with constrained fitting
+    return Splines(points, num_control_points=num_control_points)
+
+
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     num_samples: int = 20,
