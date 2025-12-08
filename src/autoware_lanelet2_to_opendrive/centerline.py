@@ -3,8 +3,8 @@ import lanelet2
 from typing import Set
 from .geometry import (
     point_to_line_segment_distance,
-    ArcLengthParameterizedCatmullRomSpline,
 )
+from .spline import Splines
 from .util import sort_adjacent_groups
 
 
@@ -15,17 +15,17 @@ class AsymmetryLaneletException(Exception):
 
 
 def extract_centerline_as_spline(
-    lanelet: lanelet2.core.Lanelet, alpha: float = 0.5
-) -> ArcLengthParameterizedCatmullRomSpline:
+    lanelet: lanelet2.core.Lanelet, num_control_points: int = 10
+) -> Splines:
     """
-    Extract centerline from a Lanelet and return as arc length parameterized spline.
+    Extract centerline from a Lanelet and return as B-spline with arc length parameterization.
 
     Args:
         lanelet: A Lanelet2 lanelet object
-        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
+        num_control_points: Number of control points for B-spline interpolation
 
     Returns:
-        ArcLengthParameterizer object that can be evaluated using arc length
+        Splines object that can be evaluated using arc length
     """
     centerline = lanelet.centerline
 
@@ -38,27 +38,27 @@ def extract_centerline_as_spline(
 
     points = np.array(points)
 
-    # Use the new function from geometry.py
-    return ArcLengthParameterizedCatmullRomSpline(points, alpha)
+    # Create B-spline with constrained fitting
+    return Splines(points, num_control_points=num_control_points)
 
 
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     num_samples: int = 20,
-    alpha: float = 0.5,
+    num_control_points: int = 10,
     reference: str = "center_line",
-) -> ArcLengthParameterizedCatmullRomSpline:
+) -> Splines:
     """
     Estimate lanelet total width along its centerline or left boundary using Frenet coordinates.
 
     Args:
         lanelet: A Lanelet2 lanelet object
         num_samples: Number of sample points along the reference line
-        alpha: Alpha parameter for Catmull-Rom spline
+        num_control_points: Number of control points for B-spline interpolation
         reference: Reference line for width calculation - "center_line" or "left_bound"
 
     Returns:
-        CatmullRom spline object representing the total width (left + right distances)
+        Splines object representing the total width (left + right distances)
     """
     if reference not in ["center_line", "left_bound"]:
         raise ValueError(
@@ -67,9 +67,20 @@ def estimate_lanelet_width_as_spline(
 
     # Get arc length parameterized reference spline based on mode
     if reference == "center_line":
-        length_based_spline = extract_centerline_as_spline(lanelet, alpha)
+        length_based_spline = extract_centerline_as_spline(lanelet, num_control_points)
     else:  # left_bound
-        length_based_spline = extract_left_boundary_as_spline(lanelet, alpha)
+        # Extract left boundary points directly
+        left_bound = lanelet.leftBound
+        if len(left_bound) < 2:
+            raise ValueError("Lanelet must have at least 2 points in its left bound")
+
+        points = []
+        for point in left_bound:
+            points.append([point.x, point.y, point.z])
+
+        length_based_spline = Splines(
+            np.array(points), num_control_points=num_control_points
+        )
 
     total_length = length_based_spline.total_length
 
@@ -85,7 +96,7 @@ def estimate_lanelet_width_as_spline(
 
     for length in length_values:
         # Use Frenet coordinate calculation from the spline class
-        frenet_frame = length_based_spline.evaluate(length, frenet=True)
+        frenet_frame = length_based_spline.get_frenet_frame(length)
         reference_point = frenet_frame["position"]
 
         if reference == "center_line":
@@ -148,27 +159,31 @@ def estimate_lanelet_width_as_spline(
         total_widths.append(left_width + right_width)
 
     # Create 1D spline for total width values
-    # CatmullRom expects points as rows: [[length0, width0], [length1, width1], ...]
-    width_points = np.column_stack([length_values, total_widths])
+    # Create points as [[length0, width0, 0], [length1, width1, 0], ...]
+    width_points = np.column_stack(
+        [length_values, total_widths, np.zeros(len(total_widths))]
+    )
 
-    return ArcLengthParameterizedCatmullRomSpline(width_points, alpha=alpha)
+    return Splines(
+        width_points, num_control_points=min(num_control_points, len(width_points))
+    )
 
 
 def extract_centerline_as_spline_from_two_lanelets(
     lanelet_map: lanelet2.core.LaneletMap,
     two_lanelets: Set[lanelet2.core.Lanelet],
-    alpha: float = 0.5,
-) -> ArcLengthParameterizedCatmullRomSpline:
+    num_control_points: int = 10,
+) -> Splines:
     """
     Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
 
     Args:
         lanelet_map: The lanelet2 map containing the lanelets
         two_lanelets: Set containing exactly two lanelets
-        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
+        num_control_points: Number of control points for B-spline interpolation
 
     Returns:
-        ArcLengthParameterizedCatmullRomSpline representing the right bound of the left lanelet
+        Splines object representing the right bound of the left lanelet
 
     Raises:
         ValueError: If two_lanelets does not contain exactly 2 lanelets
@@ -194,32 +209,5 @@ def extract_centerline_as_spline_from_two_lanelets(
 
     points = np.array(points)
 
-    # Create and return the spline
-    return ArcLengthParameterizedCatmullRomSpline(points, alpha)
-
-
-def extract_left_boundary_as_spline(
-    lanelet: lanelet2.core.Lanelet, alpha: float = 0.5
-) -> ArcLengthParameterizedCatmullRomSpline:
-    """
-    Extract left boundary from a Lanelet and return as arc length parameterized spline.
-
-    Args:
-        lanelet: A Lanelet2 lanelet object
-        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
-
-    Returns:
-        ArcLengthParameterizedCatmullRomSpline representing the left boundary
-    """
-    left_bound = lanelet.leftBound
-
-    if len(left_bound) < 2:
-        raise ValueError("Lanelet must have at least 2 points in its left bound")
-
-    points = []
-    for point in left_bound:
-        points.append([point.x, point.y, point.z])
-
-    points = np.array(points)
-
-    return ArcLengthParameterizedCatmullRomSpline(points, alpha)
+    # Create and return the B-spline
+    return Splines(points, num_control_points=num_control_points)

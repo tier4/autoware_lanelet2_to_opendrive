@@ -6,7 +6,7 @@ import lxml.etree as ET
 
 from scenariogeneration import xodr
 from ..centerline import estimate_lanelet_width_as_spline
-from ..geometry import ArcLengthParameterizedCatmullRomSpline
+from ..spline import Splines
 from ..util import find_adjacent_groups
 
 from .opendrive_dataclass import (
@@ -75,41 +75,40 @@ class Lane:
 
     def _add_width_from_spline(
         self,
-        width_spline: ArcLengthParameterizedCatmullRomSpline,
+        width_spline: Splines,
         road_length: Optional[float] = None,
     ) -> None:
         """
-        Add width definitions from an arc length parameterized spline using cubic parameters.
-        Creates one width definition per spline segment.
+        Add width definitions from a B-spline using sampled width values.
+        Creates width definitions by sampling the spline at regular intervals.
 
         Args:
-            width_spline: ArcLengthParameterizedCatmullRomSpline for width
+            width_spline: Splines object for width data
             road_length: Total road length (uses spline length if None)
         """
         if road_length is None:
             road_length = width_spline.total_length
 
-        # Get cubic spline parameters for each segment
-        segments = width_spline.as_cubic_spline_parameters()
+        # Sample the spline to create width segments
+        num_segments = 10  # Number of segments to create
+        segment_length = road_length / num_segments
 
-        for segment in segments:
-            s_start = segment["s_start"]
-            s_end = segment["s_end"]
-            a, b, c, d = segment["a"], segment["b"], segment["c"], segment["d"]
+        for i in range(num_segments):
+            s_start = i * segment_length
+            s_end = min((i + 1) * segment_length, road_length)
 
-            # Clamp segment to road_length
-            if s_start >= road_length:
-                break
-            s_end = min(s_end, road_length)
-
-            # Skip if segment is outside valid range
-            segment_length = s_end - s_start
-            if segment_length <= 0:
+            if s_end <= s_start:
                 continue
 
-            # Create one width definition per segment using cubic polynomial coefficients
-            # OpenDRIVE width format: width = a + b*s + c*s^2 + d*s^3
-            self._add_width(LaneWidth(s_offset=s_start, a=a, b=b, c=c, d=d))
+            # Evaluate spline at start to get width value
+            # For width splines, we use the Y coordinate as the width value
+            start_pos = width_spline.evaluate(s_start)
+            width_value = start_pos[1]  # Y coordinate contains width
+
+            # Create constant width definition for this segment
+            self._add_width(
+                LaneWidth(s_offset=s_start, a=width_value, b=0.0, c=0.0, d=0.0)
+            )
 
     @staticmethod
     def construct_from_lanelet(
