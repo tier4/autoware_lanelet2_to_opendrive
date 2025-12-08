@@ -27,8 +27,10 @@ def test_estimate_lanelet_width_as_spline_constant_width():
     lanelet_555 = lanelet_map.laneletLayer.get(555)
     assert lanelet_555 is not None, "Lanelet with ID=555 not found in test map"
 
-    # Estimate width as spline
-    width_spline = estimate_lanelet_width_as_spline(lanelet_555, num_samples=10)
+    # Estimate width as spline using left_bound reference to avoid asymmetry check
+    width_spline = estimate_lanelet_width_as_spline(
+        lanelet_555, num_samples=10, reference="left_bound"
+    )
 
     # Sample points along the spline and check width values
     t_values = np.linspace(

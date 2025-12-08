@@ -15,10 +15,14 @@ class AsymmetryLaneletException(Exception):
 
 
 def extract_centerline_as_spline(
-    lanelet: lanelet2.core.Lanelet, num_control_points: int = 10
+    lanelet: lanelet2.core.Lanelet, num_control_points: int = 20
 ) -> Splines:
     """
-    Extract centerline from a Lanelet and return as B-spline with arc length parameterization.
+    Extract centerline from a Lanelet using midpoints between left and right borders.
+
+    Uses extract_border_from_spline to get left and right border splines, then samples
+    points from both borders using normalized 0-1 Frenet coordinates and calculates
+    midpoints to create the centerline spline.
 
     Args:
         lanelet: A Lanelet2 lanelet object
@@ -27,19 +31,41 @@ def extract_centerline_as_spline(
     Returns:
         Splines object that can be evaluated using arc length
     """
-    centerline = lanelet.centerline
+    # Extract left and right border splines
+    left_border_spline = extract_border_from_spline(lanelet, "left", num_control_points)
+    right_border_spline = extract_border_from_spline(
+        lanelet, "right", num_control_points
+    )
 
-    if len(centerline) < 2:
-        raise ValueError("Lanelet must have at least 2 points in its centerline")
+    # Number of sample points for midpoint calculation
+    num_samples = max(20, num_control_points * 2)
 
-    points = []
-    for point in centerline:
-        points.append([point.x, point.y, point.z])
+    # Sample points from both borders using normalized coordinates (0-1)
+    centerline_points = []
+    for i in range(num_samples):
+        # Normalized coordinate from 0 to 1
+        t_normalized = i / (num_samples - 1) if num_samples > 1 else 0.0
 
-    points = np.array(points)
+        # Convert to arc length for each border
+        left_s = t_normalized * left_border_spline.total_length
+        right_s = t_normalized * right_border_spline.total_length
+
+        # Sample points from both borders
+        left_point = left_border_spline.evaluate(left_s)
+        right_point = right_border_spline.evaluate(right_s)
+
+        # Calculate midpoint
+        midpoint = [
+            (left_point[0] + right_point[0]) / 2.0,
+            (left_point[1] + right_point[1]) / 2.0,
+            (left_point[2] + right_point[2]) / 2.0,
+        ]
+        centerline_points.append(midpoint)
+
+    centerline_points = np.array(centerline_points)
 
     # Create B-spline with constrained fitting
-    return Splines(points, num_control_points=num_control_points)
+    return Splines(centerline_points, num_control_points=num_control_points)
 
 
 def extract_border_from_spline(
