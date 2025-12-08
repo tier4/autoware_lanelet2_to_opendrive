@@ -43,6 +43,12 @@ class Splines:
         if self.n_points < 2:
             raise ValueError("At least 2 points are required")
 
+        # Store original coordinate offset for numerical stability
+        self._origin_offset = self.points[0].copy()
+
+        # Translate points to origin for numerical stability with large coordinates
+        self.points = self.points - self._origin_offset
+
         self.k = k
         self.num_control_points = num_control_points
 
@@ -232,7 +238,9 @@ class Splines:
             t = np.interp(s, self._arc_length_table, self._param_table)
 
         if derivative == 0:
-            return self.spline(t, nu=0)
+            # For position, translate back to original coordinate system
+            result = self.spline(t, nu=0)
+            return result + self._origin_offset
         else:
             # For derivatives with respect to arc length, we need to apply the chain rule
             # ds/dt = ||dx/dt|| where x is position

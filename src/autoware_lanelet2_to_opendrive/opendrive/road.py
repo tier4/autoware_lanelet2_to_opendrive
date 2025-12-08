@@ -167,6 +167,9 @@ class Road:
             total=len(adjacent_groups),
             desc="Building roads",
         ):
+            ll_ids = [ll.id for ll in adjacent_group]
+            if 124253 not in ll_ids:
+                continue
             try:
                 road = Road.construct_from_lanelet_groups(
                     lanelet_map=lanelet_map,  # Use original map for proper connectivity
