@@ -24,6 +24,13 @@ class TestSplinesBasic:
         assert np.allclose(start_pos, points[0], atol=1e-6)
         assert np.allclose(end_pos, points[1], atol=1e-6)
 
+        # Coordinate validation tests
+        # For a straight horizontal line, x should equal arc length s
+        mid_pos = spline.evaluate(0.5)
+        assert abs(mid_pos[0] - 0.5) < 1e-3, f"Expected x=0.5, got x={mid_pos[0]}"
+        assert abs(mid_pos[1] - 0.0) < 1e-3, f"Expected y=0.0, got y={mid_pos[1]}"
+        assert abs(mid_pos[2] - 0.0) < 1e-3, f"Expected z=0.0, got z={mid_pos[2]}"
+
     def test_create_spline_with_multiple_points(self):
         """Test creating a spline with multiple points."""
         points = np.array(
@@ -47,6 +54,20 @@ class TestSplinesBasic:
 
         assert np.allclose(start_pos, points[0], atol=1e-3)
         assert np.allclose(end_pos, points[-1], atol=1e-3)
+
+        # Coordinate validation tests
+        # Check intermediate positions maintain reasonable coordinates
+        mid_arc_length = spline.total_length / 2
+        mid_pos = spline.evaluate(mid_arc_length)
+
+        # Verify coordinates are within expected bounds
+        assert (
+            0.0 <= mid_pos[0] <= 5.0
+        ), f"X coordinate {mid_pos[0]} out of expected range [0,5]"
+        assert (
+            -0.5 <= mid_pos[1] <= 1.5
+        ), f"Y coordinate {mid_pos[1]} out of expected range [-0.5,1.5]"
+        assert abs(mid_pos[2]) < 0.1, f"Z coordinate {mid_pos[2]} should be near 0"
 
     def test_evaluate_at_different_parameters(self):
         """Test evaluating spline at different parameter values."""
@@ -73,6 +94,19 @@ class TestSplinesBasic:
         for i in range(len(positions) - 1):
             assert not np.allclose(positions[i], positions[i + 1])
 
+        # Coordinate validation tests
+        # Verify all positions have reasonable coordinate values
+        for i, pos in enumerate(positions):
+            assert (
+                0.0 <= pos[0] <= 2.5
+            ), f"Position {i}: X coordinate {pos[0]} out of range [0,2.5]"
+            assert (
+                -0.5 <= pos[1] <= 1.5
+            ), f"Position {i}: Y coordinate {pos[1]} out of range [-0.5,1.5]"
+            assert (
+                abs(pos[2]) < 0.1
+            ), f"Position {i}: Z coordinate {pos[2]} should be near 0"
+
     def test_evaluate_arc_length(self):
         """Test evaluating spline using arc length parameterization."""
         points = np.array(
@@ -95,6 +129,19 @@ class TestSplinesBasic:
 
         assert np.allclose(start_pos, points[0], atol=1e-3)
         assert np.allclose(end_pos, points[-1], atol=1e-3)
+
+        # Coordinate validation tests for straight line
+        # For this straight horizontal line, x should approximately equal arc length s
+        pos_1 = spline.evaluate_arc_length(1.0)
+        pos_1_5 = spline.evaluate_arc_length(1.5)
+        pos_2 = spline.evaluate_arc_length(2.0)
+
+        assert abs(pos_1[0] - 1.0) < 0.1, f"At s=1.0, expected x≈1.0, got x={pos_1[0]}"
+        assert abs(pos_1[1] - 0.0) < 0.1, f"At s=1.0, expected y≈0.0, got y={pos_1[1]}"
+        assert (
+            abs(pos_1_5[0] - 1.5) < 0.1
+        ), f"At s=1.5, expected x≈1.5, got x={pos_1_5[0]}"
+        assert abs(pos_2[0] - 2.0) < 0.1, f"At s=2.0, expected x≈2.0, got x={pos_2[0]}"
 
 
 class TestSplinesConstraints:
@@ -129,6 +176,19 @@ class TestSplinesConstraints:
         assert np.dot(start_tangent_norm, start_vel) > 0.9
         assert np.dot(end_tangent_norm, end_vel) > 0.9
 
+        # Coordinate validation tests
+        # Verify spline endpoints match exactly
+        start_pos = spline.evaluate(0.0)
+        end_pos = spline.evaluate(spline.total_length)
+        assert (
+            abs(start_pos[0] - 0.0) < 1e-6
+        ), f"Start X: expected 0.0, got {start_pos[0]}"
+        assert (
+            abs(start_pos[1] - 0.0) < 1e-6
+        ), f"Start Y: expected 0.0, got {start_pos[1]}"
+        assert abs(end_pos[0] - 3.0) < 1e-2, f"End X: expected ≈3.0, got {end_pos[0]}"
+        assert abs(end_pos[1] - 0.0) < 1e-2, f"End Y: expected ≈0.0, got {end_pos[1]}"
+
     def test_automatic_tangent_estimation(self):
         """Test automatic tangent estimation when not specified."""
         points = np.array(
@@ -146,6 +206,24 @@ class TestSplinesConstraints:
         assert np.all(np.isfinite(end_tangent))
         assert np.linalg.norm(start_tangent) > 0
         assert np.linalg.norm(end_tangent) > 0
+
+        # Coordinate validation tests
+        # Verify the spline interpolates correctly through the points
+        start_pos = spline.evaluate(0.0)
+        end_pos = spline.evaluate(spline.total_length)
+        mid_pos = spline.evaluate(spline.total_length / 2)
+
+        assert (
+            abs(start_pos[0] - 0.0) < 1e-6
+        ), f"Start X: expected 0.0, got {start_pos[0]}"
+        assert (
+            abs(start_pos[1] - 0.0) < 1e-6
+        ), f"Start Y: expected 0.0, got {start_pos[1]}"
+        assert abs(end_pos[0] - 3.0) < 1e-2, f"End X: expected ≈3.0, got {end_pos[0]}"
+        assert abs(end_pos[1] - 1.0) < 1e-2, f"End Y: expected ≈1.0, got {end_pos[1]}"
+        # Mid position should be somewhere reasonable between start and end
+        assert 0.0 <= mid_pos[0] <= 3.0, f"Mid X: {mid_pos[0]} out of range [0,3]"
+        assert 0.0 <= mid_pos[1] <= 1.2, f"Mid Y: {mid_pos[1]} out of range [0,1.2]"
 
     def test_varying_control_points(self):
         """Test spline behavior with different numbers of control points."""
@@ -175,6 +253,18 @@ class TestSplinesConstraints:
             assert np.allclose(start_pos, points[0], atol=1e-2)
             assert np.allclose(end_pos, points[-1], atol=1e-2)
 
+            # Coordinate validation for varying control points
+            quarter_pos = spline.evaluate(spline.total_length * 0.25)
+            assert (
+                0.0 <= quarter_pos[0] <= 5.0
+            ), f"X coordinate {quarter_pos[0]} out of range"
+            assert (
+                0.0 <= quarter_pos[1] <= 1.2
+            ), f"Y coordinate {quarter_pos[1]} out of range"
+            assert (
+                abs(quarter_pos[2]) < 0.1
+            ), f"Z coordinate {quarter_pos[2]} should be near 0"
+
 
 class TestSplinesDerivatives:
     """Tests for spline derivatives."""
@@ -192,6 +282,22 @@ class TestSplinesDerivatives:
             assert velocity.shape == (3,)
             assert np.all(np.isfinite(velocity))
 
+        # Coordinate validation tests
+        # Verify position coordinates at known arc lengths
+        start_pos = spline.evaluate(0.0)
+        mid_pos = spline.evaluate(total_length * 0.5)
+        end_pos = spline.evaluate(total_length)
+
+        assert (
+            abs(start_pos[0] - 0.0) < 1e-6
+        ), f"Start X: expected 0.0, got {start_pos[0]}"
+        assert (
+            abs(start_pos[1] - 0.0) < 1e-6
+        ), f"Start Y: expected 0.0, got {start_pos[1]}"
+        assert abs(end_pos[0] - 2.0) < 1e-2, f"End X: expected ≈2.0, got {end_pos[0]}"
+        assert abs(end_pos[1] - 0.0) < 1e-2, f"End Y: expected ≈0.0, got {end_pos[1]}"
+        assert 0.0 <= mid_pos[0] <= 2.0, f"Mid X: {mid_pos[0]} out of range [0,2]"
+
     def test_second_derivative(self):
         """Test second derivative (acceleration) calculation."""
         points = np.array(
@@ -206,6 +312,24 @@ class TestSplinesDerivatives:
             acceleration = spline.evaluate(s, derivative=2)
             assert acceleration.shape == (3,)
             assert np.all(np.isfinite(acceleration))
+
+        # Coordinate validation tests
+        # Verify position coordinates for this more complex curve
+        start_pos = spline.evaluate(0.0)
+        quarter_pos = spline.evaluate(total_length * 0.25)
+        end_pos = spline.evaluate(total_length)
+
+        assert (
+            abs(start_pos[0] - 0.0) < 1e-6
+        ), f"Start X: expected 0.0, got {start_pos[0]}"
+        assert (
+            abs(start_pos[1] - 0.0) < 1e-6
+        ), f"Start Y: expected 0.0, got {start_pos[1]}"
+        assert abs(end_pos[0] - 3.0) < 1e-2, f"End X: expected ≈3.0, got {end_pos[0]}"
+        assert abs(end_pos[1] + 1.0) < 1e-2, f"End Y: expected ≈-1.0, got {end_pos[1]}"
+        assert (
+            0.0 <= quarter_pos[0] <= 3.0
+        ), f"Quarter X: {quarter_pos[0]} out of range [0,3]"
 
     def test_derivative_consistency(self):
         """Test that derivatives are consistent with finite differences."""
@@ -272,6 +396,18 @@ class TestSplinesFrenetFrame:
             assert np.all(np.isfinite(position))
             assert np.all(np.isfinite(tangent))
             assert np.all(np.isfinite(normal))
+
+            # Coordinate validation tests
+            # Verify positions are within expected bounds (allowing for numerical precision)
+            assert (
+                -0.1 <= position[0] <= 3.5
+            ), f"X coordinate {position[0]} out of range [-0.1,3.5]"
+            assert (
+                -0.5 <= position[1] <= 1.5
+            ), f"Y coordinate {position[1]} out of range [-0.5,1.5]"
+            assert (
+                abs(position[2]) < 0.1
+            ), f"Z coordinate {position[2]} should be near 0"
 
     def test_frenet_frame_unit_vectors(self):
         """Test that tangent and normal are unit vectors."""
@@ -428,6 +564,29 @@ class TestSplinesEdgeCases:
             assert np.abs(pos[1]) < 0.5  # y should stay reasonably close to 0
             assert np.abs(pos[2]) < 0.5  # z should stay reasonably close to 0
 
+        # Coordinate validation tests for straight line behavior
+        # For a horizontal straight line, x should reasonably match arc length s
+        # Note: B-splines with constraints may not produce perfect straight lines
+        test_positions = [
+            0.0,
+            1.0,
+            2.0,
+            3.0,
+        ]  # Test only up to 3.0 since total_length may be < 4.0
+        for expected_x in test_positions:
+            if expected_x <= total_length:
+                pos = spline.evaluate(expected_x)
+                # Allow larger tolerance for constrained B-splines
+                assert (
+                    abs(pos[0] - expected_x) < 1.5
+                ), f"At s={expected_x}, expected x≈{expected_x}, got x={pos[0]}"
+                assert (
+                    abs(pos[1]) < 0.1
+                ), f"At s={expected_x}, expected y≈0.0, got y={pos[1]}"
+                assert (
+                    abs(pos[2]) < 0.1
+                ), f"At s={expected_x}, expected z≈0.0, got z={pos[2]}"
+
     def test_evaluate_outside_range(self):
         """Test evaluation outside the arc length range [0, total_length]."""
         points = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]])
@@ -449,6 +608,21 @@ class TestSplinesEdgeCases:
         assert np.allclose(pos_negative, pos_start)
         assert np.allclose(pos_large, pos_end)
 
+        # Coordinate validation tests
+        # Verify clamped positions match expected coordinates
+        assert (
+            abs(pos_negative[0] - 0.0) < 1e-6
+        ), f"Negative clamp X: expected 0.0, got {pos_negative[0]}"
+        assert (
+            abs(pos_negative[1] - 0.0) < 1e-6
+        ), f"Negative clamp Y: expected 0.0, got {pos_negative[1]}"
+        assert (
+            abs(pos_end[0] - 2.0) < 0.1
+        ), f"Large clamp X: expected ≈2.0, got {pos_end[0]}"
+        assert (
+            abs(pos_end[1] - 0.0) < 0.1
+        ), f"Large clamp Y: expected ≈0.0, got {pos_end[1]}"
+
     def test_arc_length_outside_range(self):
         """Test arc length evaluation with out-of-range values."""
         points = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
@@ -465,6 +639,21 @@ class TestSplinesEdgeCases:
         pos_end = spline.evaluate_arc_length(spline.total_length)
         assert np.allclose(pos_large, pos_end)
 
+        # Coordinate validation tests for arc length clamping
+        # For this horizontal line, positions should match expected coordinates
+        assert (
+            abs(pos_negative[0] - 0.0) < 1e-6
+        ), f"Negative arc length X: expected 0.0, got {pos_negative[0]}"
+        assert (
+            abs(pos_negative[1] - 0.0) < 1e-6
+        ), f"Negative arc length Y: expected 0.0, got {pos_negative[1]}"
+        assert (
+            abs(pos_end[0] - 2.0) < 0.1
+        ), f"End arc length X: expected ≈2.0, got {pos_end[0]}"
+        assert (
+            abs(pos_end[1] - 0.0) < 0.1
+        ), f"End arc length Y: expected ≈0.0, got {pos_end[1]}"
+
 
 class TestSplinesNumericalStability:
     """Tests for numerical stability."""
@@ -479,6 +668,12 @@ class TestSplinesNumericalStability:
         pos = spline.evaluate(0.5)
         assert np.all(np.isfinite(pos))
 
+        # Coordinate validation tests
+        # Position should be somewhere between start and end points
+        assert 0.0 <= pos[0] <= 1.0, f"X coordinate {pos[0]} out of range [0,1]"
+        assert 0.0 <= pos[1] <= 1.0, f"Y coordinate {pos[1]} out of range [0,1]"
+        assert abs(pos[2]) < 0.1, f"Z coordinate {pos[2]} should be near 0"
+
     def test_large_coordinate_values(self):
         """Test with large coordinate values."""
         points = np.array(
@@ -491,6 +686,18 @@ class TestSplinesNumericalStability:
         pos = spline.evaluate(0.5)
         assert np.all(np.isfinite(pos))
         assert pos[0] > 1e6  # Should be in the right range
+
+        # Coordinate validation tests
+        # Position should be in expected range for large coordinates
+        assert (
+            1e6 <= pos[0] <= 1e6 + 2
+        ), f"X coordinate {pos[0]} out of expected large range"
+        assert (
+            1e6 <= pos[1] <= 1e6 + 1
+        ), f"Y coordinate {pos[1]} out of expected large range"
+        assert (
+            1e6 - 0.1 <= pos[2] <= 1e6 + 0.1
+        ), f"Z coordinate {pos[2]} out of expected large range"
 
     def test_many_points(self):
         """Test with many input points."""
