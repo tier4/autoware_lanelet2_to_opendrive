@@ -149,7 +149,7 @@ def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
 
 
 def extract_centerline_as_spline(
-    lanelet: lanelet2.core.Lanelet, num_control_points: int = 50
+    lanelet: lanelet2.core.Lanelet, num_control_points: int = 10
 ) -> Splines:
     """
     Extract centerline from a Lanelet using midpoints between left and right borders.
@@ -258,7 +258,7 @@ def _interpolate_on_line_segments(
 
 
 def extract_border_from_spline(
-    lanelet: lanelet2.core.Lanelet, border: str, num_control_points: int = 50
+    lanelet: lanelet2.core.Lanelet, border: str, num_control_points: int = 10
 ) -> Splines:
     """
     Extract border line from a Lanelet and return as B-spline with arc length parameterization.
@@ -307,7 +307,7 @@ def extract_border_from_spline(
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     num_samples: int = 20,
-    num_control_points: int = 50,
+    num_control_points: int = 10,
     reference: str = "center_line",
 ) -> Splines:
     """
@@ -434,7 +434,7 @@ def estimate_lanelet_width_as_spline(
 def extract_centerline_as_spline_from_two_lanelets(
     lanelet_map: lanelet2.core.LaneletMap,
     two_lanelets: Set[lanelet2.core.Lanelet],
-    num_control_points: int = 50,
+    num_control_points: int = 10,
 ) -> Splines:
     """
     Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
