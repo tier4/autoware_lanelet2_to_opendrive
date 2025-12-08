@@ -114,40 +114,15 @@ class LaneSection:
         # For even number: lanes are split evenly between left and right
         if num_lanes == 1:
             # Single lane: use the lanelet as a right lane (ID = -1)
+            # The left boundary is used as the reference line (via ReferenceLine.construct_from_lanelet_groups)
             single_lanelet = sorted_lanelets[0]
             lane = Lane.construct_from_lanelet(lanelet_map, single_lanelet)
             lane.lane_id = -1
             lane_section._add_right_lane(lane)
 
-            # Calculate lane offset from left/right bound first points distance
-            import math
-
-            left_bound = single_lanelet.leftBound
-            right_bound = single_lanelet.rightBound
-
-            if len(left_bound) > 0 and len(right_bound) > 0:
-                left_first = left_bound[0]
-                right_first = right_bound[0]
-
-                # Calculate Euclidean distance between first points
-                distance = math.sqrt(
-                    (left_first.x - right_first.x) ** 2
-                    + (left_first.y - right_first.y) ** 2
-                )
-                lane_offset_width = distance / 2.0  # Half the width
-            else:
-                raise ValueError(
-                    "Lanelet bounds do not have enough points to calculate lane offset."
-                )
-
-            # Add laneOffset for single lane sections
-            lane_section.lane_offset = {
-                "s": 0.0,
-                "a": lane_offset_width,
-                "b": 0.0,
-                "c": 0.0,
-                "d": 0.0,
-            }
+            # No lane offset needed since we use left boundary as reference line
+            # The lane width will be measured from the left boundary (reference line)
+            # to the right boundary
         elif num_lanes % 2 == 1:
             # Odd number of lanes
             center_index = num_lanes // 2

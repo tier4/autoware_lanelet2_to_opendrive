@@ -132,23 +132,10 @@ def test_single_lane_section_with_lane_offset():
     # Check lane ID for single lane
     assert -1 in lane_section.right_lanes
 
-    # Check that laneOffset was set
-    assert lane_section.lane_offset is not None
-    assert lane_section.lane_offset["s"] == 0.0
-    assert lane_section.lane_offset["b"] == 0.0
-    assert lane_section.lane_offset["c"] == 0.0
-    assert lane_section.lane_offset["d"] == 0.0
-    # Width should be calculated from the lanelet width, so check it's a reasonable value
-    assert 1.0 <= lane_section.lane_offset["a"] <= 3.0  # Reasonable lane offset range
+    # Check that laneOffset is not set (since we use left boundary as reference line)
+    assert lane_section.lane_offset is None
 
-    # Test XML output includes laneOffset
+    # Test XML output does not include laneOffset
     xml_element = lane_section.to_xml()
     offset_element = xml_element.find("laneOffset")
-    assert offset_element is not None
-    assert offset_element.get("s") == "0.0"
-    assert offset_element.get("b") == "0.0"
-    assert offset_element.get("c") == "0.0"
-    assert offset_element.get("d") == "0.0"
-    # Check that 'a' value is reasonable (calculated from lanelet width)
-    offset_a = float(offset_element.get("a"))
-    assert 1.0 <= offset_a <= 3.0
+    assert offset_element is None

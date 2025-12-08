@@ -69,9 +69,11 @@ class ReferenceLine:
             # Single lane: use the left boundary as reference line
             single_lanelet = sorted_lanelets[0]
 
-            from ..centerline import extract_centerline_as_spline
+            from ..centerline import extract_border_from_spline
 
-            centerline_spline = extract_centerline_as_spline(single_lanelet)
+            centerline_spline = extract_border_from_spline(
+                single_lanelet, border="left"
+            )
         elif num_lanes % 2 == 1:
             # Odd number of lanes: use the center lane's centerline
             center_lane_index = num_lanes // 2
