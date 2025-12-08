@@ -14,6 +14,88 @@ class AsymmetryLaneletException(Exception):
     pass
 
 
+def _get_start_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
+    """
+    Calculate start velocity vector for centerline spline from lanelet boundaries.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+
+    Returns:
+        3D velocity vector perpendicular to the line connecting first points of left and right boundaries
+    """
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
+
+    if len(left_bound) < 1 or len(right_bound) < 1:
+        raise ValueError(
+            "Lanelet must have at least 1 point in both left and right boundaries"
+        )
+
+    # Get first points of boundaries
+    left_first = np.array([left_bound[0].x, left_bound[0].y])
+    right_first = np.array([right_bound[0].x, right_bound[0].y])
+
+    # Calculate line segment connecting left and right boundaries
+    segment = right_first - left_first  # Vector from left to right
+
+    # Calculate perpendicular vector (2D) pointing forward along the lanelet
+    # Rotate 90 degrees clockwise: (x, y) -> (y, -x)
+    perp_2d = np.array([segment[1], -segment[0]])
+
+    # Normalize to unit vector
+    length = np.linalg.norm(perp_2d)
+    if length < 1e-10:
+        # Fallback to default direction if boundaries are parallel
+        perp_2d = np.array([1.0, 0.0])
+    else:
+        perp_2d = perp_2d / length
+
+    # Convert to 3D by adding z=0
+    return np.array([perp_2d[0], perp_2d[1], 0.0])
+
+
+def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
+    """
+    Calculate end velocity vector for centerline spline from lanelet boundaries.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+
+    Returns:
+        3D velocity vector perpendicular to the line connecting last points of left and right boundaries
+    """
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
+
+    if len(left_bound) < 1 or len(right_bound) < 1:
+        raise ValueError(
+            "Lanelet must have at least 1 point in both left and right boundaries"
+        )
+
+    # Get last points of boundaries
+    left_last = np.array([left_bound[-1].x, left_bound[-1].y])
+    right_last = np.array([right_bound[-1].x, right_bound[-1].y])
+
+    # Calculate line segment connecting left and right boundaries
+    segment = right_last - left_last  # Vector from left to right
+
+    # Calculate perpendicular vector (2D) pointing forward along the lanelet
+    # Rotate 90 degrees clockwise: (x, y) -> (y, -x)
+    perp_2d = np.array([segment[1], -segment[0]])
+
+    # Normalize to unit vector
+    length = np.linalg.norm(perp_2d)
+    if length < 1e-10:
+        # Fallback to default direction if boundaries are parallel
+        perp_2d = np.array([1.0, 0.0])
+    else:
+        perp_2d = perp_2d / length
+
+    # Convert to 3D by adding z=0
+    return np.array([perp_2d[0], perp_2d[1], 0.0])
+
+
 def extract_centerline_as_spline(
     lanelet: lanelet2.core.Lanelet, num_control_points: int = 20
 ) -> Splines:
@@ -69,7 +151,7 @@ def extract_centerline_as_spline(
 
 
 def extract_border_from_spline(
-    lanelet: lanelet2.core.Lanelet, border: str, num_control_points: int = 10
+    lanelet: lanelet2.core.Lanelet, border: str, num_control_points: int = 20
 ) -> Splines:
     """
     Extract border line from a Lanelet and return as B-spline with arc length parameterization.
@@ -107,13 +189,21 @@ def extract_border_from_spline(
     points = np.array(points)
 
     # Create B-spline with constrained fitting
-    return Splines(points, num_control_points=num_control_points)
+    print(f"Creating {border} border spline with {num_control_points} control points")
+    spline = Splines(points, num_control_points=num_control_points)
+    print(
+        f"{border} border spline created with total length {spline.total_length:.2f}m"
+    )
+    print(
+        f"{spline.evaluate(0.0)-points[0]=}, {spline.evaluate(spline.total_length)-points[-1]=}"
+    )
+    return spline
 
 
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     num_samples: int = 20,
-    num_control_points: int = 10,
+    num_control_points: int = 20,
     reference: str = "center_line",
 ) -> Splines:
     """
@@ -240,7 +330,7 @@ def estimate_lanelet_width_as_spline(
 def extract_centerline_as_spline_from_two_lanelets(
     lanelet_map: lanelet2.core.LaneletMap,
     two_lanelets: Set[lanelet2.core.Lanelet],
-    num_control_points: int = 10,
+    num_control_points: int = 20,
 ) -> Splines:
     """
     Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
