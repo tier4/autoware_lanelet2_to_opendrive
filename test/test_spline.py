@@ -578,7 +578,7 @@ class TestSplinesEdgeCases:
                 pos = spline.evaluate(expected_x)
                 # Allow larger tolerance for constrained B-splines
                 assert (
-                    abs(pos[0] - expected_x) < 1.5
+                    abs(pos[0] - expected_x) < 0.1
                 ), f"At s={expected_x}, expected x≈{expected_x}, got x={pos[0]}"
                 assert (
                     abs(pos[1]) < 0.1
