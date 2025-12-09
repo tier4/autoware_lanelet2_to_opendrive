@@ -313,3 +313,106 @@ def remove_lanelets(
         new_map.add(reg_elem)
 
     return new_map
+
+
+def replace_lanelets(
+    lanelet_map: lanelet2.core.LaneletMap,
+    lanelets: List[Union[lanelet2.core.Lanelet, int]],
+    validate: bool = True,
+    tolerance: float = 1e-3,
+) -> lanelet2.core.LaneletMap:
+    """
+    Replace multiple lanelets in the map with a single merged lanelet.
+
+    This function merges multiple lanelets into one using merge_lanelets,
+    assigns a new ID (max lanelet ID in map + 1), removes the original lanelets,
+    and adds the new merged lanelet to the map.
+
+    Args:
+        lanelet_map: The lanelet map to operate on
+        lanelets: List of lanelets or lanelet IDs to merge and replace
+        validate: If True, validates continuity between consecutive lanelets before merging
+        tolerance: Distance tolerance for boundary continuity validation
+
+    Returns:
+        New LaneletMap with the lanelets replaced by the merged lanelet
+
+    Raises:
+        ValueError: If less than 2 lanelets provided, if any lanelet is not found,
+                   or if validation fails
+    """
+    if not lanelets or len(lanelets) < 2:
+        raise ValueError("At least 2 lanelets required for replacement")
+
+    # Convert input to actual lanelet objects
+    lanelet_objects = []
+    lanelet_ids_to_remove = set()
+
+    for lanelet in lanelets:
+        if isinstance(lanelet, int):
+            # It's an ID, need to get the lanelet from the map
+            try:
+                ll = lanelet_map.laneletLayer.get(lanelet)
+                lanelet_objects.append(ll)
+                lanelet_ids_to_remove.add(lanelet)
+            except RuntimeError:
+                raise ValueError(f"Lanelet with ID {lanelet} not found in map")
+        else:
+            # It's already a lanelet object
+            # Verify it exists in the map
+            try:
+                lanelet_map.laneletLayer.get(lanelet.id)
+                lanelet_objects.append(lanelet)
+                lanelet_ids_to_remove.add(lanelet.id)
+            except RuntimeError:
+                raise ValueError(f"Lanelet with ID {lanelet.id} not found in map")
+
+    # Find the maximum lanelet ID in the map
+    max_id = 0
+    for ll in lanelet_map.laneletLayer:
+        if ll.id > max_id:
+            max_id = ll.id
+
+    # Generate new base ID for the merged lanelet (max ID + 1)
+    # We need IDs for: left boundary, right boundary, and the lanelet itself
+    # So we use max_id + 1, max_id + 2, max_id + 3
+    new_base_id = max_id
+
+    # Merge the lanelets using merge_lanelets
+    merged_lanelet = merge_lanelets(
+        lanelet_objects, base_id=new_base_id, validate=validate, tolerance=tolerance
+    )
+
+    # Create a new map with the replacement
+    new_map = lanelet2.core.LaneletMap()
+
+    # Copy all lanelets except those being replaced
+    for ll in lanelet_map.laneletLayer:
+        if ll.id not in lanelet_ids_to_remove:
+            new_map.add(ll)
+
+    # Add the new merged lanelet
+    new_map.add(merged_lanelet)
+
+    # Copy regulatory elements
+    for reg_elem in lanelet_map.regulatoryElementLayer:
+        new_map.add(reg_elem)
+
+    return new_map
+
+
+def get_max_lanelet_id(lanelet_map: lanelet2.core.LaneletMap) -> int:
+    """
+    Get the maximum lanelet ID in the map.
+
+    Args:
+        lanelet_map: The lanelet map to search
+
+    Returns:
+        Maximum lanelet ID in the map, or 0 if map is empty
+    """
+    max_id = 0
+    for ll in lanelet_map.laneletLayer:
+        if ll.id > max_id:
+            max_id = ll.id
+    return max_id
