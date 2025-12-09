@@ -1,9 +1,6 @@
 import numpy as np
 import lanelet2
 from typing import Set
-from .geometry import (
-    point_to_line_segment_distance,
-)
 from .spline import Splines
 from .util import sort_adjacent_groups
 
@@ -313,6 +310,9 @@ def estimate_lanelet_width_as_spline(
     """
     Estimate lanelet total width along its centerline or left boundary using Frenet coordinates.
 
+    Calculates width by measuring the distance between corresponding points on left and right
+    border splines at the same normalized Frenet coordinate positions.
+
     Args:
         lanelet: A Lanelet2 lanelet object
         num_samples: Number of sample points along the reference line
@@ -327,98 +327,61 @@ def estimate_lanelet_width_as_spline(
             f"Invalid reference: {reference}. Must be 'center_line' or 'left_bound'"
         )
 
-    # Get arc length parameterized reference spline based on mode
+    # Extract splines for all three curves (left border, right border, and reference)
+    left_spline = extract_border_from_spline(lanelet, "left", num_control_points)
+    right_spline = extract_border_from_spline(lanelet, "right", num_control_points)
+
+    # Get reference spline based on mode
     if reference == "center_line":
-        length_based_spline = extract_centerline_as_spline(lanelet, num_control_points)
+        reference_spline = extract_centerline_as_spline(lanelet, num_control_points)
     else:  # left_bound
-        # Extract left boundary points directly
-        left_bound = lanelet.leftBound
-        if len(left_bound) < 2:
-            raise ValueError("Lanelet must have at least 2 points in its left bound")
+        reference_spline = left_spline
 
-        points = []
-        for point in left_bound:
-            points.append([point.x, point.y, point.z])
+    # Get total arc length of the reference spline
+    total_length = reference_spline.total_length
 
-        length_based_spline = Splines(
-            np.array(points), num_control_points=num_control_points
-        )
-
-    total_length = length_based_spline.total_length
-
-    left_bound = lanelet.leftBound
-    right_bound = lanelet.rightBound
-
-    left_bound_points = np.array([[p.x, p.y, p.z] for p in left_bound])
-    right_bound_points = np.array([[p.x, p.y, p.z] for p in right_bound])
-
-    # Create length-based sampling points
+    # Create normalized sampling points along the reference curve
     length_values = np.linspace(0, total_length, num_samples)
     total_widths = []
 
-    for length in length_values:
-        # Use Frenet coordinate calculation from the spline class
-        frenet_frame = length_based_spline.get_frenet_frame(length)
-        reference_point = frenet_frame["position"]
+    for s in length_values:
+        # Get normalized parameter (0 to 1) for this arc length
+        t_normalized = s / total_length if total_length > 0 else 0.0
+
+        # Get corresponding arc lengths for left and right splines
+        # Using the same normalized parameter to ensure correspondence
+        left_s = t_normalized * left_spline.total_length
+        right_s = t_normalized * right_spline.total_length
+
+        # Get positions at corresponding points
+        left_pos = left_spline.evaluate(left_s, derivative=0)
+        right_pos = right_spline.evaluate(right_s, derivative=0)
+        reference_pos = reference_spline.evaluate(s, derivative=0)
 
         if reference == "center_line":
-            # Find closest distance to left boundary (use simple point-to-line distance)
-            min_left_dist = float("inf")
-            for i in range(len(left_bound_points) - 1):
-                seg_start = left_bound_points[i]
-                seg_end = left_bound_points[i + 1]
-
-                dist = point_to_line_segment_distance(
-                    reference_point, seg_start, seg_end, None
-                )
-                if dist is not None and dist < min_left_dist:
-                    min_left_dist = dist
-
-            # Find closest distance to right boundary
-            min_right_dist = float("inf")
-            for i in range(len(right_bound_points) - 1):
-                seg_start = right_bound_points[i]
-                seg_end = right_bound_points[i + 1]
-
-                dist = point_to_line_segment_distance(
-                    reference_point, seg_start, seg_end, None
-                )
-                if dist is not None and dist < min_right_dist:
-                    min_right_dist = dist
-
-            left_width = min_left_dist if min_left_dist != float("inf") else 0.0
-            right_width = min_right_dist if min_right_dist != float("inf") else 0.0
+            # For centerline reference, calculate distances from reference to both borders
+            left_width = np.linalg.norm(reference_pos - left_pos)
+            right_width = np.linalg.norm(reference_pos - right_pos)
 
             # Check for asymmetry between left and right widths only for center_line reference
             # Threshold of 0.3m is hardcoded as a parameter for detecting asymmetric lanelets
             ASYMMETRY_THRESHOLD = 0.3  # meters
             if abs(left_width - right_width) > ASYMMETRY_THRESHOLD:
                 raise AsymmetryLaneletException(
-                    f"Lanelet {lanelet.id} has asymmetric widths: "
+                    f"Lanelet {lanelet.id} has asymmetric widths at s={s:.2f}: "
                     f"left={left_width:.2f}m, right={right_width:.2f}m, "
                     f"difference={abs(left_width - right_width):.2f}m > {ASYMMETRY_THRESHOLD}m threshold"
                 )
 
+            # Total width is the sum of left and right distances
+            total_width = left_width + right_width
+
         else:  # reference == "left_bound"
-            # When using left boundary as reference, left width is always 0
-            left_width = 0.0
+            # For left boundary reference, width is just the distance to right border
+            # Left width is always 0 since we're on the left boundary
+            total_width = np.linalg.norm(right_pos - left_pos)
 
-            # Find closest distance to right boundary only
-            min_right_dist = float("inf")
-            for i in range(len(right_bound_points) - 1):
-                seg_start = right_bound_points[i]
-                seg_end = right_bound_points[i + 1]
-
-                dist = point_to_line_segment_distance(
-                    reference_point, seg_start, seg_end, None
-                )
-                if dist is not None and dist < min_right_dist:
-                    min_right_dist = dist
-
-            right_width = min_right_dist if min_right_dist != float("inf") else 0.0
-            # No asymmetry check needed for left_bound reference mode
-
-        total_widths.append(left_width + right_width)
+        total_widths.append(total_width)
 
     # Create 1D spline for total width values
     # Create points as [[length0, width0, 0], [length1, width1, 0], ...]
