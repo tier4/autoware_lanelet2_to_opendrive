@@ -1,6 +1,6 @@
 """Functions for working with Lanelet2 lanelet objects."""
 
-from typing import Optional, List
+from typing import Optional, List, Union
 import lanelet2
 import numpy as np
 
@@ -229,13 +229,205 @@ def merge_lanelets_from_ids(
     # Retrieve lanelets from map by ID
     lanelets = []
     for lid in lanelet_ids:
-        try:
-            lanelet = lanelet_map.laneletLayer.get(lid)
-            if lanelet is None:
-                raise ValueError(f"Lanelet with ID {lid} not found in map")
-            lanelets.append(lanelet)
-        except Exception as e:
-            raise ValueError(f"Failed to retrieve lanelet with ID {lid}: {e}")
+        lanelet = get_lanelet_by_id(lanelet_map, lid)
+        if lanelet is None:
+            raise ValueError(f"Lanelet with ID {lid} not found in map")
+        lanelets.append(lanelet)
 
     # Merge the retrieved lanelets
     return merge_lanelets(lanelets, base_id, validate, tolerance)
+
+
+def remove_lanelet(
+    lanelet_map: lanelet2.core.LaneletMap,
+    lanelet: Union[lanelet2.core.Lanelet, int],
+) -> lanelet2.core.LaneletMap:
+    """
+    Remove a specified lanelet from the lanelet map by creating a new map without it.
+
+    Note: Since the Python bindings don't expose a direct remove method,
+    this function creates a new map with all lanelets except the specified one.
+
+    Args:
+        lanelet_map: The lanelet map to remove from
+        lanelet: Either a Lanelet object or lanelet ID to remove
+
+    Returns:
+        New LaneletMap with the specified lanelet removed
+    """
+    # Handle both Lanelet object and ID input
+    if isinstance(lanelet, int):
+        lanelet_id = lanelet
+    else:
+        lanelet_id = lanelet.id
+
+    # Create a new map
+    new_map = lanelet2.core.LaneletMap()
+
+    # Copy all lanelets except the one to remove
+    for ll in lanelet_map.laneletLayer:
+        if ll.id != lanelet_id:
+            new_map.add(ll)
+
+    # Copy regulatory elements
+    for reg_elem in lanelet_map.regulatoryElementLayer:
+        new_map.add(reg_elem)
+
+    return new_map
+
+
+def remove_lanelets(
+    lanelet_map: lanelet2.core.LaneletMap,
+    lanelets: List[Union[lanelet2.core.Lanelet, int]],
+) -> lanelet2.core.LaneletMap:
+    """
+    Remove multiple lanelets from the lanelet map by creating a new map without them.
+
+    Args:
+        lanelet_map: The lanelet map to remove from
+        lanelets: List of Lanelet objects or lanelet IDs to remove
+
+    Returns:
+        New LaneletMap with the specified lanelets removed
+    """
+    # Convert all inputs to IDs
+    lanelet_ids_to_remove = set()
+    for lanelet in lanelets:
+        if isinstance(lanelet, int):
+            lanelet_ids_to_remove.add(lanelet)
+        else:
+            lanelet_ids_to_remove.add(lanelet.id)
+
+    # Create a new map
+    new_map = lanelet2.core.LaneletMap()
+
+    # Copy all lanelets except those to remove
+    for ll in lanelet_map.laneletLayer:
+        if ll.id not in lanelet_ids_to_remove:
+            new_map.add(ll)
+
+    # Copy regulatory elements
+    for reg_elem in lanelet_map.regulatoryElementLayer:
+        new_map.add(reg_elem)
+
+    return new_map
+
+
+def remove_lanelet_and_update_connections(
+    lanelet_map: lanelet2.core.LaneletMap,
+    lanelet: Union[lanelet2.core.Lanelet, int],
+    merge_connections: bool = False,
+    base_id: Optional[int] = None,
+) -> tuple[lanelet2.core.LaneletMap, Optional[lanelet2.core.Lanelet]]:
+    """
+    Remove a lanelet from the map and optionally merge its connections.
+
+    This function removes a lanelet and can automatically merge its predecessor
+    and successor if they exist and the merge_connections flag is True.
+
+    Args:
+        lanelet_map: The lanelet map to operate on
+        lanelet: Either a Lanelet object or lanelet ID to remove
+        merge_connections: If True, attempts to merge predecessor and successor lanelets
+        base_id: Optional base ID for creating new merged lanelet IDs
+
+    Returns:
+        Tuple of (new_map, merged_lanelet) where:
+        - new_map: New LaneletMap with modifications
+        - merged_lanelet: If merge_connections is True and merging succeeds,
+                         the new merged lanelet. Otherwise, None.
+
+    Raises:
+        ValueError: If the lanelet doesn't exist in the map
+    """
+    from .util import find_connecting_lanelet_groups, ConnectionDirection
+
+    # Get the lanelet object if ID was provided
+    if isinstance(lanelet, int):
+        lanelet_obj = get_lanelet_by_id(lanelet_map, lanelet)
+        if lanelet_obj is None:
+            raise ValueError(f"Lanelet with ID {lanelet} not found in map")
+    else:
+        lanelet_obj = lanelet
+        # Verify it exists in the map
+        if get_lanelet_by_id(lanelet_map, lanelet_obj.id) is None:
+            raise ValueError(f"Lanelet with ID {lanelet_obj.id} not found in map")
+
+    merged_lanelet = None
+    lanelets_to_remove = {lanelet_obj.id}
+    lanelets_to_add = []
+
+    if merge_connections:
+        # Find predecessor and successor lanelets
+        predecessors = find_connecting_lanelet_groups(
+            lanelet_map, [lanelet_obj], ConnectionDirection.PREVIOUS
+        )
+
+        successors = find_connecting_lanelet_groups(
+            lanelet_map, [lanelet_obj], ConnectionDirection.FOLLOWING
+        )
+
+        # If there's exactly one predecessor and one successor, try to merge them
+        if predecessors and successors:
+            # Get the first groups (assuming single lane connection)
+            pred_group = predecessors[0] if predecessors else set()
+            succ_group = successors[0] if successors else set()
+
+            # For simplicity, handle the case where there's one predecessor and one successor
+            if len(pred_group) == 1 and len(succ_group) == 1:
+                predecessor = list(pred_group)[0]
+                successor = list(succ_group)[0]
+
+                # Try to merge the predecessor and successor
+                try:
+                    merged_lanelet = merge_lanelet(predecessor, successor, base_id)
+
+                    # Mark original lanelets for removal and add the merged one
+                    lanelets_to_remove.add(predecessor.id)
+                    lanelets_to_remove.add(successor.id)
+                    lanelets_to_add.append(merged_lanelet)
+
+                except Exception:
+                    # If merging fails, just remove the target lanelet
+                    pass
+
+    # Create new map
+    new_map = lanelet2.core.LaneletMap()
+
+    # Copy all lanelets except those marked for removal
+    for ll in lanelet_map.laneletLayer:
+        if ll.id not in lanelets_to_remove:
+            new_map.add(ll)
+
+    # Add new lanelets
+    for ll in lanelets_to_add:
+        new_map.add(ll)
+
+    # Copy regulatory elements
+    for reg_elem in lanelet_map.regulatoryElementLayer:
+        new_map.add(reg_elem)
+
+    return new_map, merged_lanelet
+
+
+def get_lanelet_by_id(
+    lanelet_map: lanelet2.core.LaneletMap,
+    lanelet_id: int,
+) -> Optional[lanelet2.core.Lanelet]:
+    """
+    Get a lanelet from the map by its ID.
+
+    This is a convenience function that safely retrieves a lanelet by ID.
+
+    Args:
+        lanelet_map: The lanelet map to search in
+        lanelet_id: The ID of the lanelet to retrieve
+
+    Returns:
+        The Lanelet object if found, None otherwise
+    """
+    try:
+        return lanelet_map.laneletLayer.get(lanelet_id)
+    except RuntimeError:
+        # lanelet2 throws RuntimeError when element not found
+        return None
