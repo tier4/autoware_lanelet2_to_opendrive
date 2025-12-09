@@ -1,11 +1,11 @@
 """Lane implementation for OpenDRIVE conversion."""
 
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Union
 import lanelet2
 import lxml.etree as ET
 
 from scenariogeneration import xodr
-from ..centerline import estimate_lanelet_width_as_spline
+from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
 from ..spline import Splines
 from ..util import find_adjacent_groups
 
@@ -75,40 +75,53 @@ class Lane:
 
     def _add_width_from_spline(
         self,
-        width_spline: Splines,
+        width_spline: Union[Width1DSplineAdapter, Splines],
         road_length: Optional[float] = None,
     ) -> None:
         """
-        Add width definitions from a B-spline using sampled width values.
-        Creates width definitions by sampling the spline at regular intervals.
+        Add width definitions from a width spline using polynomial coefficients.
+
+        For Width1DSplineAdapter objects (from estimate_lanelet_width_as_spline),
+        this extracts the proper cubic polynomial coefficients (a, b, c, d).
+        For legacy Splines objects, it falls back to sampling.
 
         Args:
-            width_spline: Splines object for width data
+            width_spline: Width spline object (Width1DSplineAdapter or Splines)
             road_length: Total road length (uses spline length if None)
         """
         if road_length is None:
             road_length = width_spline.total_length
 
-        # Sample the spline to create width segments
-        num_segments = 10  # Number of segments to create
-        segment_length = road_length / num_segments
+        # Check if this is a Width1DSplineAdapter with polynomial segments
+        if hasattr(width_spline, "get_polynomial_segments"):
+            # Use proper polynomial coefficients from 1D cubic spline
+            segments = width_spline.get_polynomial_segments()
 
-        for i in range(num_segments):
-            s_start = i * segment_length
-            s_end = min((i + 1) * segment_length, road_length)
+            for s_offset, a, b, c, d in segments:
+                # Only add segments within the road length
+                if s_offset < road_length:
+                    self._add_width(LaneWidth(s_offset=s_offset, a=a, b=b, c=c, d=d))
+        else:
+            # Fallback for legacy Splines objects - sample at intervals
+            num_segments = 10  # Number of segments to create
+            segment_length = road_length / num_segments
 
-            if s_end <= s_start:
-                continue
+            for i in range(num_segments):
+                s_start = i * segment_length
+                s_end = min((i + 1) * segment_length, road_length)
 
-            # Evaluate spline at start to get width value
-            # For width splines, we use the Y coordinate as the width value
-            start_pos = width_spline.evaluate(s_start)
-            width_value = start_pos[1]  # Y coordinate contains width
+                if s_end <= s_start:
+                    continue
 
-            # Create constant width definition for this segment
-            self._add_width(
-                LaneWidth(s_offset=s_start, a=width_value, b=0.0, c=0.0, d=0.0)
-            )
+                # Evaluate spline at start to get width value
+                # For width splines, we use the Y coordinate as the width value
+                start_pos = width_spline.evaluate(s_start)
+                width_value = start_pos[1]  # Y coordinate contains width
+
+                # Create constant width definition for this segment
+                self._add_width(
+                    LaneWidth(s_offset=s_start, a=width_value, b=0.0, c=0.0, d=0.0)
+                )
 
     @staticmethod
     def construct_from_lanelet(
@@ -162,7 +175,9 @@ class Lane:
             )
         else:
             # Calculate lane width using spline curve from estimate_lanelet_width_as_spline
-            width_spline = estimate_lanelet_width_as_spline(lanelet, reference="center")
+            width_spline = estimate_lanelet_width_as_spline(
+                lanelet, reference="center_line"
+            )
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)
