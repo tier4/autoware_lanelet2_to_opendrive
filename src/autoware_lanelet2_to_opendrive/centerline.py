@@ -1,11 +1,9 @@
 import numpy as np
 import lanelet2
 from typing import Set
-from .geometry import (
-    point_to_line_segment_distance,
-    ArcLengthParameterizedCatmullRomSpline,
-)
+from .spline import Splines
 from .util import sort_adjacent_groups
+from .width_spline import WidthSpline1D
 
 
 class AsymmetryLaneletException(Exception):
@@ -14,161 +12,546 @@ class AsymmetryLaneletException(Exception):
     pass
 
 
-def extract_centerline_as_spline(
-    lanelet: lanelet2.core.Lanelet, alpha: float = 0.5
-) -> ArcLengthParameterizedCatmullRomSpline:
+class Width1DSplineAdapter:
     """
-    Extract centerline from a Lanelet and return as arc length parameterized spline.
+    Adapter class that wraps WidthSpline1D to provide compatibility with existing interface.
+    """
+
+    def __init__(self, width_spline_1d: WidthSpline1D):
+        """
+        Initialize the adapter.
+
+        Args:
+            width_spline_1d: The 1D width spline object
+        """
+        self.spline_1d = width_spline_1d
+        self.total_length = width_spline_1d.total_arc_length
+
+    def evaluate(self, s: float, derivative: int = 0) -> np.ndarray:
+        """
+        Evaluate the width at a given arc length.
+
+        Args:
+            s: Arc length along the reference line
+            derivative: Derivative order (only 0 supported)
+
+        Returns:
+            3D array [s, width, 0] for compatibility
+        """
+        return self.spline_1d.evaluate_with_3d_compatibility(s, derivative)
+
+    def evaluate_arc_length(self, s: float, derivative: int = 0) -> np.ndarray:
+        """Alias for evaluate method."""
+        return self.evaluate(s, derivative)
+
+    def get_width_at_arc_length(self, s: float) -> float:
+        """Get just the width value at a given arc length."""
+        return self.spline_1d.evaluate(s, derivative=0)
+
+    def get_polynomial_segments(self):
+        """Get polynomial segments for OpenDRIVE export."""
+        return self.spline_1d.get_segments()
+
+
+class WidthSplineWrapper:
+    """
+    Wrapper class that provides a proper interface for width splines.
+
+    This class wraps a parametric spline that maps t ∈ [0,1] to (arc_length, width)
+    and provides methods to query width at a given arc_length.
+    """
+
+    def __init__(self, parametric_spline: Splines, total_arc_length: float):
+        """
+        Initialize the width spline wrapper.
+
+        Args:
+            parametric_spline: A Splines object that maps t to (arc_length, width, 0)
+            total_arc_length: Total arc length of the reference line
+        """
+        self.parametric_spline = parametric_spline
+        self.total_arc_length = total_arc_length
+
+        # Build lookup table for arc_length -> parameter t mapping
+        self._build_lookup_table()
+
+    def _build_lookup_table(self, num_samples: int = 100):
+        """Build a lookup table for converting arc_length to parameter t."""
+        self.t_samples = np.linspace(0, 1, num_samples)
+        self.arc_length_samples = []
+        self.width_samples = []
+
+        for t in self.t_samples:
+            # Evaluate the parametric spline at t
+            # Note: _evaluate_normalized returns points in the translated coordinate system
+            point = self.parametric_spline._evaluate_normalized(t)
+            # Need to add back the origin offset to get actual values
+            actual_point = point + self.parametric_spline._origin_offset
+            # point[0] is arc_length, point[1] is width
+            self.arc_length_samples.append(actual_point[0])
+            self.width_samples.append(actual_point[1])
+
+        self.arc_length_samples = np.array(self.arc_length_samples)
+        self.width_samples = np.array(self.width_samples)
+
+    def evaluate(self, s: float, derivative: int = 0) -> np.ndarray:
+        """
+        Evaluate the width at a given arc length.
+
+        Args:
+            s: Arc length along the reference line
+            derivative: Derivative order (only 0 is supported for now)
+
+        Returns:
+            For derivative=0: Returns a 3D array [s, width, 0] for compatibility
+        """
+        if derivative != 0:
+            raise NotImplementedError("Width derivatives not yet implemented")
+
+        # Clamp arc length to valid range
+        s = np.clip(s, 0, self.total_arc_length)
+
+        # Find parameter t corresponding to arc length s
+        # Use linear interpolation on the lookup table
+        t = np.interp(s, self.arc_length_samples, self.t_samples)
+
+        # Evaluate the parametric spline at t
+        point = self.parametric_spline._evaluate_normalized(t)
+        actual_point = point + self.parametric_spline._origin_offset
+
+        # Return in format [arc_length, width, 0] for compatibility
+        return np.array([s, actual_point[1], 0.0])
+
+    def evaluate_arc_length(self, s: float, derivative: int = 0) -> np.ndarray:
+        """Alias for evaluate method."""
+        return self.evaluate(s, derivative)
+
+    @property
+    def total_length(self) -> float:
+        """Get the total arc length."""
+        return self.total_arc_length
+
+    def get_width_at_arc_length(self, s: float) -> float:
+        """
+        Get just the width value at a given arc length.
+
+        Args:
+            s: Arc length along the reference line
+
+        Returns:
+            Width value at the given arc length
+        """
+        result = self.evaluate(s)
+        return result[1]  # Return just the width component
+
+
+def _get_boundary_start_vel(boundary) -> np.ndarray:
+    """
+    Calculate start velocity vector for a boundary spline.
+
+    Args:
+        boundary: List of points representing a boundary
+
+    Returns:
+        3D velocity vector along the boundary direction
+    """
+    if len(boundary) < 2:
+        return np.array([1.0, 0.0, 0.0])  # Default direction
+
+    # Calculate direction from first to second point
+    start_point = np.array([boundary[0].x, boundary[0].y, boundary[0].z])
+    next_point = np.array([boundary[1].x, boundary[1].y, boundary[1].z])
+
+    direction = next_point - start_point
+    length = np.linalg.norm(direction)
+
+    if length < 1e-10:
+        return np.array([1.0, 0.0, 0.0])  # Fallback
+
+    return direction / length
+
+
+def _get_boundary_end_vel(boundary) -> np.ndarray:
+    """
+    Calculate end velocity vector for a boundary spline.
+
+    Args:
+        boundary: List of points representing a boundary
+
+    Returns:
+        3D velocity vector along the boundary direction
+    """
+    if len(boundary) < 2:
+        return np.array([1.0, 0.0, 0.0])  # Default direction
+
+    # Calculate direction from second-to-last to last point
+    prev_point = np.array([boundary[-2].x, boundary[-2].y, boundary[-2].z])
+    end_point = np.array([boundary[-1].x, boundary[-1].y, boundary[-1].z])
+
+    direction = end_point - prev_point
+    length = np.linalg.norm(direction)
+
+    if length < 1e-10:
+        return np.array([1.0, 0.0, 0.0])  # Fallback
+
+    return direction / length
+
+
+def _get_start_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
+    """
+    Calculate start velocity vector for centerline spline from lanelet boundaries.
 
     Args:
         lanelet: A Lanelet2 lanelet object
-        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
 
     Returns:
-        ArcLengthParameterizer object that can be evaluated using arc length
+        3D velocity vector perpendicular to the line connecting first points of left and right boundaries
     """
-    centerline = lanelet.centerline
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
 
-    if len(centerline) < 2:
-        raise ValueError("Lanelet must have at least 2 points in its centerline")
+    if len(left_bound) < 1 or len(right_bound) < 1:
+        raise ValueError(
+            "Lanelet must have at least 1 point in both left and right boundaries"
+        )
 
+    # Get first points of boundaries
+    left_first = np.array([left_bound[0].x, left_bound[0].y])
+    right_first = np.array([right_bound[0].x, right_bound[0].y])
+
+    # Calculate line segment connecting left and right boundaries
+    segment = right_first - left_first  # Vector from left to right
+
+    # Calculate perpendicular vector (2D) pointing forward along the lanelet
+    # Rotate 90 degrees counter-clockwise: (x, y) -> (-y, x)
+    perp_2d = np.array([-segment[1], segment[0]])
+
+    # Normalize to unit vector
+    length = np.linalg.norm(perp_2d)
+    if length < 1e-10:
+        # Fallback to default direction if boundaries are parallel
+        perp_2d = np.array([1.0, 0.0])
+    else:
+        perp_2d = perp_2d / length
+
+    # Convert to 3D by adding z=0
+    return np.array([perp_2d[0], perp_2d[1], 0.0])
+
+
+def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
+    """
+    Calculate end velocity vector for centerline spline from lanelet boundaries.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+
+    Returns:
+        3D velocity vector perpendicular to the line connecting last points of left and right boundaries
+    """
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
+
+    if len(left_bound) < 1 or len(right_bound) < 1:
+        raise ValueError(
+            "Lanelet must have at least 1 point in both left and right boundaries"
+        )
+
+    # Get last points of boundaries
+    left_last = np.array([left_bound[-1].x, left_bound[-1].y])
+    right_last = np.array([right_bound[-1].x, right_bound[-1].y])
+
+    # Calculate line segment connecting left and right boundaries
+    segment = right_last - left_last  # Vector from left to right
+
+    # Calculate perpendicular vector (2D) pointing forward along the lanelet
+    # Rotate 90 degrees counter-clockwise: (x, y) -> (-y, x)
+    perp_2d = np.array([-segment[1], segment[0]])
+
+    # Normalize to unit vector
+    length = np.linalg.norm(perp_2d)
+    if length < 1e-10:
+        # Fallback to default direction if boundaries are parallel
+        perp_2d = np.array([1.0, 0.0])
+    else:
+        perp_2d = perp_2d / length
+
+    # Convert to 3D by adding z=0
+    return np.array([perp_2d[0], perp_2d[1], 0.0])
+
+
+def extract_centerline_as_spline(
+    lanelet: lanelet2.core.Lanelet, num_control_points: int = 10
+) -> Splines:
+    """
+    Extract centerline from a Lanelet using midpoints between left and right borders.
+
+    Uses line segment representation of borders to calculate centerline points
+    by interpolating along both borders using normalized coordinates.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+        num_control_points: Number of control points for B-spline interpolation
+
+    Returns:
+        Splines object that can be evaluated using arc length
+    """
+    # Get raw boundary points
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
+
+    if len(left_bound) < 2 or len(right_bound) < 2:
+        raise ValueError("Both boundaries must have at least 2 points")
+
+    # Convert to numpy arrays
+    left_points = np.array([[p.x, p.y, p.z] for p in left_bound])
+    right_points = np.array([[p.x, p.y, p.z] for p in right_bound])
+
+    # Calculate cumulative arc lengths for both boundaries
+    left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
+    left_cumulative = np.concatenate(([0], np.cumsum(left_dists)))
+    left_total_length = left_cumulative[-1]
+
+    right_dists = np.linalg.norm(np.diff(right_points, axis=0), axis=1)
+    right_cumulative = np.concatenate(([0], np.cumsum(right_dists)))
+    right_total_length = right_cumulative[-1]
+
+    # Number of sample points for centerline
+    num_samples = max(20, num_control_points * 2)
+
+    centerline_points = []
+    for i in range(num_samples):
+        # Normalized coordinate from 0 to 1
+        t_normalized = i / (num_samples - 1) if num_samples > 1 else 0.0
+
+        # Convert to arc length for each boundary
+        left_s = t_normalized * left_total_length
+        right_s = t_normalized * right_total_length
+
+        # Interpolate on left boundary line segments
+        left_point = _interpolate_on_line_segments(left_points, left_cumulative, left_s)
+
+        # Interpolate on right boundary line segments
+        right_point = _interpolate_on_line_segments(
+            right_points, right_cumulative, right_s
+        )
+
+        # Calculate midpoint
+        midpoint = (left_point + right_point) / 2.0
+        centerline_points.append(midpoint)
+
+    centerline_points = np.array(centerline_points)
+
+    # Create B-spline with constrained fitting
+    return Splines(
+        centerline_points,
+        start_vel=_get_start_vel(lanelet),
+        end_vel=_get_end_vel(lanelet),
+        num_control_points=num_control_points,
+    )
+
+
+def _interpolate_on_line_segments(
+    points: np.ndarray, cumulative_lengths: np.ndarray, s: float
+) -> np.ndarray:
+    """
+    Interpolate a point along line segments at given arc length.
+
+    Args:
+        points: Array of points defining the line segments (N x 3)
+        cumulative_lengths: Cumulative arc lengths at each point (N,)
+        s: Target arc length for interpolation
+
+    Returns:
+        Interpolated 3D point
+    """
+    # Clamp s to valid range
+    s = np.clip(s, 0.0, cumulative_lengths[-1])
+
+    # Find which segment contains the target arc length
+    segment_idx = np.searchsorted(cumulative_lengths, s) - 1
+    segment_idx = np.clip(segment_idx, 0, len(points) - 2)
+
+    # Get segment endpoints
+    p1 = points[segment_idx]
+    p2 = points[segment_idx + 1]
+
+    # Get arc lengths at segment endpoints
+    s1 = cumulative_lengths[segment_idx]
+    s2 = cumulative_lengths[segment_idx + 1]
+
+    # Avoid division by zero for zero-length segments
+    if abs(s2 - s1) < 1e-10:
+        return p1
+
+    # Linear interpolation within the segment
+    t = (s - s1) / (s2 - s1)
+    return p1 + t * (p2 - p1)
+
+
+def extract_border_from_spline(
+    lanelet: lanelet2.core.Lanelet, border: str, num_control_points: int = 10
+) -> Splines:
+    """
+    Extract border line from a Lanelet and return as B-spline with arc length parameterization.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+        border: Border specification - "left" or "right"
+        num_control_points: Number of control points for B-spline interpolation
+
+    Returns:
+        Splines object that can be evaluated using arc length
+
+    Raises:
+        ValueError: If border is not "left" or "right", or if insufficient points
+    """
+    if border not in ["left", "right"]:
+        raise ValueError(f"Invalid border: {border}. Must be 'left' or 'right'")
+
+    # Get the appropriate boundary
+    if border == "left":
+        boundary = lanelet.leftBound
+    else:  # border == "right"
+        boundary = lanelet.rightBound
+
+    if len(boundary) < 2:
+        raise ValueError(
+            f"Lanelet must have at least 2 points in its {border} boundary"
+        )
+
+    # Extract points from the boundary
     points = []
-    for point in centerline:
+    for point in boundary:
         points.append([point.x, point.y, point.z])
 
     points = np.array(points)
 
-    # Use the new function from geometry.py
-    return ArcLengthParameterizedCatmullRomSpline(points, alpha)
+    # Create B-spline with constrained fitting
+    return Splines(
+        points,
+        start_vel=_get_boundary_start_vel(boundary),
+        end_vel=_get_boundary_end_vel(boundary),
+        num_control_points=num_control_points,
+    )
 
 
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     num_samples: int = 20,
-    alpha: float = 0.5,
+    num_control_points: int = 10,
     reference: str = "center_line",
-) -> ArcLengthParameterizedCatmullRomSpline:
+) -> Width1DSplineAdapter:
     """
-    Estimate lanelet total width along its centerline or left boundary using Frenet coordinates.
+    Estimate lanelet width as a spline by measuring distances between corresponding
+    points on borders and centerline in normalized Frenet coordinates.
 
     Args:
         lanelet: A Lanelet2 lanelet object
-        num_samples: Number of sample points along the reference line
-        alpha: Alpha parameter for Catmull-Rom spline
-        reference: Reference line for width calculation - "center_line" or "left_bound"
+        num_samples: Number of points to sample along the lanelet for width estimation
+        num_control_points: Number of control points for width spline interpolation
+        reference: Reference line to use - "center_line", "left_bound", or "right_bound"
 
     Returns:
-        CatmullRom spline object representing the total width (left + right distances)
+        Splines object representing width as a function of arc length along the reference
+
+    Raises:
+        ValueError: If reference is invalid or if lanelet has insufficient points
     """
-    if reference not in ["center_line", "left_bound"]:
+    if reference not in ["center_line", "left_bound", "right_bound"]:
         raise ValueError(
-            f"Invalid reference: {reference}. Must be 'center_line' or 'left_bound'"
+            f"Invalid reference: {reference}. Must be 'center_line', 'left_bound', or 'right_bound'"
         )
 
-    # Get arc length parameterized reference spline based on mode
+    # Extract splines for borders and reference line
+    left_spline = extract_border_from_spline(lanelet, "left", num_control_points)
+    right_spline = extract_border_from_spline(lanelet, "right", num_control_points)
+
+    # Choose reference spline based on parameter
     if reference == "center_line":
-        length_based_spline = extract_centerline_as_spline(lanelet, alpha)
-    else:  # left_bound
-        length_based_spline = extract_left_boundary_as_spline(lanelet, alpha)
+        reference_spline = extract_centerline_as_spline(lanelet, num_control_points)
+    elif reference == "left_bound":
+        reference_spline = left_spline
+    elif reference == "right_bound":
+        reference_spline = right_spline
 
-    total_length = length_based_spline.total_length
+    # Get total arc lengths for normalization
+    ref_total_length = reference_spline.total_length
+    left_total_length = left_spline.total_length
+    right_total_length = right_spline.total_length
 
-    left_bound = lanelet.leftBound
-    right_bound = lanelet.rightBound
+    # Sample points along normalized arc length (0 to 1)
+    normalized_positions = np.linspace(0.0, 1.0, num_samples)
 
-    left_bound_points = np.array([[p.x, p.y, p.z] for p in left_bound])
-    right_bound_points = np.array([[p.x, p.y, p.z] for p in right_bound])
+    # Calculate widths at each normalized position
+    arc_lengths = []
+    widths = []
 
-    # Create length-based sampling points
-    length_values = np.linspace(0, total_length, num_samples)
-    total_widths = []
+    for t_norm in normalized_positions:
+        # Convert normalized position to actual arc length for each spline
+        s_ref = t_norm * ref_total_length
+        s_left = t_norm * left_total_length
+        s_right = t_norm * right_total_length
 
-    for length in length_values:
-        # Use Frenet coordinate calculation from the spline class
-        frenet_frame = length_based_spline.evaluate(length, frenet=True)
-        reference_point = frenet_frame["position"]
+        # Get positions at corresponding normalized locations
+        ref_pos = reference_spline.evaluate(s_ref, derivative=0)
+        left_pos = left_spline.evaluate(s_left, derivative=0)
+        right_pos = right_spline.evaluate(s_right, derivative=0)
 
+        # Calculate width based on reference type
         if reference == "center_line":
-            # Find closest distance to left boundary (use simple point-to-line distance)
-            min_left_dist = float("inf")
-            for i in range(len(left_bound_points) - 1):
-                seg_start = left_bound_points[i]
-                seg_end = left_bound_points[i + 1]
+            # Width is the total distance from center to both borders
+            left_dist = np.linalg.norm(ref_pos - left_pos)
+            right_dist = np.linalg.norm(ref_pos - right_pos)
+            width = left_dist + right_dist
+        elif reference == "left_bound":
+            # Width is distance from left to right border
+            width = np.linalg.norm(left_pos - right_pos)
+        elif reference == "right_bound":
+            # Width is distance from right to left border
+            width = np.linalg.norm(right_pos - left_pos)
 
-                dist = point_to_line_segment_distance(
-                    reference_point, seg_start, seg_end, None
-                )
-                if dist is not None and dist < min_left_dist:
-                    min_left_dist = dist
+        arc_lengths.append(s_ref)
+        widths.append(width)
 
-            # Find closest distance to right boundary
-            min_right_dist = float("inf")
-            for i in range(len(right_bound_points) - 1):
-                seg_start = right_bound_points[i]
-                seg_end = right_bound_points[i + 1]
+    # Create a parametric representation where parameter t goes from 0 to 1
+    # and maps to arc length positions along the reference line
+    # We'll create 3D points where each dimension represents:
+    # x: arc_length (for reference)
+    # y: width value
+    # z: 0 (unused)
 
-                dist = point_to_line_segment_distance(
-                    reference_point, seg_start, seg_end, None
-                )
-                if dist is not None and dist < min_right_dist:
-                    min_right_dist = dist
+    # The old parametric approach is no longer needed since we use 1D splines directly
+    # We previously created 3D points but now we work with 1D width values
 
-            left_width = min_left_dist if min_left_dist != float("inf") else 0.0
-            right_width = min_right_dist if min_right_dist != float("inf") else 0.0
+    # Create a proper 1D cubic spline for width as a function of arc length
+    # This will give us the polynomial coefficients we need for OpenDRIVE
+    arc_lengths_array = np.array(arc_lengths)
+    widths_array = np.array(widths)
 
-            # Check for asymmetry between left and right widths only for center_line reference
-            # Threshold of 0.3m is hardcoded as a parameter for detecting asymmetric lanelets
-            ASYMMETRY_THRESHOLD = 0.3  # meters
-            if abs(left_width - right_width) > ASYMMETRY_THRESHOLD:
-                raise AsymmetryLaneletException(
-                    f"Lanelet {lanelet.id} has asymmetric widths: "
-                    f"left={left_width:.2f}m, right={right_width:.2f}m, "
-                    f"difference={abs(left_width - right_width):.2f}m > {ASYMMETRY_THRESHOLD}m threshold"
-                )
+    # Use natural boundary conditions for smooth interpolation
+    # Could also use 'clamped' with specified derivatives if needed
+    width_spline_1d = WidthSpline1D(arc_lengths_array, widths_array, bc_type="natural")
 
-        else:  # reference == "left_bound"
-            # When using left boundary as reference, left width is always 0
-            left_width = 0.0
-
-            # Find closest distance to right boundary only
-            min_right_dist = float("inf")
-            for i in range(len(right_bound_points) - 1):
-                seg_start = right_bound_points[i]
-                seg_end = right_bound_points[i + 1]
-
-                dist = point_to_line_segment_distance(
-                    reference_point, seg_start, seg_end, None
-                )
-                if dist is not None and dist < min_right_dist:
-                    min_right_dist = dist
-
-            right_width = min_right_dist if min_right_dist != float("inf") else 0.0
-            # No asymmetry check needed for left_bound reference mode
-
-        total_widths.append(left_width + right_width)
-
-    # Create 1D spline for total width values
-    # CatmullRom expects points as rows: [[length0, width0], [length1, width1], ...]
-    width_points = np.column_stack([length_values, total_widths])
-
-    return ArcLengthParameterizedCatmullRomSpline(width_points, alpha=alpha)
+    # Create a wrapper that provides the same interface as the old WidthSplineWrapper
+    # but uses the proper 1D spline internally
+    return Width1DSplineAdapter(width_spline_1d)
 
 
 def extract_centerline_as_spline_from_two_lanelets(
     lanelet_map: lanelet2.core.LaneletMap,
     two_lanelets: Set[lanelet2.core.Lanelet],
-    alpha: float = 0.5,
-) -> ArcLengthParameterizedCatmullRomSpline:
+    num_control_points: int = 10,
+) -> Splines:
     """
     Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
 
     Args:
         lanelet_map: The lanelet2 map containing the lanelets
         two_lanelets: Set containing exactly two lanelets
-        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
+        num_control_points: Number of control points for B-spline interpolation
 
     Returns:
-        ArcLengthParameterizedCatmullRomSpline representing the right bound of the left lanelet
+        Splines object representing the right bound of the left lanelet
 
     Raises:
         ValueError: If two_lanelets does not contain exactly 2 lanelets
@@ -194,32 +577,10 @@ def extract_centerline_as_spline_from_two_lanelets(
 
     points = np.array(points)
 
-    # Create and return the spline
-    return ArcLengthParameterizedCatmullRomSpline(points, alpha)
-
-
-def extract_left_boundary_as_spline(
-    lanelet: lanelet2.core.Lanelet, alpha: float = 0.5
-) -> ArcLengthParameterizedCatmullRomSpline:
-    """
-    Extract left boundary from a Lanelet and return as arc length parameterized spline.
-
-    Args:
-        lanelet: A Lanelet2 lanelet object
-        alpha: Alpha parameter for Catmull-Rom spline (0=uniform, 0.5=centripetal, 1=chordal)
-
-    Returns:
-        ArcLengthParameterizedCatmullRomSpline representing the left boundary
-    """
-    left_bound = lanelet.leftBound
-
-    if len(left_bound) < 2:
-        raise ValueError("Lanelet must have at least 2 points in its left bound")
-
-    points = []
-    for point in left_bound:
-        points.append([point.x, point.y, point.z])
-
-    points = np.array(points)
-
-    return ArcLengthParameterizedCatmullRomSpline(points, alpha)
+    # Create and return the B-spline
+    return Splines(
+        points,
+        start_vel=_get_start_vel(left_lanelet),
+        end_vel=_get_end_vel(left_lanelet),
+        num_control_points=num_control_points,
+    )

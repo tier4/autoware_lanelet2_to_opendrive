@@ -2,7 +2,7 @@
 
 import lanelet2
 from typing import Union, List, Set, TYPE_CHECKING
-from ..geometry import ArcLengthParameterizedCatmullRomSpline
+from ..spline import Splines
 
 if TYPE_CHECKING:
     pass
@@ -21,8 +21,8 @@ class ReferenceLine:
     instance for compatibility but is specifically designed for reference line purposes.
     """
 
-    def __init__(self, centerline_spline: ArcLengthParameterizedCatmullRomSpline):
-        self.centerline_spline = centerline_spline
+    def __init__(self, centerline_spline: Splines):
+        self.centerline_spline: Splines = centerline_spline
 
         # Create a Lane instance for the reference line
         # Import here to avoid circular import
@@ -69,9 +69,11 @@ class ReferenceLine:
             # Single lane: use the left boundary as reference line
             single_lanelet = sorted_lanelets[0]
 
-            from ..centerline import extract_left_boundary_as_spline
+            from ..centerline import extract_border_from_spline
 
-            centerline_spline = extract_left_boundary_as_spline(single_lanelet)
+            centerline_spline = extract_border_from_spline(
+                single_lanelet, border="left"
+            )
         elif num_lanes % 2 == 1:
             # Odd number of lanes: use the center lane's centerline
             center_lane_index = num_lanes // 2

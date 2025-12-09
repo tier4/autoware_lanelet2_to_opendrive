@@ -8,7 +8,7 @@ import numpy as np
 from .enums import GeometryType
 
 if TYPE_CHECKING:
-    from ..geometry import ArcLengthParameterizedCatmullRomSpline
+    from ..spline import Splines
 
 
 @dataclass
@@ -94,113 +94,106 @@ class ParamPoly3(GeometryBase):
 
     @classmethod
     def from_spline(
-        cls, spline: "ArcLengthParameterizedCatmullRomSpline"
+        cls, spline: "Splines", num_segments: int = 10
     ) -> List["ParamPoly3"]:
         """
-        Create ParamPoly3 list from ArcLengthParameterizedCatmullRomSpline.
+        Convert a B-spline to a list of ParamPoly3 segments.
+
+        This method divides the spline into segments and fits a cubic polynomial
+        to each segment using local coordinate systems.
 
         Args:
-            spline: Arc length parameterized Catmull-Rom spline
+            spline: The Splines object to convert
+            num_segments: Number of ParamPoly3 segments to create
 
         Returns:
-            List of ParamPoly3 instances with normalized pRange for all segments
+            List of ParamPoly3 objects representing the spline
         """
+        segments = []
+        total_length = spline.total_length
 
-        def solve_cubic_coeffs(
-            p0: float, v0: float, p1: float, v1: float, dt: float
-        ) -> tuple[float, float, float, float]:
-            """
-            Calculate cubic polynomial coefficients from start/end positions and velocities.
-            f(t) = a + bt + ct^2 + dt^3
-            """
-            if dt == 0:
-                print("Warning: dt is zero, returning zero coefficients.")
-                return p0, v0, 0.0, 0.0
+        if total_length <= 0:
+            # Handle degenerate case
+            return []
 
-            inv_dt = 1.0 / dt
-            inv_dt2 = inv_dt * inv_dt
-            inv_dt3 = inv_dt2 * inv_dt
+        # Divide the spline into segments
+        segment_length = total_length / num_segments
 
-            delta_p = p1 - p0
+        for i in range(num_segments):
+            # Arc length bounds for this segment
+            s_start = i * segment_length
+            s_end = min((i + 1) * segment_length, total_length)
+            actual_segment_length = s_end - s_start
 
-            a = p0
-            b = v0
-            c = (3 * delta_p * inv_dt2) - ((2 * v0 + v1) * inv_dt)
-            d = (2 * -delta_p * inv_dt3) + ((v0 + v1) * inv_dt2)
-            return a, b, c, d
+            if actual_segment_length <= 0:
+                continue
 
-        # Get spline segments data
-        segments = spline.as_cubic_spline_parameters()
+            # Get position and derivatives at segment start
+            start_pos = spline.evaluate(s_start, derivative=0)
+            start_tangent = spline.evaluate(s_start, derivative=1)
 
-        if not segments:
-            raise ValueError("Spline has no segments.")
+            # Get position and derivatives at segment end
+            end_pos = spline.evaluate(s_end, derivative=0)
+            end_tangent = spline.evaluate(s_end, derivative=1)
 
-        param_poly_list = []
+            # Extract 2D coordinates (assuming z is constant or negligible for road geometry)
+            x0, y0 = start_pos[0], start_pos[1]
 
-        for segment_index, segment in enumerate(segments):
-            # Get segment start and end arc lengths
-            s_start = segment["s_start"]
-            s_end = segment["s_end"]
-            segment_length = s_end - s_start
+            # Calculate heading from tangent vector
+            hdg = np.arctan2(start_tangent[1], start_tangent[0])
 
-            if segment_length <= 0:
-                raise ValueError(
-                    f"Invalid segment length: {segment_length} for segment {segment_index}"
-                )
+            # Transform to local coordinate system
+            # Local u-axis is along the tangent, v-axis is perpendicular
+            cos_hdg = np.cos(hdg)
+            sin_hdg = np.sin(hdg)
 
-            # Evaluate spline at segment boundaries to get positions and velocities
-            start_frame = spline.evaluate(s_start, frenet=True)
-            end_frame = spline.evaluate(s_end, frenet=True)
+            # Transform end position to local coordinates
+            dx = end_pos[0] - x0
+            dy = end_pos[1] - y0
+            u_end = dx * cos_hdg + dy * sin_hdg
+            v_end = -dx * sin_hdg + dy * cos_hdg
 
-            start_position = start_frame["position"]
-            start_tangent = start_frame["tangent"]
-            start_normal = start_frame["normal"]
+            # Transform tangent vectors to local coordinates
+            # Start tangent in local coords (should be [1, 0] ideally)
+            du_start = start_tangent[0] * cos_hdg + start_tangent[1] * sin_hdg
+            dv_start = -start_tangent[0] * sin_hdg + start_tangent[1] * cos_hdg
 
-            end_position = end_frame["position"]
-            end_tangent = end_frame["tangent"]
-            end_normal = end_frame["normal"]
+            # End tangent in local coords
+            du_end = end_tangent[0] * cos_hdg + end_tangent[1] * sin_hdg
+            dv_end = -end_tangent[0] * sin_hdg + end_tangent[1] * cos_hdg
 
-            # Calculate local U/V coordinates using Frenet frame at segment start
-            start_global = start_position
-            end_global = end_position
+            # Fit cubic polynomials using boundary conditions
+            # For paramPoly3: u(p) = aU + bU*p + cU*p^2 + dU*p^3
+            #                 v(p) = aV + bV*p + cV*p^2 + dV*p^3
+            # where p is the parameter (arc length in this case)
 
-            # Project end position onto start frame
-            delta = end_global - start_global
-            u_end = np.dot(delta, start_tangent)  # longitudinal
-            v_end = np.dot(delta, start_normal)  # lateral
+            # Boundary conditions:
+            # u(0) = 0, u(L) = u_end
+            # u'(0) = du_start, u'(L) = du_end
+            # v(0) = 0, v(L) = v_end
+            # v'(0) = dv_start, v'(L) = dv_end
 
-            # Calculate proper velocities using spline derivatives
-            # For normalized parameterization, dt = 1.0 and we need du/dp, dv/dp where p ∈ [0,1]
-            dt_normalized = 1.0
+            L = actual_segment_length
 
-            # Get velocity vectors at start and end points in global coordinates
-            start_velocity = spline._arc_length_spline.evaluate_derivative(
-                s_start, order=1
-            )
-            end_velocity = spline._arc_length_spline.evaluate_derivative(s_end, order=1)
+            # Solve for u coefficients using cubic Hermite interpolation
+            aU = 0.0
+            bU = du_start
+            cU = (3 * u_end - 2 * du_start * L - du_end * L) / (L * L)
+            dU = (-2 * u_end + (du_start + du_end) * L) / (L * L * L)
 
-            # Project velocities onto local Frenet frame and scale for normalized parameter
-            # For normalized parameter, we need to scale by segment_length
-            u_vel_start = np.dot(start_velocity, start_tangent) * segment_length
-            v_vel_start = np.dot(start_velocity, start_normal) * segment_length
+            # Solve for v coefficients
+            aV = 0.0
+            bV = dv_start
+            cV = (3 * v_end - 2 * dv_start * L - dv_end * L) / (L * L)
+            dV = (-2 * v_end + (dv_start + dv_end) * L) / (L * L * L)
 
-            u_vel_end = np.dot(end_velocity, end_tangent) * segment_length
-            v_vel_end = np.dot(end_velocity, end_normal) * segment_length
-
-            # Calculate cubic coefficients for U and V coordinates with normalized parameter
-            aU, bU, cU, dU = solve_cubic_coeffs(
-                0.0, u_vel_start, u_end, u_vel_end, dt_normalized
-            )
-            aV, bV, cV, dV = solve_cubic_coeffs(
-                0.0, v_vel_start, v_end, v_vel_end, dt_normalized
-            )
-
-            param_poly = cls(
+            # Create ParamPoly3 segment
+            segment = cls(
                 s=s_start,
-                x=start_position[0],
-                y=start_position[1],
-                hdg=float(np.arctan2(start_tangent[1], start_tangent[0])),
-                length=segment_length,
+                x=x0,
+                y=y0,
+                hdg=hdg,
+                length=actual_segment_length,
                 aU=aU,
                 bU=bU,
                 cU=cU,
@@ -209,12 +202,12 @@ class ParamPoly3(GeometryBase):
                 bV=bV,
                 cV=cV,
                 dV=dV,
-                pRange="normalized",
+                pRange="arcLength",
             )
 
-            param_poly_list.append(param_poly)
+            segments.append(segment)
 
-        return param_poly_list
+        return segments
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""

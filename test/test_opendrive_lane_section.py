@@ -102,3 +102,40 @@ def test_get_all_lanes():
     center_lane = center_section.find("lane")
     assert center_lane is not None
     assert center_lane.get("type") == "none"
+
+
+def test_single_lane_section_with_lane_offset():
+    """Test constructing a LaneSection from a single lanelet with laneOffset."""
+    lanelet_map = load_test_map()
+
+    # Use a single lanelet
+    single_lanelet = lanelet_map.laneletLayer.get(3002094)
+    lanelet_group = [single_lanelet]
+
+    lane_section = LaneSection.construct_from_lanelet_groups(
+        lanelet_map, lanelet_group, s_offset=0.0
+    )
+
+    # Check that lane section was created
+    assert lane_section is not None
+    assert lane_section.s_offset == 0.0
+
+    # Check center lane (reference line)
+    assert lane_section.center_lane is not None
+    assert isinstance(lane_section.center_lane, ReferenceLine)
+    assert lane_section.center_lane.lane_id == 0
+
+    # For single lane: should have 0 left lanes and 1 right lane
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 1
+
+    # Check lane ID for single lane
+    assert -1 in lane_section.right_lanes
+
+    # Check that laneOffset is not set (since we use left boundary as reference line)
+    assert lane_section.lane_offset is None
+
+    # Test XML output does not include laneOffset
+    xml_element = lane_section.to_xml()
+    offset_element = xml_element.find("laneOffset")
+    assert offset_element is None

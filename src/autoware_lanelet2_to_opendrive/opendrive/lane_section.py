@@ -35,6 +35,9 @@ class LaneSection:
         self.center_lane: Optional[ReferenceLine] = None  # ID = 0
         self.right_lanes: Dict[int, "Lane"] = {}  # Negative IDs
 
+        # Lane offset for single lane sections
+        self.lane_offset: Optional[Dict[str, float]] = None
+
     def _add_left_lane(self, lane: "Lane") -> None:
         """Add a left lane to the section."""
         if lane.lane_id <= 0:
@@ -111,10 +114,15 @@ class LaneSection:
         # For even number: lanes are split evenly between left and right
         if num_lanes == 1:
             # Single lane: use the lanelet as a right lane (ID = -1)
+            # The left boundary is used as the reference line (via ReferenceLine.construct_from_lanelet_groups)
             single_lanelet = sorted_lanelets[0]
             lane = Lane.construct_from_lanelet(lanelet_map, single_lanelet)
             lane.lane_id = -1
             lane_section._add_right_lane(lane)
+
+            # No lane offset needed since we use left boundary as reference line
+            # The lane width will be measured from the left boundary (reference line)
+            # to the right boundary
         elif num_lanes % 2 == 1:
             # Odd number of lanes
             center_index = num_lanes // 2
@@ -205,6 +213,15 @@ class LaneSection:
         """Convert to XML element."""
         elem = ET.Element("laneSection")
         elem.set("s", str(self.s_offset))
+
+        # Add laneOffset if present (for single lane sections)
+        if self.lane_offset:
+            offset_elem = ET.SubElement(elem, "laneOffset")
+            offset_elem.set("s", str(self.lane_offset["s"]))
+            offset_elem.set("a", str(self.lane_offset["a"]))
+            offset_elem.set("b", str(self.lane_offset["b"]))
+            offset_elem.set("c", str(self.lane_offset["c"]))
+            offset_elem.set("d", str(self.lane_offset["d"]))
 
         # Add left lanes
         if self.left_lanes:
