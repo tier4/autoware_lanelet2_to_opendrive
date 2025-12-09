@@ -11,3 +11,4 @@ wheels/
 
 # Artifacts
 *.xodr
+*processed.osm

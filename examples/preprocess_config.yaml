@@ -4,6 +4,7 @@
 # Input and output paths
 input_map_path: /path/to/input/lanelet2_map.osm
 output_map_path: /path/to/output/processed_map.osm
+mgrs_code: 54SUE815501
 
 # Merge operations - merge multiple lanelets into one
 # First creates all merged lanelets, then removes the original lanelets

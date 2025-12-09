@@ -1,12 +1,15 @@
 """Preprocessing script for Lanelet2 maps using configurable operations."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Any
 from pathlib import Path
 import yaml  # type: ignore
-import lanelet2
 import logging
 from enum import Enum
+
+# Import autoware extensions before lanelet2 to ensure proper registration
+from autoware_lanelet2_extension_python.projection import MGRSProjector
+import lanelet2
 
 from .lanelet import (
     merge_lanelets_from_ids,
@@ -15,6 +18,7 @@ from .lanelet import (
     get_max_lanelet_id,
     validate_lanelet_continuity,
 )
+from .util import mgrs_to_lanelet2_origin
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -76,6 +80,7 @@ class PreprocessOperation:
     # Input/Output paths
     input_map_path: str
     output_map_path: str
+    mgrs_code: str  # MGRS code for projection
 
     # Operations to perform
     merge_operations: List[MergeOperation] = field(default_factory=list)
@@ -100,6 +105,7 @@ class PreprocessOperation:
         Example YAML format:
             input_map_path: /path/to/input.osm
             output_map_path: /path/to/output.osm
+            mgrs_code: 54SUE815501
 
             merge_operations:
               - lanelet_ids: [100, 101, 102]
@@ -150,6 +156,7 @@ class PreprocessOperation:
         return cls(
             input_map_path=config["input_map_path"],
             output_map_path=config["output_map_path"],
+            mgrs_code=config["mgrs_code"],
             merge_operations=merge_ops,
             remove_operations=remove_ops,
             replace_operations=replace_ops,
@@ -169,6 +176,7 @@ class PreprocessOperation:
         config = {
             "input_map_path": self.input_map_path,
             "output_map_path": self.output_map_path,
+            "mgrs_code": self.mgrs_code,
             "dry_run": self.dry_run,
             "verbose": self.verbose,
         }
@@ -224,12 +232,13 @@ class LaneletPreprocessor:
         """
         self.config = config
         self.lanelet_map: Optional[lanelet2.core.LaneletMap] = None
+        self.projector: Optional[Any] = None  # MGRSProjector or UtmProjector
 
         if config.verbose:
             logging.getLogger().setLevel(logging.DEBUG)
 
     def load_map(self) -> lanelet2.core.LaneletMap:
-        """Load the input Lanelet2 map.
+        """Load the input Lanelet2 map using MGRS projection.
 
         Returns:
             Loaded LaneletMap
@@ -243,10 +252,13 @@ class LaneletPreprocessor:
             raise FileNotFoundError(f"Input map not found: {input_path}")
 
         logger.info(f"Loading map from: {input_path}")
+        logger.info(f"Using MGRS projection with code: {self.config.mgrs_code}")
 
-        # Load using lanelet2 io
-        projector = lanelet2.projection.UtmProjector(lanelet2.io.Origin(0, 0))
-        self.lanelet_map = lanelet2.io.load(str(input_path), projector)
+        # Use MGRSProjector with the provided MGRS code
+        origin = mgrs_to_lanelet2_origin(self.config.mgrs_code)
+        self.projector = MGRSProjector(origin)
+
+        self.lanelet_map = lanelet2.io.load(str(input_path), self.projector)
 
         logger.info(f"Loaded map with {len(self.lanelet_map.laneletLayer)} lanelets")
         return self.lanelet_map
@@ -266,9 +278,8 @@ class LaneletPreprocessor:
 
         logger.info(f"Saving map to: {output_path}")
 
-        # Save using lanelet2 io
-        projector = lanelet2.projection.UtmProjector(lanelet2.io.Origin(0, 0))
-        lanelet2.io.write(str(output_path), lanelet_map, projector)
+        # Use the same projector that was used to load the map
+        lanelet2.io.write(str(output_path), lanelet_map, self.projector)
 
         logger.info(f"Saved map with {len(lanelet_map.laneletLayer)} lanelets")
 
@@ -290,6 +301,10 @@ class LaneletPreprocessor:
         all_lanelets_to_remove = set()
         merged_lanelets = []
 
+        # Get the maximum ID from the current map to ensure unique IDs
+        max_id = get_max_lanelet_id(lanelet_map)
+        current_id_counter = max_id + 1
+
         # Step 1: Perform all merge operations and collect merged lanelets
         logger.info(
             f"Step 1: Creating {len(self.config.merge_operations)} merged lanelets"
@@ -301,11 +316,16 @@ class LaneletPreprocessor:
             )
 
             try:
+                # Use unique base_id for each merge operation
+                unique_base_id = (
+                    op.base_id if op.base_id is not None else current_id_counter
+                )
+
                 # Create merged lanelet
                 merged_lanelet = merge_lanelets_from_ids(
                     lanelet_map,
                     op.lanelet_ids,
-                    base_id=op.base_id,
+                    base_id=unique_base_id,
                     validate=op.validate,
                     tolerance=op.tolerance,
                 )
@@ -313,6 +333,10 @@ class LaneletPreprocessor:
                 merged_lanelets.append(merged_lanelet)
                 all_lanelets_to_remove.update(op.lanelet_ids)
                 logger.info(f"    Created merged lanelet with ID: {merged_lanelet.id}")
+
+                # Increment counter to ensure next merge gets unique IDs
+                # Each merge uses base_id, base_id+1, base_id+2, base_id+3
+                current_id_counter = unique_base_id + 10  # Leave gap for safety
 
             except ValueError as e:
                 logger.warning(f"    Merge operation failed: {e}")
@@ -492,6 +516,11 @@ def main():
         help="Path to YAML configuration file",
     )
     parser.add_argument(
+        "--mgrs",
+        type=str,
+        help="MGRS code for projection (overrides config file)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run without saving the output (validation only)",
@@ -518,6 +547,8 @@ def main():
         return 1
 
     # Override settings from command line
+    if args.mgrs:
+        config.mgrs_code = args.mgrs
     if args.dry_run:
         config.dry_run = True
     if args.verbose:

@@ -2,8 +2,9 @@
 # This file demonstrates all available preprocessing operations
 
 # Input and output paths
-input_map_path: lanelet2_map.osm
-output_map_path: lanelet2_map_processed.osm
+input_map_path: test/data/lanelet2_map.osm
+output_map_path: test/data/lanelet2_map_processed.osm
+mgrs_code: 54SUE
 
 # Merge operations - merge multiple lanelets into one
 # The merged lanelet is added to the map (originals are kept)
