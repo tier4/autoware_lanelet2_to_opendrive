@@ -277,20 +277,31 @@ class LaneletPreprocessor:
     ) -> lanelet2.core.LaneletMap:
         """Execute all merge operations.
 
+        First performs all merges to create new lanelets, then removes the original
+        lanelets that were merged.
+
         Args:
             lanelet_map: Current lanelet map
 
         Returns:
             Updated lanelet map
         """
+        # Track all lanelets to be removed after merging
+        all_lanelets_to_remove = set()
+        merged_lanelets = []
+
+        # Step 1: Perform all merge operations and collect merged lanelets
+        logger.info(
+            f"Step 1: Creating {len(self.config.merge_operations)} merged lanelets"
+        )
         for i, op in enumerate(self.config.merge_operations):
             logger.info(
-                f"Executing merge operation {i+1}/{len(self.config.merge_operations)}"
+                f"  Merge operation {i+1}/{len(self.config.merge_operations)}: "
+                f"lanelets {op.lanelet_ids}"
             )
-            logger.debug(f"  Merging lanelets: {op.lanelet_ids}")
 
             try:
-                # Create merged lanelet but don't modify map yet
+                # Create merged lanelet
                 merged_lanelet = merge_lanelets_from_ids(
                     lanelet_map,
                     op.lanelet_ids,
@@ -299,14 +310,43 @@ class LaneletPreprocessor:
                     tolerance=op.tolerance,
                 )
 
-                # For merge, we keep original lanelets and add the merged one
-                lanelet_map.add(merged_lanelet)
-                logger.info(f"  Created merged lanelet with ID: {merged_lanelet.id}")
+                merged_lanelets.append(merged_lanelet)
+                all_lanelets_to_remove.update(op.lanelet_ids)
+                logger.info(f"    Created merged lanelet with ID: {merged_lanelet.id}")
 
             except ValueError as e:
-                logger.warning(f"  Merge operation failed: {e}")
+                logger.warning(f"    Merge operation failed: {e}")
                 if not self.config.dry_run:
                     raise
+
+        # Step 2: Remove original lanelets and add merged ones
+        if merged_lanelets:
+            logger.info(
+                f"Step 2: Removing {len(all_lanelets_to_remove)} original lanelets"
+            )
+
+            # Create new map with merged lanelets replacing originals
+            new_map = lanelet2.core.LaneletMap()
+
+            # Copy all lanelets except those that were merged
+            for ll in lanelet_map.laneletLayer:
+                if ll.id not in all_lanelets_to_remove:
+                    new_map.add(ll)
+
+            # Add all the merged lanelets
+            for merged_lanelet in merged_lanelets:
+                new_map.add(merged_lanelet)
+
+            # Copy regulatory elements
+            for reg_elem in lanelet_map.regulatoryElementLayer:
+                new_map.add(reg_elem)
+
+            logger.info(
+                f"  Replaced {len(all_lanelets_to_remove)} original lanelets "
+                f"with {len(merged_lanelets)} merged lanelets"
+            )
+
+            return new_map
 
         return lanelet_map
 

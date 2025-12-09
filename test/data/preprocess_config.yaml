@@ -1,0 +1,20 @@
+# Example configuration file for Lanelet2 map preprocessing
+# This file demonstrates all available preprocessing operations
+
+# Input and output paths
+input_map_path: lanelet2_map.osm
+output_map_path: lanelet2_map_processed.osm
+
+# Merge operations - merge multiple lanelets into one
+# The merged lanelet is added to the map (originals are kept)
+merge_operations:
+  - lanelet_ids: [112, 114]
+    validate: true
+  - lanelet_ids: [113, 116]
+    validate: true
+  - lanelet_ids: [113, 115]
+    validate: true
+
+# Global settings
+dry_run: false    # If true, only validate without saving output
+verbose: false    # Enable detailed logging

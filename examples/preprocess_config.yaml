@@ -6,7 +6,7 @@ input_map_path: /path/to/input/lanelet2_map.osm
 output_map_path: /path/to/output/processed_map.osm
 
 # Merge operations - merge multiple lanelets into one
-# The merged lanelet is added to the map (originals are kept)
+# First creates all merged lanelets, then removes the original lanelets
 merge_operations:
   - lanelet_ids: [100, 101, 102]
     validate: true         # Validate continuity before merging
