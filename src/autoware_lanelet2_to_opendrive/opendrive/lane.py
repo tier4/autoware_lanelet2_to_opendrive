@@ -154,9 +154,9 @@ class Lane:
             successor=successor,
         )
 
-        group = find_adjacent_groups(lanelet_map, {lanelet})
+        groups = find_adjacent_groups(lanelet_map, {lanelet})
 
-        if len(group) == 1:
+        if len(groups) == 1 and len(groups[0]) == 1:
             width_spline = estimate_lanelet_width_as_spline(
                 lanelet, reference="left_bound"
             )

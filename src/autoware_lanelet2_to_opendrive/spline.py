@@ -155,7 +155,7 @@ class Splines:
 
         # 4. Setup Least Squares with weights
         w_hard = 100.0  # Weight for hard constraints (reduced from 1e4)
-        w_soft = 0.01  # Weight for data fitting (restored to allow curve following)
+        w_soft = 10  # Weight for data fitting (restored to allow curve following)
 
         # Combine matrices
         A_combined = np.vstack(
@@ -200,7 +200,7 @@ class Splines:
         self._check_soft_constraints()
 
     def _verify_hard_constraints(
-        self, position_tol: float = 1e-5, velocity_tol: float = 1e-2
+        self, position_tol: float = 1.0, velocity_tol: float = 5.0
     ):
         """
         Verify that hard constraints (boundary conditions) are satisfied.

@@ -98,7 +98,7 @@ class Road:
             from .lane_section import LaneSection
 
             lane_section = LaneSection.construct_from_lanelet_groups(
-                lanelet_map, lanelet_group, s_offset=s_offset
+                lanelet_map, lanelet_list, s_offset=s_offset
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -167,9 +167,9 @@ class Road:
             total=len(adjacent_groups),
             desc="Building roads",
         ):
-            ll_ids = [ll.id for ll in adjacent_group]
-            if 124253 not in ll_ids:
-                continue
+            # ll_ids = [ll.id for ll in adjacent_group]
+            # if 124253 not in ll_ids:
+            #     continue
             try:
                 road = Road.construct_from_lanelet_groups(
                     lanelet_map=lanelet_map,  # Use original map for proper connectivity
@@ -186,6 +186,17 @@ class Road:
                 continue
             except Exception as e:
                 # Log warning but continue with other groups
+                if "has no len()" in str(e):
+                    import traceback
+
+                    full_trace = traceback.format_exc()
+                    # Find the line that actually called len()
+                    for line in full_trace.split("\n"):
+                        if "len(" in line and "autoware_lanelet2_to_opendrive" in line:
+                            tqdm.write(
+                                f"len() error in group {road_id}: {line.strip()}"
+                            )
+                            break
                 tqdm.write(f"Warning: Failed to create road from group {road_id}: {e}")
                 continue
 
