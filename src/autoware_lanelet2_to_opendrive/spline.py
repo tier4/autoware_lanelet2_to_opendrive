@@ -126,15 +126,67 @@ class Splines:
         else:
             self.t_data /= self.t_max  # Normalize to 0.0 ~ 1.0
 
-        # 2. Create knot vector (Clamped knots)
+        # 2. Create knot vector (Adaptive based on curvature)
         n_internal = self.num_control_points - (self.k + 1)
         if n_internal < 0:
             raise ValueError(f"Too few control points. Must be at least {self.k + 1}.")
 
+        if n_internal > 0:
+            # --- Curvature-adaptive knot placement logic ---
+
+            # A. Calculate tangent vectors for each segment
+            # diffs: (N-1, 3)
+            diffs = np.diff(self.points, axis=0)
+            norms = np.linalg.norm(diffs, axis=1)
+            # Avoid division by zero
+            norms[norms == 0] = 1.0
+            tangents = diffs / norms[:, None]
+
+            # B. Calculate angles between adjacent tangents (approximation of curvature)
+            # Compute angles corresponding to internal points
+
+            # Compute dot products to get angles (N-2 angles)
+            dot_products = np.sum(tangents[:-1] * tangents[1:], axis=1)
+            # Clip for numerical stability
+            dot_products = np.clip(dot_products, -1.0, 1.0)
+            angles = np.arccos(dot_products)
+
+            # C. Create weight distribution
+            # Create weight array for all data points (length equals N points)
+            # Endpoints have no angle, so set to 0
+            curvature_metric = np.concatenate(([0], angles, [0]))
+
+            # Density function D(t) for knot placement
+            # alpha: weight for uniformity (larger values approach uniform spacing)
+            # beta:  weight for curvature (larger values concentrate knots at curves)
+            alpha = 1.0
+            beta = 5.0  # Tuning parameter: sensitivity to curves
+
+            # Define "importance" weight for each interval
+            # Using curvature_metric at point positions
+
+            weights = alpha + beta * curvature_metric
+
+            # D. Create Cumulative Distribution Function (CDF)
+            # Accumulate weights along t_data
+            cdf = np.cumsum(weights)
+            cdf_normalized = cdf / cdf[-1]
+
+            # E. Select knots uniformly in CDF space and map back to t-space (Inverse Transform Sampling)
+            # Create target positions in CDF space for internal knots
+            target_knots_cdf = np.linspace(0, 1, n_internal + 2)[1:-1]
+
+            # Find t_data values (x-axis) where cdf_normalized (y-axis) equals target_knots_cdf
+            internal_knots = np.interp(target_knots_cdf, cdf_normalized, self.t_data)
+
+            # --- End of curvature-adaptive logic ---
+        else:
+            internal_knots = []
+
         self.knots = np.concatenate(
             [
                 np.zeros(self.k + 1),
-                np.linspace(0, 1, n_internal + 2)[1:-1] if n_internal > 0 else [],
+                internal_knots,
                 np.ones(self.k + 1),
             ]
         )

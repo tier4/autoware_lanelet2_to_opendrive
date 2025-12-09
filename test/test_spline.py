@@ -97,8 +97,9 @@ class TestSplinesBasic:
         # Coordinate validation tests
         # Verify all positions have reasonable coordinate values
         for i, pos in enumerate(positions):
+            # Use small tolerance for numerical precision at boundaries
             assert (
-                0.0 <= pos[0] <= 2.5
+                -1e-10 <= pos[0] <= 2.5
             ), f"Position {i}: X coordinate {pos[0]} out of range [0,2.5]"
             assert (
                 -0.5 <= pos[1] <= 1.5
