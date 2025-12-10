@@ -87,6 +87,13 @@ class DeletePointOperation:
 
 
 @dataclass
+class RemoveLaneletOperation:
+    """Configuration for removing entire lanelets from the map."""
+
+    lanelet_ids: List[int]
+
+
+@dataclass
 class PreprocessOperation:
     """Main configuration class for preprocessing operations.
 
@@ -106,6 +113,9 @@ class PreprocessOperation:
     validate_operations: List[ValidateOperation] = field(default_factory=list)
     move_point_operations: List[MovePointOperation] = field(default_factory=list)
     delete_point_operations: List[DeletePointOperation] = field(default_factory=list)
+    remove_lanelet_operations: List[RemoveLaneletOperation] = field(
+        default_factory=list
+    )
 
     # Global settings
     dry_run: bool = False  # If True, only validate without saving
@@ -180,6 +190,10 @@ class PreprocessOperation:
         for op in config.get("delete_point_operations", []):
             delete_point_ops.append(DeletePointOperation(**op))
 
+        remove_lanelet_ops = []
+        for op in config.get("remove_lanelet_operations", []):
+            remove_lanelet_ops.append(RemoveLaneletOperation(**op))
+
         return cls(
             input_map_path=config["input_map_path"],
             output_map_path=config["output_map_path"],
@@ -190,6 +204,7 @@ class PreprocessOperation:
             validate_operations=validate_ops,
             move_point_operations=move_point_ops,
             delete_point_operations=delete_point_ops,
+            remove_lanelet_operations=remove_lanelet_ops,
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
         )
@@ -260,6 +275,11 @@ class PreprocessOperation:
         if self.delete_point_operations:
             config["delete_point_operations"] = [
                 {"point_ids": op.point_ids} for op in self.delete_point_operations
+            ]
+
+        if self.remove_lanelet_operations:
+            config["remove_lanelet_operations"] = [
+                {"lanelet_ids": op.lanelet_ids} for op in self.remove_lanelet_operations
             ]
 
         with open(yaml_path, "w") as f:
@@ -574,6 +594,58 @@ class LaneletPreprocessor:
 
         return lanelet_map
 
+    def execute_remove_lanelet_operations(
+        self, lanelet_map: lanelet2.core.LaneletMap
+    ) -> lanelet2.core.LaneletMap:
+        """Execute all remove lanelet operations.
+
+        Args:
+            lanelet_map: Current lanelet map
+
+        Returns:
+            Updated lanelet map with specified lanelets removed
+        """
+        if not self.config.remove_lanelet_operations:
+            return lanelet_map
+
+        # Collect all lanelet IDs to remove
+        all_lanelets_to_remove = set()
+        for op in self.config.remove_lanelet_operations:
+            all_lanelets_to_remove.update(op.lanelet_ids)
+
+        logger.info(f"Removing {len(all_lanelets_to_remove)} lanelets from map")
+
+        # Create new map without the specified lanelets
+        new_map = lanelet2.core.LaneletMap()
+
+        # Copy all lanelets except those to be removed
+        removed_count = 0
+        for ll in lanelet_map.laneletLayer:
+            if ll.id not in all_lanelets_to_remove:
+                new_map.add(ll)
+            else:
+                removed_count += 1
+                logger.debug(f"  Removed lanelet {ll.id}")
+
+        # Copy regulatory elements
+        for reg_elem in lanelet_map.regulatoryElementLayer:
+            new_map.add(reg_elem)
+
+        logger.info(
+            f"Successfully removed {removed_count}/{len(all_lanelets_to_remove)} lanelets"
+        )
+
+        if removed_count < len(all_lanelets_to_remove):
+            missing = all_lanelets_to_remove - {
+                ll.id
+                for ll in lanelet_map.laneletLayer
+                if ll.id in all_lanelets_to_remove
+            }
+            if missing:
+                logger.warning(f"  Lanelets not found: {missing}")
+
+        return new_map
+
     def process(self) -> lanelet2.core.LaneletMap:
         """Execute all preprocessing operations.
 
@@ -612,10 +684,15 @@ class LaneletPreprocessor:
             logger.info("Running merge operations...")
             lanelet_map = self.execute_merge_operations(lanelet_map)
 
-        # 5. Remove operations (removes lanelets)
+        # 5. Remove operations (removes lanelets - old style)
         if self.config.remove_operations:
             logger.info("Running remove operations...")
             lanelet_map = self.execute_remove_operations(lanelet_map)
+
+        # 6. Remove lanelet operations (removes entire lanelets)
+        if self.config.remove_lanelet_operations:
+            logger.info("Running remove lanelet operations...")
+            lanelet_map = self.execute_remove_lanelet_operations(lanelet_map)
 
         # Save the processed map
         self.save_map(lanelet_map)
