@@ -5,6 +5,8 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Optional
+import tempfile
+import logging
 
 # Import autoware extensions before loading maps to ensure proper registration
 # The order matters: projection module must be imported to register extensions
@@ -12,6 +14,10 @@ from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
 
 from autoware_lanelet2_to_opendrive.util import mgrs_to_lanelet2_origin
+from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
+    PreprocessOperation,
+    LaneletPreprocessor,
+)
 
 from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     OpenDRIVE,
@@ -19,6 +25,10 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     save_opendrive_to_file,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def load_lanelet2_map(lanelet2_path: Path, mgrs: str) -> lanelet2.core.LaneletMap:
@@ -104,23 +114,131 @@ def convert_lanelet2_to_opendrive(
     return opendrive
 
 
+def preprocess_and_convert(
+    lanelet2_file: Path,
+    output_file: Path,
+    preprocess_config_path: Optional[Path] = None,
+    mgrs_code: Optional[str] = None,
+    verbose: bool = False,
+) -> None:
+    """
+    Run preprocessing (if configured) and convert Lanelet2 to OpenDRIVE.
+
+    Args:
+        lanelet2_file: Path to input Lanelet2 OSM file
+        output_file: Path to output OpenDRIVE file
+        preprocess_config_path: Optional path to preprocessing config YAML
+        mgrs_code: Optional MGRS code (required if not in preprocess config)
+        verbose: Enable verbose output
+    """
+    # Determine the input file and MGRS code
+    input_map_path = lanelet2_file
+
+    # If preprocessing config is provided, run preprocessing first
+    if preprocess_config_path:
+        logger.info(
+            f"Loading preprocessing configuration from: {preprocess_config_path}"
+        )
+
+        try:
+            config = PreprocessOperation.from_yaml(preprocess_config_path)
+
+            # Override verbose setting if specified
+            if verbose:
+                config.verbose = True
+
+            # Extract MGRS code from config
+            mgrs_code = config.mgrs_code
+
+            # Create a temporary file for preprocessed output if needed
+            # We'll use the configured output path or a temp file
+            if config.output_map_path:
+                preprocessed_path = Path(config.output_map_path)
+            else:
+                # Create a temporary file for preprocessed map
+                with tempfile.NamedTemporaryFile(
+                    suffix=".osm", delete=False
+                ) as tmp_file:
+                    preprocessed_path = Path(tmp_file.name)
+                    config.output_map_path = str(preprocessed_path)
+
+            # Run preprocessing
+            logger.info("Running preprocessing operations...")
+            preprocessor = LaneletPreprocessor(config)
+            preprocessor.process()
+
+            # Update input path to use preprocessed map
+            input_map_path = preprocessed_path
+            logger.info(
+                f"Preprocessing completed. Using preprocessed map from: {input_map_path}"
+            )
+
+        except Exception as e:
+            logger.error(f"Preprocessing failed: {e}")
+            raise
+
+    # Ensure we have an MGRS code
+    if not mgrs_code:
+        raise ValueError(
+            "MGRS code must be provided either via --preprocess-config or directly. "
+            "Add 'mgrs_code' to your preprocess config YAML file."
+        )
+
+    # Load the (possibly preprocessed) Lanelet2 map
+    logger.info(f"Loading Lanelet2 map from: {input_map_path}")
+    logger.info(f"Using MGRS code: {mgrs_code}")
+
+    lanelet_map = load_lanelet2_map(input_map_path, mgrs_code)
+
+    # Convert to OpenDRIVE
+    logger.info("Converting to OpenDRIVE format...")
+    convert_lanelet2_to_opendrive(lanelet_map, output_file)
+
+    logger.info("Conversion completed successfully!")
+
+    # Clean up temporary file if we created one
+    if (
+        preprocess_config_path
+        and not PreprocessOperation.from_yaml(preprocess_config_path).output_map_path
+    ):
+        try:
+            preprocessed_path.unlink()
+            logger.debug(f"Cleaned up temporary file: {preprocessed_path}")
+        except Exception:
+            pass
+
+
 def main():
     """Main entry point for the conversion script."""
     parser = argparse.ArgumentParser(
-        description="Convert Lanelet2 map to OpenDRIVE format",
+        description="Convert Lanelet2 map to OpenDRIVE format with optional preprocessing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py input.osm --mgrs-lat 35.23 --mgrs-lon 139.16
-  python main.py input.osm --mgrs-lat 35.23 --mgrs-lon 139.16 -o output.xodr
+  # Direct conversion without preprocessing (MGRS must be in preprocess config):
+  python main.py input.osm --preprocess-config config.yaml
+
+  # Direct conversion with preprocessing:
+  python main.py input.osm --preprocess-config preprocess_config.yaml -o output.xodr
+
+  # Specify output file:
+  python main.py input.osm --preprocess-config config.yaml -o custom_output.xodr
+
+Note: MGRS code must be specified in the preprocess configuration YAML file.
         """,
     )
 
     parser.add_argument(
-        "lanelet2_file", type=Path, help="Path to the input Lanelet2 OSM file"
+        "lanelet2_file",
+        type=Path,
+        help="Path to the input Lanelet2 OSM file",
     )
 
-    parser.add_argument("mgrs", type=str, help="MGRS grid reference for projection")
+    parser.add_argument(
+        "--preprocess-config",
+        type=Path,
+        help="Path to preprocessing configuration YAML file (contains MGRS code)",
+    )
 
     parser.add_argument(
         "-o",
@@ -130,36 +248,49 @@ Examples:
     )
 
     parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose output"
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose output",
     )
 
     args = parser.parse_args()
+
+    # Set up logging
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     # Set default output path if not provided
     if not args.output:
         args.output = args.lanelet2_file.with_suffix(".xodr")
 
+    # Validate that preprocessing config is provided
+    if not args.preprocess_config:
+        parser.error(
+            "Preprocessing configuration file is required. "
+            "Please provide --preprocess-config with a YAML file containing MGRS code and optional preprocessing operations."
+        )
+
     try:
-        # Load Lanelet2 map
-        if args.verbose:
-            print(f"Loading Lanelet2 map from: {args.lanelet2_file}")
-            print(f"Using MGRS coordinates: mgrs grid={args.mgrs}")
-
-        lanelet_map = load_lanelet2_map(args.lanelet2_file, args.mgrs)
-
-        # Convert to OpenDRIVE
-        if args.verbose:
-            print(f"Output will be saved to: {args.output}")
-
-        convert_lanelet2_to_opendrive(lanelet_map, Path(args.output))
-
-        print("Conversion completed successfully!")
+        preprocess_and_convert(
+            lanelet2_file=args.lanelet2_file,
+            output_file=args.output,
+            preprocess_config_path=args.preprocess_config,
+            verbose=args.verbose,
+        )
 
     except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"File not found: {e}")
+        sys.exit(1)
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"Error during conversion: {e}", file=sys.stderr)
+        logger.error(f"Error during conversion: {e}")
+        if args.verbose:
+            import traceback
+
+            traceback.print_exc()
         sys.exit(1)
 
 
