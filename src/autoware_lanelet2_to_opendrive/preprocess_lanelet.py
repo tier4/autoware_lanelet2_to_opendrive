@@ -87,14 +87,6 @@ class DeletePointOperation:
 
 
 @dataclass
-class AlignPointOperation:
-    """Configuration for align point operations."""
-
-    reference: tuple[int, int]  # Two reference point IDs
-    targets: List[int]  # Target point IDs to align
-
-
-@dataclass
 class PreprocessOperation:
     """Main configuration class for preprocessing operations.
 
@@ -114,7 +106,6 @@ class PreprocessOperation:
     validate_operations: List[ValidateOperation] = field(default_factory=list)
     move_point_operations: List[MovePointOperation] = field(default_factory=list)
     delete_point_operations: List[DeletePointOperation] = field(default_factory=list)
-    align_point_operations: List[AlignPointOperation] = field(default_factory=list)
 
     # Global settings
     dry_run: bool = False  # If True, only validate without saving
@@ -189,13 +180,6 @@ class PreprocessOperation:
         for op in config.get("delete_point_operations", []):
             delete_point_ops.append(DeletePointOperation(**op))
 
-        align_point_ops = []
-        for op in config.get("align_point_operations", []):
-            # Convert reference tuple if needed
-            if isinstance(op.get("reference"), list):
-                op["reference"] = tuple(op["reference"])
-            align_point_ops.append(AlignPointOperation(**op))
-
         return cls(
             input_map_path=config["input_map_path"],
             output_map_path=config["output_map_path"],
@@ -206,7 +190,6 @@ class PreprocessOperation:
             validate_operations=validate_ops,
             move_point_operations=move_point_ops,
             delete_point_operations=delete_point_ops,
-            align_point_operations=align_point_ops,
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
         )
@@ -277,15 +260,6 @@ class PreprocessOperation:
         if self.delete_point_operations:
             config["delete_point_operations"] = [
                 {"point_ids": op.point_ids} for op in self.delete_point_operations
-            ]
-
-        if self.align_point_operations:
-            config["align_point_operations"] = [
-                {
-                    "reference": list(op.reference),  # Convert tuple to list for YAML
-                    "targets": op.targets,
-                }
-                for op in self.align_point_operations
             ]
 
         with open(yaml_path, "w") as f:
@@ -600,37 +574,6 @@ class LaneletPreprocessor:
 
         return lanelet_map
 
-    def execute_align_point_operations(
-        self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
-        """Execute all align point operations.
-
-        Args:
-            lanelet_map: Current lanelet map
-
-        Returns:
-            Updated lanelet map
-        """
-        from .geometry import align_points_to_reference
-
-        for i, op in enumerate(self.config.align_point_operations):
-            logger.info(
-                f"Executing align point operation {i+1}/{len(self.config.align_point_operations)}"
-            )
-            logger.info(f"  Reference line: points {op.reference}")
-            logger.info(f"  Target points to align: {op.targets}")
-
-            results = align_points_to_reference(lanelet_map, op.reference, op.targets)
-
-            successful = sum(1 for s in results.values() if s)
-            logger.info(f"  Aligned {successful}/{len(op.targets)} points successfully")
-
-            if not self.config.dry_run and successful < len(op.targets):
-                failed_points = [pid for pid, success in results.items() if not success]
-                logger.warning(f"  Failed to align points: {failed_points}")
-
-        return lanelet_map
-
     def process(self) -> lanelet2.core.LaneletMap:
         """Execute all preprocessing operations.
 
@@ -653,10 +596,6 @@ class LaneletPreprocessor:
         if self.config.delete_point_operations:
             logger.info("Running delete point operations...")
             lanelet_map = self.execute_delete_point_operations(lanelet_map)
-
-        if self.config.align_point_operations:
-            logger.info("Running align point operations...")
-            lanelet_map = self.execute_align_point_operations(lanelet_map)
 
         # 2. Validations (just for checking)
         if self.config.validate_operations:
