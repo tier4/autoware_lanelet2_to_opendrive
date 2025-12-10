@@ -70,6 +70,23 @@ class ValidateOperation:
 
 
 @dataclass
+class MovePointOperation:
+    """Configuration for move point operations."""
+
+    point_id: int
+    new_x: float
+    new_y: float
+    new_z: Optional[float] = None  # If None, keep original z
+
+
+@dataclass
+class DeletePointOperation:
+    """Configuration for delete point operations."""
+
+    point_ids: List[int]
+
+
+@dataclass
 class PreprocessOperation:
     """Main configuration class for preprocessing operations.
 
@@ -87,6 +104,8 @@ class PreprocessOperation:
     remove_operations: List[RemoveOperation] = field(default_factory=list)
     replace_operations: List[ReplaceOperation] = field(default_factory=list)
     validate_operations: List[ValidateOperation] = field(default_factory=list)
+    move_point_operations: List[MovePointOperation] = field(default_factory=list)
+    delete_point_operations: List[DeletePointOperation] = field(default_factory=list)
 
     # Global settings
     dry_run: bool = False  # If True, only validate without saving
@@ -153,6 +172,14 @@ class PreprocessOperation:
         for op in config.get("validate_operations", []):
             validate_ops.append(ValidateOperation(**op))
 
+        move_point_ops = []
+        for op in config.get("move_point_operations", []):
+            move_point_ops.append(MovePointOperation(**op))
+
+        delete_point_ops = []
+        for op in config.get("delete_point_operations", []):
+            delete_point_ops.append(DeletePointOperation(**op))
+
         return cls(
             input_map_path=config["input_map_path"],
             output_map_path=config["output_map_path"],
@@ -161,6 +188,8 @@ class PreprocessOperation:
             remove_operations=remove_ops,
             replace_operations=replace_ops,
             validate_operations=validate_ops,
+            move_point_operations=move_point_ops,
+            delete_point_operations=delete_point_ops,
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
         )
@@ -215,6 +244,22 @@ class PreprocessOperation:
                     "tolerance": op.tolerance,
                 }
                 for op in self.validate_operations
+            ]
+
+        if self.move_point_operations:
+            config["move_point_operations"] = [
+                {
+                    "point_id": op.point_id,
+                    "new_x": op.new_x,
+                    "new_y": op.new_y,
+                    "new_z": op.new_z,
+                }
+                for op in self.move_point_operations
+            ]
+
+        if self.delete_point_operations:
+            config["delete_point_operations"] = [
+                {"point_ids": op.point_ids} for op in self.delete_point_operations
             ]
 
         with open(yaml_path, "w") as f:
@@ -463,6 +508,72 @@ class LaneletPreprocessor:
             except RuntimeError as e:
                 logger.warning(f"  Validation failed - lanelet not found: {e}")
 
+    def execute_move_point_operations(
+        self, lanelet_map: lanelet2.core.LaneletMap
+    ) -> lanelet2.core.LaneletMap:
+        """Execute all move point operations.
+
+        Args:
+            lanelet_map: Current lanelet map
+
+        Returns:
+            Updated lanelet map
+        """
+        from .geometry import move_point_in_map
+
+        for i, op in enumerate(self.config.move_point_operations):
+            logger.info(
+                f"Executing move point operation {i+1}/{len(self.config.move_point_operations)}"
+            )
+            logger.info(
+                f"  Moving point {op.point_id} to ({op.new_x}, {op.new_y}, {op.new_z})"
+            )
+
+            success = move_point_in_map(
+                lanelet_map, op.point_id, op.new_x, op.new_y, op.new_z
+            )
+
+            if success:
+                logger.info(f"  Successfully moved point {op.point_id}")
+            else:
+                logger.warning(f"  Failed to move point {op.point_id}")
+                if not self.config.dry_run:
+                    raise RuntimeError(f"Failed to move point {op.point_id}")
+
+        return lanelet_map
+
+    def execute_delete_point_operations(
+        self, lanelet_map: lanelet2.core.LaneletMap
+    ) -> lanelet2.core.LaneletMap:
+        """Execute all delete point operations.
+
+        Args:
+            lanelet_map: Current lanelet map
+
+        Returns:
+            Updated lanelet map
+        """
+        from .geometry import delete_points_from_map
+
+        for i, op in enumerate(self.config.delete_point_operations):
+            logger.info(
+                f"Executing delete point operation {i+1}/{len(self.config.delete_point_operations)}"
+            )
+            logger.info(f"  Points to delete: {op.point_ids}")
+
+            results = delete_points_from_map(lanelet_map, op.point_ids)
+
+            successful = sum(1 for s in results.values() if s)
+            logger.info(
+                f"  Deleted {successful}/{len(op.point_ids)} points successfully"
+            )
+
+            if not self.config.dry_run and successful < len(op.point_ids):
+                failed_points = [pid for pid, success in results.items() if not success]
+                logger.warning(f"  Failed to delete points: {failed_points}")
+
+        return lanelet_map
+
     def process(self) -> lanelet2.core.LaneletMap:
         """Execute all preprocessing operations.
 
@@ -477,22 +588,31 @@ class LaneletPreprocessor:
         lanelet_map = self.load_map()
 
         # Execute operations in order
-        # 1. Validations (just for checking)
+        # 1. Point operations (modify individual points)
+        if self.config.move_point_operations:
+            logger.info("Running move point operations...")
+            lanelet_map = self.execute_move_point_operations(lanelet_map)
+
+        if self.config.delete_point_operations:
+            logger.info("Running delete point operations...")
+            lanelet_map = self.execute_delete_point_operations(lanelet_map)
+
+        # 2. Validations (just for checking)
         if self.config.validate_operations:
             logger.info("Running validation checks...")
             self.execute_validate_operations(lanelet_map)
 
-        # 2. Replace operations (modifies map)
+        # 3. Replace operations (modifies map)
         if self.config.replace_operations:
             logger.info("Running replace operations...")
             lanelet_map = self.execute_replace_operations(lanelet_map)
 
-        # 3. Merge operations (adds new lanelets)
+        # 4. Merge operations (adds new lanelets)
         if self.config.merge_operations:
             logger.info("Running merge operations...")
             lanelet_map = self.execute_merge_operations(lanelet_map)
 
-        # 4. Remove operations (removes lanelets)
+        # 5. Remove operations (removes lanelets)
         if self.config.remove_operations:
             logger.info("Running remove operations...")
             lanelet_map = self.execute_remove_operations(lanelet_map)
