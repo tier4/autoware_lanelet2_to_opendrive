@@ -14,7 +14,7 @@ class WidthSpline1D:
     """
 
     def __init__(
-        self, arc_lengths: np.ndarray, widths: np.ndarray, bc_type: str = "natural"
+        self, arc_lengths: np.ndarray, widths: np.ndarray, bc_type: str = "not-a-knot"
     ):
         """
         Initialize a 1D width spline.
@@ -22,7 +22,8 @@ class WidthSpline1D:
         Args:
             arc_lengths: Array of arc length values (must be monotonically increasing)
             widths: Array of width values corresponding to arc_lengths
-            bc_type: Boundary condition type for spline ('natural', 'clamped', 'not-a-knot')
+            bc_type: Boundary condition type for spline ('not-a-knot', 'natural', 'clamped')
+                    'not-a-knot' (default) provides smoother interpolation with less oscillation
         """
         if len(arc_lengths) != len(widths):
             raise ValueError("arc_lengths and widths must have the same length")

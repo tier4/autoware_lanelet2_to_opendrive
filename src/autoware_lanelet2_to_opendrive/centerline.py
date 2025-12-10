@@ -528,9 +528,11 @@ def estimate_lanelet_width_as_spline(
     arc_lengths_array = np.array(arc_lengths)
     widths_array = np.array(widths)
 
-    # Use natural boundary conditions for smooth interpolation
-    # Could also use 'clamped' with specified derivatives if needed
-    width_spline_1d = WidthSpline1D(arc_lengths_array, widths_array, bc_type="natural")
+    # Use not-a-knot boundary conditions for smoother interpolation with less oscillation
+    # 'not-a-knot' typically produces more stable results than 'natural' at boundaries
+    width_spline_1d = WidthSpline1D(
+        arc_lengths_array, widths_array, bc_type="not-a-knot"
+    )
 
     # Create a wrapper that provides the same interface as the old WidthSplineWrapper
     # but uses the proper 1D spline internally
