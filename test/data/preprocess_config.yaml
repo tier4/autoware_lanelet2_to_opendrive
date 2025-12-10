@@ -18,14 +18,18 @@ merge_operations:
 
 # Move point operations - move points to specific coordinates
 move_point_operations:
-  - point_id: 10031
-    new_x: 81520.0
-    new_y: 50460.0
-    new_z: 10.5
-  - point_id: 10033
-    new_x: 81525.0
-    new_y: 50465.0
-    # new_z not specified - will keep original z coordinate
+  - point_id: 10030
+    new_x: 81509.0771
+    new_y: 50489.7863
+  - point_id: 28339
+    new_x: 81506.1119
+    new_y: 50489.4558
+  - point_id: 28301
+    new_x: 81503.3119
+    new_y: 50488.6425
+
+delete_point_operations:
+  - point_ids: [10034]
 
 # Global settings
 dry_run: false    # If true, only validate without saving output
