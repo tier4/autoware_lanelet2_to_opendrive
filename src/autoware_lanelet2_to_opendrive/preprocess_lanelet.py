@@ -94,6 +94,19 @@ class RemoveLaneletOperation:
 
 
 @dataclass
+class RemoveTurnDirectionOperation:
+    """Configuration for removing turn_direction attribute from lanelets.
+
+    If lanelet_ids is empty, the turn_direction attribute will be removed from ALL lanelets.
+    Otherwise, only removes from the specified lanelet IDs.
+    """
+
+    lanelet_ids: List[int] = field(
+        default_factory=list
+    )  # Empty list means all lanelets
+
+
+@dataclass
 class PreprocessOperation:
     """Main configuration class for preprocessing operations.
 
@@ -114,6 +127,9 @@ class PreprocessOperation:
     move_point_operations: List[MovePointOperation] = field(default_factory=list)
     delete_point_operations: List[DeletePointOperation] = field(default_factory=list)
     remove_lanelet_operations: List[RemoveLaneletOperation] = field(
+        default_factory=list
+    )
+    remove_turn_direction_operations: List[RemoveTurnDirectionOperation] = field(
         default_factory=list
     )
 
@@ -155,6 +171,10 @@ class PreprocessOperation:
                 second_lanelet_id: 501
                 tolerance: 0.01
 
+            remove_turn_direction_operations:
+              - lanelet_ids: []  # Empty list = remove from ALL lanelets
+              - lanelet_ids: [600, 601, 602]  # Remove from specific lanelets only
+
             dry_run: false
             verbose: true
         """
@@ -194,6 +214,10 @@ class PreprocessOperation:
         for op in config.get("remove_lanelet_operations", []):
             remove_lanelet_ops.append(RemoveLaneletOperation(**op))
 
+        remove_turn_direction_ops = []
+        for op in config.get("remove_turn_direction_operations", []):
+            remove_turn_direction_ops.append(RemoveTurnDirectionOperation(**op))
+
         return cls(
             input_map_path=config["input_map_path"],
             output_map_path=config["output_map_path"],
@@ -205,6 +229,7 @@ class PreprocessOperation:
             move_point_operations=move_point_ops,
             delete_point_operations=delete_point_ops,
             remove_lanelet_operations=remove_lanelet_ops,
+            remove_turn_direction_operations=remove_turn_direction_ops,
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
         )
@@ -280,6 +305,12 @@ class PreprocessOperation:
         if self.remove_lanelet_operations:
             config["remove_lanelet_operations"] = [
                 {"lanelet_ids": op.lanelet_ids} for op in self.remove_lanelet_operations
+            ]
+
+        if self.remove_turn_direction_operations:
+            config["remove_turn_direction_operations"] = [
+                {"lanelet_ids": op.lanelet_ids}
+                for op in self.remove_turn_direction_operations
             ]
 
         with open(yaml_path, "w") as f:
@@ -646,6 +677,63 @@ class LaneletPreprocessor:
 
         return new_map
 
+    def execute_remove_turn_direction_operations(
+        self, lanelet_map: lanelet2.core.LaneletMap
+    ) -> lanelet2.core.LaneletMap:
+        """Execute all remove turn direction operations.
+
+        Args:
+            lanelet_map: Current lanelet map
+
+        Returns:
+            Updated lanelet map with turn_direction attributes removed
+        """
+        if not self.config.remove_turn_direction_operations:
+            return lanelet_map
+
+        for i, op in enumerate(self.config.remove_turn_direction_operations):
+            logger.info(
+                f"Executing remove turn_direction operation {i+1}/"
+                f"{len(self.config.remove_turn_direction_operations)}"
+            )
+
+            # Determine which lanelets to process
+            if not op.lanelet_ids:
+                # Empty list means remove from ALL lanelets
+                logger.info("  Removing turn_direction attribute from ALL lanelets")
+                target_lanelets = list(lanelet_map.laneletLayer)
+            else:
+                # Remove from specific lanelet IDs
+                logger.info(
+                    f"  Removing turn_direction attribute from {len(op.lanelet_ids)} lanelets"
+                )
+                target_lanelets = []
+                for lanelet_id in op.lanelet_ids:
+                    try:
+                        ll = lanelet_map.laneletLayer.get(lanelet_id)
+                        target_lanelets.append(ll)
+                    except RuntimeError:
+                        logger.warning(f"    Lanelet {lanelet_id} not found in map")
+
+            # Remove turn_direction attribute from target lanelets
+            removed_count = 0
+            skipped_count = 0
+
+            for ll in target_lanelets:
+                if "turn_direction" in ll.attributes:
+                    del ll.attributes["turn_direction"]
+                    removed_count += 1
+                    logger.debug(f"    Removed turn_direction from lanelet {ll.id}")
+                else:
+                    skipped_count += 1
+
+            logger.info(
+                f"  Removed turn_direction from {removed_count} lanelets "
+                f"(skipped {skipped_count} without the attribute)"
+            )
+
+        return lanelet_map
+
     def process(self) -> lanelet2.core.LaneletMap:
         """Execute all preprocessing operations.
 
@@ -693,6 +781,11 @@ class LaneletPreprocessor:
         if self.config.remove_lanelet_operations:
             logger.info("Running remove lanelet operations...")
             lanelet_map = self.execute_remove_lanelet_operations(lanelet_map)
+
+        # 7. Remove turn direction operations (removes turn_direction attributes)
+        if self.config.remove_turn_direction_operations:
+            logger.info("Running remove turn_direction operations...")
+            lanelet_map = self.execute_remove_turn_direction_operations(lanelet_map)
 
         # Save the processed map
         self.save_map(lanelet_map)
