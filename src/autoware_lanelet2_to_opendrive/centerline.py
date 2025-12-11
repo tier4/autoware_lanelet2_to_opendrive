@@ -443,16 +443,16 @@ def estimate_lanelet_width_as_spline(
 ) -> Width1DSplineAdapter:
     """
     Estimate lanelet width as a spline by measuring distances between corresponding
-    points on borders and centerline in normalized Frenet coordinates.
+    points on borders using direct linear interpolation of original Lanelet2 points.
 
     Args:
         lanelet: A Lanelet2 lanelet object
         num_samples: Number of points to sample along the lanelet for width estimation
-        num_control_points: Number of control points for width spline interpolation
+        num_control_points: Number of control points for width spline interpolation (unused, kept for compatibility)
         reference: Reference line to use - "center_line", "left_bound", or "right_bound"
 
     Returns:
-        Splines object representing width as a function of arc length along the reference
+        Width1DSplineAdapter object representing width as a function of arc length along the reference
 
     Raises:
         ValueError: If reference is invalid or if lanelet has insufficient points
@@ -462,80 +462,97 @@ def estimate_lanelet_width_as_spline(
             f"Invalid reference: {reference}. Must be 'center_line', 'left_bound', or 'right_bound'"
         )
 
-    # Extract splines for borders and reference line
-    left_spline = extract_border_from_spline(lanelet, "left", num_control_points)
-    right_spline = extract_border_from_spline(lanelet, "right", num_control_points)
+    # Get raw boundary points directly from lanelet
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
 
-    # Choose reference spline based on parameter
-    if reference == "center_line":
-        reference_spline = extract_centerline_as_spline(lanelet, num_control_points)
-    elif reference == "left_bound":
-        reference_spline = left_spline
-    elif reference == "right_bound":
-        reference_spline = right_spline
+    if len(left_bound) < 2 or len(right_bound) < 2:
+        raise ValueError("Both boundaries must have at least 2 points")
 
-    # Get total arc lengths for normalization
-    ref_total_length = reference_spline.total_length
-    left_total_length = left_spline.total_length
-    right_total_length = right_spline.total_length
+    # Convert to numpy arrays
+    left_points = np.array([[p.x, p.y, p.z] for p in left_bound])
+    right_points = np.array([[p.x, p.y, p.z] for p in right_bound])
+
+    # Calculate cumulative arc lengths for both boundaries
+    left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
+    left_cumulative = np.concatenate(([0], np.cumsum(left_dists)))
+    left_total_length = left_cumulative[-1]
+
+    right_dists = np.linalg.norm(np.diff(right_points, axis=0), axis=1)
+    right_cumulative = np.concatenate(([0], np.cumsum(right_dists)))
+    right_total_length = right_cumulative[-1]
 
     # Sample points along normalized arc length (0 to 1)
     normalized_positions = np.linspace(0.0, 1.0, num_samples)
 
     # Calculate widths at each normalized position
-    arc_lengths = []
-    widths = []
+    arc_lengths: list[float] = []
+    widths: list[float] = []
 
     for t_norm in normalized_positions:
-        # Convert normalized position to actual arc length for each spline
-        s_ref = t_norm * ref_total_length
+        # Convert normalized position to actual arc length for each boundary
         s_left = t_norm * left_total_length
         s_right = t_norm * right_total_length
 
-        # Get positions at corresponding normalized locations
-        ref_pos = reference_spline.evaluate(s_ref, derivative=0)
-        left_pos = left_spline.evaluate(s_left, derivative=0)
-        right_pos = right_spline.evaluate(s_right, derivative=0)
+        # Interpolate positions on boundaries using linear interpolation
+        left_pos = _interpolate_on_line_segments(left_points, left_cumulative, s_left)
+        right_pos = _interpolate_on_line_segments(
+            right_points, right_cumulative, s_right
+        )
 
         # Calculate width based on reference type
         if reference == "center_line":
+            # Calculate centerline position as midpoint
+            center_pos = (left_pos + right_pos) / 2.0
+
             # Width is the total distance from center to both borders
-            left_dist = np.linalg.norm(ref_pos - left_pos)
-            right_dist = np.linalg.norm(ref_pos - right_pos)
+            left_dist = np.linalg.norm(center_pos - left_pos)
+            right_dist = np.linalg.norm(center_pos - right_pos)
             width = left_dist + right_dist
+
+            # Arc length is based on centerline
+            # For first point, arc length is 0
+            if len(arc_lengths) == 0:
+                arc_length = 0.0
+            else:
+                # Calculate arc length increment from previous centerline position
+                prev_center_pos = (
+                    _interpolate_on_line_segments(
+                        left_points,
+                        left_cumulative,
+                        normalized_positions[len(arc_lengths) - 1] * left_total_length,
+                    )
+                    + _interpolate_on_line_segments(
+                        right_points,
+                        right_cumulative,
+                        normalized_positions[len(arc_lengths) - 1] * right_total_length,
+                    )
+                ) / 2.0
+                arc_length = arc_lengths[-1] + np.linalg.norm(
+                    center_pos - prev_center_pos
+                )
         elif reference == "left_bound":
             # Width is distance from left to right border
             width = np.linalg.norm(left_pos - right_pos)
+            arc_length = s_left
         elif reference == "right_bound":
             # Width is distance from right to left border
             width = np.linalg.norm(right_pos - left_pos)
+            arc_length = s_right
 
-        arc_lengths.append(s_ref)
+        arc_lengths.append(arc_length)
         widths.append(width)
 
-    # Create a parametric representation where parameter t goes from 0 to 1
-    # and maps to arc length positions along the reference line
-    # We'll create 3D points where each dimension represents:
-    # x: arc_length (for reference)
-    # y: width value
-    # z: 0 (unused)
-
-    # The old parametric approach is no longer needed since we use 1D splines directly
-    # We previously created 3D points but now we work with 1D width values
-
     # Create a proper 1D cubic spline for width as a function of arc length
-    # This will give us the polynomial coefficients we need for OpenDRIVE
     arc_lengths_array = np.array(arc_lengths)
     widths_array = np.array(widths)
 
     # Use not-a-knot boundary conditions for smoother interpolation with less oscillation
-    # 'not-a-knot' typically produces more stable results than 'natural' at boundaries
     width_spline_1d = WidthSpline1D(
         arc_lengths_array, widths_array, bc_type="not-a-knot"
     )
 
     # Create a wrapper that provides the same interface as the old WidthSplineWrapper
-    # but uses the proper 1D spline internally
     return Width1DSplineAdapter(width_spline_1d)
 
 
