@@ -39,7 +39,7 @@ delete_point_operations:
 
 # Remove lanelet operations - remove entire lanelets from the map
 remove_lanelet_operations:
-  - lanelet_ids: [468]
+  - lanelet_ids: [468, 124219]
 
 # Global settings
 dry_run: false    # If true, only validate without saving output
