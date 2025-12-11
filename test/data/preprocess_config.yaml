@@ -17,7 +17,7 @@ merge_operations:
     validate: true
   - lanelet_ids: [301024, 3001037, 301038]
     validate: true
-  - lanelet_ids: [301029, 301030, 301031]
+  - lanelet_ids: [301029, 301030, 301031, 3001324]
     validate: true
   - lanelet_ids: [301021, 301033]
     validate: true
