@@ -19,6 +19,8 @@ merge_operations:
     validate: true
   - lanelet_ids: [301029, 301030, 301031]
     validate: true
+  - lanelet_ids: [301021, 301033]
+    validate: true
 
 # Move point operations - move points to specific coordinates
 move_point_operations:
