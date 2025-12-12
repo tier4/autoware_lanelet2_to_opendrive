@@ -125,6 +125,9 @@ class LaneSection:
             # to the right boundary
         elif num_lanes % 2 == 1:
             # Odd number of lanes
+            # Reference line is the left boundary of the center lanelet
+            # Left lanes: indices 0 to center_index-1
+            # Right lanes: indices center_index to num_lanes-1
             center_index = num_lanes // 2
 
             # Assign lane IDs
@@ -135,13 +138,13 @@ class LaneSection:
                     lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
                     lane.lane_id = lane_id
                     lane_section._add_left_lane(lane)
-                elif i > center_index:
+                else:
                     # Right lanes (negative IDs, starting from center outward)
-                    lane_id = center_index - i  # This will be negative
+                    # i >= center_index, so lane_id will be -1, -2, etc.
+                    lane_id = center_index - i - 1
                     lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
                     lane.lane_id = lane_id
                     lane_section._add_right_lane(lane)
-                # Skip center lane (i == center_index) as it's represented by the reference line
         else:
             # Even number of lanes
             mid_point = num_lanes // 2
