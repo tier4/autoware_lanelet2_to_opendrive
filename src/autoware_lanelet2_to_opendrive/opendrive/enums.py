@@ -60,3 +60,17 @@ class GeometryType(Enum):
     SPIRAL = "spiral"
     POLY3 = "poly3"
     PARAMPOLY3 = "paramPoly3"
+
+
+class ContactPoint(Enum):
+    """Contact point for road link connections."""
+
+    START = "start"
+    END = "end"
+
+
+class ElementType(Enum):
+    """Element type for road link connections."""
+
+    ROAD = "road"
+    JUNCTION = "junction"

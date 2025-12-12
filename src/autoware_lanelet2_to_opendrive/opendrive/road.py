@@ -10,8 +10,62 @@ from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
+from .enums import ContactPoint, ElementType
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype
+
+
+@dataclass
+class Predecessor:
+    """Predecessor link element."""
+
+    element_type: ElementType
+    element_id: int
+    contact_point: Optional[ContactPoint] = None
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("predecessor")
+        elem.set("elementType", self.element_type.value)
+        elem.set("elementId", str(self.element_id))
+        if self.contact_point:
+            elem.set("contactPoint", self.contact_point.value)
+        return elem
+
+
+@dataclass
+class Successor:
+    """Successor link element."""
+
+    element_type: ElementType
+    element_id: int
+    contact_point: Optional[ContactPoint] = None
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("successor")
+        elem.set("elementType", self.element_type.value)
+        elem.set("elementId", str(self.element_id))
+        if self.contact_point:
+            elem.set("contactPoint", self.contact_point.value)
+        return elem
+
+
+@dataclass
+class RoadLink:
+    """Road link element containing predecessor and successor."""
+
+    predecessor: Optional[Predecessor] = None
+    successor: Optional[Successor] = None
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("link")
+        if self.predecessor:
+            elem.append(self.predecessor.to_xml())
+        if self.successor:
+            elem.append(self.successor.to_xml())
+        return elem
 
 
 @dataclass
@@ -25,6 +79,7 @@ class Road:
     plan_view: Optional[PlanView] = None
     elevation_profile: Optional[ElevationProfile] = None
     lanes: Optional[Lanes] = None
+    link: Optional[RoadLink] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -36,6 +91,8 @@ class Road:
         if self.name:
             elem.set("name", self.name)
 
+        if self.link:
+            elem.append(self.link.to_xml())
         if self.plan_view:
             elem.append(self.plan_view.to_xml())
         if self.elevation_profile:
@@ -44,6 +101,48 @@ class Road:
             elem.append(self.lanes.to_xml())
 
         return elem
+
+    def add_predecessor(
+        self,
+        element_id: int,
+        element_type: ElementType = ElementType.ROAD,
+        contact_point: Optional[ContactPoint] = None,
+    ) -> None:
+        """Add a predecessor link to this road.
+
+        Args:
+            element_id: ID of the predecessor element
+            element_type: Type of the predecessor element (road or junction)
+            contact_point: Contact point of the predecessor (start or end)
+        """
+        if self.link is None:
+            self.link = RoadLink()
+        self.link.predecessor = Predecessor(
+            element_type=element_type,
+            element_id=element_id,
+            contact_point=contact_point,
+        )
+
+    def add_successor(
+        self,
+        element_id: int,
+        element_type: ElementType = ElementType.ROAD,
+        contact_point: Optional[ContactPoint] = None,
+    ) -> None:
+        """Add a successor link to this road.
+
+        Args:
+            element_id: ID of the successor element
+            element_type: Type of the successor element (road or junction)
+            contact_point: Contact point of the successor (start or end)
+        """
+        if self.link is None:
+            self.link = RoadLink()
+        self.link.successor = Successor(
+            element_type=element_type,
+            element_id=element_id,
+            contact_point=contact_point,
+        )
 
     @staticmethod
     def construct_from_lanelet_groups(
@@ -160,6 +259,9 @@ class Road:
 
         # Create roads from adjacent groups
         roads = []
+        # Store mapping from lanelet ID to road ID and adjacent group for each road
+        lanelet_to_road: dict[int, int] = {}
+        road_to_group: dict[int, Set[lanelet2.core.Lanelet]] = {}
 
         print(f"Creating roads from {len(adjacent_groups)} lanelet groups...")
         for road_id, adjacent_group in tqdm(
@@ -182,6 +284,14 @@ class Road:
                     s_offset=0.0,
                 )
                 roads.append(road)
+
+                # Store lanelet ID to road ID mapping
+                for lanelet in adjacent_group:
+                    lanelet_to_road[lanelet.id] = road_id
+
+                # Store road ID to adjacent group mapping
+                road_to_group[road_id] = adjacent_group
+
             except AsymmetryLaneletException as e:
                 # Log asymmetric lanelet warning and skip this road
                 tqdm.write(
@@ -206,5 +316,62 @@ class Road:
 
         if not roads:
             raise ValueError("No valid roads could be constructed from the lanelet map")
+
+        # Build road links based on lanelet previous/following relationships
+        from ..util import find_connecting_lanelet_groups, ConnectionDirection
+
+        print(f"Building road links for {len(roads)} roads...")
+        for road in tqdm(roads, desc="Building road links"):
+            adjacent_group = road_to_group[road.id]
+
+            # Find preceding lanelet groups
+            try:
+                preceding_groups = find_connecting_lanelet_groups(
+                    lanelet_map, adjacent_group, ConnectionDirection.PREVIOUS
+                )
+
+                # Find which roads these preceding lanelets belong to
+                for preceding_group in preceding_groups:
+                    # Get the road ID for any lanelet in this group
+                    for lanelet in preceding_group:
+                        if lanelet.id in lanelet_to_road:
+                            predecessor_road_id = lanelet_to_road[lanelet.id]
+                            # Add predecessor link with contactPoint=END
+                            # (the end of the predecessor road connects to the start of current road)
+                            road.add_predecessor(
+                                element_id=predecessor_road_id,
+                                element_type=ElementType.ROAD,
+                                contact_point=ContactPoint.END,
+                            )
+                            break  # Only need to find one lanelet from the group
+            except Exception as e:
+                tqdm.write(
+                    f"Warning: Failed to find predecessors for road {road.id}: {e}"
+                )
+
+            # Find following lanelet groups
+            try:
+                following_groups = find_connecting_lanelet_groups(
+                    lanelet_map, adjacent_group, ConnectionDirection.FOLLOWING
+                )
+
+                # Find which roads these following lanelets belong to
+                for following_group in following_groups:
+                    # Get the road ID for any lanelet in this group
+                    for lanelet in following_group:
+                        if lanelet.id in lanelet_to_road:
+                            successor_road_id = lanelet_to_road[lanelet.id]
+                            # Add successor link with contactPoint=START
+                            # (the end of current road connects to the start of the successor road)
+                            road.add_successor(
+                                element_id=successor_road_id,
+                                element_type=ElementType.ROAD,
+                                contact_point=ContactPoint.START,
+                            )
+                            break  # Only need to find one lanelet from the group
+            except Exception as e:
+                tqdm.write(
+                    f"Warning: Failed to find successors for road {road.id}: {e}"
+                )
 
         return roads
