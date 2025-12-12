@@ -75,27 +75,26 @@ class ReferenceLine:
                 single_lanelet, border="left"
             )
         elif num_lanes % 2 == 1:
-            # Odd number of lanes: use the center lane's centerline
+            # Odd number of lanes: use the left boundary of the center lanelet
+            # This allows us to not skip the center lanelet in lane creation
             center_lane_index = num_lanes // 2
             center_lanelet = sorted_lanelets[center_lane_index]
 
-            from ..centerline import extract_centerline_as_spline
+            from ..centerline import extract_border_from_spline
 
-            centerline_spline = extract_centerline_as_spline(center_lanelet)
+            centerline_spline = extract_border_from_spline(
+                center_lanelet, border="left"
+            )
         else:
-            # Even number of lanes: use the line between X/2 and X/2+1 lanes
-            left_lane_index = num_lanes // 2 - 1  # X/2 (0-indexed)
-            right_lane_index = num_lanes // 2  # X/2+1 (0-indexed)
+            # Even number of lanes: use the left boundary of the mid_point lanelet
+            # This allows us to skip the mid_point lanelet in lane creation
+            mid_point_index = num_lanes // 2  # X/2+1 (0-indexed)
+            mid_point_lanelet = sorted_lanelets[mid_point_index]
 
-            two_lanelets = {
-                sorted_lanelets[left_lane_index],
-                sorted_lanelets[right_lane_index],
-            }
+            from ..centerline import extract_border_from_spline
 
-            from ..centerline import extract_centerline_as_spline_from_two_lanelets
-
-            centerline_spline = extract_centerline_as_spline_from_two_lanelets(
-                lanelet_map, two_lanelets
+            centerline_spline = extract_border_from_spline(
+                mid_point_lanelet, border="left"
             )
 
         # Create the ReferenceLine instance
