@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 import lxml.etree as ET
+import lanelet2
 
 from .enums import ContactPoint
 
@@ -114,3 +115,51 @@ class Junction:
         )
         self.connections.append(connection)
         return connection
+
+    @staticmethod
+    def construct_from_lanelet_groups(
+        junction_id: int,
+        lanelet_group: List[lanelet2.core.Lanelet],
+        name: Optional[str] = None,
+    ) -> "Junction":
+        """Construct a Junction from a group of lanelets.
+
+        This method creates a Junction instance from a single lanelet group
+        as returned by find_junction_groups(). The connections are not
+        automatically created - they should be added separately using
+        add_connection() based on the road network structure.
+
+        Args:
+            junction_id: Unique ID for this junction
+            lanelet_group: List of lanelets that form this junction
+                          (one group from find_junction_groups result)
+            name: Optional name for this junction. If not provided,
+                  will be generated from the lanelet IDs
+
+        Returns:
+            Junction instance with the specified ID and name, but no connections yet
+
+        Example:
+            >>> from autoware_lanelet2_to_opendrive.junction import find_junction_groups
+            >>> junction_groups = find_junction_groups(junction_lanelets)
+            >>> junctions = []
+            >>> for i, group in enumerate(junction_groups):
+            >>>     junction = Junction.construct_from_lanelet_groups(
+            >>>         junction_id=i,
+            >>>         lanelet_group=group,
+            >>>         name=f"Junction_{i}"
+            >>>     )
+            >>>     junctions.append(junction)
+        """
+        # Generate a name if not provided
+        if name is None:
+            if lanelet_group:
+                lanelet_ids = sorted([ll.id for ll in lanelet_group])
+                name = f"junction_{lanelet_ids[0]}"
+            else:
+                name = f"junction_{junction_id}"
+
+        # Create the junction without connections
+        junction = Junction(id=junction_id, name=name, connections=[])
+
+        return junction
