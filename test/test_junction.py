@@ -151,3 +151,45 @@ def test_construct_from_lanelet_groups():
     assert empty_junction.id == 999
     assert empty_junction.name == "junction_999"
     assert empty_junction.connections == []
+
+
+def test_construct_from_lanelet_map():
+    """Test constructing Junction instances directly from a lanelet map."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+    from autoware_lanelet2_to_opendrive.junction import (
+        filter_lanelets_inside_junction,
+        find_junction_groups,
+    )
+
+    lanelet_map = load_test_map()
+
+    # Test with default starting ID
+    junctions = Junction.construct_from_lanelet_map(lanelet_map)
+
+    # Verify we get junctions
+    assert len(junctions) > 0, "Should find at least one junction in test map"
+
+    # Verify junction IDs start from 0 and are sequential
+    for i, junction in enumerate(junctions):
+        assert junction.id == i
+        assert junction.name is not None
+        assert junction.name.startswith("junction_")
+        assert junction.connections == []  # No connections initially
+
+    # Verify consistency with manual approach
+    lanelets = list(lanelet_map.laneletLayer)
+    junction_lanelets = filter_lanelets_inside_junction(lanelets)
+    junction_groups = find_junction_groups(junction_lanelets)
+    assert len(junctions) == len(
+        junction_groups
+    ), "Should have same number of junctions as groups"
+
+    # Test with custom starting ID
+    custom_junctions = Junction.construct_from_lanelet_map(
+        lanelet_map, starting_junction_id=100
+    )
+    assert len(custom_junctions) == len(junctions)
+    for i, junction in enumerate(custom_junctions):
+        assert junction.id == 100 + i
+        assert junction.name is not None
+        assert junction.connections == []

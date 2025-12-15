@@ -163,3 +163,53 @@ class Junction:
         junction = Junction(id=junction_id, name=name, connections=[])
 
         return junction
+
+    @staticmethod
+    def construct_from_lanelet_map(
+        lanelet_map: lanelet2.core.LaneletMap,
+        starting_junction_id: int = 0,
+    ) -> List["Junction"]:
+        """Construct a list of Junctions from a lanelet2 map.
+
+        This method automatically extracts all junction lanelets from the map,
+        groups them into separate junctions based on their spatial relationships,
+        and creates Junction instances for each group.
+
+        Args:
+            lanelet_map: The lanelet2 map to extract junctions from
+            starting_junction_id: The starting ID for junction numbering (default: 0)
+
+        Returns:
+            List of Junction instances, one for each detected junction group.
+            The connections are not automatically created - they should be added
+            separately using add_connection() based on the road network structure.
+
+        Example:
+            >>> from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+            >>> junctions = Junction.construct_from_lanelet_map(lanelet_map)
+            >>> print(f"Found {len(junctions)} junctions")
+            >>> for junction in junctions:
+            ...     print(f"Junction {junction.id}: {junction.name}")
+        """
+        # Import here to avoid circular dependency
+        from ..junction import filter_lanelets_inside_junction, find_junction_groups
+
+        # Get all lanelets from the map
+        all_lanelets = list(lanelet_map.laneletLayer)
+
+        # Filter lanelets that are inside junctions (have turn_direction attribute)
+        junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+
+        # Group junction lanelets into separate junction groups
+        junction_groups = find_junction_groups(junction_lanelets)
+
+        # Create Junction instances from each group
+        junctions = []
+        for i, group in enumerate(junction_groups):
+            junction_id = starting_junction_id + i
+            junction = Junction.construct_from_lanelet_groups(
+                junction_id=junction_id, lanelet_group=group
+            )
+            junctions.append(junction)
+
+        return junctions

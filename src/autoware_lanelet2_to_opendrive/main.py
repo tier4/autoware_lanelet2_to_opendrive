@@ -25,6 +25,7 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     save_opendrive_to_file,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -96,12 +97,10 @@ def convert_lanelet2_to_opendrive(
         west="0.0",
     )
 
-    # Create minimal road structure
-    # TODO: Extract roads from lanelet groups
-
-    # For now, create an empty OpenDRIVE structure
     opendrive = OpenDRIVE(
-        header=header, roads=Road.construct_from_lanelet_map(lanelet_map)
+        header=header,
+        roads=Road.construct_from_lanelet_map(lanelet_map),
+        junctions=Junction.construct_from_lanelet_map(lanelet_map),
     )
 
     print("Conversion completed (stub implementation)")
