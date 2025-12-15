@@ -41,17 +41,17 @@ def test_construct_lane_section_from_two_lanes():
     assert lane_section.center_lane.lane_id == 0
 
     # Check left and right lanes
-    # With 2 lanes (even), we should have 1 left and 1 right
-    assert len(lane_section.left_lanes) == 1
-    assert len(lane_section.right_lanes) == 1
+    # With 2 lanes, all are right lanes (reference line is leftmost left boundary)
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 2
 
-    # Check lane IDs
-    assert 1 in lane_section.left_lanes
+    # Check lane IDs (negative IDs from left to right: -1, -2)
     assert -1 in lane_section.right_lanes
+    assert -2 in lane_section.right_lanes
 
     # Check that lanes are Lane instances
-    assert isinstance(lane_section.left_lanes[1], Lane)
     assert isinstance(lane_section.right_lanes[-1], Lane)
+    assert isinstance(lane_section.right_lanes[-2], Lane)
 
 
 def test_lane_section_to_standard():
@@ -88,12 +88,12 @@ def test_get_all_lanes():
 
     all_lanes = lane_section.get_all_lanes()
 
-    # Should have 3 lanes total (1 left + 1 center + 1 right)
+    # Should have 3 lanes total (0 left + 1 center + 2 right)
     assert len(all_lanes) == 3
 
-    # Check order: left lanes, center, right lanes
+    # Check order: left lanes, center, right lanes (but no left lanes in new logic)
     lane_ids = [lane.lane_id for lane in all_lanes]
-    assert lane_ids == [1, 0, -1]
+    assert lane_ids == [0, -1, -2]
 
     # Verify center lane type is "none"
     xml_element = lane_section.to_xml()

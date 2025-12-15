@@ -100,7 +100,6 @@ class LaneSection:
             lanelet_set = set(lanelet_group)
 
         sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_set)
-        num_lanes = len(sorted_lanelets)
 
         # Create and set the reference line
         reference_line = ReferenceLine.construct_from_lanelet_groups(
@@ -108,60 +107,14 @@ class LaneSection:
         )
         lane_section._set_center_lane(reference_line)
 
-        # Determine the center position for lane ID assignment
-        # For single lane: treat as right lane with reference line as left boundary
-        # For odd number of lanes: center lane gets ID closest to 0
-        # For even number: lanes are split evenly between left and right
-        if num_lanes == 1:
-            # Single lane: use the lanelet as a right lane (ID = -1)
-            # The left boundary is used as the reference line (via ReferenceLine.construct_from_lanelet_groups)
-            single_lanelet = sorted_lanelets[0]
-            lane = Lane.construct_from_lanelet(lanelet_map, single_lanelet)
-            lane.lane_id = -1
+        # All lanes are treated as right lanes (negative IDs) since reference line
+        # is the left boundary of the leftmost lanelet
+        # Lane IDs: -1, -2, -3, ... from left to right
+        for i, lanelet in enumerate(sorted_lanelets):
+            lane_id = -(i + 1)  # -1, -2, -3, ...
+            lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+            lane.lane_id = lane_id
             lane_section._add_right_lane(lane)
-
-            # No lane offset needed since we use left boundary as reference line
-            # The lane width will be measured from the left boundary (reference line)
-            # to the right boundary
-        elif num_lanes % 2 == 1:
-            # Odd number of lanes
-            # Reference line is the left boundary of the center lanelet
-            # Left lanes: indices 0 to center_index-1
-            # Right lanes: indices center_index to num_lanes-1
-            center_index = num_lanes // 2
-
-            # Assign lane IDs
-            for i, lanelet in enumerate(sorted_lanelets):
-                if i < center_index:
-                    # Left lanes (positive IDs, starting from center outward)
-                    lane_id = center_index - i
-                    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
-                    lane.lane_id = lane_id
-                    lane_section._add_left_lane(lane)
-                else:
-                    # Right lanes (negative IDs, starting from center outward)
-                    # i >= center_index, so lane_id will be -1, -2, etc.
-                    lane_id = center_index - i - 1
-                    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
-                    lane.lane_id = lane_id
-                    lane_section._add_right_lane(lane)
-        else:
-            # Even number of lanes
-            mid_point = num_lanes // 2
-
-            for i, lanelet in enumerate(sorted_lanelets):
-                if i < mid_point:
-                    # Left lanes
-                    lane_id = mid_point - i
-                    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
-                    lane.lane_id = lane_id
-                    lane_section._add_left_lane(lane)
-                else:
-                    # Right lanes (ensure negative ID)
-                    lane_id = mid_point - i - 1  # This will be -1, -2, etc.
-                    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
-                    lane.lane_id = lane_id
-                    lane_section._add_right_lane(lane)
 
         return lane_section
 

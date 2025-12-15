@@ -62,40 +62,12 @@ class ReferenceLine:
 
         sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_group)
 
-        num_lanes = len(sorted_lanelets)
+        # Always use the left boundary of the leftmost lanelet as reference line
+        leftmost_lanelet = sorted_lanelets[0]
 
-        # Calculate centerline spline based on the number of lanes
-        if num_lanes == 1:
-            # Single lane: use the left boundary as reference line
-            single_lanelet = sorted_lanelets[0]
+        from ..centerline import extract_border_from_spline
 
-            from ..centerline import extract_border_from_spline
-
-            centerline_spline = extract_border_from_spline(
-                single_lanelet, border="left"
-            )
-        elif num_lanes % 2 == 1:
-            # Odd number of lanes: use the left boundary of the center lanelet
-            # This allows us to not skip the center lanelet in lane creation
-            center_lane_index = num_lanes // 2
-            center_lanelet = sorted_lanelets[center_lane_index]
-
-            from ..centerline import extract_border_from_spline
-
-            centerline_spline = extract_border_from_spline(
-                center_lanelet, border="left"
-            )
-        else:
-            # Even number of lanes: use the left boundary of the mid_point lanelet
-            # This allows us to skip the mid_point lanelet in lane creation
-            mid_point_index = num_lanes // 2  # X/2+1 (0-indexed)
-            mid_point_lanelet = sorted_lanelets[mid_point_index]
-
-            from ..centerline import extract_border_from_spline
-
-            centerline_spline = extract_border_from_spline(
-                mid_point_lanelet, border="left"
-            )
+        centerline_spline = extract_border_from_spline(leftmost_lanelet, border="left")
 
         # Create the ReferenceLine instance
         reference_line = ReferenceLine(centerline_spline=centerline_spline)
