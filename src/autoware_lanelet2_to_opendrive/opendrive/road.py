@@ -375,3 +375,100 @@ class Road:
                 )
 
         return roads
+
+    @staticmethod
+    def construct_connecting_roads_from_junctions(
+        lanelet_map: lanelet2.core.LaneletMap,
+        junction_groups: List[List[lanelet2.core.Lanelet]],
+        starting_road_id: int = 0,
+    ) -> tuple[List["Road"], dict[int, List[int]], dict[int, int]]:
+        """Construct connecting roads from junction lanelet groups.
+
+        Creates roads from lanelets inside junctions. These roads have their
+        junction field set to the appropriate junction ID.
+
+        Args:
+            lanelet_map: The lanelet2 map containing all lanelets
+            junction_groups: List of junction lanelet groups from find_junction_groups()
+            starting_road_id: Starting ID for road numbering (default: 0)
+
+        Returns:
+            Tuple of:
+            - List of Road objects (connecting roads with junction field set)
+            - Dict mapping junction_id -> list of road IDs in that junction
+            - Dict mapping lanelet_id -> road_id for all junction lanelets
+
+        Example:
+            >>> from autoware_lanelet2_to_opendrive.junction import find_junction_groups, filter_lanelets_inside_junction
+            >>> junction_lanelets = filter_lanelets_inside_junction(lanelet_map.laneletLayer)
+            >>> junction_groups = find_junction_groups(junction_lanelets)
+            >>> roads, junction_to_roads, lanelet_to_road = Road.construct_connecting_roads_from_junctions(
+            ...     lanelet_map, junction_groups, starting_road_id=1000
+            ... )
+        """
+        from ..util import find_adjacent_groups
+
+        connecting_roads = []
+        junction_to_roads: dict[int, List[int]] = {}
+        lanelet_to_road: dict[int, int] = {}
+
+        current_road_id = starting_road_id
+
+        print(
+            f"Creating connecting roads from {len(junction_groups)} junction groups..."
+        )
+
+        for junction_id, junction_group in tqdm(
+            enumerate(junction_groups),
+            total=len(junction_groups),
+            desc="Building junction roads",
+        ):
+            # Find adjacent groups within this junction
+            adjacent_groups_in_junction = find_adjacent_groups(
+                lanelet_map, set(junction_group)
+            )
+
+            junction_road_ids = []
+
+            # Create one road per adjacent group within the junction
+            for adjacent_group in adjacent_groups_in_junction:
+                try:
+                    road = Road.construct_from_lanelet_groups(
+                        lanelet_map=lanelet_map,
+                        lanelet_group=adjacent_group,
+                        road_id=current_road_id,
+                        s_offset=0.0,
+                    )
+
+                    # Set the junction field to mark this as a connecting road
+                    road.junction = junction_id
+
+                    connecting_roads.append(road)
+                    junction_road_ids.append(current_road_id)
+
+                    # Store lanelet ID to road ID mapping
+                    for lanelet in adjacent_group:
+                        lanelet_to_road[lanelet.id] = current_road_id
+
+                    current_road_id += 1
+
+                except AsymmetryLaneletException as e:
+                    tqdm.write(
+                        f"Warning: Skipping connecting road in junction {junction_id} "
+                        f"due to asymmetric lanelet: {e}"
+                    )
+                    continue
+                except Exception as e:
+                    tqdm.write(
+                        f"Warning: Failed to create connecting road in junction {junction_id}: {e}"
+                    )
+                    continue
+
+            # Store the mapping from junction ID to its road IDs
+            junction_to_roads[junction_id] = junction_road_ids
+
+        print(
+            f"Created {len(connecting_roads)} connecting roads across {len(junction_groups)} junctions"
+        )
+
+        return connecting_roads, junction_to_roads, lanelet_to_road

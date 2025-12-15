@@ -25,6 +25,7 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     save_opendrive_to_file,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -74,14 +75,8 @@ def convert_lanelet2_to_opendrive(
 
     Returns:
         OpenDRIVE object representing the converted map
-
-    Note:
-        This is currently a stub implementation.
     """
     print("Converting Lanelet2 map to OpenDRIVE format...")
-
-    # TODO: Implement actual conversion logic
-    # This is a stub implementation that creates a minimal OpenDRIVE structure
 
     # Create header
     header = Header(
@@ -96,15 +91,93 @@ def convert_lanelet2_to_opendrive(
         west="0.0",
     )
 
-    # Create minimal road structure
-    # TODO: Extract roads from lanelet groups
+    # Step 1: Create regular roads (outside junctions)
+    print("\n=== Building regular roads ===")
+    regular_roads = Road.construct_from_lanelet_map(lanelet_map)
+    starting_junction_road_id = len(regular_roads)
 
-    # For now, create an empty OpenDRIVE structure
-    opendrive = OpenDRIVE(
-        header=header, roads=Road.construct_from_lanelet_map(lanelet_map)
+    # Build lanelet-to-road mapping for regular roads
+    from autoware_lanelet2_to_opendrive.junction import (
+        filter_lanelets_inside_junction,
+        filter_lanelets_outside_junction,
+        find_junction_groups,
+    )
+    from autoware_lanelet2_to_opendrive.util import (
+        find_adjacent_groups,
+        filter_lanelets_by_subtype,
     )
 
-    print("Conversion completed (stub implementation)")
+    all_lanelets = list(lanelet_map.laneletLayer)
+    road_lanelets = filter_lanelets_outside_junction(
+        filter_lanelets_by_subtype(all_lanelets, ["road"])
+    )
+    adjacent_groups = find_adjacent_groups(lanelet_map, set(road_lanelets))
+
+    lanelet_to_road_id: dict[int, int] = {}
+    for road_id, adjacent_group in enumerate(adjacent_groups):
+        for lanelet in adjacent_group:
+            lanelet_to_road_id[lanelet.id] = road_id
+
+    # Step 2: Get junction groups
+    print("\n=== Finding junctions ===")
+    junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+    junction_groups = find_junction_groups(junction_lanelets)
+    print(f"Found {len(junction_groups)} junctions")
+
+    # Step 3: Create connecting roads (inside junctions)
+    print("\n=== Building connecting roads inside junctions ===")
+    connecting_roads, junction_to_roads, junction_lanelet_to_road = (
+        Road.construct_connecting_roads_from_junctions(
+            lanelet_map=lanelet_map,
+            junction_groups=junction_groups,
+            starting_road_id=starting_junction_road_id,
+        )
+    )
+
+    # Step 4: Merge lanelet-to-road mappings
+    lanelet_to_road_id.update(junction_lanelet_to_road)
+
+    # Step 5: Build junctions with connections
+    print("\n=== Building junction connections ===")
+    junctions = []
+    for junction_id, junction_group in enumerate(junction_groups):
+        # Create base junction
+        junction = Junction.construct_from_lanelet_groups(
+            junction_id=junction_id,
+            lanelet_group=junction_group,
+        )
+
+        # Build connections for this junction
+        connecting_road_ids = junction_to_roads.get(junction_id, [])
+        connections = Junction.build_connections_from_roads(
+            lanelet_map=lanelet_map,
+            junction_lanelet_group=junction_group,
+            junction_id=junction_id,
+            lanelet_to_road_id=lanelet_to_road_id,
+            connecting_road_ids=connecting_road_ids,
+        )
+
+        junction.connections = connections
+        junctions.append(junction)
+
+    print(
+        f"Built {len(junctions)} junctions with {sum(len(j.connections) for j in junctions)} total connections"
+    )
+
+    # Step 6: Combine all roads
+    all_roads = regular_roads + connecting_roads
+    print(
+        f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
+    )
+
+    # Create OpenDRIVE object
+    opendrive = OpenDRIVE(
+        header=header,
+        roads=all_roads,
+        junctions=junctions,
+    )
+
+    print("\nConversion completed successfully!")
 
     # Save to file if output path is provided
     if output_path:

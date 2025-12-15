@@ -6,6 +6,7 @@ import lxml.etree as ET
 
 from .header import Header
 from .road import Road
+from .junction import Junction
 
 from pathlib import Path
 
@@ -16,10 +17,13 @@ class OpenDRIVE:
 
     header: Optional[Header] = None
     roads: Optional[List[Road]] = None
+    junctions: Optional[List[Junction]] = None
 
     def __post_init__(self):
         if self.roads is None:
             self.roads = []
+        if self.junctions is None:
+            self.junctions = []
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -31,6 +35,10 @@ class OpenDRIVE:
         if self.roads:
             for road in self.roads:
                 elem.append(road.to_xml())
+
+        if self.junctions:
+            for junction in self.junctions:
+                elem.append(junction.to_xml())
 
         return elem
 

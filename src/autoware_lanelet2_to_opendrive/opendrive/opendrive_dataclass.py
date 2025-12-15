@@ -11,6 +11,7 @@ from .elevation import Elevation, ElevationProfile
 from .lane_sections import Left, Center, Right, Lanes
 from .road import Road
 from .header import Header
+from .junction import Junction
 from .opendrive import OpenDRIVE, export_to_xml, save_opendrive_to_file
 
 # Re-export everything for backward compatibility
@@ -43,6 +44,7 @@ __all__ = [
     # Road and structure
     "Road",
     "Header",
+    "Junction",
     "OpenDRIVE",
     # Export functions
     "export_to_xml",
