@@ -14,12 +14,6 @@ from .enums import ContactPoint, ElementType
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype
 
-# Import for type hints only
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .signals import Signals
-
 
 @dataclass
 class Predecessor:
@@ -86,7 +80,6 @@ class Road:
     elevation_profile: Optional[ElevationProfile] = None
     lanes: Optional[Lanes] = None
     link: Optional[RoadLink] = None
-    signals: Optional["Signals"] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -106,8 +99,6 @@ class Road:
             elem.append(self.elevation_profile.to_xml())
         if self.lanes:
             elem.append(self.lanes.to_xml())
-        if self.signals:
-            elem.append(self.signals.to_xml())
 
         return elem
 

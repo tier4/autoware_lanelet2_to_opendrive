@@ -4,7 +4,7 @@ This document describes the implementation of traffic signals (traffic lights, s
 
 ## Overview
 
-The signals implementation follows the ASAM OpenDRIVE v1.8.1 specification (Section 14: Signals) and provides a complete framework for adding traffic signals to OpenDRIVE roads.
+The signals implementation follows the ASAM OpenDRIVE v1.8.1 specification (Section 14: Signals) and provides a framework for creating traffic signal objects.
 
 ## Module Structure
 
@@ -15,28 +15,16 @@ Core signal definitions:
 - **`SignalUserData`**: Container for custom user-defined data
 - **`SignalType`**: Constants for common signal types (traffic lights, etc.)
 
-### `signals.py`
-Container class:
-- **`Signals`**: Container class for managing multiple signals on a road
-
 ## Usage
 
 ### Basic Example
 
 ```python
 from autoware_lanelet2_to_opendrive.opendrive import (
-    Road,
     Signal,
-    Signals,
     Validity,
     SignalType,
 )
-
-# Create a road
-road = Road(id=1, name="Main Street", length=200.0)
-
-# Create signals container
-signals = Signals()
 
 # Create a traffic light using Signal constructor
 traffic_light = Signal(
@@ -59,13 +47,9 @@ traffic_light = Signal(
     width=0.6,
     validities=[Validity(from_lane=-1, to_lane=-1)],
 )
-signals.add_signal(traffic_light)
-
-# Attach signals to road
-road.signals = signals
 
 # Generate XML
-xml = road.to_xml()
+xml = traffic_light.to_xml()
 ```
 
 ### Creating Multiple Signals
@@ -160,39 +144,20 @@ validity = Validity(from_lane=0, to_lane=0)
 The implementation generates OpenDRIVE-compliant XML:
 
 ```xml
-<road id="1" length="200.0" junction="-1" name="Main Street">
-  <!-- ... other road elements ... -->
-  <signals>
-    <signal id="100" name="TrafficLight_1"
-            s="5.0000000000000000e+01"
-            t="-4.5000000000000000e+00"
-            zOffset="0.0000000000000000e+00"
-            orientation="-"
-            dynamic="yes"
-            country="OpenDRIVE"
-            type="1000001"
-            subtype="-1"
-            height="1.2000000000000000e+00"
-            width="6.0000000000000000e-01">
-      <validity fromLane="-1" toLane="-1"/>
-    </signal>
-  </signals>
-</road>
+<signal id="100" name="TrafficLight_1"
+        s="5.0000000000000000e+01"
+        t="-4.5000000000000000e+00"
+        zOffset="0.0000000000000000e+00"
+        orientation="-"
+        dynamic="yes"
+        country="OpenDRIVE"
+        type="1000001"
+        subtype="-1"
+        height="1.2000000000000000e+00"
+        width="6.0000000000000000e-01">
+  <validity fromLane="-1" toLane="-1"/>
+</signal>
 ```
-
-## Running the Demo
-
-A complete demo script is provided:
-
-```bash
-uv run python examples/signal_demo.py
-```
-
-This demonstrates:
-1. Creating traffic lights using the Signal constructor
-2. Creating signals with custom attributes
-3. Creating pedestrian traffic lights
-4. Generating OpenDRIVE XML output
 
 ## Testing
 
@@ -204,23 +169,42 @@ uv run pytest test/test_signals.py -v
 
 Tests cover:
 - Signal creation and XML conversion
-- Signals container operations
-- Road integration
+- Validity and SignalUserData functionality
+- Signal conversion from lanelet2 traffic lights
 - XML formatting and structure
+- Error handling for invalid inputs
 
 ## References
 
 - **ASAM OpenDRIVE v1.8.1 Specification**: [Section 14 - Signals](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/v1.8.1/specification/14_signals/14_01_introduction.html)
 - **OpenDRIVE Signal Reference**: [Signal Catalog](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Signal_reference/latest/signal-catalog/00_preface/00_introduction.html)
 
-## Integration with Existing Code
+## Converting from Lanelet2
 
-The signals functionality integrates seamlessly with the existing `Road` class:
+The `Signal.construct_from_lanelet2_traffic_signal()` method converts lanelet2 traffic light regulatory elements to OpenDRIVE signals:
 
-1. Signals are optional - roads without signals work as before
-2. Signals are added via the `road.signals` attribute
-3. XML output automatically includes signals when present
-4. All existing road functionality remains unchanged
+```python
+import lanelet2
+from autoware_lanelet2_to_opendrive.opendrive import Signal
+
+# Load lanelet2 map
+lanelet_map = lanelet2.io.load("map.osm", projector)
+
+# Get traffic light from lanelet
+lanelet = lanelet_map.laneletLayer.get(lanelet_id)
+traffic_lights = [reg for reg in lanelet.regulatoryElements
+                  if isinstance(reg, lanelet2.core.TrafficLight)]
+traffic_light = traffic_lights[0]
+
+# Convert to OpenDRIVE Signal
+signal = Signal.construct_from_lanelet2_traffic_signal(
+    traffic_light=traffic_light,
+    signal_id=100,
+    s=50.0,      # Position along road reference line
+    t=-4.5,      # Lateral offset from reference line
+    lane_ids=[-1]  # Lanes this signal applies to
+)
+```
 
 ## Future Enhancements
 
@@ -228,4 +212,4 @@ Potential future enhancements:
 - Signal dependencies and relationships
 - Signal references (signalReference element)
 - More signal type constants for different countries
-- Automated signal placement from Lanelet2 regulatory elements
+- Signal controllers for coordinated traffic light control
