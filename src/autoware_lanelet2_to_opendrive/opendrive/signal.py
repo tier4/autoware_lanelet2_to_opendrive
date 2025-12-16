@@ -41,6 +41,63 @@ class SignalUserData:
 
 
 @dataclass
+class ControlEntry:
+    """Control entry linking a signal to a controller."""
+
+    signal_id: int  # ID of the controlled signal
+    type: str = ""  # Optional: type of control
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("control")
+        elem.set("signalId", str(self.signal_id))
+        if self.type:
+            elem.set("type", self.type)
+        return elem
+
+
+@dataclass
+class Controller:
+    """
+    OpenDRIVE signal controller representation.
+
+    Controllers group multiple signals together for coordinated control,
+    such as traffic light phases at an intersection.
+
+    Reference: ASAM OpenDRIVE v1.8.1 - Section 14.3: Signal Controllers
+    """
+
+    id: int  # Controller ID
+    name: str  # Controller name
+    sequence: Optional[int] = None  # Optional sequence number
+    controls: Optional[List[ControlEntry]] = None  # List of controlled signals
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("controller")
+
+        # Set required attributes
+        elem.set("id", str(self.id))
+        elem.set("name", self.name)
+
+        # Set optional sequence attribute
+        if self.sequence is not None:
+            elem.set("sequence", str(self.sequence))
+
+        # Add control entries if present
+        if self.controls:
+            for control in self.controls:
+                elem.append(control.to_xml())
+
+        return elem
+
+    def __repr__(self) -> str:
+        """String representation of the controller."""
+        num_controls = len(self.controls) if self.controls else 0
+        return f"Controller(id={self.id}, name='{self.name}', controls={num_controls})"
+
+
+@dataclass
 class Signal:
     """
     OpenDRIVE signal representation.
