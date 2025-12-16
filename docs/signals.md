@@ -226,7 +226,6 @@ The signals functionality integrates seamlessly with the existing `Road` class:
 
 Potential future enhancements:
 - Signal dependencies and relationships
-- Signal controllers
 - Signal references (signalReference element)
 - More signal type constants for different countries
 - Automated signal placement from Lanelet2 regulatory elements
