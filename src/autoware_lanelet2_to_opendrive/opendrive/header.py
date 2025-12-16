@@ -18,6 +18,7 @@ class Header:
     south: Optional[str] = None
     east: Optional[str] = None
     west: Optional[str] = None
+    geo_reference: Optional[str] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -39,5 +40,10 @@ class Header:
             elem.set("east", self.east)
         if self.west:
             elem.set("west", self.west)
+
+        if self.geo_reference:
+            geo_ref_elem = ET.SubElement(elem, "geoReference")
+            # Wrap the geo_reference string in a CDATA section
+            geo_ref_elem.text = ET.CDATA(self.geo_reference)
 
         return elem

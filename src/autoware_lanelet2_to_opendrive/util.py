@@ -459,3 +459,71 @@ def mgrs_to_lanelet2_origin(mgrs_grid: str) -> lanelet2.io.Origin:
 
     except Exception as e:
         raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e
+
+
+def mgrs_to_proj_string(mgrs_grid: str) -> str:
+    """Convert MGRS grid to PROJ string for OpenDRIVE geoReference.
+
+    Args:
+        mgrs_grid: MGRS grid reference string (e.g., "54SUE" or "54SUE1234567890")
+
+    Returns:
+        PROJ string with UTM projection and origin coordinates from MGRS grid
+
+    Raises:
+        ValueError: If the MGRS grid string is invalid
+
+    Example:
+        >>> mgrs_to_proj_string("54SUE")
+        '+proj=utm +zone=54 +south +lat_0=-28.0 +lon_0=141.0 +datum=WGS84 +units=m +no_defs'
+    """
+    import re
+
+    try:
+        # Extract UTM zone number and latitude band
+        match = re.match(r"^(\d+)([A-Z])", mgrs_grid)
+        if not match:
+            raise ValueError(f"Invalid MGRS format: {mgrs_grid}")
+
+        zone = match.group(1)
+        band = match.group(2)
+
+        # Determine hemisphere from latitude band
+        # Latitude bands: C-M are south, N-X are north
+        is_south = band < "N"
+        hemisphere = "+south" if is_south else ""
+
+        # Get origin lat/lon from MGRS grid using mgrs library directly
+        m = mgrs.MGRS()
+
+        # Handle partial MGRS grid by padding with zeros if needed
+        processed_mgrs = mgrs_grid.strip()
+        match_full = re.match(r"^(\d+[A-Z][A-Z][A-Z])(.*)$", processed_mgrs)
+        if match_full:
+            grid_square = match_full.group(1)
+            coordinates = match_full.group(2)
+
+            # If coordinates are missing, use origin (00000 00000)
+            if len(coordinates) == 0:
+                processed_mgrs = grid_square + "0000000000"
+            elif len(coordinates) < 10:
+                # Partial coordinates - pad to 10 digits
+                if len(coordinates) % 2 == 1:
+                    coordinates += "0"
+                padded_coords = coordinates.ljust(10, "0")
+                processed_mgrs = grid_square + padded_coords
+
+        # Convert MGRS to latitude/longitude
+        lat, lon = m.toLatLon(processed_mgrs)
+
+        # Build PROJ string with UTM projection and MGRS origin coordinates
+        proj_string = (
+            f"+proj=utm +zone={zone} {hemisphere} "
+            f"+lat_0={lat} +lon_0={lon} "
+            f"+datum=WGS84 +units=m +no_defs"
+        ).replace("  ", " ")  # Remove double spaces if hemisphere is empty
+
+        return proj_string
+
+    except Exception as e:
+        raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e
