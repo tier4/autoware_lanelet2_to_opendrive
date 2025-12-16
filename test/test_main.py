@@ -1,6 +1,6 @@
 """Tests for main conversion functionality and RoadLaneletMapping."""
 
-from autoware_lanelet2_to_opendrive.main import RoadLaneletMapping
+from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
 
 
 def test_road_lanelet_mapping_creation():

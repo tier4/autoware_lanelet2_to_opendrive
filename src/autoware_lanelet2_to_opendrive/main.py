@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import tempfile
 import logging
-from dataclasses import dataclass
 
 # Import autoware extensions before loading maps to ensure proper registration
 # The order matters: projection module must be imported to register extensions
@@ -17,6 +16,7 @@ import lanelet2
 from autoware_lanelet2_to_opendrive.util import (
     mgrs_to_lanelet2_origin,
     mgrs_to_proj_string,
+    RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
@@ -34,45 +34,6 @@ from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RoadLaneletMapping:
-    """
-    Mapping between OpenDRIVE Roads and Lanelet2 lanelets.
-
-    This class provides bidirectional mapping to easily convert between
-    OpenDRIVE road IDs and Lanelet2 lanelet IDs.
-
-    Attributes:
-        road_to_lanelets: Maps OpenDRIVE road ID to list of Lanelet2 lanelet IDs
-        lanelet_to_road: Maps Lanelet2 lanelet ID to OpenDRIVE road ID
-    """
-
-    road_to_lanelets: Dict[int, List[int]]
-    lanelet_to_road: Dict[int, int]
-
-    def get_lanelets_for_road(self, road_id: int) -> List[int]:
-        """Get all lanelet IDs that belong to a specific road.
-
-        Args:
-            road_id: OpenDRIVE road ID
-
-        Returns:
-            List of Lanelet2 lanelet IDs, or empty list if road not found
-        """
-        return self.road_to_lanelets.get(road_id, [])
-
-    def get_road_for_lanelet(self, lanelet_id: int) -> Optional[int]:
-        """Get the road ID that contains a specific lanelet.
-
-        Args:
-            lanelet_id: Lanelet2 lanelet ID
-
-        Returns:
-            OpenDRIVE road ID, or None if lanelet not found
-        """
-        return self.lanelet_to_road.get(lanelet_id)
 
 
 def load_lanelet2_map(lanelet2_path: Path, mgrs: str) -> lanelet2.core.LaneletMap:
