@@ -13,7 +13,10 @@ import logging
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
 
-from autoware_lanelet2_to_opendrive.util import mgrs_to_lanelet2_origin
+from autoware_lanelet2_to_opendrive.util import (
+    mgrs_to_lanelet2_origin,
+    mgrs_to_proj_string,
+)
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
     LaneletPreprocessor,
@@ -64,19 +67,26 @@ def load_lanelet2_map(lanelet2_path: Path, mgrs: str) -> lanelet2.core.LaneletMa
 
 
 def convert_lanelet2_to_opendrive(
-    lanelet_map: lanelet2.core.LaneletMap, output_path: Optional[Path] = None
+    lanelet_map: lanelet2.core.LaneletMap,
+    mgrs_code: str,
+    output_path: Optional[Path] = None,
 ) -> OpenDRIVE:
     """
     Convert Lanelet2 map to OpenDRIVE format.
 
     Args:
         lanelet_map: Loaded Lanelet2 map
+        mgrs_code: MGRS code for generating geoReference PROJ string
         output_path: Optional output path for saving the OpenDRIVE file
 
     Returns:
         OpenDRIVE object representing the converted map
     """
     print("Converting Lanelet2 map to OpenDRIVE format...")
+
+    # Generate PROJ string from MGRS code for geoReference
+    geo_reference_proj = mgrs_to_proj_string(mgrs_code)
+    print(f"Using geoReference: {geo_reference_proj}")
 
     # Create header
     header = Header(
@@ -89,6 +99,7 @@ def convert_lanelet2_to_opendrive(
         south="0.0",
         east="0.0",
         west="0.0",
+        geo_reference=geo_reference_proj,
     )
 
     # Step 1: Create regular roads (outside junctions)
@@ -126,12 +137,14 @@ def convert_lanelet2_to_opendrive(
 
     # Step 3: Create connecting roads (inside junctions)
     print("\n=== Building connecting roads inside junctions ===")
-    connecting_roads, junction_to_roads, junction_lanelet_to_road = (
-        Road.construct_connecting_roads_from_junctions(
-            lanelet_map=lanelet_map,
-            junction_groups=junction_groups,
-            starting_road_id=starting_junction_road_id,
-        )
+    (
+        connecting_roads,
+        junction_to_roads,
+        junction_lanelet_to_road,
+    ) = Road.construct_connecting_roads_from_junctions(
+        lanelet_map=lanelet_map,
+        junction_groups=junction_groups,
+        starting_road_id=starting_junction_road_id,
     )
 
     # Step 4: Merge lanelet-to-road mappings
@@ -265,7 +278,7 @@ def preprocess_and_convert(
 
     # Convert to OpenDRIVE
     logger.info("Converting to OpenDRIVE format...")
-    convert_lanelet2_to_opendrive(lanelet_map, output_file)
+    convert_lanelet2_to_opendrive(lanelet_map, mgrs_code, output_file)
 
     logger.info("Conversion completed successfully!")
 
