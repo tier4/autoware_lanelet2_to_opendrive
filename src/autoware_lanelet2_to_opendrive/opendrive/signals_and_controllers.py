@@ -22,10 +22,12 @@ class SignalsAndControllers:
     Attributes:
         signals: List of all Signal objects
         controllers: List of Controller objects for coordinated signal control
+        signal_to_road_id: Mapping from signal ID to road ID
     """
 
     signals: List[Signal] = field(default_factory=list)
     controllers: List[Controller] = field(default_factory=list)
+    signal_to_road_id: Dict[int, int] = field(default_factory=dict)
 
     def add_signal(self, signal: Signal) -> None:
         """Add a signal to the collection.
@@ -167,6 +169,10 @@ class SignalsAndControllers:
 
                 result.add_signal(signal)
                 created_signal_ids.append(signal_id_counter)
+
+                # Track signal to road mapping
+                result.signal_to_road_id[signal_id_counter] = road_id
+
                 signal_id_counter += 1
 
             # Step 3: If multiple roads are affected, create a controller

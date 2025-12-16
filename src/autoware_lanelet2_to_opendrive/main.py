@@ -30,6 +30,9 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
+    SignalsAndControllers,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -202,16 +205,49 @@ def convert_lanelet2_to_opendrive(
         f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
     )
 
+    # Create mapping object
+    mapping = RoadLaneletMapping(
+        road_to_lanelets=road_to_lanelet_ids, lanelet_to_road=lanelet_to_road_id
+    )
+
+    # Step 7: Extract signals and controllers from Lanelet2 map
+    print("\n=== Extracting signals and controllers ===")
+    signals_and_controllers = SignalsAndControllers.construct_from_lanelet_map(
+        lanelet_map=lanelet_map,
+        road_lanelet_mapping=mapping,
+    )
+    print(
+        f"Extracted {len(signals_and_controllers.signals)} signals and "
+        f"{len(signals_and_controllers.controllers)} controllers"
+    )
+
+    # Step 8: Assign signals to roads
+    print("\n=== Assigning signals to roads ===")
+    road_signals: Dict[int, List] = {}
+    for signal in signals_and_controllers.signals:
+        signal_road_id: Optional[int] = signals_and_controllers.signal_to_road_id.get(
+            signal.id
+        )
+        if signal_road_id is not None:
+            if signal_road_id not in road_signals:
+                road_signals[signal_road_id] = []
+            road_signals[signal_road_id].append(signal)
+
+    # Assign signals to road objects
+    signals_assigned_count = 0
+    for road in all_roads:
+        if road.id in road_signals:
+            road.signals = road_signals[road.id]
+            signals_assigned_count += len(road.signals)
+
+    print(f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads")
+
     # Create OpenDRIVE object
     opendrive = OpenDRIVE(
         header=header,
         roads=all_roads,
         junctions=junctions,
-    )
-
-    # Create mapping object
-    mapping = RoadLaneletMapping(
-        road_to_lanelets=road_to_lanelet_ids, lanelet_to_road=lanelet_to_road_id
+        controllers=signals_and_controllers.controllers,
     )
 
     print("\nConversion completed successfully!")
