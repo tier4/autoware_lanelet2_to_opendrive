@@ -14,7 +14,7 @@ from .header import Header
 from .junction import Junction
 from .opendrive import OpenDRIVE, export_to_xml, save_opendrive_to_file
 from .signal import Signal, Validity, SignalUserData, SignalType
-from .signals import Signals, create_traffic_light
+from .signals import Signals
 
 # Re-export everything for backward compatibility
 __all__ = [
@@ -54,7 +54,6 @@ __all__ = [
     "Validity",
     "SignalUserData",
     "SignalType",
-    "create_traffic_light",
     # Export functions
     "export_to_xml",
     "save_opendrive_to_file",

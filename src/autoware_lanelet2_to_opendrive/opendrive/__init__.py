@@ -30,7 +30,6 @@ from .opendrive_dataclass import (
     Validity,
     SignalUserData,
     SignalType,
-    create_traffic_light,
     export_to_xml,
     save_opendrive_to_file,
 )
@@ -66,7 +65,6 @@ __all__ = [
     "Validity",
     "SignalUserData",
     "SignalType",
-    "create_traffic_light",
     "export_to_xml",
     "save_opendrive_to_file",
 ]

@@ -7,10 +7,7 @@ from autoware_lanelet2_to_opendrive.opendrive.signal import (
     SignalUserData,
     SignalType,
 )
-from autoware_lanelet2_to_opendrive.opendrive.signals import (
-    Signals,
-    create_traffic_light,
-)
+from autoware_lanelet2_to_opendrive.opendrive.signals import Signals
 
 
 def test_validity_to_xml():
@@ -161,34 +158,6 @@ def test_signals_to_xml():
     assert signal_elems[0].get("id") == "362"
 
 
-def test_create_traffic_light_function():
-    """Test create_traffic_light convenience function."""
-    traffic_light = create_traffic_light(
-        signal_id=100,
-        name="TrafficLight1",
-        s=50.0,
-        t=-3.0,
-        orientation="-",
-        z_offset=0.5,
-        height=1.2,
-        width=0.6,
-        traffic_light_type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
-        from_lane=-1,
-        to_lane=-1,
-    )
-
-    assert traffic_light.id == 100
-    assert traffic_light.name == "TrafficLight1"
-    assert traffic_light.s == 50.0
-    assert traffic_light.t == -3.0
-    assert traffic_light.dynamic == "yes"
-    assert traffic_light.type == 1000001
-    assert traffic_light.country == "OpenDRIVE"
-    assert len(traffic_light.validities) == 1
-    assert traffic_light.validities[0].from_lane == -1
-    assert traffic_light.validities[0].to_lane == -1
-
-
 def test_signal_xml_formatting():
     """Test that Signal XML uses scientific notation for floats."""
     signal = Signal(
@@ -300,17 +269,25 @@ def test_road_with_signals_integration():
 
     # Create signals
     signals = Signals()
-    traffic_light = create_traffic_light(
-        signal_id=100,
+    traffic_light = Signal(
+        id=100,
         name="TrafficLight1",
         s=50.0,
         t=-3.0,
-        orientation="-",
         z_offset=0.5,
+        h_offset=0.0,
+        roll=0.0,
+        pitch=0.0,
+        orientation="-",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
+        subtype=-1,
+        value=-1.0,
+        text="",
         height=1.2,
         width=0.6,
-        from_lane=-1,
-        to_lane=-1,
+        validities=[Validity(from_lane=-1, to_lane=-1)],
     )
     signals.add_signal(traffic_light)
     road.signals = signals

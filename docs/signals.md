@@ -16,9 +16,8 @@ Core signal definitions:
 - **`SignalType`**: Constants for common signal types (traffic lights, etc.)
 
 ### `signals.py`
-Container and convenience functions:
+Container class:
 - **`Signals`**: Container class for managing multiple signals on a road
-- **`create_traffic_light()`**: Convenience function for creating standard traffic lights
 
 ## Usage
 
@@ -27,8 +26,9 @@ Container and convenience functions:
 ```python
 from autoware_lanelet2_to_opendrive.opendrive import (
     Road,
+    Signal,
     Signals,
-    create_traffic_light,
+    Validity,
     SignalType,
 )
 
@@ -38,19 +38,26 @@ road = Road(id=1, name="Main Street", length=200.0)
 # Create signals container
 signals = Signals()
 
-# Add a traffic light using convenience function
-traffic_light = create_traffic_light(
-    signal_id=100,
+# Create a traffic light using Signal constructor
+traffic_light = Signal(
+    id=100,
     name="TrafficLight_1",
     s=50.0,  # Position along road (m)
     t=-4.5,  # Lateral offset (m)
-    orientation="-",
     z_offset=0.0,
+    h_offset=0.0,
+    roll=0.0,
+    pitch=0.0,
+    orientation="-",
+    dynamic="yes",  # Traffic lights are dynamic
+    country="OpenDRIVE",
+    type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
+    subtype=-1,
+    value=-1.0,
+    text="",
     height=1.2,
     width=0.6,
-    traffic_light_type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
-    from_lane=-1,
-    to_lane=-1,
+    validities=[Validity(from_lane=-1, to_lane=-1)],
 )
 signals.add_signal(traffic_light)
 
@@ -61,7 +68,7 @@ road.signals = signals
 xml = road.to_xml()
 ```
 
-### Advanced Example: Manual Signal Creation
+### Creating Multiple Signals
 
 ```python
 from autoware_lanelet2_to_opendrive.opendrive import Signal, Validity
@@ -182,8 +189,8 @@ uv run python examples/signal_demo.py
 ```
 
 This demonstrates:
-1. Creating traffic lights using the convenience function
-2. Creating signals manually with custom attributes
+1. Creating traffic lights using the Signal constructor
+2. Creating signals with custom attributes
 3. Creating pedestrian traffic lights
 4. Generating OpenDRIVE XML output
 
@@ -200,7 +207,6 @@ Tests cover:
 - Signals container operations
 - Road integration
 - XML formatting and structure
-- Convenience functions
 
 ## References
 
