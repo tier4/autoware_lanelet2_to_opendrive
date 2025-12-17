@@ -2,8 +2,9 @@
 
 import numpy as np
 import warnings
-from typing import Optional
+from typing import Optional, Tuple
 from scipy.interpolate import BSpline
+from scipy.optimize import minimize_scalar
 
 
 class Splines:
@@ -527,3 +528,74 @@ class Splines:
             normal = np.array([0.0, 1.0, 0.0])
 
         return {"position": position, "tangent": tangent, "normal": normal}
+
+    def cartesian_to_frenet(
+        self, x: float, y: float, z: float = 0.0
+    ) -> Tuple[float, float]:
+        """
+        Convert Cartesian coordinates (x, y, z) to Frenet coordinates (s, d).
+
+        This method finds the closest point on the spline to the query point
+        and returns the arc length (s) and lateral offset (d) in the Frenet frame.
+
+        Args:
+            x: X coordinate of the query point
+            y: Y coordinate of the query point
+            z: Z coordinate of the query point (default: 0.0)
+
+        Returns:
+            Tuple of (s, d) where:
+                s: Arc length from the start of the spline to the closest point
+                d: Lateral offset from the spline (positive = left, negative = right)
+                   Left/right is determined based on the tangent direction in XY plane
+
+        Note:
+            - The lateral offset sign is determined by the 2D cross product in the XY plane
+            - For 2D applications, set z=0.0 (default)
+            - The method uses numerical optimization to find the closest point
+        """
+        # Ensure arc length table is computed
+        self._compute_arc_length_table()
+
+        # Query point in original coordinate system
+        query_point = np.array([x, y, z])
+
+        # Translate to spline's local coordinate system
+        query_point_local = query_point - self._origin_offset
+
+        # Step 1: Find the parameter t that minimizes distance to the query point
+        def distance_squared(t: float) -> float:
+            """Calculate squared distance from spline to query point at parameter t."""
+            t = np.clip(t, 0.0, 1.0)  # Ensure t is within valid range
+            spline_point = self._evaluate_normalized(t, derivative=0)
+            diff = spline_point - query_point_local
+            return np.dot(diff, diff)
+
+        # Use bounded optimization to find closest point on spline
+        result = minimize_scalar(distance_squared, bounds=(0.0, 1.0), method="bounded")
+        t_closest = result.x
+
+        # Step 2: Convert parameter t to arc length s
+        s = np.interp(t_closest, self._param_table, self._arc_length_table)
+
+        # Step 3: Calculate lateral offset d
+        # Get the closest point on the spline
+        closest_point_local = self._evaluate_normalized(t_closest, derivative=0)
+
+        # Vector from closest point to query point (in local coordinates)
+        vec_to_query = query_point_local - closest_point_local
+
+        # Calculate absolute distance
+        d_abs = np.linalg.norm(vec_to_query)
+
+        # Determine sign based on tangent direction (2D cross product in XY plane)
+        tangent_t = self._evaluate_normalized(t_closest, derivative=1)
+
+        # 2D cross product: tangent × vec_to_query (only consider XY plane)
+        # If positive, point is on the left; if negative, on the right
+        cross_product = tangent_t[0] * vec_to_query[1] - tangent_t[1] * vec_to_query[0]
+
+        # Assign sign: positive for left, negative for right
+        d = d_abs if cross_product >= 0 else -d_abs
+
+        return s, d
