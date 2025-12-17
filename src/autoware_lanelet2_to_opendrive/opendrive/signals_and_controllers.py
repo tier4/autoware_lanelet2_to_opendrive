@@ -1,12 +1,15 @@
 """OpenDRIVE signals and controllers management."""
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Set
+from typing import List, Dict, Set, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
 
 from .signal import Signal, Controller, ControlEntry
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
+
+if TYPE_CHECKING:
+    pass
 
 
 @dataclass
@@ -141,11 +144,13 @@ class SignalsAndControllers:
                 if not road_lanelets_with_signal:
                     continue
 
-                # Calculate approximate s, t coordinates
-                # TODO: Implement proper geometry-based calculation
-                # For now, use simplified values
-                s = 0.0  # Start of road
-                t = -4.0  # 4 meters to the right
+                # Calculate s, t coordinates from traffic light geometry
+                s, t = SignalsAndControllers._calculate_signal_position(
+                    traffic_light=traffic_light,
+                    road_id=road_id,
+                    lanelet_map=lanelet_map,
+                    road_lanelet_mapping=road_lanelet_mapping,
+                )
 
                 # Determine lane IDs (negative for right lanes in OpenDRIVE)
                 lane_ids = [-1]  # Simplified: assume rightmost lane
@@ -196,3 +201,80 @@ class SignalsAndControllers:
             f"SignalsAndControllers(signals={len(self.signals)}, "
             f"controllers={len(self.controllers)})"
         )
+
+    @staticmethod
+    def _calculate_signal_position(
+        traffic_light,  # lanelet2 TrafficLight regulatory element
+        road_id: int,
+        lanelet_map: lanelet2.core.LaneletMap,
+        road_lanelet_mapping: RoadLaneletMapping,
+    ) -> tuple[float, float]:
+        """
+        Calculate s,t coordinates for a traffic signal on a road.
+
+        Args:
+            traffic_light: Lanelet2 TrafficLight regulatory element
+            road_id: ID of the road the signal is on
+            lanelet_map: Lanelet2 map containing the lanelets
+            road_lanelet_mapping: Mapping between roads and lanelets
+
+        Returns:
+            Tuple of (s, t) coordinates where:
+                s: arc length along road reference line
+                t: lateral offset from reference line (negative = right side)
+        """
+        # Get traffic light geometry (position)
+        traffic_light_geometry = traffic_light.trafficLights
+        if not traffic_light_geometry:
+            # No geometry, return default position
+            return (0.0, -4.0)
+
+        # Get the first traffic light linestring
+        light_linestring = traffic_light_geometry[0]
+        if len(light_linestring) == 0:
+            # Empty linestring, return default position
+            return (0.0, -4.0)
+
+        # Extract 3D position (use the first point as the signal position)
+        position = light_linestring[0]
+        x, y, z = float(position.x), float(position.y), float(position.z)
+
+        # Build spline for this road
+        from .reference_line import ReferenceLine
+
+        # Get lanelet IDs for this road
+        lanelet_ids = road_lanelet_mapping.get_lanelets_for_road(road_id)
+        if not lanelet_ids:
+            # No lanelets found for this road, return default position
+            return (0.0, -4.0)
+
+        # Get lanelet objects from IDs
+        lanelets = []
+        for lanelet_id in lanelet_ids:
+            try:
+                lanelet = lanelet_map.laneletLayer.get(lanelet_id)
+                lanelets.append(lanelet)
+            except Exception:
+                # Lanelet not found, skip
+                continue
+
+        if not lanelets:
+            # No valid lanelets found, return default position
+            return (0.0, -4.0)
+
+        try:
+            # Construct spline from lanelets using ReferenceLine
+            reference_line = ReferenceLine.construct_from_lanelet_groups(
+                lanelet_map, lanelets
+            )
+            spline = reference_line.centerline_spline
+
+            # Use cartesian_to_frenet to convert 3D position to s,t coordinates
+            s, t = spline.cartesian_to_frenet(x, y, z)
+            return (s, t)
+        except Exception as e:
+            # If conversion fails, log warning and return default position
+            print(
+                f"Warning: Failed to calculate signal position for traffic light {traffic_light.id}: {e}"
+            )
+            return (0.0, -4.0)
