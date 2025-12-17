@@ -6,7 +6,7 @@ import lanelet2
 import lxml.etree as ET
 
 from .signal import Signal, Controller, ControlEntry
-from ..util import RoadLaneletMapping
+from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
 
 
 @dataclass
@@ -97,26 +97,18 @@ class SignalsAndControllers:
         result = SignalsAndControllers()
 
         # Step 1: Collect all traffic lights from all lanelets
-        # Map: traffic_light_id -> (traffic_light_regelem, set of lanelet_ids)
-        traffic_light_map: Dict[
-            int, tuple[lanelet2.core.RegulatoryElement, Set[int]]
-        ] = {}
-
-        for lanelet in lanelet_map.laneletLayer:
-            # Get all traffic light regulatory elements for this lanelet
-            for reg_elem in lanelet.regulatoryElements:
-                # Check if this is a TrafficLight regulatory element
-                if hasattr(reg_elem, "trafficLights") and reg_elem.trafficLights:
-                    tl_id = reg_elem.id
-                    if tl_id not in traffic_light_map:
-                        traffic_light_map[tl_id] = (reg_elem, set())
-                    traffic_light_map[tl_id][1].add(lanelet.id)
+        traffic_light_map = filter_regulatory_element_by_type(
+            lanelet_map, element_type="trafficLights"
+        )
 
         # Step 2: Process each traffic light and determine affected roads
         signal_id_counter = 0
         controller_id_counter = 0
 
-        for tl_id, (traffic_light, lanelet_ids) in traffic_light_map.items():
+        for lanelet2_traffic_light_id, (
+            traffic_light,
+            lanelet_ids,
+        ) in traffic_light_map.items():
             # Determine which roads are affected by this traffic light
             affected_roads: Set[int] = set()
             for lanelet_id in lanelet_ids:
@@ -185,7 +177,7 @@ class SignalsAndControllers:
                 # Create controller
                 controller = Controller(
                     id=controller_id_counter,
-                    name=f"Controller_TL_{tl_id}",
+                    name=f"Controller_TL_{lanelet2_traffic_light_id}",
                     controls=control_entries,
                 )
 

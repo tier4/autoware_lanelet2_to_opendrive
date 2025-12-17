@@ -567,3 +567,32 @@ def mgrs_to_proj_string(mgrs_grid: str) -> str:
 
     except Exception as e:
         raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e
+
+
+def filter_regulatory_element_by_type(
+    lanelet_map: lanelet2.core.LaneletMap,
+    element_type: str,
+) -> Dict[int, tuple[lanelet2.core.RegulatoryElement, Set[int]]]:
+    """
+    Filter regulatory elements of specified type from lanelet map.
+
+    Args:
+        lanelet_map: Lanelet2 map containing regulatory elements
+        element_type: Type of regulatory element to filter (e.g., "trafficLights", "speedLimits")
+
+    Returns:
+        Dictionary mapping regulatory element ID to (regulatory element, set of lanelet IDs)
+    """
+    element_map: Dict[int, tuple[lanelet2.core.RegulatoryElement, Set[int]]] = {}
+
+    for lanelet in lanelet_map.laneletLayer:
+        # Get all regulatory elements of the specified type for this lanelet
+        for reg_elem in lanelet.regulatoryElements:
+            # Check if this regulatory element has the specified type attribute
+            if hasattr(reg_elem, element_type) and getattr(reg_elem, element_type):
+                reg_elem_id = reg_elem.id
+                if reg_elem_id not in element_map:
+                    element_map[reg_elem_id] = (reg_elem, set())
+                element_map[reg_elem_id][1].add(lanelet.id)
+
+    return element_map
