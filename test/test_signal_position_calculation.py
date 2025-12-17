@@ -1,7 +1,7 @@
 """Tests for signal position calculation from Lanelet2 geometry."""
 
 import numpy as np
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
 from autoware_lanelet2_to_opendrive.spline import Splines
 
@@ -35,15 +35,32 @@ def test_calculate_signal_position_with_valid_geometry():
     )
     spline = Splines(points)
 
-    # Create spline cache
-    road_spline_cache = {0: spline}
+    # Mock the lanelet_map and road_lanelet_mapping
+    mock_lanelet_map = Mock()
+    mock_road_lanelet_mapping = Mock()
+    mock_road_lanelet_mapping.get_lanelets_for_road.return_value = [1, 2, 3]
 
-    # Calculate signal position
-    s, t = SignalsAndControllers._calculate_signal_position(
-        traffic_light=mock_traffic_light,
-        road_id=0,
-        road_spline_cache=road_spline_cache,
-    )
+    # Mock lanelet objects
+    mock_lanelet = Mock()
+    mock_lanelet_map.laneletLayer.get.return_value = mock_lanelet
+
+    # Mock ReferenceLine to return our test spline
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
+    ) as mock_reference_line_class:
+        mock_reference_line = Mock()
+        mock_reference_line.centerline_spline = spline
+        mock_reference_line_class.construct_from_lanelet_groups.return_value = (
+            mock_reference_line
+        )
+
+        # Calculate signal position
+        s, t = SignalsAndControllers._calculate_signal_position(
+            traffic_light=mock_traffic_light,
+            road_id=0,
+            lanelet_map=mock_lanelet_map,
+            road_lanelet_mapping=mock_road_lanelet_mapping,
+        )
 
     # For a straight line along x-axis, the signal at (10, 5, 2) should be:
     # - s ≈ 10.0 (x-coordinate along the spline)
@@ -58,13 +75,15 @@ def test_calculate_signal_position_with_no_geometry():
     mock_traffic_light.trafficLights = []
     mock_traffic_light.id = 1
 
-    road_spline_cache = {}
+    mock_lanelet_map = Mock()
+    mock_road_lanelet_mapping = Mock()
 
     # Should return default position (0.0, -4.0)
     s, t = SignalsAndControllers._calculate_signal_position(
         traffic_light=mock_traffic_light,
         road_id=0,
-        road_spline_cache=road_spline_cache,
+        lanelet_map=mock_lanelet_map,
+        road_lanelet_mapping=mock_road_lanelet_mapping,
     )
 
     assert s == 0.0
@@ -77,13 +96,15 @@ def test_calculate_signal_position_with_empty_linestring():
     mock_traffic_light.trafficLights = [[]]  # Empty linestring
     mock_traffic_light.id = 1
 
-    road_spline_cache = {}
+    mock_lanelet_map = Mock()
+    mock_road_lanelet_mapping = Mock()
 
     # Should return default position (0.0, -4.0)
     s, t = SignalsAndControllers._calculate_signal_position(
         traffic_light=mock_traffic_light,
         road_id=0,
-        road_spline_cache=road_spline_cache,
+        lanelet_map=mock_lanelet_map,
+        road_lanelet_mapping=mock_road_lanelet_mapping,
     )
 
     assert s == 0.0
@@ -91,7 +112,7 @@ def test_calculate_signal_position_with_empty_linestring():
 
 
 def test_calculate_signal_position_without_spline():
-    """Test signal position calculation when road has no spline in cache."""
+    """Test signal position calculation when road has no lanelets."""
     mock_traffic_light = Mock()
     mock_point = Mock()
     mock_point.x = 10.0
@@ -101,14 +122,17 @@ def test_calculate_signal_position_without_spline():
     mock_traffic_light.trafficLights = [mock_linestring]
     mock_traffic_light.id = 1
 
-    # Empty cache
-    road_spline_cache = {}
+    # Mock empty lanelet list for road
+    mock_lanelet_map = Mock()
+    mock_road_lanelet_mapping = Mock()
+    mock_road_lanelet_mapping.get_lanelets_for_road.return_value = []
 
     # Should return default position (0.0, -4.0)
     s, t = SignalsAndControllers._calculate_signal_position(
         traffic_light=mock_traffic_light,
         road_id=0,
-        road_spline_cache=road_spline_cache,
+        lanelet_map=mock_lanelet_map,
+        road_lanelet_mapping=mock_road_lanelet_mapping,
     )
 
     assert s == 0.0
@@ -139,15 +163,32 @@ def test_calculate_signal_position_negative_t():
     )
     spline = Splines(points)
 
-    # Create spline cache
-    road_spline_cache = {0: spline}
+    # Mock the lanelet_map and road_lanelet_mapping
+    mock_lanelet_map = Mock()
+    mock_road_lanelet_mapping = Mock()
+    mock_road_lanelet_mapping.get_lanelets_for_road.return_value = [1, 2, 3]
 
-    # Calculate signal position
-    s, t = SignalsAndControllers._calculate_signal_position(
-        traffic_light=mock_traffic_light,
-        road_id=0,
-        road_spline_cache=road_spline_cache,
-    )
+    # Mock lanelet objects
+    mock_lanelet = Mock()
+    mock_lanelet_map.laneletLayer.get.return_value = mock_lanelet
+
+    # Mock ReferenceLine to return our test spline
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
+    ) as mock_reference_line_class:
+        mock_reference_line = Mock()
+        mock_reference_line.centerline_spline = spline
+        mock_reference_line_class.construct_from_lanelet_groups.return_value = (
+            mock_reference_line
+        )
+
+        # Calculate signal position
+        s, t = SignalsAndControllers._calculate_signal_position(
+            traffic_light=mock_traffic_light,
+            road_id=0,
+            lanelet_map=mock_lanelet_map,
+            road_lanelet_mapping=mock_road_lanelet_mapping,
+        )
 
     # The signal at (10, -3, 2) should have:
     # - s ≈ 10.0 (x-coordinate along the spline)
@@ -156,15 +197,31 @@ def test_calculate_signal_position_negative_t():
     assert abs(t - (-3.0)) < 1.0, f"Expected t ≈ -3.0, got {t}"
 
 
-def test_build_road_spline_cache_empty_mapping():
-    """Test building road spline cache with empty mapping."""
-    mock_lanelet_map = Mock()
-    empty_mapping = Mock()
-    empty_mapping.road_to_lanelets = {}
+def test_calculate_signal_position_lanelet_not_found():
+    """Test signal position calculation when lanelet cannot be retrieved."""
+    mock_traffic_light = Mock()
+    mock_point = Mock()
+    mock_point.x = 10.0
+    mock_point.y = 5.0
+    mock_point.z = 2.0
+    mock_linestring = [mock_point]
+    mock_traffic_light.trafficLights = [mock_linestring]
+    mock_traffic_light.id = 1
 
-    cache = SignalsAndControllers._build_road_spline_cache(
-        mock_lanelet_map, empty_mapping
+    # Mock lanelet_map that throws exception when getting lanelet
+    mock_lanelet_map = Mock()
+    mock_lanelet_map.laneletLayer.get.side_effect = Exception("Lanelet not found")
+
+    mock_road_lanelet_mapping = Mock()
+    mock_road_lanelet_mapping.get_lanelets_for_road.return_value = [1, 2, 3]
+
+    # Should return default position (0.0, -4.0) when lanelets cannot be retrieved
+    s, t = SignalsAndControllers._calculate_signal_position(
+        traffic_light=mock_traffic_light,
+        road_id=0,
+        lanelet_map=mock_lanelet_map,
+        road_lanelet_mapping=mock_road_lanelet_mapping,
     )
 
-    assert len(cache) == 0
-    assert isinstance(cache, dict)
+    assert s == 0.0
+    assert t == -4.0

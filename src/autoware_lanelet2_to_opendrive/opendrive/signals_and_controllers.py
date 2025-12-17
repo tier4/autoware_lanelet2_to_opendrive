@@ -9,7 +9,7 @@ from .signal import Signal, Controller, ControlEntry
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
 
 if TYPE_CHECKING:
-    from ..spline import Splines
+    pass
 
 
 @dataclass
@@ -99,12 +99,6 @@ class SignalsAndControllers:
         """
         result = SignalsAndControllers()
 
-        # Step 0: Build spline cache for each road to calculate signal positions
-        # This cache maps road_id -> spline for efficient s,t coordinate calculation
-        road_spline_cache = SignalsAndControllers._build_road_spline_cache(
-            lanelet_map, road_lanelet_mapping
-        )
-
         # Step 1: Collect all traffic lights from all lanelets
         traffic_light_map = filter_regulatory_element_by_type(
             lanelet_map, element_type="trafficLights"
@@ -154,7 +148,8 @@ class SignalsAndControllers:
                 s, t = SignalsAndControllers._calculate_signal_position(
                     traffic_light=traffic_light,
                     road_id=road_id,
-                    road_spline_cache=road_spline_cache,
+                    lanelet_map=lanelet_map,
+                    road_lanelet_mapping=road_lanelet_mapping,
                 )
 
                 # Determine lane IDs (negative for right lanes in OpenDRIVE)
@@ -208,57 +203,11 @@ class SignalsAndControllers:
         )
 
     @staticmethod
-    def _build_road_spline_cache(
-        lanelet_map: lanelet2.core.LaneletMap,
-        road_lanelet_mapping: RoadLaneletMapping,
-    ) -> Dict[int, "Splines"]:
-        """
-        Build a cache of road splines for efficient signal position calculation.
-
-        Args:
-            lanelet_map: Lanelet2 map containing the lanelets
-            road_lanelet_mapping: Mapping between roads and lanelets
-
-        Returns:
-            Dictionary mapping road_id to its centerline spline
-        """
-        from ..spline import Splines
-        from .reference_line import ReferenceLine
-
-        road_spline_cache: Dict[int, Splines] = {}
-
-        for road_id, lanelet_ids in road_lanelet_mapping.road_to_lanelets.items():
-            # Get lanelet objects from IDs
-            lanelets = []
-            for lanelet_id in lanelet_ids:
-                try:
-                    lanelet = lanelet_map.laneletLayer.get(lanelet_id)
-                    lanelets.append(lanelet)
-                except Exception:
-                    # Lanelet not found, skip
-                    continue
-
-            if not lanelets:
-                continue
-
-            try:
-                # Construct spline from lanelets using ReferenceLine
-                reference_line = ReferenceLine.construct_from_lanelet_groups(
-                    lanelet_map, lanelets
-                )
-                road_spline_cache[road_id] = reference_line.centerline_spline
-            except Exception as e:
-                # If spline construction fails, log and skip this road
-                print(f"Warning: Failed to build spline for road {road_id}: {e}")
-                continue
-
-        return road_spline_cache
-
-    @staticmethod
     def _calculate_signal_position(
         traffic_light,  # lanelet2 TrafficLight regulatory element
         road_id: int,
-        road_spline_cache: Dict[int, "Splines"],
+        lanelet_map: lanelet2.core.LaneletMap,
+        road_lanelet_mapping: RoadLaneletMapping,
     ) -> tuple[float, float]:
         """
         Calculate s,t coordinates for a traffic signal on a road.
@@ -266,7 +215,8 @@ class SignalsAndControllers:
         Args:
             traffic_light: Lanelet2 TrafficLight regulatory element
             road_id: ID of the road the signal is on
-            road_spline_cache: Cache of road splines
+            lanelet_map: Lanelet2 map containing the lanelets
+            road_lanelet_mapping: Mapping between roads and lanelets
 
         Returns:
             Tuple of (s, t) coordinates where:
@@ -289,14 +239,36 @@ class SignalsAndControllers:
         position = light_linestring[0]
         x, y, z = float(position.x), float(position.y), float(position.z)
 
-        # Get the road's spline from cache
-        if road_id not in road_spline_cache:
-            # Spline not available, return default position
+        # Build spline for this road
+        from .reference_line import ReferenceLine
+
+        # Get lanelet IDs for this road
+        lanelet_ids = road_lanelet_mapping.get_lanelets_for_road(road_id)
+        if not lanelet_ids:
+            # No lanelets found for this road, return default position
             return (0.0, -4.0)
 
-        spline = road_spline_cache[road_id]
+        # Get lanelet objects from IDs
+        lanelets = []
+        for lanelet_id in lanelet_ids:
+            try:
+                lanelet = lanelet_map.laneletLayer.get(lanelet_id)
+                lanelets.append(lanelet)
+            except Exception:
+                # Lanelet not found, skip
+                continue
+
+        if not lanelets:
+            # No valid lanelets found, return default position
+            return (0.0, -4.0)
 
         try:
+            # Construct spline from lanelets using ReferenceLine
+            reference_line = ReferenceLine.construct_from_lanelet_groups(
+                lanelet_map, lanelets
+            )
+            spline = reference_line.centerline_spline
+
             # Use cartesian_to_frenet to convert 3D position to s,t coordinates
             s, t = spline.cartesian_to_frenet(x, y, z)
             return (s, t)
