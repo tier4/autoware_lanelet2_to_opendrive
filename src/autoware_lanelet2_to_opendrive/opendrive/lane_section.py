@@ -3,7 +3,6 @@
 from typing import List, Optional, Dict, Union, Set, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
-from scenariogeneration import xodr
 
 if TYPE_CHECKING:
     from .lane import Lane
@@ -117,35 +116,6 @@ class LaneSection:
             lane_section._add_right_lane(lane)
 
         return lane_section
-
-    def to_standard_lane_section(self) -> xodr.LaneSection:
-        """
-        Convert to scenariogeneration LaneSection object.
-
-        Returns:
-            xodr.LaneSection instance
-        """
-        # Convert center lane to standard lane
-        if self.center_lane:
-            center_lane_std = self.center_lane.to_standard_lane()
-        else:
-            # Create a minimal center lane if not present
-            center_lane_std = xodr.Lane(lane_id=0)
-
-        # Create the standard lane section with center lane
-        standard_section = xodr.LaneSection(s=self.s_offset, centerlane=center_lane_std)
-
-        # Add left lanes (sorted by ID)
-        for lane_id in sorted(self.left_lanes.keys()):
-            lane_std = self.left_lanes[lane_id].to_standard_lane()
-            standard_section.add_left_lane(lane_std)
-
-        # Add right lanes (sorted by ID in reverse for proper order)
-        for lane_id in sorted(self.right_lanes.keys(), reverse=True):
-            lane_std = self.right_lanes[lane_id].to_standard_lane()
-            standard_section.add_right_lane(lane_std)
-
-        return standard_section
 
     def get_all_lanes(self) -> List["Lane"]:
         """Get all lanes in the section (left + center + right)."""

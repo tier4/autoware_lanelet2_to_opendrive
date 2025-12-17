@@ -1,10 +1,9 @@
 """Lane implementation for OpenDRIVE conversion."""
 
-from typing import List, Optional, Any, Dict, Union
+from typing import List, Optional, Dict, Union, Any
 import lanelet2
 import lxml.etree as ET
 
-from scenariogeneration import xodr
 from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
 from ..spline import Splines
 from ..util import find_adjacent_groups
@@ -182,63 +181,6 @@ class Lane:
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)
         # TODO: Add road marks based on lanelet line types
-
-        return lane
-
-    def to_xodr_roadmark(self) -> List[Any]:
-        """
-        Create XODR RoadMark objects from this lane's road marks.
-
-        Returns:
-            List of XODR RoadMark objects
-        """
-        road_marks = []
-        for road_mark in self.road_marks:
-            # Convert enum values to scenariogeneration enums
-            mark_type = getattr(
-                xodr.enumerations.RoadMarkType, road_mark.type.value, None
-            )
-            mark_color = getattr(
-                xodr.enumerations.RoadMarkColor, road_mark.color.value, None
-            )
-
-            if mark_type is None:
-                mark_type = xodr.enumerations.RoadMarkType.solid
-            if mark_color is None:
-                mark_color = xodr.enumerations.RoadMarkColor.standard
-
-            xodr_mark = xodr.RoadMark(
-                marking_type=mark_type, color=mark_color, soffset=road_mark.s_offset
-            )
-            road_marks.append(xodr_mark)
-
-        return road_marks
-
-    def to_standard_lane(self, lane_width: Optional[float] = None) -> Any:
-        """
-        Convert to standard scenariogeneration lane.
-
-        Args:
-            lane_width: Width for the lane (uses first width if None)
-
-        Returns:
-            Standard Lane object from scenariogeneration
-        """
-        # Determine lane width
-        if lane_width is None:
-            if self.widths:
-                lane_width = self.widths[0].a
-            else:
-                lane_width = 3.5  # Default width
-
-        # Create road mark
-        if self.road_marks:
-            road_mark = self.to_xodr_roadmark()[0]  # Use first road mark
-        else:
-            road_mark = xodr.RoadMark(xodr.enumerations.RoadMarkType.solid)
-
-        # Create standard lane
-        lane = xodr.standard_lane(offset=lane_width, rm=road_mark)
 
         return lane
 

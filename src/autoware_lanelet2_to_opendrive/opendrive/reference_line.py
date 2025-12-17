@@ -108,10 +108,6 @@ class ReferenceLine:
         """Convert to XML element via the internal lane."""
         return self._lane.to_xml()
 
-    def to_standard_lane(self, lane_width=None):
-        """Convert to standard lane via the internal lane."""
-        return self._lane.to_standard_lane(lane_width)
-
     def __repr__(self) -> str:
         """String representation of the reference line."""
         return f"ReferenceLine(widths={len(self.widths)}, marks={len(self.road_marks)})"
