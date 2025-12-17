@@ -54,27 +54,6 @@ def test_construct_lane_section_from_two_lanes():
     assert isinstance(lane_section.right_lanes[-2], Lane)
 
 
-def test_lane_section_to_standard():
-    """Test converting LaneSection to scenariogeneration standard."""
-    lanelet_map = load_test_map()
-
-    lanelet_group = [
-        lanelet_map.laneletLayer.get(3002094),
-        lanelet_map.laneletLayer.get(3002093),
-    ]
-
-    lane_section = LaneSection.construct_from_lanelet_groups(lanelet_map, lanelet_group)
-
-    # Convert to standard lane section
-    standard_section = lane_section.to_standard_lane_section()
-
-    # Check that conversion succeeded
-    assert standard_section is not None
-
-    # Check s_offset
-    assert standard_section.s == 0.0
-
-
 def test_get_all_lanes():
     """Test getting all lanes from a LaneSection."""
     lanelet_map = load_test_map()
