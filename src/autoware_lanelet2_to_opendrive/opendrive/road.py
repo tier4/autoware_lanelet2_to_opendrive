@@ -18,7 +18,7 @@ from ..util import filter_lanelets_by_subtype
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .signals import Signals
+    from .signal import Signal
 
 
 @dataclass
@@ -86,7 +86,7 @@ class Road:
     elevation_profile: Optional[ElevationProfile] = None
     lanes: Optional[Lanes] = None
     link: Optional[RoadLink] = None
-    signals: Optional["Signals"] = None
+    signals: Optional[List["Signal"]] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -107,7 +107,9 @@ class Road:
         if self.lanes:
             elem.append(self.lanes.to_xml())
         if self.signals:
-            elem.append(self.signals.to_xml())
+            signals_elem = ET.SubElement(elem, "signals")
+            for signal in self.signals:
+                signals_elem.append(signal.to_xml())
 
         return elem
 

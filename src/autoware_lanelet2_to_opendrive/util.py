@@ -1,11 +1,51 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
-from typing import Set, List, Union
+from typing import Set, List, Union, Dict, Optional
 from enum import Enum
+from dataclasses import dataclass
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from lanelet2.geometry import intersects2d
 import mgrs
+
+
+@dataclass
+class RoadLaneletMapping:
+    """
+    Mapping between OpenDRIVE Roads and Lanelet2 lanelets.
+
+    This class provides bidirectional mapping to easily convert between
+    OpenDRIVE road IDs and Lanelet2 lanelet IDs.
+
+    Attributes:
+        road_to_lanelets: Maps OpenDRIVE road ID to list of Lanelet2 lanelet IDs
+        lanelet_to_road: Maps Lanelet2 lanelet ID to OpenDRIVE road ID
+    """
+
+    road_to_lanelets: Dict[int, List[int]]
+    lanelet_to_road: Dict[int, int]
+
+    def get_lanelets_for_road(self, road_id: int) -> List[int]:
+        """Get all lanelet IDs that belong to a specific road.
+
+        Args:
+            road_id: OpenDRIVE road ID
+
+        Returns:
+            List of Lanelet2 lanelet IDs, or empty list if road not found
+        """
+        return self.road_to_lanelets.get(road_id, [])
+
+    def get_road_for_lanelet(self, lanelet_id: int) -> Optional[int]:
+        """Get the road ID that contains a specific lanelet.
+
+        Args:
+            lanelet_id: Lanelet2 lanelet ID
+
+        Returns:
+            OpenDRIVE road ID, or None if lanelet not found
+        """
+        return self.lanelet_to_road.get(lanelet_id)
 
 
 class ConnectionDirection(Enum):
@@ -527,3 +567,32 @@ def mgrs_to_proj_string(mgrs_grid: str) -> str:
 
     except Exception as e:
         raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e
+
+
+def filter_regulatory_element_by_type(
+    lanelet_map: lanelet2.core.LaneletMap,
+    element_type: str,
+) -> Dict[int, tuple[lanelet2.core.RegulatoryElement, Set[int]]]:
+    """
+    Filter regulatory elements of specified type from lanelet map.
+
+    Args:
+        lanelet_map: Lanelet2 map containing regulatory elements
+        element_type: Type of regulatory element to filter (e.g., "trafficLights", "speedLimits")
+
+    Returns:
+        Dictionary mapping regulatory element ID to (regulatory element, set of lanelet IDs)
+    """
+    element_map: Dict[int, tuple[lanelet2.core.RegulatoryElement, Set[int]]] = {}
+
+    for lanelet in lanelet_map.laneletLayer:
+        # Get all regulatory elements of the specified type for this lanelet
+        for reg_elem in lanelet.regulatoryElements:
+            # Check if this regulatory element has the specified type attribute
+            if hasattr(reg_elem, element_type) and getattr(reg_elem, element_type):
+                reg_elem_id = reg_elem.id
+                if reg_elem_id not in element_map:
+                    element_map[reg_elem_id] = (reg_elem, set())
+                element_map[reg_elem_id][1].add(lanelet.id)
+
+    return element_map

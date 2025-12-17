@@ -26,13 +26,14 @@ from .opendrive_dataclass import (
     Junction,
     OpenDRIVE,
     Signal,
-    Signals,
     Validity,
     SignalUserData,
     SignalType,
     export_to_xml,
     save_opendrive_to_file,
 )
+from .signal import Controller, ControlEntry
+from .signals_and_controllers import SignalsAndControllers
 
 __all__ = [
     # Re-export everything from opendrive_dataclass
@@ -61,10 +62,12 @@ __all__ = [
     "Junction",
     "OpenDRIVE",
     "Signal",
-    "Signals",
     "Validity",
     "SignalUserData",
     "SignalType",
+    "Controller",
+    "ControlEntry",
+    "SignalsAndControllers",
     "export_to_xml",
     "save_opendrive_to_file",
 ]

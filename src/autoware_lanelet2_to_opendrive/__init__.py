@@ -13,7 +13,9 @@ from .util import (
     find_adjacent_groups,
     filter_lanelets_by_subtype,
     find_connecting_lanelet_groups,
+    RoadLaneletMapping,
 )
+from .main import convert_lanelet2_to_opendrive
 
 __all__ = [
     "ConnectionDirection",
@@ -23,4 +25,6 @@ __all__ = [
     "find_adjacent_groups",
     "filter_lanelets_by_subtype",
     "find_connecting_lanelet_groups",
+    "RoadLaneletMapping",
+    "convert_lanelet2_to_opendrive",
 ]

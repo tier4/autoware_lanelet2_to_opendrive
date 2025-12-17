@@ -4,7 +4,7 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, List, Tuple
 import tempfile
 import logging
 
@@ -16,6 +16,7 @@ import lanelet2
 from autoware_lanelet2_to_opendrive.util import (
     mgrs_to_lanelet2_origin,
     mgrs_to_proj_string,
+    RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
@@ -29,6 +30,9 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
+    SignalsAndControllers,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -70,7 +74,7 @@ def convert_lanelet2_to_opendrive(
     lanelet_map: lanelet2.core.LaneletMap,
     mgrs_code: str,
     output_path: Optional[Path] = None,
-) -> OpenDRIVE:
+) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
 
@@ -80,7 +84,9 @@ def convert_lanelet2_to_opendrive(
         output_path: Optional output path for saving the OpenDRIVE file
 
     Returns:
-        OpenDRIVE object representing the converted map
+        Tuple of:
+            - OpenDRIVE object representing the converted map
+            - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
     """
     print("Converting Lanelet2 map to OpenDRIVE format...")
 
@@ -150,6 +156,22 @@ def convert_lanelet2_to_opendrive(
     # Step 4: Merge lanelet-to-road mappings
     lanelet_to_road_id.update(junction_lanelet_to_road)
 
+    # Step 4.5: Build reverse mapping (road_id -> list of lanelet IDs)
+    print("\n=== Building Road-Lanelet mapping ===")
+    road_to_lanelet_ids: Dict[int, List[int]] = {}
+    for lanelet_id, road_id in lanelet_to_road_id.items():
+        if road_id not in road_to_lanelet_ids:
+            road_to_lanelet_ids[road_id] = []
+        road_to_lanelet_ids[road_id].append(lanelet_id)
+
+    # Sort lanelet IDs for each road for consistency
+    for road_id in road_to_lanelet_ids:
+        road_to_lanelet_ids[road_id].sort()
+
+    print(
+        f"Created mapping for {len(road_to_lanelet_ids)} roads covering {len(lanelet_to_road_id)} lanelets"
+    )
+
     # Step 5: Build junctions with connections
     print("\n=== Building junction connections ===")
     junctions = []
@@ -183,11 +205,49 @@ def convert_lanelet2_to_opendrive(
         f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
     )
 
+    # Create mapping object
+    mapping = RoadLaneletMapping(
+        road_to_lanelets=road_to_lanelet_ids, lanelet_to_road=lanelet_to_road_id
+    )
+
+    # Step 7: Extract signals and controllers from Lanelet2 map
+    print("\n=== Extracting signals and controllers ===")
+    signals_and_controllers = SignalsAndControllers.construct_from_lanelet_map(
+        lanelet_map=lanelet_map,
+        road_lanelet_mapping=mapping,
+    )
+    print(
+        f"Extracted {len(signals_and_controllers.signals)} signals and "
+        f"{len(signals_and_controllers.controllers)} controllers"
+    )
+
+    # Step 8: Assign signals to roads
+    print("\n=== Assigning signals to roads ===")
+    road_signals: Dict[int, List] = {}
+    for signal in signals_and_controllers.signals:
+        signal_road_id: Optional[int] = signals_and_controllers.signal_to_road_id.get(
+            signal.id
+        )
+        if signal_road_id is not None:
+            if signal_road_id not in road_signals:
+                road_signals[signal_road_id] = []
+            road_signals[signal_road_id].append(signal)
+
+    # Assign signals to road objects
+    signals_assigned_count = 0
+    for road in all_roads:
+        if road.id in road_signals:
+            road.signals = road_signals[road.id]
+            signals_assigned_count += len(road.signals)
+
+    print(f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads")
+
     # Create OpenDRIVE object
     opendrive = OpenDRIVE(
         header=header,
         roads=all_roads,
         junctions=junctions,
+        controllers=signals_and_controllers.controllers,
     )
 
     print("\nConversion completed successfully!")
@@ -197,7 +257,7 @@ def convert_lanelet2_to_opendrive(
         save_opendrive_to_file(opendrive, output_path)
         print(f"OpenDRIVE file saved to: {output_path}")
 
-    return opendrive
+    return opendrive, mapping
 
 
 def preprocess_and_convert(
@@ -278,9 +338,15 @@ def preprocess_and_convert(
 
     # Convert to OpenDRIVE
     logger.info("Converting to OpenDRIVE format...")
-    convert_lanelet2_to_opendrive(lanelet_map, mgrs_code, output_file)
+    opendrive, mapping = convert_lanelet2_to_opendrive(
+        lanelet_map, mgrs_code, output_file
+    )
 
     logger.info("Conversion completed successfully!")
+    logger.info(
+        f"Road-Lanelet mapping: {len(mapping.road_to_lanelets)} roads, "
+        f"{len(mapping.lanelet_to_road)} lanelets"
+    )
 
     # Clean up temporary file if we created one
     if (
