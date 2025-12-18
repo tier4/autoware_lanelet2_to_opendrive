@@ -3,7 +3,7 @@ import lanelet2
 from typing import Set
 from .spline import Splines
 from .util import sort_adjacent_groups
-from .width_spline import WidthSpline1D
+from .cubic_spline_1d import CubicSpline1D
 
 
 class AsymmetryLaneletException(Exception):
@@ -14,10 +14,10 @@ class AsymmetryLaneletException(Exception):
 
 class Width1DSplineAdapter:
     """
-    Adapter class that wraps WidthSpline1D to provide compatibility with existing interface.
+    Adapter class that wraps CubicSpline1D to provide compatibility with existing interface.
     """
 
-    def __init__(self, width_spline_1d: WidthSpline1D):
+    def __init__(self, width_spline_1d: CubicSpline1D):
         """
         Initialize the adapter.
 
@@ -548,7 +548,7 @@ def estimate_lanelet_width_as_spline(
     widths_array = np.array(widths)
 
     # Use not-a-knot boundary conditions for smoother interpolation with less oscillation
-    width_spline_1d = WidthSpline1D(
+    width_spline_1d = CubicSpline1D(
         arc_lengths_array, widths_array, bc_type="not-a-knot"
     )
 

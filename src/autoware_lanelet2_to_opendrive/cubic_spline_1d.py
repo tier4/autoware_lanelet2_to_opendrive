@@ -5,12 +5,13 @@ from scipy.interpolate import CubicSpline
 from typing import Tuple, List
 
 
-class WidthSpline1D:
+class CubicSpline1D:
     """
-    1D cubic spline that maps arc length to width.
+    Generic 1D cubic spline that maps one variable to another.
 
-    This class creates a proper 1D cubic spline interpolation for width values
-    and provides methods to get polynomial coefficients for each segment.
+    This class creates a proper 1D cubic spline interpolation for any 1D values
+    (e.g., width, height, superelevation) and provides methods to get polynomial
+    coefficients for each segment.
     """
 
     def __init__(
