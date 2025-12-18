@@ -87,6 +87,7 @@ class Road:
     lanes: Optional[Lanes] = None
     link: Optional[RoadLink] = None
     signals: Optional[List["Signal"]] = None
+    elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -232,6 +233,7 @@ class Road:
             plan_view=plan_view,
             elevation_profile=elevation_profile,
             lanes=get_lanes(),
+            elevation_offset=reference_line.elevation_offset,
         )
 
         return road

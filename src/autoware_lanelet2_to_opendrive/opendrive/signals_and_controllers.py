@@ -170,12 +170,13 @@ class SignalsAndControllers:
                     ):
                         # Evaluate elevation at position s using the elevation profile
                         # Find the appropriate elevation segment for this s value
+                        relative_elevation = 0.0
                         for elevation in matching_road.elevation_profile.elevations:
                             if elevation.s <= s:
                                 # Calculate ds from segment start
                                 ds = s - elevation.s
                                 # Evaluate cubic polynomial: elevation = a + b*ds + c*ds^2 + d*ds^3
-                                road_elevation_at_s = (
+                                relative_elevation = (
                                     elevation.a
                                     + elevation.b * ds
                                     + elevation.c * ds * ds
@@ -183,6 +184,11 @@ class SignalsAndControllers:
                                 )
                             else:
                                 break
+
+                        # Convert relative elevation to absolute by adding road start elevation
+                        road_elevation_at_s = (
+                            relative_elevation + matching_road.elevation_offset
+                        )
 
                 # Create Signal object
                 signal = Signal.construct_from_lanelet2_traffic_signal(

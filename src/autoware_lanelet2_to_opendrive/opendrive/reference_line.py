@@ -27,6 +27,10 @@ class ReferenceLine:
     def __init__(self, centerline_spline: Splines):
         self.centerline_spline: Splines = centerline_spline
 
+        # Store the absolute elevation at the road start point (s=0)
+        # This is needed for calculating signal z_offsets correctly
+        self.elevation_offset = centerline_spline.evaluate(0.0)[2]
+
         # Create a Lane instance for the reference line
         # Import here to avoid circular import
         from .lane import Lane
@@ -140,9 +144,15 @@ class ReferenceLine:
         # Extract elevations (z coordinates)
         elevations = points_3d[:, 2]
 
-        # Create CubicSpline1D mapping XY arc length -> elevation
+        # Convert to relative elevation (offset from first point)
+        # OpenDRIVE elevation profile represents height changes relative to road start
+        # not absolute altitude from sea level
+        elevation_offset = elevations[0]
+        relative_elevations = elevations - elevation_offset
+
+        # Create CubicSpline1D mapping XY arc length -> relative elevation
         elevation_spline = CubicSpline1D(
-            xy_arc_lengths, elevations, bc_type="not-a-knot"
+            xy_arc_lengths, relative_elevations, bc_type="not-a-knot"
         )
 
         # Extract elevation segments from the spline
