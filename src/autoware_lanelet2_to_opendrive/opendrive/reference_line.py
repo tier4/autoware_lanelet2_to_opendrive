@@ -27,21 +27,6 @@ class ReferenceLine:
     def __init__(self, centerline_spline: Splines):
         self.centerline_spline: Splines = centerline_spline
 
-        # Sample centerline_spline at 1m intervals to create elevation spline
-        total_length = centerline_spline.total_length
-
-        # Create arc length samples at 1m intervals
-        num_samples = max(2, int(np.ceil(total_length)) + 1)
-        arc_lengths = np.linspace(0, total_length, num_samples)
-
-        # Extract elevation (z coordinate) at each arc length
-        elevations = np.array([centerline_spline.evaluate(s)[2] for s in arc_lengths])
-
-        # Create CubicSpline1D for elevation as a function of arc length
-        self.elevation_spline = CubicSpline1D(
-            arc_lengths, elevations, bc_type="not-a-knot"
-        )
-
         # Create a Lane instance for the reference line
         # Import here to avoid circular import
         from .lane import Lane
@@ -124,13 +109,32 @@ class ReferenceLine:
 
     def get_elevation_profile(self) -> ElevationProfile:
         """
-        Get elevation profile from the reference line's elevation spline.
+        Get elevation profile from the reference line by directly sampling centerline_spline.
+
+        This method samples the centerline_spline at high density (0.1m intervals) to
+        accurately capture elevation changes, avoiding double interpolation errors.
 
         Returns:
             ElevationProfile object containing elevation segments with polynomial coefficients
         """
-        # Extract elevation segments from elevation spline
-        elevation_segments = self.elevation_spline.get_segments()
+        # Sample centerline_spline at high density for accurate elevation capture
+        total_length = self.centerline_spline.total_length
+
+        # Create arc length samples at 0.1m intervals for high precision
+        # Use minimum of 10 samples to ensure good spline quality even for short roads
+        num_samples = max(10, int(np.ceil(total_length / 0.1)) + 1)
+        arc_lengths = np.linspace(0, total_length, num_samples)
+
+        # Extract elevation (z coordinate) directly from centerline_spline at each arc length
+        elevations = np.array(
+            [self.centerline_spline.evaluate(s)[2] for s in arc_lengths]
+        )
+
+        # Create CubicSpline1D for elevation as a function of arc length
+        elevation_spline = CubicSpline1D(arc_lengths, elevations, bc_type="not-a-knot")
+
+        # Extract elevation segments from the spline
+        elevation_segments = elevation_spline.get_segments()
 
         # Create Elevation objects for each segment
         elevations = [
