@@ -188,9 +188,10 @@ class Road:
         else:
             lanelet_list = lanelet_group
 
-        centerline_spline = ReferenceLine.construct_from_lanelet_groups(
+        reference_line = ReferenceLine.construct_from_lanelet_groups(
             lanelet_map, lanelet_list
-        ).centerline_spline
+        )
+        centerline_spline = reference_line.centerline_spline
 
         # Create paramPoly3 geometries from spline using from_spline method
         geometries: List[GeometryBase] = cast(
@@ -213,11 +214,13 @@ class Road:
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
 
+        # Get elevation profile from reference line
+        elevation_profile = reference_line.get_elevation_profile()
+
         # Create a basic road with the extracted information
         # Note: This is a simplified implementation
         # A complete implementation would also need to:
         # - Create proper lane sections from the lanelets
-        # - Handle elevation profile
         # - Set appropriate road ID and other attributes
         road = Road(
             id=road_id,
@@ -225,7 +228,7 @@ class Road:
             length=road_length,
             junction=-1,  # Not in a junction by default
             plan_view=plan_view,
-            elevation_profile=None,  # TODO: Extract elevation from lanelets
+            elevation_profile=elevation_profile,
             lanes=get_lanes(),
         )
 

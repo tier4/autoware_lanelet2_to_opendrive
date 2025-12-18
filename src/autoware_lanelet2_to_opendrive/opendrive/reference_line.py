@@ -1,8 +1,10 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
+import numpy as np
 import lanelet2
 from typing import Union, List, Set, TYPE_CHECKING
 from ..spline import Splines
+from ..cubic_spline_1d import CubicSpline1D
 
 if TYPE_CHECKING:
     pass
@@ -10,6 +12,7 @@ if TYPE_CHECKING:
 # Import enums directly to avoid circular import
 from .enums import LaneType
 from .lane_elements import LaneWidth
+from .elevation import ElevationProfile, Elevation
 
 
 class ReferenceLine:
@@ -23,6 +26,21 @@ class ReferenceLine:
 
     def __init__(self, centerline_spline: Splines):
         self.centerline_spline: Splines = centerline_spline
+
+        # Sample centerline_spline at 1m intervals to create elevation spline
+        total_length = centerline_spline.total_length
+
+        # Create arc length samples at 1m intervals
+        num_samples = max(2, int(np.ceil(total_length)) + 1)
+        arc_lengths = np.linspace(0, total_length, num_samples)
+
+        # Extract elevation (z coordinate) at each arc length
+        elevations = np.array([centerline_spline.evaluate(s)[2] for s in arc_lengths])
+
+        # Create CubicSpline1D for elevation as a function of arc length
+        self.elevation_spline = CubicSpline1D(
+            arc_lengths, elevations, bc_type="not-a-knot"
+        )
 
         # Create a Lane instance for the reference line
         # Import here to avoid circular import
@@ -103,6 +121,24 @@ class ReferenceLine:
     def level(self):
         """Access to lane level."""
         return self._lane.level
+
+    def get_elevation_profile(self) -> ElevationProfile:
+        """
+        Get elevation profile from the reference line's elevation spline.
+
+        Returns:
+            ElevationProfile object containing elevation segments with polynomial coefficients
+        """
+        # Extract elevation segments from elevation spline
+        elevation_segments = self.elevation_spline.get_segments()
+
+        # Create Elevation objects for each segment
+        elevations = [
+            Elevation(s=s_offset, a=a, b=b, c=c, d=d)
+            for s_offset, a, b, c, d in elevation_segments
+        ]
+
+        return ElevationProfile(elevations=elevations)
 
     def to_xml(self):
         """Convert to XML element via the internal lane."""
