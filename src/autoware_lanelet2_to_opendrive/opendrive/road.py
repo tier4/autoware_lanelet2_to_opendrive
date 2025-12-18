@@ -87,6 +87,7 @@ class Road:
     lanes: Optional[Lanes] = None
     link: Optional[RoadLink] = None
     signals: Optional[List["Signal"]] = None
+    elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -201,8 +202,10 @@ class Road:
         # Create plan view with the paramPoly3 geometries
         plan_view = PlanView(geometries=geometries)
 
-        # Calculate total road length from spline
-        road_length = centerline_spline.total_length
+        # Calculate total road length from ParamPoly3 geometries (XY projection)
+        # IMPORTANT: Use XY-plane length from geometries, not 3D spline length
+        # ParamPoly3.from_spline() uses XY coordinates only, ignoring Z
+        road_length = sum(geometry.length for geometry in geometries)
 
         def get_lanes() -> Lanes:
             """Create Lanes object from lanelet group."""
@@ -230,6 +233,7 @@ class Road:
             plan_view=plan_view,
             elevation_profile=elevation_profile,
             lanes=get_lanes(),
+            elevation_offset=reference_line.elevation_offset,
         )
 
         return road
