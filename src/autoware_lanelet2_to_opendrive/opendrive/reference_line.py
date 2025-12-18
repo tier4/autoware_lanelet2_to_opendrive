@@ -111,27 +111,39 @@ class ReferenceLine:
         """
         Get elevation profile from the reference line by directly sampling centerline_spline.
 
-        This method samples the centerline_spline at high density (0.1m intervals) to
-        accurately capture elevation changes, avoiding double interpolation errors.
+        IMPORTANT: This method uses XY-plane arc length (2D projection) to match ParamPoly3
+        geometry coordinates. The 3D spline's natural arc length is NOT used because
+        ParamPoly3.from_spline() only uses XY coordinates (ignoring Z), which causes
+        misalignment on slopes.
 
         Returns:
             ElevationProfile object containing elevation segments with polynomial coefficients
         """
         # Sample centerline_spline at high density for accurate elevation capture
-        total_length = self.centerline_spline.total_length
+        total_length_3d = self.centerline_spline.total_length
 
-        # Create arc length samples at 0.1m intervals for high precision
+        # Create 3D arc length samples at 0.1m intervals for high precision
         # Use minimum of 10 samples to ensure good spline quality even for short roads
-        num_samples = max(10, int(np.ceil(total_length / 0.1)) + 1)
-        arc_lengths = np.linspace(0, total_length, num_samples)
+        num_samples = max(10, int(np.ceil(total_length_3d / 0.1)) + 1)
+        arc_lengths_3d = np.linspace(0, total_length_3d, num_samples)
 
-        # Extract elevation (z coordinate) directly from centerline_spline at each arc length
-        elevations = np.array(
-            [self.centerline_spline.evaluate(s)[2] for s in arc_lengths]
+        # Extract 3D coordinates at each 3D arc length
+        points_3d = np.array(
+            [self.centerline_spline.evaluate(s) for s in arc_lengths_3d]
         )
 
-        # Create CubicSpline1D for elevation as a function of arc length
-        elevation_spline = CubicSpline1D(arc_lengths, elevations, bc_type="not-a-knot")
+        # Calculate XY-plane arc lengths (2D projection to match ParamPoly3)
+        # ParamPoly3.from_spline() uses only XY coordinates, so we must too
+        xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
+        xy_arc_lengths = np.concatenate(([0], np.cumsum(xy_distances)))
+
+        # Extract elevations (z coordinates)
+        elevations = points_3d[:, 2]
+
+        # Create CubicSpline1D mapping XY arc length -> elevation
+        elevation_spline = CubicSpline1D(
+            xy_arc_lengths, elevations, bc_type="not-a-knot"
+        )
 
         # Extract elevation segments from the spline
         elevation_segments = elevation_spline.get_segments()

@@ -201,8 +201,10 @@ class Road:
         # Create plan view with the paramPoly3 geometries
         plan_view = PlanView(geometries=geometries)
 
-        # Calculate total road length from spline
-        road_length = centerline_spline.total_length
+        # Calculate total road length from ParamPoly3 geometries (XY projection)
+        # IMPORTANT: Use XY-plane length from geometries, not 3D spline length
+        # ParamPoly3.from_spline() uses XY coordinates only, ignoring Z
+        road_length = sum(geometry.length for geometry in geometries)
 
         def get_lanes() -> Lanes:
             """Create Lanes object from lanelet group."""
