@@ -7,7 +7,7 @@ import lanelet2
 from tqdm import tqdm
 
 from .geometry import PlanView, ParamPoly3, GeometryBase
-from .elevation import ElevationProfile, Elevation
+from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
 from .enums import ContactPoint, ElementType
@@ -214,13 +214,8 @@ class Road:
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
 
-        # Extract elevation profile from reference line's elevation spline
-        elevation_segments = reference_line.elevation_spline.get_segments()
-        elevations = [
-            Elevation(s=s_offset, a=a, b=b, c=c, d=d)
-            for s_offset, a, b, c, d in elevation_segments
-        ]
-        elevation_profile = ElevationProfile(elevations=elevations)
+        # Get elevation profile from reference line
+        elevation_profile = reference_line.get_elevation_profile()
 
         # Create a basic road with the extracted information
         # Note: This is a simplified implementation

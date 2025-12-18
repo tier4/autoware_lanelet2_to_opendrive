@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 # Import enums directly to avoid circular import
 from .enums import LaneType
 from .lane_elements import LaneWidth
+from .elevation import ElevationProfile, Elevation
 
 
 class ReferenceLine:
@@ -120,6 +121,24 @@ class ReferenceLine:
     def level(self):
         """Access to lane level."""
         return self._lane.level
+
+    def get_elevation_profile(self) -> ElevationProfile:
+        """
+        Get elevation profile from the reference line's elevation spline.
+
+        Returns:
+            ElevationProfile object containing elevation segments with polynomial coefficients
+        """
+        # Extract elevation segments from elevation spline
+        elevation_segments = self.elevation_spline.get_segments()
+
+        # Create Elevation objects for each segment
+        elevations = [
+            Elevation(s=s_offset, a=a, b=b, c=c, d=d)
+            for s_offset, a, b, c, d in elevation_segments
+        ]
+
+        return ElevationProfile(elevations=elevations)
 
     def to_xml(self):
         """Convert to XML element via the internal lane."""
