@@ -215,6 +215,7 @@ def convert_lanelet2_to_opendrive(
     signals_and_controllers = SignalsAndControllers.construct_from_lanelet_map(
         lanelet_map=lanelet_map,
         road_lanelet_mapping=mapping,
+        roads=all_roads,
     )
     print(
         f"Extracted {len(signals_and_controllers.signals)} signals and "

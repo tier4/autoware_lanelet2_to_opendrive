@@ -176,6 +176,7 @@ class Signal:
         s: float,
         t: float,
         lane_ids: Optional[List[int]] = None,
+        road_elevation_at_s: Optional[float] = None,
     ) -> "Signal":
         """Construct a Signal from a lanelet2 TrafficLight regulatory element.
 
@@ -193,6 +194,9 @@ class Signal:
                indicate signals on the right side of the road.
             lane_ids: List of lane IDs this signal applies to. If None, applies
                      to lane -1 (rightmost lane). Use negative IDs for right lanes.
+            road_elevation_at_s: Elevation of the road surface at position s (m).
+                                If provided, used to calculate relative z_offset from
+                                signal's absolute height. If None, uses absolute height.
 
         Returns:
             Signal object constructed from the traffic light with OpenDRIVE format
@@ -233,7 +237,19 @@ class Signal:
 
         # Extract position (we'll use the first point as the signal position)
         position = light_linestring[0]
-        z_offset = float(position.z) if hasattr(position, "z") else 0.0
+
+        # Calculate z_offset (height above road surface)
+        # OpenDRIVE zOffset is relative to road surface, not absolute elevation
+        if hasattr(position, "z"):
+            signal_absolute_z = float(position.z)
+            if road_elevation_at_s is not None:
+                # Calculate relative height: signal height - road surface elevation
+                z_offset = signal_absolute_z - road_elevation_at_s
+            else:
+                # Fallback: use absolute height (may be incorrect for elevated roads)
+                z_offset = signal_absolute_z
+        else:
+            z_offset = 0.0
 
         # Determine signal type from attributes
         # Check if traffic light has a 'subtype' or 'type' attribute

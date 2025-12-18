@@ -368,6 +368,55 @@ def test_construct_from_lanelet2_traffic_signal_no_geometry():
         )
 
 
+def test_construct_from_lanelet2_traffic_signal_with_road_elevation():
+    """Test z_offset calculation with road elevation."""
+
+    # Create a mock traffic light object
+    class MockPoint:
+        def __init__(self, x, y, z):
+            self.x = x
+            self.y = y
+            self.z = z
+
+    class MockLineString:
+        def __init__(self, points):
+            self.points = points
+
+        def __len__(self):
+            return len(self.points)
+
+        def __getitem__(self, index):
+            return self.points[index]
+
+    class MockTrafficLight:
+        def __init__(self, traffic_light_id, geometry):
+            self.id = traffic_light_id
+            self.trafficLights = geometry
+            self.attributes = {}
+
+    # Create mock geometry
+    # Signal absolute height is 45.0m, road elevation is 40.0m
+    # Expected z_offset should be 45.0 - 40.0 = 5.0m
+    point = MockPoint(100.0, 200.0, 45.0)
+    linestring = MockLineString([point])
+    traffic_light = MockTrafficLight(12345, [linestring])
+
+    # Convert to Signal with road elevation
+    signal = Signal.construct_from_lanelet2_traffic_signal(
+        traffic_light=traffic_light,
+        signal_id=100,
+        s=50.0,
+        t=-4.5,
+        lane_ids=[-1],
+        road_elevation_at_s=40.0,  # Road surface is at 40m elevation
+    )
+
+    # Verify z_offset is relative to road surface
+    assert (
+        signal.z_offset == 5.0
+    ), f"Expected z_offset=5.0 (45.0 - 40.0), got {signal.z_offset}"
+
+
 def test_construct_from_lanelet2_traffic_signal_empty_linestring():
     """Test error handling when linestring is empty."""
 

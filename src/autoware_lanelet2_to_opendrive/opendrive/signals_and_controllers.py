@@ -1,7 +1,7 @@
 """OpenDRIVE signals and controllers management."""
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Set, TYPE_CHECKING
+from typing import List, Dict, Set, Optional, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
 
@@ -74,6 +74,7 @@ class SignalsAndControllers:
     def construct_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
         road_lanelet_mapping: RoadLaneletMapping,
+        roads: Optional[List] = None,
     ) -> "SignalsAndControllers":
         """
         Construct signals and controllers from Lanelet2 map.
@@ -85,6 +86,8 @@ class SignalsAndControllers:
         Args:
             lanelet_map: Lanelet2 map containing traffic light information
             road_lanelet_mapping: Mapping between OpenDRIVE roads and Lanelet2 lanelets
+            roads: List of Road objects to calculate elevation at signal positions.
+                  If None, signal z_offset will use absolute elevation values.
 
         Returns:
             SignalsAndControllers object with populated signals and controllers
@@ -155,6 +158,32 @@ class SignalsAndControllers:
                 # Determine lane IDs (negative for right lanes in OpenDRIVE)
                 lane_ids = [-1]  # Simplified: assume rightmost lane
 
+                # Calculate road elevation at signal position
+                road_elevation_at_s = None
+                if roads is not None:
+                    # Find the corresponding Road object
+                    matching_road = next((r for r in roads if r.id == road_id), None)
+                    if (
+                        matching_road
+                        and matching_road.elevation_profile
+                        and matching_road.elevation_profile.elevations
+                    ):
+                        # Evaluate elevation at position s using the elevation profile
+                        # Find the appropriate elevation segment for this s value
+                        for elevation in matching_road.elevation_profile.elevations:
+                            if elevation.s <= s:
+                                # Calculate ds from segment start
+                                ds = s - elevation.s
+                                # Evaluate cubic polynomial: elevation = a + b*ds + c*ds^2 + d*ds^3
+                                road_elevation_at_s = (
+                                    elevation.a
+                                    + elevation.b * ds
+                                    + elevation.c * ds * ds
+                                    + elevation.d * ds * ds * ds
+                                )
+                            else:
+                                break
+
                 # Create Signal object
                 signal = Signal.construct_from_lanelet2_traffic_signal(
                     traffic_light=traffic_light,
@@ -162,6 +191,7 @@ class SignalsAndControllers:
                     s=s,
                     t=t,
                     lane_ids=lane_ids,
+                    road_elevation_at_s=road_elevation_at_s,
                 )
 
                 result.add_signal(signal)
