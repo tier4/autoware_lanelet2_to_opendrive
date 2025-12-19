@@ -479,12 +479,19 @@ class TestSplinesEdgeCases:
         with pytest.raises(ValueError, match="At least 2 points are required"):
             Splines(points)
 
-    def test_wrong_dimension_fails(self):
-        """Test that 2D points raise ValueError."""
-        points_2d = np.array([[0.0, 0.0], [1.0, 1.0]])
+    def test_2d_points_supported(self):
+        """Test that 2D points are automatically converted to 3D with z=0."""
+        points_2d = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]])
 
-        with pytest.raises(ValueError, match="Points must be an \\(N, 3\\) array"):
-            Splines(points_2d)
+        # Should not raise an error - 2D points are now supported
+        spline = Splines(points_2d)
+
+        # Verify that the spline was created successfully
+        assert spline is not None
+
+        # Verify that z-coordinate is 0 at the start
+        pos = spline.evaluate(0.0)
+        assert abs(pos[2]) < 1e-6, f"Expected z=0, got z={pos[2]}"
 
     def test_insufficient_control_points_fails(self):
         """Test that too few control points raise ValueError."""

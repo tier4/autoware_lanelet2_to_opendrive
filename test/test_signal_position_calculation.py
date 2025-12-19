@@ -49,7 +49,7 @@ def test_calculate_signal_position_with_valid_geometry():
         "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
     ) as mock_reference_line_class:
         mock_reference_line = Mock()
-        mock_reference_line.centerline_spline = spline
+        mock_reference_line.centerline_2d = spline
         mock_reference_line_class.construct_from_lanelet_groups.return_value = (
             mock_reference_line
         )
@@ -177,7 +177,7 @@ def test_calculate_signal_position_negative_t():
         "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
     ) as mock_reference_line_class:
         mock_reference_line = Mock()
-        mock_reference_line.centerline_spline = spline
+        mock_reference_line.centerline_2d = spline
         mock_reference_line_class.construct_from_lanelet_groups.return_value = (
             mock_reference_line
         )

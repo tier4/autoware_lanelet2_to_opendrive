@@ -24,12 +24,30 @@ class ReferenceLine:
     instance for compatibility but is specifically designed for reference line purposes.
     """
 
-    def __init__(self, centerline_spline: Splines):
-        self.centerline_spline: Splines = centerline_spline
+    def __init__(
+        self,
+        centerline_2d: Splines,
+        elevation_offset: float = 0.0,
+        centerline_3d: Union[Splines, None] = None,
+    ):
+        """
+        Initialize a ReferenceLine with a 2D centerline spline.
+
+        Args:
+            centerline_2d: 2D spline (XY coordinates only) representing the reference line
+            elevation_offset: Absolute elevation (z coordinate) at the road start point (s=0)
+            centerline_3d: Optional 3D spline for temporary use in elevation profile generation
+                          (will be removed in Phase 2 when height_spline is introduced)
+        """
+        self.centerline_2d: Splines = centerline_2d
 
         # Store the absolute elevation at the road start point (s=0)
         # This is needed for calculating signal z_offsets correctly
-        self.elevation_offset = centerline_spline.evaluate(0.0)[2]
+        self.elevation_offset = elevation_offset
+
+        # TODO: Remove this in Phase 2 (Issue #58) when height_spline is introduced
+        # Temporarily store 3D spline for elevation profile generation
+        self._centerline_3d_temp = centerline_3d
 
         # Create a Lane instance for the reference line
         # Import here to avoid circular import
@@ -74,10 +92,24 @@ class ReferenceLine:
 
         from ..centerline import extract_border_from_spline
 
-        centerline_spline = extract_border_from_spline(leftmost_lanelet, border="left")
+        # Extract the left boundary as 3D spline first to get elevation_offset
+        centerline_3d = extract_border_from_spline(
+            leftmost_lanelet, border="left", dimensions=3
+        )
+        elevation_offset = centerline_3d.evaluate(0.0)[2]
 
-        # Create the ReferenceLine instance
-        reference_line = ReferenceLine(centerline_spline=centerline_spline)
+        # Extract the left boundary as 2D spline (XY only) for reference line
+        centerline_2d = extract_border_from_spline(
+            leftmost_lanelet, border="left", dimensions=2
+        )
+
+        # Create the ReferenceLine instance with 2D centerline and elevation offset
+        # TODO: Remove centerline_3d parameter in Phase 2 (Issue #58)
+        reference_line = ReferenceLine(
+            centerline_2d=centerline_2d,
+            elevation_offset=elevation_offset,
+            centerline_3d=centerline_3d,
+        )
 
         # Reference line is a virtual line, so I hardcode a small constant width
         reference_line._lane._add_width(LaneWidth(s_offset=0, a=0.1))
@@ -113,18 +145,27 @@ class ReferenceLine:
 
     def get_elevation_profile(self) -> ElevationProfile:
         """
-        Get elevation profile from the reference line by directly sampling centerline_spline.
+        Get elevation profile from the reference line.
 
         IMPORTANT: This method uses XY-plane arc length (2D projection) to match ParamPoly3
         geometry coordinates. The 3D spline's natural arc length is NOT used because
         ParamPoly3.from_spline() only uses XY coordinates (ignoring Z), which causes
         misalignment on slopes.
 
+        TODO: In Phase 2 (Issue #58), this will be simplified to directly use height_spline.
+
         Returns:
             ElevationProfile object containing elevation segments with polynomial coefficients
         """
-        # Sample centerline_spline at high density for accurate elevation capture
-        total_length_3d = self.centerline_spline.total_length
+        # TODO: Phase 2 - Replace this temporary implementation with height_spline
+        if self._centerline_3d_temp is None:
+            raise RuntimeError(
+                "Cannot generate elevation profile without 3D centerline data. "
+                "This should be addressed in Phase 2 (Issue #58)."
+            )
+
+        # Sample 3D centerline at high density for accurate elevation capture
+        total_length_3d = self._centerline_3d_temp.total_length
 
         # Create 3D arc length samples at 0.1m intervals for high precision
         # Use minimum of 10 samples to ensure good spline quality even for short roads
@@ -133,7 +174,7 @@ class ReferenceLine:
 
         # Extract 3D coordinates at each 3D arc length
         points_3d = np.array(
-            [self.centerline_spline.evaluate(s) for s in arc_lengths_3d]
+            [self._centerline_3d_temp.evaluate(s) for s in arc_lengths_3d]
         )
 
         # Calculate XY-plane arc lengths (2D projection to match ParamPoly3)
