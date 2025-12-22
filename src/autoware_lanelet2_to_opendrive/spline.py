@@ -595,8 +595,9 @@ class Splines:
         # Vector from closest point to query point (in local coordinates)
         vec_to_query = query_point_local - closest_point_local
 
-        # Calculate absolute distance
-        d_abs = np.linalg.norm(vec_to_query)
+        # Calculate absolute distance in XY plane only
+        # (z-component should not affect lateral offset t)
+        d_abs = np.linalg.norm(vec_to_query[:2])
 
         # Determine sign based on tangent direction (2D cross product in XY plane)
         tangent_t = self._evaluate_normalized(t_closest, derivative=1)
