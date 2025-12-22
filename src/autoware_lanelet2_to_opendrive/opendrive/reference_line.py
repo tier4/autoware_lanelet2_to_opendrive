@@ -204,12 +204,14 @@ class ReferenceLine:
             ElevationProfile object containing elevation segments with polynomial coefficients
         """
         # Extract elevation segments directly from height_spline
-        # height_spline already maps XY arc length (s) to relative elevation (z)
+        # height_spline maps XY arc length (s) to relative elevation (z - elevation_offset)
         elevation_segments = self.height_spline.get_segments()
 
         # Create Elevation objects for each segment
+        # Add elevation_offset to the 'a' coefficient of each segment to convert
+        # from relative elevation back to absolute inertial z-coordinate
         elevations = [
-            Elevation(s=s_offset, a=a, b=b, c=c, d=d)
+            Elevation(s=s_offset, a=a + self.elevation_offset, b=b, c=c, d=d)
             for s_offset, a, b, c, d in elevation_segments
         ]
 
