@@ -303,9 +303,10 @@ class SignalsAndControllers:
             reference_line = ReferenceLine.construct_from_lanelet_groups(
                 lanelet_map, lanelets
             )
-            spline = reference_line.centerline_spline
+            spline = reference_line.centerline_2d
 
             # Use cartesian_to_frenet to convert 3D position to s,t coordinates
+            # Note: 2D spline (z=0) works fine for XY-based Frenet conversion
             s, t = spline.cartesian_to_frenet(x, y, z)
             return (s, t)
         except Exception as e:

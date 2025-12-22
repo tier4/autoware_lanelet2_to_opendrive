@@ -192,11 +192,12 @@ class Road:
         reference_line = ReferenceLine.construct_from_lanelet_groups(
             lanelet_map, lanelet_list
         )
-        centerline_spline = reference_line.centerline_spline
+        centerline_2d = reference_line.centerline_2d
 
-        # Create paramPoly3 geometries from spline using from_spline method
+        # Create paramPoly3 geometries from 2D spline using from_spline method
+        # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate
         geometries: List[GeometryBase] = cast(
-            List[GeometryBase], ParamPoly3.from_spline(centerline_spline)
+            List[GeometryBase], ParamPoly3.from_spline(centerline_2d)
         )
 
         # Create plan view with the paramPoly3 geometries

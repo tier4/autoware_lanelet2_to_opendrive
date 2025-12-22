@@ -389,7 +389,10 @@ def _interpolate_on_line_segments(
 
 
 def extract_border_from_spline(
-    lanelet: lanelet2.core.Lanelet, border: str, num_control_points: int = 10
+    lanelet: lanelet2.core.Lanelet,
+    border: str,
+    num_control_points: int = 10,
+    dimensions: int = 3,
 ) -> Splines:
     """
     Extract border line from a Lanelet and return as B-spline with arc length parameterization.
@@ -398,6 +401,7 @@ def extract_border_from_spline(
         lanelet: A Lanelet2 lanelet object
         border: Border specification - "left" or "right"
         num_control_points: Number of control points for B-spline interpolation
+        dimensions: Number of dimensions (2 for XY only, 3 for XYZ)
 
     Returns:
         Splines object that can be evaluated using arc length
@@ -407,6 +411,9 @@ def extract_border_from_spline(
     """
     if border not in ["left", "right"]:
         raise ValueError(f"Invalid border: {border}. Must be 'left' or 'right'")
+
+    if dimensions not in [2, 3]:
+        raise ValueError(f"Invalid dimensions: {dimensions}. Must be 2 or 3")
 
     # Get the appropriate boundary
     if border == "left":
@@ -422,15 +429,27 @@ def extract_border_from_spline(
     # Extract points from the boundary
     points = []
     for point in boundary:
-        points.append([point.x, point.y, point.z])
+        if dimensions == 2:
+            points.append([point.x, point.y])
+        else:
+            points.append([point.x, point.y, point.z])
 
     points = np.array(points)
+
+    # Get velocity vectors
+    start_vel = _get_boundary_start_vel(boundary)
+    end_vel = _get_boundary_end_vel(boundary)
+
+    # For 2D splines, use only XY components of velocity
+    if dimensions == 2:
+        start_vel = start_vel[:2]
+        end_vel = end_vel[:2]
 
     # Create B-spline with constrained fitting
     return Splines(
         points,
-        start_vel=_get_boundary_start_vel(boundary),
-        end_vel=_get_boundary_end_vel(boundary),
+        start_vel=start_vel,
+        end_vel=end_vel,
         num_control_points=num_control_points,
     )
 

@@ -28,9 +28,9 @@ class Splines:
         Initialize a B-spline with constrained fitting.
 
         Args:
-            points: (N, 3) Array of 3D points to fit
-            start_vel: (3,) Tangent vector at the start. If None, estimated from points.
-            end_vel: (3,) Tangent vector at the end. If None, estimated from points.
+            points: (N, 2) or (N, 3) Array of 2D or 3D points to fit
+            start_vel: (2,) or (3,) Tangent vector at the start. If None, estimated from points.
+            end_vel: (2,) or (3,) Tangent vector at the end. If None, estimated from points.
             num_control_points: Number of control points (higher = closer fit, lower = smoother)
             k: Degree of the spline (usually 3 for cubic)
 
@@ -38,8 +38,12 @@ class Splines:
             ValueError: If too few control points or invalid input
         """
         self.points = np.asarray(points)
-        if self.points.ndim != 2 or self.points.shape[1] != 3:
-            raise ValueError("Points must be an (N, 3) array")
+        if self.points.ndim != 2 or self.points.shape[1] not in [2, 3]:
+            raise ValueError("Points must be an (N, 2) or (N, 3) array")
+
+        # Convert 2D points to 3D by adding z=0
+        if self.points.shape[1] == 2:
+            self.points = np.column_stack([self.points, np.zeros(len(self.points))])
 
         self.n_points = len(self.points)
         if self.n_points < 2:
@@ -107,6 +111,12 @@ class Splines:
 
         self.start_vel = np.asarray(start_vel)
         self.end_vel = np.asarray(end_vel)
+
+        # Convert 2D velocity vectors to 3D by adding z=0
+        if self.start_vel.shape[0] == 2:
+            self.start_vel = np.append(self.start_vel, 0.0)
+        if self.end_vel.shape[0] == 2:
+            self.end_vel = np.append(self.end_vel, 0.0)
 
         # Perform constrained spline fitting
         self._fit_constrained_spline()
