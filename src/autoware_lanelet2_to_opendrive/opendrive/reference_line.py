@@ -192,7 +192,9 @@ class ReferenceLine:
         """Access to lane level."""
         return self._lane.level
 
-    def get_elevation_profile(self) -> ElevationProfile:
+    def get_elevation_profile(
+        self, geometry_s_values: list[float] | None = None
+    ) -> ElevationProfile:
         """
         Get elevation profile from the reference line.
 
@@ -200,20 +202,67 @@ class ReferenceLine:
         geometry coordinates, ensuring that s-coordinates are consistent between the
         reference line geometry and elevation profile.
 
+        Args:
+            geometry_s_values: Optional list of s-coordinates for segment boundaries.
+                If provided, elevation segments will be aligned with these boundaries
+                (typically from ParamPoly3 geometries) to ensure consistency.
+                If None, uses the internal height_spline segment boundaries.
+
         Returns:
             ElevationProfile object containing elevation segments with polynomial coefficients
         """
-        # Extract elevation segments directly from height_spline
-        # height_spline maps XY arc length (s) to relative elevation (z - elevation_offset)
-        elevation_segments = self.height_spline.get_segments()
+        if geometry_s_values is None:
+            # Fallback: use height_spline segments directly
+            elevation_segments = self.height_spline.get_segments()
+            elevations = [
+                Elevation(s=s_offset, a=a + self.elevation_offset, b=b, c=c, d=d)
+                for s_offset, a, b, c, d in elevation_segments
+            ]
+        else:
+            # Create elevation segments aligned with geometry boundaries
+            # Use cubic Hermite interpolation to compute polynomial coefficients
+            elevations = []
+            for i in range(len(geometry_s_values)):
+                s_start = geometry_s_values[i]
+                s_end = (
+                    geometry_s_values[i + 1]
+                    if i + 1 < len(geometry_s_values)
+                    else self.height_spline.total_length
+                )
+                segment_length = s_end - s_start
 
-        # Create Elevation objects for each segment
-        # Add elevation_offset to the 'a' coefficient of each segment to convert
-        # from relative elevation back to absolute inertial z-coordinate
-        elevations = [
-            Elevation(s=s_offset, a=a + self.elevation_offset, b=b, c=c, d=d)
-            for s_offset, a, b, c, d in elevation_segments
-        ]
+                if segment_length <= 0:
+                    continue
+
+                # Evaluate height_spline at segment boundaries
+                # Get relative elevation and derivatives
+                z_start = self.height_spline.evaluate(s_start, derivative=0)
+                dz_start = self.height_spline.evaluate(s_start, derivative=1)
+                z_end = self.height_spline.evaluate(s_end, derivative=0)
+                dz_end = self.height_spline.evaluate(s_end, derivative=1)
+
+                # Compute cubic polynomial coefficients using Hermite interpolation
+                # z(ds) = a + b*ds + c*ds^2 + d*ds^3, where ds = s - s_start
+                # Boundary conditions:
+                #   z(0) = z_start, z(L) = z_end
+                #   z'(0) = dz_start, z'(L) = dz_end
+                L = segment_length
+
+                a = z_start
+                b = dz_start
+                c = (3 * (z_end - z_start) / L - 2 * dz_start - dz_end) / L
+                d = (2 * (z_start - z_end) / L + dz_start + dz_end) / (L * L)
+
+                # Add elevation_offset to 'a' to convert to absolute z-coordinate
+                elevations.append(
+                    Elevation(
+                        s=s_start,
+                        a=a + self.elevation_offset,
+                        b=b,
+                        c=c,
+                        d=d,
+                    )
+                )
 
         return ElevationProfile(elevations=elevations)
 
