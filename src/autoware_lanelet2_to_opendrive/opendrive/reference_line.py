@@ -88,65 +88,37 @@ class ReferenceLine:
 
         from ..centerline import extract_border_from_spline
 
-        # Extract the left boundary as 3D spline first to get elevation data
-        centerline_3d = extract_border_from_spline(
-            leftmost_lanelet, border="left", dimensions=3
-        )
-        elevation_offset = centerline_3d.evaluate(0.0)[2]
+        # Extract 3D points directly from the left boundary (no 3D spline needed)
+        # This avoids the 3D-to-2D arc length mapping issues on steep slopes
+        boundary = leftmost_lanelet.leftBound
+        points_3d = np.array([[p.x, p.y, p.z] for p in boundary])
 
-        # Extract the left boundary as 2D spline (XY only) for reference line
+        # Calculate XY cumulative distances (2D arc length) directly from points
+        xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
+        xy_arc_lengths = np.concatenate(([0], np.cumsum(xy_distances)))
+
+        # Get elevation offset (absolute Z at s=0)
+        elevation_offset = points_3d[0, 2]
+
+        # Extract the left boundary as 2D spline (XY only) for reference line geometry
         centerline_2d = extract_border_from_spline(
             leftmost_lanelet, border="left", dimensions=2
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)
-        # Sample the 3D spline and calculate cumulative XY distances
-        total_length_2d = centerline_2d.total_length
-        total_length_3d = centerline_3d.total_length
-
-        # Sample 3D spline at high density (0.05m intervals)
-        num_samples_3d = max(20, int(np.ceil(total_length_3d / 0.05)) + 1)
-        arc_lengths_3d = np.linspace(0, total_length_3d, num_samples_3d)
-
-        # Extract all 3D coordinates
-        all_points_3d = np.array([centerline_3d.evaluate(s) for s in arc_lengths_3d])
-
-        # Calculate cumulative XY distances (arc length in 2D projection)
-        xy_distances = np.linalg.norm(np.diff(all_points_3d[:, :2], axis=0), axis=1)
-        xy_cumulative = np.concatenate(([0], np.cumsum(xy_distances)))
-
-        # Find points where XY cumulative distance <= total_length_2d
-        valid_indices = xy_cumulative <= (total_length_2d + 1e-6)
-
-        # Extract valid points and their XY arc lengths
-        points_3d = all_points_3d[valid_indices]
-        xy_arc_lengths = xy_cumulative[valid_indices]
-
-        # Ensure the last point exactly matches total_length_2d
-        if len(xy_arc_lengths) > 0 and xy_arc_lengths[-1] < total_length_2d:
-            # Interpolate the last point
-            next_idx = np.searchsorted(xy_cumulative, total_length_2d)
-            if next_idx < len(xy_cumulative):
-                t = (total_length_2d - xy_cumulative[next_idx - 1]) / (
-                    xy_cumulative[next_idx] - xy_cumulative[next_idx - 1]
-                )
-                last_point = all_points_3d[next_idx - 1] + t * (
-                    all_points_3d[next_idx] - all_points_3d[next_idx - 1]
-                )
-                points_3d = np.vstack([points_3d, last_point])
-                xy_arc_lengths = np.append(xy_arc_lengths, total_length_2d)
+        # Use the original point Z-coordinates directly (no 3D spline sampling needed)
+        z_values = points_3d[:, 2]
+        relative_elevations_raw = z_values - elevation_offset
 
         # Resample to desired density (0.1m intervals) for height spline
+        total_length_2d = centerline_2d.total_length
         num_samples = max(10, int(np.ceil(total_length_2d / 0.1)) + 1)
         xy_arc_lengths_resampled = np.linspace(0, total_length_2d, num_samples)
 
         # Interpolate z-coordinates at resampled positions
-        elevations_resampled = np.interp(
-            xy_arc_lengths_resampled, xy_arc_lengths, points_3d[:, 2]
+        relative_elevations = np.interp(
+            xy_arc_lengths_resampled, xy_arc_lengths, relative_elevations_raw
         )
-
-        # Convert to relative elevation (offset from first point)
-        relative_elevations = elevations_resampled - elevation_offset
 
         # Create height_spline mapping XY arc length -> relative elevation
         height_spline = CubicSpline1D(
