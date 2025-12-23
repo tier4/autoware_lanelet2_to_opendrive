@@ -504,20 +504,10 @@ class Road:
                 )
 
         # Build lane links based on lanelet previous/following relationships
-        # First, create a global mapping from lanelet_id to (road_id, lane_id)
-        lanelet_to_road_and_lane: Dict[int, tuple[int, int]] = {}
-        for road in roads:
-            lane_mapping = road.get_lanelet_to_lane_mapping()
-            for lanelet_id, lane_id in lane_mapping.items():
-                lanelet_to_road_and_lane[lanelet_id] = (road.id, lane_id)
-
-        # Set lane links for each road
-        print(f"Building lane links for {len(roads)} roads...")
-        for road in tqdm(roads, desc="Building lane links"):
-            try:
-                road.set_lane_links(lanelet_map, lanelet_to_road_and_lane)
-            except Exception as e:
-                tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
+        # Note: This only sets links between regular roads.
+        # For complete lane links including junction roads, use set_all_lane_links()
+        # after combining regular roads and connecting roads from junctions.
+        Road.set_all_lane_links(lanelet_map, roads)
 
         return roads
 
@@ -617,3 +607,37 @@ class Road:
         )
 
         return connecting_roads, junction_to_roads, lanelet_to_road
+
+    @staticmethod
+    def set_all_lane_links(
+        lanelet_map: lanelet2.core.LaneletMap,
+        roads: List["Road"],
+    ) -> None:
+        """Set lane links for all roads based on lanelet connections.
+
+        This method builds a global mapping from lanelet IDs to (road_id, lane_id)
+        and sets predecessor/successor links for all lanes in all roads.
+
+        Args:
+            lanelet_map: The Lanelet2 map containing connectivity information
+            roads: List of all roads (both regular and connecting roads from junctions)
+
+        Example:
+            >>> # After creating all roads
+            >>> all_roads = regular_roads + connecting_roads
+            >>> Road.set_all_lane_links(lanelet_map, all_roads)
+        """
+        # Build global mapping from lanelet_id to (road_id, lane_id)
+        lanelet_to_road_and_lane: Dict[int, tuple[int, int]] = {}
+        for road in roads:
+            lane_mapping = road.get_lanelet_to_lane_mapping()
+            for lanelet_id, lane_id in lane_mapping.items():
+                lanelet_to_road_and_lane[lanelet_id] = (road.id, lane_id)
+
+        # Set lane links for each road
+        print(f"Building lane links for {len(roads)} roads...")
+        for road in tqdm(roads, desc="Building lane links"):
+            try:
+                road.set_lane_links(lanelet_map, lanelet_to_road_and_lane)
+            except Exception as e:
+                tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
