@@ -392,7 +392,7 @@ def extract_border_from_spline(
     lanelet: lanelet2.core.Lanelet,
     border: str,
     num_control_points: int = 10,
-    dimensions: int = 3,
+    dimensions: int = 2,
 ) -> Splines:
     """
     Extract border line from a Lanelet and return as B-spline with arc length parameterization.
@@ -401,19 +401,23 @@ def extract_border_from_spline(
         lanelet: A Lanelet2 lanelet object
         border: Border specification - "left" or "right"
         num_control_points: Number of control points for B-spline interpolation
-        dimensions: Number of dimensions (2 for XY only, 3 for XYZ)
+        dimensions: Number of dimensions (2 for XY only)
 
     Returns:
         Splines object that can be evaluated using arc length
 
     Raises:
-        ValueError: If border is not "left" or "right", or if insufficient points
+        ValueError: If border is not "left" or "right", if insufficient points,
+                    or if dimensions >= 3
     """
     if border not in ["left", "right"]:
         raise ValueError(f"Invalid border: {border}. Must be 'left' or 'right'")
 
-    if dimensions not in [2, 3]:
-        raise ValueError(f"Invalid dimensions: {dimensions}. Must be 2 or 3")
+    if dimensions >= 3:
+        raise ValueError(
+            f"Invalid dimensions: {dimensions}. OpenDRIVE reference lines must be 2D. "
+            "Please refer to the OpenDRIVE specification."
+        )
 
     # Get the appropriate boundary
     if border == "left":
@@ -426,24 +430,12 @@ def extract_border_from_spline(
             f"Lanelet must have at least 2 points in its {border} boundary"
         )
 
-    # Extract points from the boundary
-    points = []
-    for point in boundary:
-        if dimensions == 2:
-            points.append([point.x, point.y])
-        else:
-            points.append([point.x, point.y, point.z])
+    # Extract 2D points from the boundary (XY only, per OpenDRIVE spec)
+    points = np.array([[point.x, point.y] for point in boundary])
 
-    points = np.array(points)
-
-    # Get velocity vectors
-    start_vel = _get_boundary_start_vel(boundary)
-    end_vel = _get_boundary_end_vel(boundary)
-
-    # For 2D splines, use only XY components of velocity
-    if dimensions == 2:
-        start_vel = start_vel[:2]
-        end_vel = end_vel[:2]
+    # Get velocity vectors (XY components only)
+    start_vel = _get_boundary_start_vel(boundary)[:2]
+    end_vel = _get_boundary_end_vel(boundary)[:2]
 
     # Create B-spline with constrained fitting
     return Splines(
