@@ -1,9 +1,10 @@
 """OpenDRIVE road definitions."""
 
 from dataclasses import dataclass
-from typing import Optional, Union, Set, List, cast
+from typing import Optional, Union, Set, List, cast, Dict
 import lxml.etree as ET
 import lanelet2
+from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from tqdm import tqdm
 
 from .geometry import PlanView, ParamPoly3, GeometryBase
@@ -11,6 +12,7 @@ from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
 from .enums import ContactPoint, ElementType
+from .lane_elements import LaneLink
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype
 
@@ -19,6 +21,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .signal import Signal
+    from .lane import Lane
 
 
 @dataclass
@@ -155,6 +158,109 @@ class Road:
             element_id=element_id,
             contact_point=contact_point,
         )
+
+    def get_lanelet_to_lane_mapping(self) -> Dict[int, int]:
+        """Get mapping from lanelet ID to lane ID for all lanes in this road.
+
+        Returns:
+            Dictionary mapping lanelet_id -> lane_id
+        """
+        mapping: Dict[int, int] = {}
+
+        if self.lanes is None:
+            return mapping
+
+        for lane_section in self.lanes.lane_sections:
+            section_mapping = lane_section.get_lanelet_to_lane_mapping()
+            mapping.update(section_mapping)
+
+        return mapping
+
+    def set_lane_links(
+        self,
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
+    ) -> None:
+        """Set lane predecessor and successor links based on lanelet connections.
+
+        Args:
+            lanelet_map: The Lanelet2 map containing connectivity information
+            lanelet_to_road_and_lane: Global mapping from lanelet_id to (road_id, lane_id)
+        """
+        if self.lanes is None:
+            return
+
+        # Create routing graph for connectivity analysis
+        traffic_rules = lanelet2.traffic_rules.create(
+            lanelet2.traffic_rules.Locations.Germany,
+            lanelet2.traffic_rules.Participants.Vehicle,
+        )
+        routing_graph = RoutingGraph(
+            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+        )
+
+        for lane_section in self.lanes.lane_sections:
+            # Process left lanes
+            for lane in lane_section.left_lanes.values():
+                self._set_single_lane_links(
+                    lane, lanelet_map, routing_graph, lanelet_to_road_and_lane
+                )
+
+            # Process right lanes
+            for lane in lane_section.right_lanes.values():
+                self._set_single_lane_links(
+                    lane, lanelet_map, routing_graph, lanelet_to_road_and_lane
+                )
+
+    def _set_single_lane_links(
+        self,
+        lane: "Lane",
+        lanelet_map: lanelet2.core.LaneletMap,
+        routing_graph: RoutingGraph,
+        lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
+    ) -> None:
+        """Set predecessor and successor for a single lane.
+
+        Args:
+            lane: The lane to set links for
+            lanelet_map: The Lanelet2 map
+            routing_graph: Routing graph for connectivity analysis
+            lanelet_to_road_and_lane: Global mapping from lanelet_id to (road_id, lane_id)
+        """
+
+        if lane.lanelet_id is None:
+            return
+
+        # Get the lanelet corresponding to this lane
+        try:
+            lanelet = lanelet_map.laneletLayer.get(lane.lanelet_id)
+        except Exception:
+            return
+
+        # Find predecessor lanelets
+        previous_lanelets = routing_graph.previous(lanelet)
+        if previous_lanelets:
+            # Take the first predecessor that maps to a different road
+            for prev_ll in previous_lanelets:
+                if prev_ll.id in lanelet_to_road_and_lane:
+                    pred_road_id, pred_lane_id = lanelet_to_road_and_lane[prev_ll.id]
+                    # Only set predecessor if it's in a different road
+                    # (same road connections would be within lane sections)
+                    if pred_road_id != self.id:
+                        lane.predecessor = LaneLink(id=pred_lane_id)
+                        break
+
+        # Find successor lanelets
+        following_lanelets = routing_graph.following(lanelet)
+        if following_lanelets:
+            # Take the first successor that maps to a different road
+            for next_ll in following_lanelets:
+                if next_ll.id in lanelet_to_road_and_lane:
+                    succ_road_id, succ_lane_id = lanelet_to_road_and_lane[next_ll.id]
+                    # Only set successor if it's in a different road
+                    if succ_road_id != self.id:
+                        lane.successor = LaneLink(id=succ_lane_id)
+                        break
 
     @staticmethod
     def construct_from_lanelet_groups(
@@ -396,6 +502,22 @@ class Road:
                 tqdm.write(
                     f"Warning: Failed to find successors for road {road.id}: {e}"
                 )
+
+        # Build lane links based on lanelet previous/following relationships
+        # First, create a global mapping from lanelet_id to (road_id, lane_id)
+        lanelet_to_road_and_lane: Dict[int, tuple[int, int]] = {}
+        for road in roads:
+            lane_mapping = road.get_lanelet_to_lane_mapping()
+            for lanelet_id, lane_id in lane_mapping.items():
+                lanelet_to_road_and_lane[lanelet_id] = (road.id, lane_id)
+
+        # Set lane links for each road
+        print(f"Building lane links for {len(roads)} roads...")
+        for road in tqdm(roads, desc="Building lane links"):
+            try:
+                road.set_lane_links(lanelet_map, lanelet_to_road_and_lane)
+            except Exception as e:
+                tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
 
         return roads
 

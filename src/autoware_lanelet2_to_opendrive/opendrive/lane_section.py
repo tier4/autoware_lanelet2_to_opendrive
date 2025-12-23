@@ -135,6 +135,26 @@ class LaneSection:
 
         return all_lanes
 
+    def get_lanelet_to_lane_mapping(self) -> Dict[int, int]:
+        """Get mapping from lanelet ID to lane ID for all lanes in this section.
+
+        Returns:
+            Dictionary mapping lanelet_id -> lane_id
+        """
+        mapping: Dict[int, int] = {}
+
+        # Add left lanes
+        for lane in self.left_lanes.values():
+            if lane.lanelet_id is not None:
+                mapping[lane.lanelet_id] = lane.lane_id
+
+        # Add right lanes
+        for lane in self.right_lanes.values():
+            if lane.lanelet_id is not None:
+                mapping[lane.lanelet_id] = lane.lane_id
+
+        return mapping
+
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
         elem = ET.Element("laneSection")
