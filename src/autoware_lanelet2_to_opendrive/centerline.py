@@ -415,8 +415,8 @@ def extract_border_from_spline(
 
     if dimensions >= 3:
         raise ValueError(
-            "不正な次元数が入力されました。OpenDRIVEの仕様を確認してください。"
-            f" (dimensions={dimensions}, expected: 2)"
+            f"Invalid dimensions: {dimensions}. OpenDRIVE reference lines must be 2D. "
+            "Please refer to the OpenDRIVE specification."
         )
 
     # Get the appropriate boundary
