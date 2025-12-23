@@ -218,8 +218,12 @@ class Road:
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
 
-        # Get elevation profile from reference line
-        elevation_profile = reference_line.get_elevation_profile()
+        # Extract geometry segment boundaries (s-coordinates)
+        # This ensures elevation profile segments align with ParamPoly3 segments
+        geometry_s_values = [g.s for g in geometries]
+
+        # Get elevation profile from reference line, aligned with geometry boundaries
+        elevation_profile = reference_line.get_elevation_profile(geometry_s_values)
 
         # Create a basic road with the extracted information
         # Note: This is a simplified implementation
