@@ -180,24 +180,27 @@ class Road:
         self,
         lanelet_map: lanelet2.core.LaneletMap,
         lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> None:
         """Set lane predecessor and successor links based on lanelet connections.
 
         Args:
             lanelet_map: The Lanelet2 map containing connectivity information
             lanelet_to_road_and_lane: Global mapping from lanelet_id to (road_id, lane_id)
+            routing_graph: Optional pre-built routing graph. If None, creates a new one.
         """
         if self.lanes is None:
             return
 
-        # Create routing graph for connectivity analysis
-        traffic_rules = lanelet2.traffic_rules.create(
-            lanelet2.traffic_rules.Locations.Germany,
-            lanelet2.traffic_rules.Participants.Vehicle,
-        )
-        routing_graph = RoutingGraph(
-            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
-        )
+        # Use provided routing graph or create a new one
+        if routing_graph is None:
+            traffic_rules = lanelet2.traffic_rules.create(
+                lanelet2.traffic_rules.Locations.Germany,
+                lanelet2.traffic_rules.Participants.Vehicle,
+            )
+            routing_graph = RoutingGraph(
+                lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+            )
 
         for lane_section in self.lanes.lane_sections:
             # Process left lanes
@@ -380,11 +383,22 @@ class Road:
         if not road_lanelets:
             raise ValueError("No lanelets found outside junctions")
 
+        # Create routing graph once and reuse for all operations
+        traffic_rules = lanelet2.traffic_rules.create(
+            lanelet2.traffic_rules.Locations.Germany,
+            lanelet2.traffic_rules.Participants.Vehicle,
+        )
+        routing_graph = RoutingGraph(
+            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+        )
+
         # Find adjacent groups of lanelets
         from ..util import find_adjacent_groups
 
         # Pass the road_lanelets set to find_adjacent_groups so it only groups these
-        adjacent_groups = find_adjacent_groups(lanelet_map, set(road_lanelets))
+        adjacent_groups = find_adjacent_groups(
+            lanelet_map, set(road_lanelets), routing_graph
+        )
 
         # Create roads from adjacent groups
         roads = []
@@ -456,7 +470,10 @@ class Road:
             # Find preceding lanelet groups
             try:
                 preceding_groups = find_connecting_lanelet_groups(
-                    lanelet_map, adjacent_group, ConnectionDirection.PREVIOUS
+                    lanelet_map,
+                    adjacent_group,
+                    ConnectionDirection.PREVIOUS,
+                    routing_graph,
                 )
 
                 # Find which roads these preceding lanelets belong to
@@ -481,7 +498,10 @@ class Road:
             # Find following lanelet groups
             try:
                 following_groups = find_connecting_lanelet_groups(
-                    lanelet_map, adjacent_group, ConnectionDirection.FOLLOWING
+                    lanelet_map,
+                    adjacent_group,
+                    ConnectionDirection.FOLLOWING,
+                    routing_graph,
                 )
 
                 # Find which roads these following lanelets belong to
@@ -507,7 +527,7 @@ class Road:
         # Note: This only sets links between regular roads.
         # For complete lane links including junction roads, use set_all_lane_links()
         # after combining regular roads and connecting roads from junctions.
-        Road.set_all_lane_links(lanelet_map, roads)
+        Road.set_all_lane_links(lanelet_map, roads, routing_graph)
 
         return roads
 
@@ -612,6 +632,7 @@ class Road:
     def set_all_lane_links(
         lanelet_map: lanelet2.core.LaneletMap,
         roads: List["Road"],
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> None:
         """Set lane links for all roads based on lanelet connections.
 
@@ -621,6 +642,7 @@ class Road:
         Args:
             lanelet_map: The Lanelet2 map containing connectivity information
             roads: List of all roads (both regular and connecting roads from junctions)
+            routing_graph: Optional pre-built routing graph. If None, creates a new one.
 
         Example:
             >>> # After creating all roads
@@ -634,11 +656,23 @@ class Road:
             for lanelet_id, lane_id in lane_mapping.items():
                 lanelet_to_road_and_lane[lanelet_id] = (road.id, lane_id)
 
+        # Use provided routing graph or create a new one
+        if routing_graph is None:
+            traffic_rules = lanelet2.traffic_rules.create(
+                lanelet2.traffic_rules.Locations.Germany,
+                lanelet2.traffic_rules.Participants.Vehicle,
+            )
+            routing_graph = RoutingGraph(
+                lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+            )
+
         # Set lane links for each road
         print(f"Building lane links for {len(roads)} roads...")
         for road in tqdm(roads, desc="Building lane links"):
             try:
-                road.set_lane_links(lanelet_map, lanelet_to_road_and_lane)
+                road.set_lane_links(
+                    lanelet_map, lanelet_to_road_and_lane, routing_graph
+                )
             except Exception as e:
                 tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
 

@@ -154,6 +154,7 @@ def find_connecting_lanelet_groups(
         lanelet2.core.LaneletLayer,
     ],
     direction: ConnectionDirection,
+    routing_graph: Optional[RoutingGraph] = None,
 ) -> List[Set[lanelet2.core.Lanelet]]:
     """Find and group the connecting lanelets of a given lanelet group.
 
@@ -161,16 +162,20 @@ def find_connecting_lanelet_groups(
         lanelet_map: The lanelet2 map to analyze
         lanelet_group: Set of lanelets to find connections for
         direction: ConnectionDirection enum value to specify which connections to find
+        routing_graph: Optional pre-built routing graph. If None, creates a new one.
 
     Returns:
         List of sets, where each set contains lanelets that are adjacent to each other
     """
-    # Create routing graph
-    traffic_rules = lanelet2.traffic_rules.create(
-        lanelet2.traffic_rules.Locations.Germany,
-        lanelet2.traffic_rules.Participants.Vehicle,
-    )
-    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+    # Use provided routing graph or create a new one
+    if routing_graph is None:
+        traffic_rules = lanelet2.traffic_rules.create(
+            lanelet2.traffic_rules.Locations.Germany,
+            lanelet2.traffic_rules.Participants.Vehicle,
+        )
+        routing_graph = RoutingGraph(
+            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+        )
 
     # Collect all connecting lanelets
     connecting_lanelets = set()
@@ -187,7 +192,7 @@ def find_connecting_lanelet_groups(
             connecting_lanelets.add(connected_ll)
 
     # Group the connecting lanelets by their adjacency
-    groups = find_adjacent_groups(lanelet_map, connecting_lanelets)
+    groups = find_adjacent_groups(lanelet_map, connecting_lanelets, routing_graph)
 
     return groups
 
@@ -195,6 +200,7 @@ def find_connecting_lanelet_groups(
 def find_adjacent_groups(
     lanelet_map: lanelet2.core.LaneletMap,
     target_lanelets: Set[lanelet2.core.Lanelet],
+    routing_graph: Optional[RoutingGraph] = None,
 ) -> List[Set[lanelet2.core.Lanelet]]:
     """Find groups of laterally adjacent lanelets.
 
@@ -205,6 +211,7 @@ def find_adjacent_groups(
         lanelet_map: The lanelet2 map to analyze
         target_lanelets: Set of lanelets to group. If empty, groups all lanelets in the map.
                         If not empty, groups only the target lanelets into adjacent groups.
+        routing_graph: Optional pre-built routing graph. If None, creates a new one.
 
     Returns:
         List of sets, where each set contains lanelets that are laterally adjacent to each other
@@ -219,12 +226,15 @@ def find_adjacent_groups(
         # The adjacency relationships will be found in the DFS below
         lanelets_to_group = target_lanelets.copy()
 
-    # Create routing graph for connectivity analysis
-    traffic_rules = lanelet2.traffic_rules.create(
-        lanelet2.traffic_rules.Locations.Germany,
-        lanelet2.traffic_rules.Participants.Vehicle,
-    )
-    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+    # Use provided routing graph or create a new one
+    if routing_graph is None:
+        traffic_rules = lanelet2.traffic_rules.create(
+            lanelet2.traffic_rules.Locations.Germany,
+            lanelet2.traffic_rules.Participants.Vehicle,
+        )
+        routing_graph = RoutingGraph(
+            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+        )
 
     groups = []
     visited = set()
