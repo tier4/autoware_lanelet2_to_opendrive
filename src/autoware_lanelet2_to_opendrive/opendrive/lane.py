@@ -33,6 +33,7 @@ class Lane:
         level: bool = False,
         predecessor: Optional[LaneLink] = None,
         successor: Optional[LaneLink] = None,
+        lanelet_id: Optional[int] = None,
     ):
         """
         Initialize a Lane object.
@@ -43,12 +44,14 @@ class Lane:
             level: Whether the lane is level
             predecessor: Link to predecessor lane
             successor: Link to successor lane
+            lanelet_id: ID of the corresponding Lanelet2 lanelet (for tracing connections)
         """
         self.lane_id = lane_id
         self.lane_type = lane_type
         self.level = level
         self.predecessor = predecessor
         self.successor = successor
+        self.lanelet_id = lanelet_id
 
         # Lane geometry definitions
         self.widths: List[LaneWidth] = []
@@ -153,17 +156,19 @@ class Lane:
         else:
             lane_type = LaneType.DRIVING
 
-        # TODO: Calculate predecessor and successor from lanelet connections
+        # Predecessor and successor will be set later via set_lane_links
+        # after all roads are constructed and lanelet-to-lane mappings are available
         predecessor = None
         successor = None
 
-        # Create the Lane instance
+        # Create the Lane instance with the lanelet ID for connection tracing
         lane = Lane(
             lane_id=lane_id,
             lane_type=lane_type,
             level=False,
             predecessor=predecessor,
             successor=successor,
+            lanelet_id=lanelet.id,
         )
 
         groups = find_adjacent_groups(lanelet_map, {lanelet})

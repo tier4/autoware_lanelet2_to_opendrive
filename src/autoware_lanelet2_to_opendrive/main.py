@@ -205,6 +205,21 @@ def convert_lanelet2_to_opendrive(
         f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
     )
 
+    # Step 6.5: Set lane links for all roads (including junction roads)
+    # This must be done after combining all roads so that connections between
+    # regular roads and junction roads are properly established
+    print("\n=== Building lane links for all roads ===")
+    Road.set_all_lane_links(lanelet_map, all_roads)
+
+    # Step 6.6: Set road links for connecting roads (predecessor/successor)
+    print("\n=== Building road links for connecting roads ===")
+    Road.set_connecting_road_links(
+        lanelet_map=lanelet_map,
+        connecting_roads=connecting_roads,
+        lanelet_to_road_id=lanelet_to_road_id,
+        road_to_lanelet_ids=road_to_lanelet_ids,
+    )
+
     # Create mapping object
     mapping = RoadLaneletMapping(
         road_to_lanelets=road_to_lanelet_ids, lanelet_to_road=lanelet_to_road_id
