@@ -12,3 +12,6 @@ wheels/
 # Artifacts
 *.xodr
 *processed.osm
+
+# pytest-testmon
+.testmondata

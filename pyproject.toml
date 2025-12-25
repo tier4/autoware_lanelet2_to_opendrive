@@ -35,4 +35,8 @@ dev = [
     "mypy>=1.19.0",
     "pre-commit>=4.5.0",
     "pytest>=9.0.1",
+    "pytest-testmon>=2.2.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--testmon"
