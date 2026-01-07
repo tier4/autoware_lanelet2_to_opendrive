@@ -1,0 +1,69 @@
+site_name: Autoware Lanelet2 to OpenDRIVE
+site_url: https://tier4.github.io/autoware_lanelet2_to_opendrive/
+site_description: Convert Lanelet2 map format to OpenDRIVE format for Autoware autonomous driving software
+repo_url: https://github.com/tier4/autoware_lanelet2_to_opendrive
+repo_name: tier4/autoware_lanelet2_to_opendrive
+
+theme:
+  name: material
+  language: en
+  palette:
+    # Light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - Signals: signals.md
+  - API Reference: api.md
+  - Development: development.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/tier4/autoware_lanelet2_to_opendrive
