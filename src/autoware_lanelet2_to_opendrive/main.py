@@ -220,6 +220,15 @@ def convert_lanelet2_to_opendrive(
         road_to_lanelet_ids=road_to_lanelet_ids,
     )
 
+    # Step 6.7: Set junction links for incoming roads
+    # This ensures CARLA compatibility by setting successor/predecessor to junction
+    # for roads that connect to junctions as incoming roads
+    print("\n=== Setting junction links for incoming roads ===")
+    Road.set_incoming_road_junction_links(
+        roads=all_roads,
+        junctions=junctions,
+    )
+
     # Create mapping object
     mapping = RoadLaneletMapping(
         road_to_lanelets=road_to_lanelet_ids, lanelet_to_road=lanelet_to_road_id
