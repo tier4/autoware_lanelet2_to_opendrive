@@ -14,4 +14,4 @@ wheels/
 *processed.osm
 
 # pytest-testmon
-.testmondata
+.testmondata*

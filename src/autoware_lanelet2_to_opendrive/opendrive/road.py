@@ -182,6 +182,7 @@ class Road:
         lanelet_map: lanelet2.core.LaneletMap,
         lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
         routing_graph: Optional[RoutingGraph] = None,
+        road_lane_ids: Optional[Dict[int, Set[int]]] = None,
     ) -> None:
         """Set lane predecessor and successor links based on lanelet connections.
 
@@ -189,6 +190,8 @@ class Road:
             lanelet_map: The Lanelet2 map containing connectivity information
             lanelet_to_road_and_lane: Global mapping from lanelet_id to (road_id, lane_id)
             routing_graph: Optional pre-built routing graph. If None, creates a new one.
+            road_lane_ids: Optional mapping from road_id to set of existing lane_ids.
+                          Used to validate that lane links reference existing lanes.
         """
         if self.lanes is None:
             return
@@ -207,13 +210,21 @@ class Road:
             # Process left lanes
             for lane in lane_section.left_lanes.values():
                 self._set_single_lane_links(
-                    lane, lanelet_map, routing_graph, lanelet_to_road_and_lane
+                    lane,
+                    lanelet_map,
+                    routing_graph,
+                    lanelet_to_road_and_lane,
+                    road_lane_ids,
                 )
 
             # Process right lanes
             for lane in lane_section.right_lanes.values():
                 self._set_single_lane_links(
-                    lane, lanelet_map, routing_graph, lanelet_to_road_and_lane
+                    lane,
+                    lanelet_map,
+                    routing_graph,
+                    lanelet_to_road_and_lane,
+                    road_lane_ids,
                 )
 
     def _set_single_lane_links(
@@ -222,6 +233,7 @@ class Road:
         lanelet_map: lanelet2.core.LaneletMap,
         routing_graph: RoutingGraph,
         lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
+        road_lane_ids: Optional[Dict[int, Set[int]]] = None,
     ) -> None:
         """Set predecessor and successor for a single lane.
 
@@ -230,6 +242,8 @@ class Road:
             lanelet_map: The Lanelet2 map
             routing_graph: Routing graph for connectivity analysis
             lanelet_to_road_and_lane: Global mapping from lanelet_id to (road_id, lane_id)
+            road_lane_ids: Optional mapping from road_id to set of existing lane_ids.
+                          Used to validate that lane links reference existing lanes.
         """
 
         if lane.lanelet_id is None:
@@ -251,6 +265,12 @@ class Road:
                     # Only set predecessor if it's in a different road
                     # (same road connections would be within lane sections)
                     if pred_road_id != self.id:
+                        # Validate that the lane exists in the predecessor road
+                        if road_lane_ids is not None:
+                            existing_lanes = road_lane_ids.get(pred_road_id, set())
+                            if pred_lane_id not in existing_lanes:
+                                # Lane doesn't exist, skip this link
+                                continue
                         lane.predecessor = LaneLink(id=pred_lane_id)
                         break
 
@@ -263,6 +283,12 @@ class Road:
                     succ_road_id, succ_lane_id = lanelet_to_road_and_lane[next_ll.id]
                     # Only set successor if it's in a different road
                     if succ_road_id != self.id:
+                        # Validate that the lane exists in the successor road
+                        if road_lane_ids is not None:
+                            existing_lanes = road_lane_ids.get(succ_road_id, set())
+                            if succ_lane_id not in existing_lanes:
+                                # Lane doesn't exist, skip this link
+                                continue
                         lane.successor = LaneLink(id=succ_lane_id)
                         break
 
@@ -657,6 +683,17 @@ class Road:
             for lanelet_id, lane_id in lane_mapping.items():
                 lanelet_to_road_and_lane[lanelet_id] = (road.id, lane_id)
 
+        # Build mapping from road_id to set of existing lane_ids
+        # This is used to validate that lane links reference existing lanes
+        road_lane_ids: Dict[int, Set[int]] = {}
+        for road in roads:
+            lane_ids: Set[int] = set()
+            if road.lanes:
+                for lane_section in road.lanes.lane_sections:
+                    lane_ids.update(lane_section.left_lanes.keys())
+                    lane_ids.update(lane_section.right_lanes.keys())
+            road_lane_ids[road.id] = lane_ids
+
         # Use provided routing graph or create a new one
         if routing_graph is None:
             traffic_rules = lanelet2.traffic_rules.create(
@@ -672,7 +709,7 @@ class Road:
         for road in tqdm(roads, desc="Building lane links"):
             try:
                 road.set_lane_links(
-                    lanelet_map, lanelet_to_road_and_lane, routing_graph
+                    lanelet_map, lanelet_to_road_and_lane, routing_graph, road_lane_ids
                 )
             except Exception as e:
                 tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
