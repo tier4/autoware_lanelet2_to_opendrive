@@ -255,16 +255,32 @@ class Road:
         except Exception:
             return
 
+        # Get road link predecessor/successor road IDs for consistency check
+        # Lane links must reference lanes in the road link's predecessor/successor roads
+        road_link_predecessor_id: Optional[int] = None
+        road_link_successor_id: Optional[int] = None
+        if self.link:
+            if self.link.predecessor:
+                road_link_predecessor_id = self.link.predecessor.element_id
+            if self.link.successor:
+                road_link_successor_id = self.link.successor.element_id
+
         # Find predecessor lanelets
         previous_lanelets = routing_graph.previous(lanelet)
         if previous_lanelets:
-            # Take the first predecessor that maps to a different road
+            # Take the first predecessor that maps to the road link's predecessor road
             for prev_ll in previous_lanelets:
                 if prev_ll.id in lanelet_to_road_and_lane:
                     pred_road_id, pred_lane_id = lanelet_to_road_and_lane[prev_ll.id]
                     # Only set predecessor if it's in a different road
                     # (same road connections would be within lane sections)
                     if pred_road_id != self.id:
+                        # Check consistency with road link
+                        # Lane link must reference the road link's predecessor road
+                        if road_link_predecessor_id is not None:
+                            if pred_road_id != road_link_predecessor_id:
+                                # This lane connects to a different road than the road link
+                                continue
                         # Validate that the lane exists in the predecessor road
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(pred_road_id, set())
@@ -277,12 +293,18 @@ class Road:
         # Find successor lanelets
         following_lanelets = routing_graph.following(lanelet)
         if following_lanelets:
-            # Take the first successor that maps to a different road
+            # Take the first successor that maps to the road link's successor road
             for next_ll in following_lanelets:
                 if next_ll.id in lanelet_to_road_and_lane:
                     succ_road_id, succ_lane_id = lanelet_to_road_and_lane[next_ll.id]
                     # Only set successor if it's in a different road
                     if succ_road_id != self.id:
+                        # Check consistency with road link
+                        # Lane link must reference the road link's successor road
+                        if road_link_successor_id is not None:
+                            if succ_road_id != road_link_successor_id:
+                                # This lane connects to a different road than the road link
+                                continue
                         # Validate that the lane exists in the successor road
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(succ_road_id, set())
