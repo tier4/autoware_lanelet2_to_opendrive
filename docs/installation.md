@@ -12,19 +12,12 @@ This package is compatible with:
 - **Python 3.10 or higher** - Check your version with `python --version`
 
 ### Package Manager
-- **uv** (version 0.9.7+) - Modern Python package manager (recommended)
-- **pip** - Traditional Python package installer (alternative)
+- **uv** (version 0.9.7+) - Modern Python package manager
 
 ## Installing uv
 
-If you don't have `uv` installed yet, you can install it using one of these methods:
+If you don't have `uv` installed yet, you can install it using curl:
 
-### Using pip
-```bash
-pip install uv
-```
-
-### Using curl (Linux)
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
@@ -33,21 +26,7 @@ For more installation options, visit the [official uv documentation](https://doc
 
 ## Installing the Package
 
-### Method 1: Using pip (Simple Installation)
-
-If you prefer using traditional pip:
-
-```bash
-# Install from GitHub repository
-pip install git+https://github.com/tier4/autoware_lanelet2_to_opendrive.git
-
-# Or install in editable mode for development
-git clone https://github.com/tier4/autoware_lanelet2_to_opendrive.git
-cd autoware_lanelet2_to_opendrive
-pip install -e .
-```
-
-### Method 2: Using uv (Recommended)
+### Method 1: Using uv (Recommended)
 
 Using `uv` provides faster installation and better dependency resolution:
 
@@ -71,7 +50,7 @@ cd autoware_lanelet2_to_opendrive
 uv pip install -e .
 ```
 
-### Method 3: From Source with uv sync (Best for Development)
+### Method 2: From Source with uv sync (Best for Development)
 
 If you're setting up a development environment with exact dependency versions:
 
@@ -112,47 +91,6 @@ The package has the following dependencies (automatically installed):
 - **pyyaml** (>=6.0.0) - YAML parser
 
 All dependencies will be automatically installed when you install the package.
-
-### Installing lanelet2
-
-The `lanelet2` package is a critical dependency. You can install it using one of the following methods:
-
-#### Method 1: Using apt (Ubuntu/Debian)
-
-For Ubuntu users, lanelet2 is available from the ROS repositories:
-
-```bash
-# Add ROS repository (if not already added)
-sudo sh -c 'echo "deb http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros2-latest.list'
-curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
-
-# Update package list
-sudo apt update
-
-# Install lanelet2
-sudo apt install ros-humble-lanelet2  # For ROS 2 Humble
-# or
-sudo apt install ros-rolling-lanelet2  # For ROS 2 Rolling
-```
-
-#### Method 2: Building from Source
-
-If you need the latest version or apt installation is not available:
-
-```bash
-# Install dependencies
-sudo apt install cmake build-essential libboost-all-dev libeigen3-dev libgeographic-dev libpugixml-dev
-
-# Clone and build lanelet2
-git clone https://github.com/fzi-forschungszentrum-informatik/Lanelet2.git
-cd Lanelet2
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-sudo make install
-```
-
-For more details, see the [official Lanelet2 documentation](https://github.com/fzi-forschungszentrum-informatik/Lanelet2).
 
 ## Troubleshooting
 
