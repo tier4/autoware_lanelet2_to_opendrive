@@ -7,8 +7,6 @@ This guide will help you install the `autoware-lanelet2-to-opendrive` package.
 ### Operating System
 This package is compatible with:
 - **Linux** (Ubuntu 20.04 or later recommended)
-- **macOS** (11.0 or later)
-- **Windows** (10 or later)
 
 ### Python Version
 - **Python 3.10 or higher** - Check your version with `python --version`
@@ -26,14 +24,9 @@ If you don't have `uv` installed yet, you can install it using one of these meth
 pip install uv
 ```
 
-### Using curl (Linux/macOS)
+### Using curl (Linux)
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### Using PowerShell (Windows)
-```powershell
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 For more installation options, visit the [official uv documentation](https://docs.astral.sh/uv/).
@@ -89,9 +82,7 @@ cd autoware_lanelet2_to_opendrive
 
 # Create and activate virtual environment
 uv venv
-source .venv/bin/activate  # On Linux/macOS
-# or
-.venv\Scripts\activate  # On Windows
+source .venv/bin/activate  # On Linux
 
 # Sync dependencies from lock file
 uv sync
