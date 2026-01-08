@@ -277,10 +277,12 @@ class Road:
                     if pred_road_id != self.id:
                         # Check consistency with road link
                         # Lane link must reference the road link's predecessor road
-                        if road_link_predecessor_id is not None:
-                            if pred_road_id != road_link_predecessor_id:
-                                # This lane connects to a different road than the road link
-                                continue
+                        # If road link has no predecessor, don't set lane predecessor
+                        if road_link_predecessor_id is None:
+                            continue
+                        if pred_road_id != road_link_predecessor_id:
+                            # This lane connects to a different road than the road link
+                            continue
                         # Validate that the lane exists in the predecessor road
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(pred_road_id, set())
@@ -301,10 +303,12 @@ class Road:
                     if succ_road_id != self.id:
                         # Check consistency with road link
                         # Lane link must reference the road link's successor road
-                        if road_link_successor_id is not None:
-                            if succ_road_id != road_link_successor_id:
-                                # This lane connects to a different road than the road link
-                                continue
+                        # If road link has no successor, don't set lane successor
+                        if road_link_successor_id is None:
+                            continue
+                        if succ_road_id != road_link_successor_id:
+                            # This lane connects to a different road than the road link
+                            continue
                         # Validate that the lane exists in the successor road
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(succ_road_id, set())
