@@ -2,37 +2,42 @@
 
 This guide will help you install the `autoware-lanelet2-to-opendrive` package.
 
-## Prerequisites
+## System Requirements
 
-Before installing, ensure you have:
+### Operating System
+This package is compatible with:
+- **Linux** (Ubuntu 20.04 or later recommended)
 
+### Python Version
 - **Python 3.10 or higher** - Check your version with `python --version`
+
+### Package Manager
 - **uv** (version 0.9.7+) - Modern Python package manager
 
 ## Installing uv
 
-If you don't have `uv` installed yet, you can install it using one of these methods:
+If you don't have `uv` installed yet, you can install it using curl:
 
-### Using pip
-```bash
-pip install uv
-```
-
-### Using curl (Linux/macOS)
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### Using PowerShell (Windows)
-```powershell
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 For more installation options, visit the [official uv documentation](https://docs.astral.sh/uv/).
 
 ## Installing the Package
 
-### From Source
+### Method 1: Using uv (Recommended)
+
+Using `uv` provides faster installation and better dependency resolution:
+
+#### For Users (Standard Installation)
+
+```bash
+# Install from GitHub repository
+uv pip install git+https://github.com/tier4/autoware_lanelet2_to_opendrive.git
+```
+
+#### For Developers (Editable Installation)
 
 1. Clone the repository:
 ```bash
@@ -45,16 +50,18 @@ cd autoware_lanelet2_to_opendrive
 uv pip install -e .
 ```
 
-### Using uv sync (Recommended for Development)
+### Method 2: From Source with uv sync (Best for Development)
 
-If you're setting up a development environment:
+If you're setting up a development environment with exact dependency versions:
 
 ```bash
+# Clone the repository
+git clone https://github.com/tier4/autoware_lanelet2_to_opendrive.git
+cd autoware_lanelet2_to_opendrive
+
 # Create and activate virtual environment
 uv venv
-source .venv/bin/activate  # On Linux/macOS
-# or
-.venv\Scripts\activate  # On Windows
+source .venv/bin/activate  # On Linux
 
 # Sync dependencies from lock file
 uv sync
@@ -72,9 +79,16 @@ python -c "import autoware_lanelet2_to_opendrive; print('Installation successful
 
 ## Dependencies
 
-The package requires:
+The package has the following dependencies (automatically installed):
 
+### Core Dependencies
 - **lanelet2** (>=1.2.2) - Core library for working with Lanelet2 map format
+- **lanelet2-python-api-for-autoware** - Python API for Autoware's Lanelet2
+- **scipy** (>=1.9.0) - Scientific computing library
+- **lxml** (>=6.0.2) - XML processing library
+- **mgrs** (>=1.5.0) - MGRS coordinate conversion
+- **tqdm** (>=4.67.1) - Progress bar utility
+- **pyyaml** (>=6.0.0) - YAML parser
 
 All dependencies will be automatically installed when you install the package.
 
