@@ -56,6 +56,29 @@ This is a converter package designed to transform Lanelet2 map data (commonly us
 3. The package name uses hyphens externally (`autoware-lanelet2-to-opendrive`) but underscores internally (`autoware_lanelet2_to_opendrive`)
 4. Use uv for all dependency management operations rather than pip directly
 
+## Language Policy
+
+**IMPORTANT**: All project content must be written in English.
+
+This applies to:
+- **Documentation**: All `.md` files, docstrings, README files, and user-facing documentation
+- **Source Code**: All variable names, function names, class names, and code identifiers
+- **Comments**: All inline comments, block comments, and code explanations
+- **Commit Messages**: All git commit messages and PR descriptions
+- **Issue and PR Discussions**: All GitHub issue reports and pull request communications
+
+### Rationale:
+- Ensures accessibility for the global open-source community
+- Facilitates collaboration among international contributors
+- Maintains consistency across the codebase
+- Enables better integration with international tools and AI assistants
+- Follows industry best practices for open-source projects
+
+### Exceptions:
+- Test data or fixtures that specifically require non-English text
+- Localization files (if the project supports multiple languages in the UI)
+- Citations or references to non-English sources (should include English translation)
+
 ## Git Operation Restrictions
 
 **IMPORTANT**: The following dangerous git operations are STRICTLY PROHIBITED for safety:
