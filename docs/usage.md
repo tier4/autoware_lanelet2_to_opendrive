@@ -57,11 +57,12 @@ This package is designed for use with Autoware autonomous driving software. Typi
 
 ### Simulation and Testing
 
-OpenDRIVE maps can be used in various simulation environments:
+!!! info "Current Support"
+    Currently, this package generates OpenDRIVE format specifically for the **CARLA simulator**. Support for other simulation platforms may be added in future releases.
 
-- CARLA simulator
-- LGSVL simulator
-- Other OpenDRIVE-compatible simulation platforms
+The generated OpenDRIVE maps are designed for use with:
+
+- **CARLA simulator** (primary target)
 
 ## Best Practices
 
