@@ -33,7 +33,7 @@ The typical workflow for converting a Lanelet2 map to OpenDRIVE involves:
 # opendrive_map = convert_to_opendrive(lanelet2_map)
 
 # Step 3: Save the result
-# save_opendrive(opendrive_map, "path/to/output.xodr")
+# save_opendrive_to_file(opendrive_map, "path/to/output.xodr")
 ```
 
 ## Command-Line Interface
