@@ -1,300 +1,300 @@
-# 使い方ガイド
+# Usage Guide
 
-このガイドでは、`autoware-lanelet2-to-opendrive`パッケージを使用してLanelet2マップをOpenDRIVE形式に変換する方法を説明します。
+This guide explains how to use the `autoware-lanelet2-to-opendrive` package to convert Lanelet2 maps to OpenDRIVE format.
 
-## 基本的な使い方
+## Basic Usage
 
-### CLIコマンド
+### CLI Commands
 
-パッケージには2つのCLIコマンドが含まれています:
+The package includes two CLI commands:
 
-#### 1. `convert` - Lanelet2からOpenDRIVEへの変換
+#### 1. `convert` - Convert from Lanelet2 to OpenDRIVE
 
 ```bash
 convert input.osm --preprocess-config config.yaml
 ```
 
-#### 2. `preprocess-lanelet` - Lanelet2マップの前処理
+#### 2. `preprocess-lanelet` - Preprocess Lanelet2 Maps
 
 ```bash
 preprocess-lanelet config.yaml
 ```
 
-## 変換コマンドの詳細
+## Convert Command Details
 
-### 基本的な変換例
+### Basic Conversion Example
 
-最もシンプルな使用例:
+The simplest usage:
 
 ```bash
 convert input_map.osm --preprocess-config config.yaml
 ```
 
-このコマンドは`input_map.xodr`を生成します(デフォルトの出力ファイル名)。
+This command will generate `input_map.xodr` (the default output file name).
 
-### 出力ファイル名を指定する
+### Specify Output File Name
 
 ```bash
 convert input_map.osm --preprocess-config config.yaml -o output_map.xodr
 ```
 
-または
+or
 
 ```bash
 convert input_map.osm --preprocess-config config.yaml --output output_map.xodr
 ```
 
-### 詳細ログを有効にする
+### Enable Verbose Logging
 
 ```bash
 convert input_map.osm --preprocess-config config.yaml -v
 ```
 
-または
+or
 
 ```bash
 convert input_map.osm --preprocess-config config.yaml --verbose
 ```
 
-## コマンドラインオプション
+## Command Line Options
 
-### `convert`コマンドのオプション
+### `convert` Command Options
 
-| オプション | 短縮形 | 説明 | 必須 |
-|-----------|--------|------|------|
-| `lanelet2_file` | - | 入力Lanelet2 OSMファイルのパス | ✓ |
-| `--preprocess-config` | - | 前処理設定YAMLファイルのパス(MGRS コードを含む) | ✓ |
-| `--output` | `-o` | 出力OpenDRIVEファイルのパス(デフォルト: input_file.xodr) | |
-| `--verbose` | `-v` | 詳細なログ出力を有効にする | |
+| Option | Short Form | Description | Required |
+|--------|------------|-------------|----------|
+| `lanelet2_file` | - | Path to the input Lanelet2 OSM file | ✓ |
+| `--preprocess-config` | - | Path to the preprocessing configuration YAML file (contains MGRS code) | ✓ |
+| `--output` | `-o` | Path to the output OpenDRIVE file (default: input_file.xodr) | |
+| `--verbose` | `-v` | Enable verbose log output | |
 
-### `preprocess-lanelet`コマンドのオプション
+### `preprocess-lanelet` Command Options
 
-| オプション | 短縮形 | 説明 | 必須 |
-|-----------|--------|------|------|
-| `config` | - | YAML設定ファイルのパス | ✓ |
-| `--mgrs` | - | MGRS コード(設定ファイルを上書き) | |
-| `--dry-run` | - | 出力を保存せずに実行(検証のみ) | |
-| `--verbose` | `-v` | 詳細なログ出力を有効にする | |
-| `--output-config` | - | 読み込んだ設定を新しいYAMLファイルに保存 | |
+| Option | Short Form | Description | Required |
+|--------|------------|-------------|----------|
+| `config` | - | Path to the YAML configuration file | ✓ |
+| `--mgrs` | - | MGRS code (overrides configuration file) | |
+| `--dry-run` | - | Run without saving output (validation only) | |
+| `--verbose` | `-v` | Enable verbose log output | |
+| `--output-config` | - | Save loaded configuration to a new YAML file | |
 
-## 入力ファイルの要件
+## Input File Requirements
 
-### Lanelet2マップの要件
+### Lanelet2 Map Requirements
 
-入力として有効なLanelet2 OSMファイルが必要です:
+A valid Lanelet2 OSM file is required as input:
 
-- **ファイル形式**: `.osm` 形式のLanelet2マップ
-- **座標系**: MGRS座標系で定義されたマップ
-- **必須要素**:
-  - レーンレット(lanelet)要素
-  - ラインストリング(linestring)要素
-  - ポイント(point)要素
-- **属性**: Autoware用の標準Lanelet2属性
+- **File Format**: Lanelet2 map in `.osm` format
+- **Coordinate System**: Map defined in MGRS coordinate system
+- **Required Elements**:
+  - Lanelet elements
+  - Linestring elements
+  - Point elements
+- **Attributes**: Standard Lanelet2 attributes for Autoware
 
-### 前処理設定ファイル(YAML)
+### Preprocessing Configuration File (YAML)
 
-変換には前処理設定ファイルが必須です。このファイルにはMGRSコードと、オプションで前処理操作を含めることができます。
+A preprocessing configuration file is required for conversion. This file must include the MGRS code and can optionally contain preprocessing operations.
 
-#### 最小限の設定例
+#### Minimal Configuration Example
 
 ```yaml
 input_map_path: /path/to/input.osm
 output_map_path: /path/to/preprocessed.osm
 mgrs_code: 54SUE815501
 
-# 前処理操作なし(変換のみMGRSコードを使用)
+# No preprocessing operations (only use MGRS code for conversion)
 ```
 
-#### 前処理操作を含む設定例
+#### Configuration Example with Preprocessing Operations
 
 ```yaml
 input_map_path: /path/to/input.osm
 output_map_path: /path/to/preprocessed.osm
 mgrs_code: 54SUE815501
 
-# レーンレットのマージ
+# Merge lanelets
 merge_operations:
   - lanelet_ids: [100, 101, 102]
     validate: true
     tolerance: 0.001
 
-# レーンレットの削除
+# Remove lanelets
 remove_lanelet_operations:
   - lanelet_ids: [300, 301]
 
-# turn_direction属性の削除(全レーンレットから)
+# Remove turn_direction attributes (from all lanelets)
 remove_turn_direction_operations:
-  - lanelet_ids: []  # 空リスト = すべてのレーンレットから削除
+  - lanelet_ids: []  # Empty list = remove from all lanelets
 
-# グローバル設定
+# Global settings
 dry_run: false
 verbose: true
 ```
 
-#### 利用可能な前処理操作
+#### Available Preprocessing Operations
 
-1. **merge_operations**: 複数のレーンレットを1つにマージ
-2. **remove_operations**: 古い形式のレーンレット削除
-3. **replace_operations**: レーンレットを置換
-4. **validate_operations**: レーンレットの連続性を検証
-5. **move_point_operations**: ポイントの座標を移動
-6. **delete_point_operations**: ポイントを削除
-7. **remove_lanelet_operations**: レーンレット全体を削除
-8. **remove_turn_direction_operations**: turn_direction属性を削除
+1. **merge_operations**: Merge multiple lanelets into one
+2. **remove_operations**: Remove lanelets (legacy format)
+3. **replace_operations**: Replace lanelets
+4. **validate_operations**: Validate lanelet continuity
+5. **move_point_operations**: Move point coordinates
+6. **delete_point_operations**: Delete points
+7. **remove_lanelet_operations**: Remove entire lanelets
+8. **remove_turn_direction_operations**: Remove turn_direction attributes
 
-## 出力ファイル
+## Output Files
 
-### OpenDRIVE形式
+### OpenDRIVE Format
 
-変換後、以下の特徴を持つOpenDRIVE形式(.xodr)ファイルが生成されます:
+After conversion, an OpenDRIVE format (.xodr) file is generated with the following characteristics:
 
-- **OpenDRIVEバージョン**: 1.4
-- **座標系**: MGRS座標系(入力マップと同じ)
-- **含まれる要素**:
-  - Roads(道路): 通常の道路とジャンクション接続道路
-  - Junctions(交差点): 交差点領域と接続情報
-  - Signals(信号): Lanelet2マップから抽出された交通信号
-  - Controllers(コントローラー): 信号機コントローラー
-- **ターゲット**: CARLAシミュレーター用に最適化
+- **OpenDRIVE Version**: 1.4
+- **Coordinate System**: MGRS coordinate system (same as input map)
+- **Included Elements**:
+  - Roads: Normal roads and junction connecting roads
+  - Junctions: Intersection areas and connection information
+  - Signals: Traffic signals extracted from Lanelet2 map
+  - Controllers: Traffic signal controllers
+- **Target**: Optimized for CARLA simulator
 
-### 出力の構造
+### Output Structure
 
 ```
 output.xodr
-├── header (ヘッダー情報とgeoReference)
+├── header (header information and geoReference)
 ├── roads
-│   ├── 通常の道路(ジャンクション外)
-│   └── 接続道路(ジャンクション内)
-├── junctions (交差点とその接続)
-└── controllers (信号機コントローラー)
+│   ├── Normal roads (outside junctions)
+│   └── Connecting roads (inside junctions)
+├── junctions (intersections and their connections)
+└── controllers (traffic signal controllers)
 ```
 
-## よくある使用例
+## Common Use Cases
 
-### ユースケース1: シンプルな変換
+### Use Case 1: Simple Conversion
 
-前処理なしでLanelet2マップをOpenDRIVEに変換:
+Convert a Lanelet2 map to OpenDRIVE without preprocessing:
 
 ```bash
-# 1. 最小限の設定ファイルを作成(config.yaml)
-# input_map_path, output_map_path, mgrs_codeを含む
+# 1. Create a minimal configuration file (config.yaml)
+# Include input_map_path, output_map_path, mgrs_code
 
-# 2. 変換を実行
+# 2. Execute conversion
 convert my_map.osm --preprocess-config config.yaml -o my_map.xodr
 ```
 
-### ユースケース2: 前処理を含む変換
+### Use Case 2: Conversion with Preprocessing
 
-マップの問題を修正してから変換:
+Fix map issues before conversion:
 
 ```bash
-# 1. 前処理操作を含む設定ファイルを作成(preprocess_config.yaml)
-# merge_operations, remove_lanelet_operationsなどを含む
+# 1. Create a configuration file with preprocessing operations (preprocess_config.yaml)
+# Include merge_operations, remove_lanelet_operations, etc.
 
-# 2. 前処理と変換を一度に実行
+# 2. Execute preprocessing and conversion in one step
 convert original_map.osm --preprocess-config preprocess_config.yaml -o fixed_map.xodr
 ```
 
-### ユースケース3: 前処理のみ実行
+### Use Case 3: Run Preprocessing Only
 
-OpenDRIVE変換の前にマップを前処理:
+Preprocess a map before OpenDRIVE conversion:
 
 ```bash
-# 1. 前処理のみを実行
+# 1. Run preprocessing only
 preprocess-lanelet preprocess_config.yaml
 
-# 2. 前処理されたマップを検証
+# 2. Validate the preprocessed map
 preprocess-lanelet preprocess_config.yaml --dry-run -v
 
-# 3. 前処理されたマップを変換
+# 3. Convert the preprocessed map
 convert preprocessed_map.osm --preprocess-config simple_config.yaml
 ```
 
-### ユースケース4: Autoware + CARLAシミュレーション
+### Use Case 4: Autoware + CARLA Simulation
 
-AutowareマップをCARLAシミュレーターで使用:
+Use an Autoware map in CARLA simulator:
 
 ```bash
-# 1. AutowareのLanelet2マップを変換
+# 1. Convert Autoware Lanelet2 map
 convert autoware_map.osm --preprocess-config config.yaml -o carla_map.xodr
 
-# 2. 生成されたcarla_map.xodrをCARLAにインポート
-# (CARLAのドキュメントを参照)
+# 2. Import the generated carla_map.xodr into CARLA
+# (Refer to CARLA documentation)
 ```
 
-### ユースケース5: デバッグと検証
+### Use Case 5: Debugging and Validation
 
-詳細ログを使用して変換プロセスをデバッグ:
+Debug the conversion process using verbose logging:
 
 ```bash
-# 詳細ログで実行
+# Run with verbose logging
 convert input.osm --preprocess-config config.yaml -v -o output.xodr
 
-# これにより以下の情報が表示されます:
-# - 読み込まれたレーンレット、ラインストリング、ポイントの数
-# - 通常の道路とジャンクション道路の構築
-# - ジャンクション接続の構築
-# - 信号とコントローラーの抽出
-# - Road-Laneletマッピング情報
+# This will display the following information:
+# - Number of loaded lanelets, linestrings, and points
+# - Building normal roads and junction roads
+# - Building junction connections
+# - Extracting signals and controllers
+# - Road-Lanelet mapping information
 ```
 
-## Autoware統合
+## Autoware Integration
 
-このパッケージはAutoware自律運転ソフトウェアで使用するために設計されています。
+This package is designed for use with Autoware autonomous driving software.
 
-### 一般的なワークフロー
+### Typical Workflow
 
-1. **AutowareマップのエクスポートLanelet2形式でAutowareマップを準備
-2. **MGRS コードの取得**: マップの座標系に対応するMGRS コードを確認
-3. **前処理設定の作成**: 必要に応じてマップの修正を定義
-4. **OpenDRIVEへの変換**: `convert`コマンドを使用
-5. **シミュレーターへのインポート**: 生成されたOpenDRIVEファイルをCARLAなどで使用
+1. **Export Autoware Map**: Prepare your Autoware map in Lanelet2 format
+2. **Get MGRS Code**: Confirm the MGRS code corresponding to your map's coordinate system
+3. **Create Preprocessing Configuration**: Define necessary map corrections
+4. **Convert to OpenDRIVE**: Use the `convert` command
+5. **Import to Simulator**: Use the generated OpenDRIVE file in CARLA, etc.
 
-## シミュレーションとテスト
+## Simulation and Testing
 
-!!! info "現在のサポート"
-    現在、このパッケージは**CARLAシミュレーター**用のOpenDRIVE形式を生成します。他のシミュレーションプラットフォームのサポートは将来のリリースで追加される可能性があります。
+!!! info "Current Support"
+    Currently, this package generates OpenDRIVE format for **CARLA simulator**. Support for other simulation platforms may be added in future releases.
 
-### CARLAシミュレーターでの使用
+### Using with CARLA Simulator
 
-生成されたOpenDRIVEマップは以下に対応しています:
+The generated OpenDRIVE map is compatible with:
 
-- **CARLAシミュレーター**(主要ターゲット)
-- カスタムマップのインポート
-- シミュレーション環境での自律走行テスト
+- **CARLA Simulator** (primary target)
+- Custom map import
+- Autonomous driving testing in simulation environments
 
-## ベストプラクティス
+## Best Practices
 
-### 入力の検証
+### Input Validation
 
-変換前にLanelet2マップが正しい形式であることを確認してください:
+Ensure your Lanelet2 map is in the correct format before conversion:
 
 ```bash
-# 前処理のdry-runモードで検証
+# Validate with preprocessing dry-run mode
 preprocess-lanelet config.yaml --dry-run -v
 ```
 
-### 出力の確認
+### Output Verification
 
-生成されたOpenDRIVEファイルをターゲットアプリケーションで確認してください:
+Verify the generated OpenDRIVE file in your target application:
 
-- CARLAシミュレーターでマップを読み込む
-- OpenDRIVEビューアーで視覚的に確認
-- XMLの構造を検証
+- Load the map in CARLA simulator
+- Visually confirm with an OpenDRIVE viewer
+- Validate the XML structure
 
-### 問題の報告
+### Reporting Issues
 
-変換の問題が発生した場合は、[GitHub Issues](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues)で報告してください。
+If you encounter conversion issues, report them at [GitHub Issues](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues).
 
-報告時には以下を含めてください:
-- 入力Lanelet2マップのサンプル(可能な場合)
-- 使用した前処理設定ファイル
-- エラーメッセージまたは予期しない動作
-- 詳細ログ出力(`--verbose`フラグを使用)
+When reporting, please include:
+- Sample of the input Lanelet2 map (if possible)
+- The preprocessing configuration file used
+- Error messages or unexpected behavior
+- Verbose log output (using `--verbose` flag)
 
-## Pythonライブラリとして使用
+## Using as a Python Library
 
-### パッケージのインポート
+### Importing the Package
 
 ```python
 import autoware_lanelet2_to_opendrive
@@ -305,13 +305,13 @@ from autoware_lanelet2_to_opendrive.main import (
 )
 ```
 
-### プログラムからの変換
+### Programmatic Conversion
 
 ```python
 from pathlib import Path
 from autoware_lanelet2_to_opendrive.main import preprocess_and_convert
 
-# 変換を実行
+# Execute conversion
 preprocess_and_convert(
     lanelet2_file=Path("input_map.osm"),
     output_file=Path("output_map.xodr"),
@@ -320,7 +320,7 @@ preprocess_and_convert(
 )
 ```
 
-### 高度な使用例
+### Advanced Usage Example
 
 ```python
 from pathlib import Path
@@ -329,74 +329,74 @@ from autoware_lanelet2_to_opendrive.main import (
     convert_lanelet2_to_opendrive
 )
 
-# 1. マップを読み込む
+# 1. Load the map
 lanelet_map = load_lanelet2_map(
     Path("input.osm"),
     mgrs="54SUE815501"
 )
 
-# 2. OpenDRIVEに変換
+# 2. Convert to OpenDRIVE
 opendrive, mapping = convert_lanelet2_to_opendrive(
     lanelet_map=lanelet_map,
     mgrs_code="54SUE815501",
     output_path=Path("output.xodr")
 )
 
-# 3. マッピング情報を使用
+# 3. Use mapping information
 print(f"Roads: {len(mapping.road_to_lanelets)}")
 print(f"Lanelets: {len(mapping.lanelet_to_road)}")
 
-# 特定のレーンレットがどの道路に対応するかを確認
+# Check which road a specific lanelet corresponds to
 lanelet_id = 100
 if lanelet_id in mapping.lanelet_to_road:
     road_id = mapping.lanelet_to_road[lanelet_id]
     print(f"Lanelet {lanelet_id} -> Road {road_id}")
 ```
 
-## 実例
+## Examples
 
-実際の使用例については、リポジトリの`examples/`ディレクトリを確認してください。
+For practical usage examples, check the `examples/` directory in the repository.
 
-## 次のステップ
+## Next Steps
 
-- 詳細なAPI仕様は[APIリファレンス](api.md)を参照
-- 開発に貢献したい場合は[開発ガイド](development.md)を確認
-- 信号と交通ルールの変換については[信号ドキュメント](signals.md)を参照
+- Refer to [API Reference](api.md) for detailed API specifications
+- Check [Development Guide](development.md) if you want to contribute to development
+- See [Signals Documentation](signals.md) for information on signal and traffic rule conversion
 
-## トラブルシューティング
+## Troubleshooting
 
-### よくあるエラー
+### Common Errors
 
 #### "MGRS code must be provided"
 
-**原因**: 前処理設定ファイルにMGRS コードが含まれていない
+**Cause**: The preprocessing configuration file does not contain an MGRS code
 
-**解決方法**:
+**Solution**:
 ```yaml
-# config.yamlに以下を追加
-mgrs_code: 54SUE815501  # 実際のMGRS コードに置き換え
+# Add the following to config.yaml
+mgrs_code: 54SUE815501  # Replace with actual MGRS code
 ```
 
 #### "Lanelet2 file not found"
 
-**原因**: 入力ファイルのパスが正しくない
+**Cause**: The input file path is incorrect
 
-**解決方法**:
-- ファイルパスを確認
-- 絶対パスまたは相対パスを正しく指定
+**Solution**:
+- Verify the file path
+- Correctly specify absolute or relative path
 
 #### "Failed to load Lanelet2 map"
 
-**原因**: マップファイルの形式が正しくない、またはMGRS コードが間違っている
+**Cause**: The map file format is incorrect, or the MGRS code is wrong
 
-**解決方法**:
-- マップファイルがLanelet2 OSM形式であることを確認
-- MGRS コードがマップの座標系と一致することを確認
-- `--verbose`フラグで詳細を確認
+**Solution**:
+- Confirm the map file is in Lanelet2 OSM format
+- Ensure the MGRS code matches the map's coordinate system
+- Check details with the `--verbose` flag
 
-### デバッグのヒント
+### Debugging Tips
 
-1. **詳細ログを有効にする**: 常に`-v`フラグを使用
-2. **段階的に実行**: 前処理と変換を分けて実行
-3. **dry-runモードを使用**: 実際の変更前に検証
-4. **小さなマップでテスト**: まず小規模なマップで試す
+1. **Enable Verbose Logging**: Always use the `-v` flag
+2. **Execute Step by Step**: Separate preprocessing and conversion
+3. **Use Dry-Run Mode**: Validate before making actual changes
+4. **Test with Small Maps**: Try with a smaller map first
