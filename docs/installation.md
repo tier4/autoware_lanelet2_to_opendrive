@@ -2,12 +2,20 @@
 
 This guide will help you install the `autoware-lanelet2-to-opendrive` package.
 
-## Prerequisites
+## System Requirements
 
-Before installing, ensure you have:
+### Operating System
+This package is compatible with:
+- **Linux** (Ubuntu 20.04 or later recommended)
+- **macOS** (11.0 or later)
+- **Windows** (10 or later)
 
+### Python Version
 - **Python 3.10 or higher** - Check your version with `python --version`
-- **uv** (version 0.9.7+) - Modern Python package manager
+
+### Package Manager
+- **uv** (version 0.9.7+) - Modern Python package manager (recommended)
+- **pip** - Traditional Python package installer (alternative)
 
 ## Installing uv
 
@@ -32,7 +40,32 @@ For more installation options, visit the [official uv documentation](https://doc
 
 ## Installing the Package
 
-### From Source
+### Method 1: Using pip (Simple Installation)
+
+If you prefer using traditional pip:
+
+```bash
+# Install from GitHub repository
+pip install git+https://github.com/tier4/autoware_lanelet2_to_opendrive.git
+
+# Or install in editable mode for development
+git clone https://github.com/tier4/autoware_lanelet2_to_opendrive.git
+cd autoware_lanelet2_to_opendrive
+pip install -e .
+```
+
+### Method 2: Using uv (Recommended)
+
+Using `uv` provides faster installation and better dependency resolution:
+
+#### For Users (Standard Installation)
+
+```bash
+# Install from GitHub repository
+uv pip install git+https://github.com/tier4/autoware_lanelet2_to_opendrive.git
+```
+
+#### For Developers (Editable Installation)
 
 1. Clone the repository:
 ```bash
@@ -45,11 +78,15 @@ cd autoware_lanelet2_to_opendrive
 uv pip install -e .
 ```
 
-### Using uv sync (Recommended for Development)
+### Method 3: From Source with uv sync (Best for Development)
 
-If you're setting up a development environment:
+If you're setting up a development environment with exact dependency versions:
 
 ```bash
+# Clone the repository
+git clone https://github.com/tier4/autoware_lanelet2_to_opendrive.git
+cd autoware_lanelet2_to_opendrive
+
 # Create and activate virtual environment
 uv venv
 source .venv/bin/activate  # On Linux/macOS
@@ -72,11 +109,59 @@ python -c "import autoware_lanelet2_to_opendrive; print('Installation successful
 
 ## Dependencies
 
-The package requires:
+The package has the following dependencies (automatically installed):
 
+### Core Dependencies
 - **lanelet2** (>=1.2.2) - Core library for working with Lanelet2 map format
+- **lanelet2-python-api-for-autoware** - Python API for Autoware's Lanelet2
+- **scipy** (>=1.9.0) - Scientific computing library
+- **lxml** (>=6.0.2) - XML processing library
+- **mgrs** (>=1.5.0) - MGRS coordinate conversion
+- **tqdm** (>=4.67.1) - Progress bar utility
+- **pyyaml** (>=6.0.0) - YAML parser
 
 All dependencies will be automatically installed when you install the package.
+
+### Installing lanelet2
+
+The `lanelet2` package is a critical dependency. You can install it using one of the following methods:
+
+#### Method 1: Using apt (Ubuntu/Debian)
+
+For Ubuntu users, lanelet2 is available from the ROS repositories:
+
+```bash
+# Add ROS repository (if not already added)
+sudo sh -c 'echo "deb http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros2-latest.list'
+curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+
+# Update package list
+sudo apt update
+
+# Install lanelet2
+sudo apt install ros-humble-lanelet2  # For ROS 2 Humble
+# or
+sudo apt install ros-rolling-lanelet2  # For ROS 2 Rolling
+```
+
+#### Method 2: Building from Source
+
+If you need the latest version or apt installation is not available:
+
+```bash
+# Install dependencies
+sudo apt install cmake build-essential libboost-all-dev libeigen3-dev libgeographic-dev libpugixml-dev
+
+# Clone and build lanelet2
+git clone https://github.com/fzi-forschungszentrum-informatik/Lanelet2.git
+cd Lanelet2
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+```
+
+For more details, see the [official Lanelet2 documentation](https://github.com/fzi-forschungszentrum-informatik/Lanelet2).
 
 ## Troubleshooting
 
