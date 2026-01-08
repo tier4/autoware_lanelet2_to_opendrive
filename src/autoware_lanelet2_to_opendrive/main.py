@@ -45,8 +45,7 @@ def load_lanelet2_map(lanelet2_path: Path, mgrs: str) -> lanelet2.core.LaneletMa
 
     Args:
         lanelet2_path: Path to the Lanelet2 OSM file
-        mgrs_lat: MGRS latitude coordinate
-        mgrs_lon: MGRS longitude coordinate
+        mgrs: MGRS grid reference code (e.g., "54SUE815501")
 
     Returns:
         Loaded Lanelet2 map
