@@ -267,6 +267,39 @@ def convert_lanelet2_to_opendrive(
 
     print(f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads")
 
+    # Step 9: Associate controllers with junctions
+    # Controllers that manage signals on incoming roads should be referenced in the junction
+    print("\n=== Associating controllers with junctions ===")
+    controllers_assigned_count = 0
+    for junction in junctions:
+        # Get all incoming road IDs for this junction
+        incoming_road_ids = {conn.incoming_road for conn in junction.connections}
+
+        # Find controllers whose signals are on incoming roads of this junction
+        junction_controller_ids: List[int] = []
+        for controller in signals_and_controllers.controllers:
+            if controller.controls:
+                # Get road IDs for all signals controlled by this controller
+                controller_road_ids = set()
+                for control_entry in controller.controls:
+                    signal_road_id = signals_and_controllers.signal_to_road_id.get(
+                        control_entry.signal_id
+                    )
+                    if signal_road_id is not None:
+                        controller_road_ids.add(signal_road_id)
+
+                # If any of the controller's roads are incoming roads to this junction,
+                # associate the controller with the junction
+                if controller_road_ids & incoming_road_ids:
+                    junction_controller_ids.append(controller.id)
+
+        junction.controller_ids = junction_controller_ids
+        controllers_assigned_count += len(junction_controller_ids)
+
+    print(
+        f"Associated {controllers_assigned_count} controller references across {len(junctions)} junctions"
+    )
+
     # Create OpenDRIVE object
     opendrive = OpenDRIVE(
         header=header,
