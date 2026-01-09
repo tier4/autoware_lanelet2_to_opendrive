@@ -1,15 +1,19 @@
 """OpenDRIVE root element and export functionality."""
 
 from dataclasses import dataclass
-from typing import Optional, List, Union
+from pathlib import Path
+from typing import List, Optional, Union
+
 import lxml.etree as ET
 
 from .header import Header
-from .road import Road
 from .junction import Junction
+from .road import Road
 from .signal import Controller
 
-from pathlib import Path
+from autoware_lanelet2_to_opendrive.validation import (
+    validate_opendrive_file_or_raise,
+)
 
 
 @dataclass
@@ -74,14 +78,26 @@ def export_to_xml(opendrive: OpenDRIVE) -> str:
     return xml_str
 
 
-def save_opendrive_to_file(opendrive: OpenDRIVE, filepath: Union[str, Path]) -> None:
+def save_opendrive_to_file(
+    opendrive: OpenDRIVE,
+    filepath: Union[str, Path],
+    validate: bool = True,
+) -> None:
     """
     Save OpenDRIVE object to XML file.
 
     Args:
         opendrive: OpenDRIVE object to save
         filepath: Path to save the XML file
+        validate: Whether to validate against XSD schema (default: True)
+
+    Raises:
+        OpenDRIVEValidationError: If validation is enabled and the output
+            does not conform to the OpenDRIVE XSD schema.
     """
     xml_str = export_to_xml(opendrive)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(xml_str)
+
+    if validate:
+        validate_opendrive_file_or_raise(filepath)
