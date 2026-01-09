@@ -74,11 +74,37 @@ uv sync --refresh
 
 ### Code Style and Quality
 
-This project follows Python best practices:
+This project follows Python best practices and enforces them through pre-commit hooks:
 
-- **Type hints**: All code should include type annotations
-- **Docstrings**: Use Google-style docstrings
-- **Formatting**: Code is automatically formatted by pre-commit hooks
+#### Coding Standards
+
+- **Python Version**: Python 3.10+ syntax and features
+- **Type Hints**: All functions and methods must include type annotations (package includes `py.typed` marker)
+- **Docstrings**: Use Google-style docstrings for all public modules, classes, and functions
+- **Naming Conventions**:
+  - Use `snake_case` for functions and variables
+  - Use `PascalCase` for class names
+  - Package name uses hyphens externally (`autoware-lanelet2-to-opendrive`) but underscores internally (`autoware_lanelet2_to_opendrive`)
+- **Code Formatting**: Automatically enforced by Ruff formatter
+- **Linting**: Ruff linter with auto-fix enabled
+- **Type Checking**: mypy with `--ignore-missing-imports`
+- **Import Organization**: Imports should be organized and sorted
+
+#### Pre-commit Hooks
+
+The project uses pre-commit hooks to ensure code quality. These are automatically run on commit and include:
+
+- Trailing whitespace removal
+- End-of-file fixer
+- YAML/TOML validation
+- Large file checks
+- Merge conflict detection
+- Debug statement detection
+- Ruff formatting and linting
+- mypy type checking
+- pytest test execution
+
+**Important**: Never bypass pre-commit hooks with `--no-verify` unless absolutely necessary and approved by maintainers.
 
 ### Running Tests
 
@@ -176,6 +202,11 @@ The conversion process typically involves:
 - **Unit tests** - Test individual components
 - **Integration tests** - Test conversion workflows
 - **Validation tests** - Verify output format compliance
+
+## Release Process
+
+!!! warning "TBD (To Be Determined)"
+    The release process is currently under development and will be finalized in a future update.
 
 ## Getting Help
 
