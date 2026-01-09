@@ -75,6 +75,7 @@ class Junction:
     id: int
     name: Optional[str] = None
     connections: List[Connection] = field(default_factory=list)
+    controller_ids: List[int] = field(default_factory=list)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -83,6 +84,12 @@ class Junction:
 
         if self.name:
             elem.set("name", self.name)
+
+        # Add controller references (OpenDRIVE 1.4+ specification)
+        # These reference the controllers that manage signals at this junction
+        for controller_id in self.controller_ids:
+            controller_elem = ET.SubElement(elem, "controller")
+            controller_elem.set("id", str(controller_id))
 
         for connection in self.connections:
             elem.append(connection.to_xml())
