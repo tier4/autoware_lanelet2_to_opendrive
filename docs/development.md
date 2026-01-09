@@ -74,11 +74,37 @@ uv sync --refresh
 
 ### Code Style and Quality
 
-This project follows Python best practices:
+This project follows Python best practices and enforces them through pre-commit hooks:
 
-- **Type hints**: All code should include type annotations
-- **Docstrings**: Use Google-style docstrings
-- **Formatting**: Code is automatically formatted by pre-commit hooks
+#### Coding Standards
+
+- **Python Version**: Python 3.10+ syntax and features
+- **Type Hints**: All functions and methods must include type annotations (package includes `py.typed` marker)
+- **Docstrings**: Use Google-style docstrings for all public modules, classes, and functions
+- **Naming Conventions**:
+  - Use `snake_case` for functions and variables
+  - Use `PascalCase` for class names
+  - Package name uses hyphens externally (`autoware-lanelet2-to-opendrive`) but underscores internally (`autoware_lanelet2_to_opendrive`)
+- **Code Formatting**: Automatically enforced by Ruff formatter
+- **Linting**: Ruff linter with auto-fix enabled
+- **Type Checking**: mypy with `--ignore-missing-imports`
+- **Import Organization**: Imports should be organized and sorted
+
+#### Pre-commit Hooks
+
+The project uses pre-commit hooks to ensure code quality. These are automatically run on commit and include:
+
+- Trailing whitespace removal
+- End-of-file fixer
+- YAML/TOML validation
+- Large file checks
+- Merge conflict detection
+- Debug statement detection
+- Ruff formatting and linting
+- mypy type checking
+- pytest test execution
+
+**Important**: Never bypass pre-commit hooks with `--no-verify` unless absolutely necessary and approved by maintainers.
 
 ### Running Tests
 
@@ -176,6 +202,96 @@ The conversion process typically involves:
 - **Unit tests** - Test individual components
 - **Integration tests** - Test conversion workflows
 - **Validation tests** - Verify output format compliance
+
+## Release Process
+
+This section describes the process for creating and publishing new releases.
+
+### Version Management
+
+The project follows [Semantic Versioning](https://semver.org/) (SemVer):
+
+- **MAJOR** version for incompatible API changes
+- **MINOR** version for backwards-compatible functionality additions
+- **PATCH** version for backwards-compatible bug fixes
+
+Version is defined in `pyproject.toml` under `[project]` section.
+
+### Release Checklist
+
+Before creating a release, ensure:
+
+1. ✅ All tests pass locally and in CI
+2. ✅ Documentation is up to date
+3. ✅ CHANGELOG.md is updated (if exists) with release notes
+4. ✅ Version number is bumped in `pyproject.toml`
+5. ✅ All changes are merged to the main branch
+
+### Creating a Release
+
+1. **Update version number** in `pyproject.toml`:
+   ```toml
+   [project]
+   version = "0.2.0"  # Update this
+   ```
+
+2. **Create a release commit**:
+   ```bash
+   git add pyproject.toml
+   git commit -m "chore: bump version to 0.2.0"
+   git push origin main
+   ```
+
+3. **Create a git tag**:
+   ```bash
+   git tag -a v0.2.0 -m "Release version 0.2.0"
+   git push origin v0.2.0
+   ```
+
+4. **Create a GitHub Release**:
+   - Go to the repository's Releases page
+   - Click "Draft a new release"
+   - Select the tag you just created
+   - Add release notes describing changes, bug fixes, and new features
+   - Publish the release
+
+### Publishing to PyPI
+
+If the package is published to PyPI:
+
+1. **Build the package**:
+   ```bash
+   uv build
+   ```
+
+2. **Upload to PyPI** (requires maintainer access):
+   ```bash
+   uv publish
+   ```
+
+   Or use twine:
+   ```bash
+   twine upload dist/*
+   ```
+
+### Post-Release
+
+After releasing:
+
+1. Verify the release appears on GitHub
+2. Test installation from PyPI (if published)
+3. Update any dependent projects
+4. Announce the release in relevant channels
+
+### Hotfix Releases
+
+For urgent bug fixes:
+
+1. Create a hotfix branch from the release tag
+2. Apply the minimal fix
+3. Update version to next patch version
+4. Follow the release process
+5. Merge hotfix back to main
 
 ## Getting Help
 
