@@ -6,14 +6,14 @@ from typing import List, Optional, Union
 
 import lxml.etree as ET
 
+from autoware_lanelet2_to_opendrive.validation import (
+    validate_opendrive_string_or_raise,
+)
+
 from .header import Header
 from .junction import Junction
 from .road import Road
 from .signal import Controller
-
-from autoware_lanelet2_to_opendrive.validation import (
-    validate_opendrive_file_or_raise,
-)
 
 
 @dataclass
@@ -96,8 +96,9 @@ def save_opendrive_to_file(
             does not conform to the OpenDRIVE XSD schema.
     """
     xml_str = export_to_xml(opendrive)
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(xml_str)
 
     if validate:
-        validate_opendrive_file_or_raise(filepath)
+        validate_opendrive_string_or_raise(xml_str)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(xml_str)

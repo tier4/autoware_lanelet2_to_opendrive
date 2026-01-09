@@ -4,6 +4,7 @@ This module provides functions to validate OpenDRIVE XML files against the
 official ASAM OpenDRIVE V1.7.0 XSD schema.
 """
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Union
 
@@ -43,8 +44,9 @@ def get_opendrive_schema_path() -> Path:
     return schema_path
 
 
+@lru_cache(maxsize=1)
 def get_opendrive_schema() -> xmlschema.XMLSchema:
-    """Load and return the OpenDRIVE 1.7 XML schema.
+    """Load and return the OpenDRIVE 1.7 XML schema (cached).
 
     Returns:
         XMLSchema object for OpenDRIVE validation.

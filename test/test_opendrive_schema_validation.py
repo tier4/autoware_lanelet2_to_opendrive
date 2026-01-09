@@ -29,10 +29,31 @@ def opendrive_schema() -> xmlschema.XMLSchema:
     return get_opendrive_schema()
 
 
-@pytest.fixture
-def test_xodr_path() -> Path:
-    """Get the path to the test .xodr file."""
-    return Path(__file__).parent / "data" / "lanelet2_map.xodr"
+@pytest.fixture(scope="session")
+def test_xodr_path(tmp_path_factory) -> Path:
+    """Generate and return path to test .xodr file."""
+    # Import here to avoid circular dependencies
+    from autoware_lanelet2_extension_python.projection import MGRSProjector
+    import lanelet2
+    from autoware_lanelet2_to_opendrive.main import convert_lanelet2_to_opendrive
+    from autoware_lanelet2_to_opendrive.util import mgrs_to_lanelet2_origin
+
+    # Path to input OSM file
+    osm_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
+
+    # Create output path in temporary directory
+    tmp_dir = tmp_path_factory.mktemp("xodr_test")
+    xodr_path = tmp_dir / "lanelet2_map.xodr"
+
+    # Load and convert
+    mgrs = "54SUE"  # Default MGRS code for test data
+    projector = MGRSProjector(mgrs_to_lanelet2_origin(mgrs))
+    lanelet_map = lanelet2.io.load(str(osm_path), projector)
+
+    # Convert and save
+    opendrive, _ = convert_lanelet2_to_opendrive(lanelet_map, mgrs, output_path=xodr_path)
+
+    return xodr_path
 
 
 class TestSchemaPath:
