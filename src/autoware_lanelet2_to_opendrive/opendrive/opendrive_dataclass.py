@@ -14,6 +14,7 @@ from .header import Header
 from .junction import Junction
 from .opendrive import OpenDRIVE, export_to_xml, save_opendrive_to_file
 from .signal import Signal, Validity, SignalUserData, SignalType
+from autoware_lanelet2_to_opendrive.validation import OpenDRIVEValidationError
 
 # Re-export everything for backward compatibility
 __all__ = [
@@ -55,4 +56,6 @@ __all__ = [
     # Export functions
     "export_to_xml",
     "save_opendrive_to_file",
+    # Validation
+    "OpenDRIVEValidationError",
 ]
