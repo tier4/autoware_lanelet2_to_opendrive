@@ -4,12 +4,16 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Set, Optional, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
+import logging
 
 from .signal import Signal, Controller, ControlEntry
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
 
 if TYPE_CHECKING:
     pass
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -124,6 +128,11 @@ class SignalsAndControllers:
 
             if not affected_roads:
                 # No roads found for this traffic light, skip
+                logger.warning(
+                    f"Traffic light {lanelet2_traffic_light_id} affects lanelets "
+                    f"{lanelet_ids} but none of these lanelets are mapped to roads. "
+                    f"Skipping signal creation."
+                )
                 continue
 
             # Get traffic light position for s,t calculation
@@ -310,7 +319,8 @@ class SignalsAndControllers:
             return (s, t)
         except Exception as e:
             # If conversion fails, log warning and return default position
-            print(
-                f"Warning: Failed to calculate signal position for traffic light {traffic_light.id}: {e}"
+            logger.warning(
+                f"Failed to calculate signal position for traffic light {traffic_light.id}: {e}. "
+                f"Using default position (s=0.0, t=-4.0)"
             )
             return (0.0, -4.0)

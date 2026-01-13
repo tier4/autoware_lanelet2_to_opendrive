@@ -4,7 +4,7 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Set
 import tempfile
 import logging
 
@@ -269,7 +269,24 @@ def convert_lanelet2_to_opendrive(
     # Step 9: Associate controllers with junctions
     # Controllers that manage signals on incoming or connecting roads should be referenced
     print("\n=== Associating controllers with junctions ===")
+
+    # Track signals without road mappings for debugging
+    signals_without_road_mapping: Set[int] = set()
+    for signal in signals_and_controllers.signals:
+        if signal.id not in signals_and_controllers.signal_to_road_id:
+            signals_without_road_mapping.add(signal.id)
+            logger.warning(
+                f"Signal {signal.id} (name: {signal.name}) has no road mapping"
+            )
+
+    if signals_without_road_mapping:
+        logger.warning(
+            f"Found {len(signals_without_road_mapping)} signals without road mappings"
+        )
+
     controllers_assigned_count = 0
+    unassociated_controller_ids: List[int] = []
+
     for junction in junctions:
         # Get all road IDs related to this junction (both incoming and connecting)
         junction_incoming_road_ids = {
@@ -288,24 +305,55 @@ def convert_lanelet2_to_opendrive(
             if controller.controls:
                 # Get road IDs for all signals controlled by this controller
                 controller_road_ids = set()
+                signals_with_missing_mapping = []
+
                 for control_entry in controller.controls:
                     signal_road_id = signals_and_controllers.signal_to_road_id.get(
                         control_entry.signal_id
                     )
                     if signal_road_id is not None:
                         controller_road_ids.add(signal_road_id)
+                    else:
+                        signals_with_missing_mapping.append(control_entry.signal_id)
 
                 # If any of the controller's roads are related to this junction,
                 # associate the controller with the junction
                 if controller_road_ids & junction_related_road_ids:
                     junction_controller_ids.append(controller.id)
+                elif signals_with_missing_mapping:
+                    # Controller has signals without road mappings
+                    # Log this for debugging
+                    logger.debug(
+                        f"Controller {controller.id} (name: {controller.name}) has "
+                        f"{len(signals_with_missing_mapping)} signals without road mappings: "
+                        f"{signals_with_missing_mapping}"
+                    )
 
         junction.controller_ids = junction_controller_ids
         controllers_assigned_count += len(junction_controller_ids)
 
+    # Step 9.5: Identify controllers not associated with any junction
+    associated_controller_ids = set()
+    for junction in junctions:
+        associated_controller_ids.update(junction.controller_ids)
+
+    for controller in signals_and_controllers.controllers:
+        if controller.id not in associated_controller_ids:
+            unassociated_controller_ids.append(controller.id)
+            logger.warning(
+                f"Controller {controller.id} (name: {controller.name}) is not "
+                f"associated with any junction"
+            )
+
     print(
         f"Associated {controllers_assigned_count} controller references across {len(junctions)} junctions"
     )
+
+    if unassociated_controller_ids:
+        logger.warning(
+            f"WARNING: {len(unassociated_controller_ids)} controllers are not "
+            f"associated with any junction: {unassociated_controller_ids}"
+        )
 
     # Create OpenDRIVE object
     opendrive = OpenDRIVE(
