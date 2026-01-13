@@ -267,14 +267,22 @@ def convert_lanelet2_to_opendrive(
     print(f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads")
 
     # Step 9: Associate controllers with junctions
-    # Controllers that manage signals on incoming roads should be referenced in the junction
+    # Controllers that manage signals on incoming or connecting roads should be referenced
     print("\n=== Associating controllers with junctions ===")
     controllers_assigned_count = 0
     for junction in junctions:
-        # Get all incoming road IDs for this junction
-        incoming_road_ids = {conn.incoming_road for conn in junction.connections}
+        # Get all road IDs related to this junction (both incoming and connecting)
+        junction_incoming_road_ids = {
+            conn.incoming_road for conn in junction.connections
+        }
+        junction_connecting_road_ids = {
+            conn.connecting_road for conn in junction.connections
+        }
+        junction_related_road_ids = (
+            junction_incoming_road_ids | junction_connecting_road_ids
+        )
 
-        # Find controllers whose signals are on incoming roads of this junction
+        # Find controllers whose signals are on roads related to this junction
         junction_controller_ids: List[int] = []
         for controller in signals_and_controllers.controllers:
             if controller.controls:
@@ -287,9 +295,9 @@ def convert_lanelet2_to_opendrive(
                     if signal_road_id is not None:
                         controller_road_ids.add(signal_road_id)
 
-                # If any of the controller's roads are incoming roads to this junction,
+                # If any of the controller's roads are related to this junction,
                 # associate the controller with the junction
-                if controller_road_ids & incoming_road_ids:
+                if controller_road_ids & junction_related_road_ids:
                     junction_controller_ids.append(controller.id)
 
         junction.controller_ids = junction_controller_ids

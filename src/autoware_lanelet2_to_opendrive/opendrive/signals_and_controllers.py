@@ -205,8 +205,10 @@ class SignalsAndControllers:
 
                 signal_id_counter += 1
 
-            # Step 3: If multiple roads are affected, create a controller
-            if len(affected_roads) > 1:
+            # Step 3: Create a controller for all traffic lights with signals
+            # OpenDRIVE requires controllers to be defined for proper signal management,
+            # regardless of whether the signal affects one or multiple roads
+            if created_signal_ids:
                 # Create control entries for all signals
                 control_entries = [
                     ControlEntry(signal_id=sig_id) for sig_id in created_signal_ids
