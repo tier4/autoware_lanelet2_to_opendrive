@@ -278,8 +278,18 @@ def convert_lanelet2_to_opendrive(
         junction_connecting_road_ids = {
             conn.connecting_road for conn in junction.connections
         }
+
+        # Also include roads that belong to this junction (based on road.junction attribute)
+        # This handles cases where roads are inside the junction but not in any connection
+        # (e.g., roads whose predecessor is also inside the junction)
+        junction_roads_by_attribute = {
+            road.id for road in all_roads if road.junction == junction.id
+        }
+
         junction_related_road_ids = (
-            junction_incoming_road_ids | junction_connecting_road_ids
+            junction_incoming_road_ids
+            | junction_connecting_road_ids
+            | junction_roads_by_attribute
         )
 
         # Find controllers whose signals are on roads related to this junction
