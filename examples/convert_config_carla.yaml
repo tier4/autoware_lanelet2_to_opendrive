@@ -1,4 +1,4 @@
-# Example configuration file for converting Lanelet2 to OpenDRIVE
+# Configuration file for converting Lanelet2 to OpenDRIVE (CARLA)
 # This file contains both MGRS projection info and optional preprocessing operations
 
 # Input and output paths
@@ -37,5 +37,7 @@ validate_operations:
 dry_run: false    # If true, only validate without saving
 verbose: false    # Enable verbose logging
 
-# CARLA compatibility settings (optional)
-# exclude_non_junction_signals: false  # Set to true for CARLA compatibility
+# CARLA compatibility settings
+# CARLA requires traffic signals to be associated with junctions.
+# Enable this option to exclude signals that are not in junctions.
+exclude_non_junction_signals: true

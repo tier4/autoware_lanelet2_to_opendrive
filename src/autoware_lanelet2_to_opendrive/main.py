@@ -73,6 +73,7 @@ def convert_lanelet2_to_opendrive(
     lanelet_map: lanelet2.core.LaneletMap,
     mgrs_code: str,
     output_path: Optional[Path] = None,
+    exclude_non_junction_signals: bool = False,
 ) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
@@ -81,6 +82,8 @@ def convert_lanelet2_to_opendrive(
         lanelet_map: Loaded Lanelet2 map
         mgrs_code: MGRS code for generating geoReference PROJ string
         output_path: Optional output path for saving the OpenDRIVE file
+        exclude_non_junction_signals: If True, exclude traffic signals not associated
+            with junction lanelets. Required for CARLA compatibility.
 
     Returns:
         Tuple of:
@@ -235,10 +238,18 @@ def convert_lanelet2_to_opendrive(
 
     # Step 7: Extract signals and controllers from Lanelet2 map
     print("\n=== Extracting signals and controllers ===")
+    # Get junction lanelet IDs for filtering (if needed for CARLA compatibility)
+    junction_lanelet_ids = {ll.id for ll in junction_lanelets}
+    if exclude_non_junction_signals:
+        print(
+            f"CARLA compatibility mode: excluding signals not in {len(junction_lanelet_ids)} junction lanelets"
+        )
     signals_and_controllers = SignalsAndControllers.construct_from_lanelet_map(
         lanelet_map=lanelet_map,
         road_lanelet_mapping=mapping,
         roads=all_roads,
+        exclude_non_junction_signals=exclude_non_junction_signals,
+        junction_lanelet_ids=junction_lanelet_ids,
     )
     print(
         f"Extracted {len(signals_and_controllers.signals)} signals and "
@@ -355,6 +366,9 @@ def preprocess_and_convert(
     # Determine the input file and MGRS code
     input_map_path = lanelet2_file
 
+    # Track CARLA compatibility setting
+    exclude_non_junction_signals = False
+
     # If preprocessing config is provided, run preprocessing first
     if preprocess_config_path:
         logger.info(
@@ -370,6 +384,9 @@ def preprocess_and_convert(
 
             # Extract MGRS code from config
             mgrs_code = config.mgrs_code
+
+            # Extract CARLA compatibility setting
+            exclude_non_junction_signals = config.exclude_non_junction_signals
 
             # Create a temporary file for preprocessed output if needed
             # We'll use the configured output path or a temp file
@@ -414,7 +431,10 @@ def preprocess_and_convert(
     # Convert to OpenDRIVE
     logger.info("Converting to OpenDRIVE format...")
     opendrive, mapping = convert_lanelet2_to_opendrive(
-        lanelet_map, mgrs_code, output_file
+        lanelet_map,
+        mgrs_code,
+        output_file,
+        exclude_non_junction_signals=exclude_non_junction_signals,
     )
 
     logger.info("Conversion completed successfully!")

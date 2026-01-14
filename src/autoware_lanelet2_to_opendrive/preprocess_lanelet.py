@@ -137,6 +137,11 @@ class PreprocessOperation:
     dry_run: bool = False  # If True, only validate without saving
     verbose: bool = False  # Enable verbose logging
 
+    # CARLA compatibility settings
+    exclude_non_junction_signals: bool = (
+        False  # If True, exclude signals not in junctions
+    )
+
     @classmethod
     def from_yaml(cls, yaml_path: Union[str, Path]) -> "PreprocessOperation":
         """Load preprocessing configuration from a YAML file.
@@ -232,6 +237,9 @@ class PreprocessOperation:
             remove_turn_direction_operations=remove_turn_direction_ops,
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
+            exclude_non_junction_signals=config.get(
+                "exclude_non_junction_signals", False
+            ),
         )
 
     def to_yaml(self, yaml_path: Union[str, Path]) -> None:
@@ -248,6 +256,7 @@ class PreprocessOperation:
             "mgrs_code": self.mgrs_code,
             "dry_run": self.dry_run,
             "verbose": self.verbose,
+            "exclude_non_junction_signals": self.exclude_non_junction_signals,
         }
 
         # Convert operations to dict format
