@@ -363,16 +363,16 @@ def preprocess_and_convert_with_hydra(
     """
     input_map_path = lanelet2_file
 
-    # Get MGRS code from config
-    mgrs_code = cfg.mgrs_code
+    # Get MGRS code from map config
+    mgrs_code = cfg.map.mgrs_code
     if not mgrs_code:
-        raise ValueError("MGRS code must be provided in the configuration.")
+        raise ValueError("MGRS code must be provided in the map configuration.")
 
     # Get target-specific settings
-    exclude_non_junction_signals = cfg.get("exclude_non_junction_signals", False)
+    exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
 
-    # Build PreprocessOperation from Hydra config
-    config = PreprocessOperation.from_hydra_config(cfg)
+    # Build PreprocessOperation from Hydra map config
+    config = PreprocessOperation.from_hydra_config(cfg.map)
 
     # Check if any preprocessing operations are configured
     has_preprocessing = any(
