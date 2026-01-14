@@ -32,12 +32,20 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
   target=carla
 ```
 
-### With custom map configuration
+### With Nishishinjuku map configuration
 
 ```bash
 uv run python -m autoware_lanelet2_to_opendrive.main \
-  input_map_path=/path/to/map.osm \
-  map=my_map \
+  input_map_path=/path/to/nishishinjuku.osm \
+  map=nishishinjuku
+```
+
+### With Nishishinjuku map + CARLA target
+
+```bash
+uv run python -m autoware_lanelet2_to_opendrive.main \
+  input_map_path=/path/to/nishishinjuku.osm \
+  map=nishishinjuku \
   target=carla
 ```
 
@@ -57,7 +65,8 @@ The configuration is managed using Hydra with the following structure:
 conf/
 ├── config.yaml           # Base configuration
 ├── map/
-│   └── example.yaml      # Map-specific preprocessing operations
+│   ├── example.yaml      # Example map template
+│   └── nishishinjuku.yaml # Nishishinjuku map configuration
 └── target/
     ├── default.yaml      # Default target settings
     └── carla.yaml        # CARLA-specific settings

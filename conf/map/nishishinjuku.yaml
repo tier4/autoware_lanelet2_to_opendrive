@@ -1,0 +1,58 @@
+# Nishishinjuku map configuration
+
+# MGRS code for map projection (REQUIRED)
+mgrs_code: 54SUE815501
+
+# Merge operations - merge multiple lanelets into one
+# First creates all merged lanelets, then removes the original lanelets
+merge_operations:
+  - lanelet_ids: [100, 101, 102]
+    validate: true
+    tolerance: 0.001
+    base_id: 5000
+  - lanelet_ids: [200, 201]
+    validate: false
+
+# Remove operations - remove lanelets from the map
+remove_operations:
+  - lanelet_ids: [300, 301, 302]
+  - lanelet_ids: [400]
+
+# Replace operations - replace multiple lanelets with a single merged one
+# Original lanelets are removed and replaced with the merged lanelet
+replace_operations:
+  - lanelet_ids: [500, 501, 502]
+    validate: true
+    tolerance: 0.01
+  - lanelet_ids: [600, 601]
+    validate: false
+
+# Validate operations - check continuity between lanelet pairs
+# These are informational only and don't modify the map
+validate_operations:
+  - first_lanelet_id: 700
+    second_lanelet_id: 701
+    tolerance: 0.001
+  - first_lanelet_id: 800
+    second_lanelet_id: 801
+    tolerance: 0.005
+
+# Move point operations - adjust individual point positions
+move_point_operations:
+  - point_id: 12345
+    new_x: 100.5
+    new_y: 200.3
+    new_z: 10.0
+
+# Delete point operations - remove points from linestrings
+delete_point_operations:
+  - point_ids: [12345, 12346]
+
+# Remove lanelet operations - completely remove lanelets
+remove_lanelet_operations:
+  - lanelet_ids: [900, 901]
+
+# Remove turn direction operations - remove turn_direction attributes
+remove_turn_direction_operations:
+  - lanelet_ids: []
+  - lanelet_ids: [1000, 1001]
