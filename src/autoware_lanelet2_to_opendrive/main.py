@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Main script to convert Lanelet2 maps to OpenDRIVE format."""
 
-import argparse
 import sys
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import tempfile
 import logging
+
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 # Import autoware extensions before loading maps to ensure proper registration
 # The order matters: projection module must be imported to register extensions
@@ -346,80 +348,67 @@ def convert_lanelet2_to_opendrive(
     return opendrive, mapping
 
 
-def preprocess_and_convert(
+def preprocess_and_convert_with_hydra(
+    cfg: DictConfig,
     lanelet2_file: Path,
     output_file: Path,
-    preprocess_config_path: Optional[Path] = None,
-    mgrs_code: Optional[str] = None,
-    verbose: bool = False,
 ) -> None:
     """
-    Run preprocessing (if configured) and convert Lanelet2 to OpenDRIVE.
+    Run preprocessing (if configured) and convert Lanelet2 to OpenDRIVE using Hydra config.
 
     Args:
+        cfg: Hydra configuration object
         lanelet2_file: Path to input Lanelet2 OSM file
         output_file: Path to output OpenDRIVE file
-        preprocess_config_path: Optional path to preprocessing config YAML
-        mgrs_code: Optional MGRS code (required if not in preprocess config)
-        verbose: Enable verbose output
     """
-    # Determine the input file and MGRS code
     input_map_path = lanelet2_file
 
-    # Track CARLA compatibility setting
-    exclude_non_junction_signals = False
-
-    # If preprocessing config is provided, run preprocessing first
-    if preprocess_config_path:
-        logger.info(
-            f"Loading preprocessing configuration from: {preprocess_config_path}"
-        )
-
-        try:
-            config = PreprocessOperation.from_yaml(preprocess_config_path)
-
-            # Override verbose setting if specified
-            if verbose:
-                config.verbose = True
-
-            # Extract MGRS code from config
-            mgrs_code = config.mgrs_code
-
-            # Extract CARLA compatibility setting
-            exclude_non_junction_signals = config.exclude_non_junction_signals
-
-            # Create a temporary file for preprocessed output if needed
-            # We'll use the configured output path or a temp file
-            if config.output_map_path:
-                preprocessed_path = Path(config.output_map_path)
-            else:
-                # Create a temporary file for preprocessed map
-                with tempfile.NamedTemporaryFile(
-                    suffix=".osm", delete=False
-                ) as tmp_file:
-                    preprocessed_path = Path(tmp_file.name)
-                    config.output_map_path = str(preprocessed_path)
-
-            # Run preprocessing
-            logger.info("Running preprocessing operations...")
-            preprocessor = LaneletPreprocessor(config)
-            preprocessor.process()
-
-            # Update input path to use preprocessed map
-            input_map_path = preprocessed_path
-            logger.info(
-                f"Preprocessing completed. Using preprocessed map from: {input_map_path}"
-            )
-
-        except Exception as e:
-            logger.error(f"Preprocessing failed: {e}")
-            raise
-
-    # Ensure we have an MGRS code
+    # Get MGRS code from config
+    mgrs_code = cfg.mgrs_code
     if not mgrs_code:
-        raise ValueError(
-            "MGRS code must be provided either via --preprocess-config or directly. "
-            "Add 'mgrs_code' to your preprocess config YAML file."
+        raise ValueError("MGRS code must be provided in the configuration.")
+
+    # Get target-specific settings
+    exclude_non_junction_signals = cfg.get("exclude_non_junction_signals", False)
+
+    # Build PreprocessOperation from Hydra config
+    config = PreprocessOperation.from_hydra_config(cfg)
+
+    # Check if any preprocessing operations are configured
+    has_preprocessing = any(
+        [
+            config.merge_operations,
+            config.remove_operations,
+            config.replace_operations,
+            config.move_point_operations,
+            config.delete_point_operations,
+            config.remove_lanelet_operations,
+            config.remove_turn_direction_operations,
+        ]
+    )
+
+    if has_preprocessing:
+        logger.info("Running preprocessing operations...")
+
+        # Set input/output paths for preprocessing
+        config.input_map_path = str(lanelet2_file)
+
+        # Create a temporary file for preprocessed output
+        if config.output_map_path:
+            preprocessed_path = Path(config.output_map_path)
+        else:
+            with tempfile.NamedTemporaryFile(suffix=".osm", delete=False) as tmp_file:
+                preprocessed_path = Path(tmp_file.name)
+                config.output_map_path = str(preprocessed_path)
+
+        # Run preprocessing
+        preprocessor = LaneletPreprocessor(config)
+        preprocessor.process()
+
+        # Update input path to use preprocessed map
+        input_map_path = preprocessed_path
+        logger.info(
+            f"Preprocessing completed. Using preprocessed map from: {input_map_path}"
         )
 
     # Load the (possibly preprocessed) Lanelet2 map
@@ -443,87 +432,48 @@ def preprocess_and_convert(
         f"{len(mapping.lanelet_to_road)} lanelets"
     )
 
-    # Clean up temporary file if we created one
-    if (
-        preprocess_config_path
-        and not PreprocessOperation.from_yaml(preprocess_config_path).output_map_path
-    ):
-        try:
-            preprocessed_path.unlink()
-            logger.debug(f"Cleaned up temporary file: {preprocessed_path}")
-        except Exception:
-            pass
 
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """
+    Main entry point for the conversion script using Hydra.
 
-def main():
-    """Main entry point for the conversion script."""
-    parser = argparse.ArgumentParser(
-        description="Convert Lanelet2 map to OpenDRIVE format with optional preprocessing",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Direct conversion without preprocessing (MGRS must be in preprocess config):
-  python main.py input.osm --preprocess-config config.yaml
+    Usage:
+        # Basic usage with default settings:
+        uv run python -m autoware_lanelet2_to_opendrive.main input_map_path=/path/to/map.osm
 
-  # Direct conversion with preprocessing:
-  python main.py input.osm --preprocess-config preprocess_config.yaml -o output.xodr
+        # With CARLA target:
+        uv run python -m autoware_lanelet2_to_opendrive.main \\
+            input_map_path=/path/to/map.osm target=carla
 
-  # Specify output file:
-  python main.py input.osm --preprocess-config config.yaml -o custom_output.xodr
+        # With custom map config:
+        uv run python -m autoware_lanelet2_to_opendrive.main \\
+            input_map_path=/path/to/map.osm map=my_map target=carla
 
-Note: MGRS code must be specified in the preprocess configuration YAML file.
-        """,
-    )
-
-    parser.add_argument(
-        "lanelet2_file",
-        type=Path,
-        help="Path to the input Lanelet2 OSM file",
-    )
-
-    parser.add_argument(
-        "--preprocess-config",
-        type=Path,
-        help="Path to preprocessing configuration YAML file (contains MGRS code)",
-    )
-
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="Output path for the OpenDRIVE file (default: input_file.xodr)",
-    )
-
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable verbose output",
-    )
-
-    args = parser.parse_args()
-
-    # Set up logging
-    if args.verbose:
+        # Override output path:
+        uv run python -m autoware_lanelet2_to_opendrive.main \\
+            input_map_path=/path/to/map.osm output_map_path=/path/to/output.xodr
+    """
+    # Print resolved configuration
+    if cfg.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Resolved configuration:")
+        logger.debug(OmegaConf.to_yaml(cfg))
 
-    # Set default output path if not provided
-    if not args.output:
-        args.output = args.lanelet2_file.with_suffix(".xodr")
+    # Get input/output paths
+    input_path = Path(cfg.input_map_path)
 
-    # Validate that preprocessing config is provided
-    if not args.preprocess_config:
-        parser.error(
-            "Preprocessing configuration file is required. "
-            "Please provide --preprocess-config with a YAML file containing MGRS code and optional preprocessing operations."
-        )
+    # Determine output path
+    if cfg.output_map_path:
+        output_path = Path(cfg.output_map_path)
+    else:
+        output_path = input_path.with_suffix(".xodr")
 
     try:
-        preprocess_and_convert(
-            lanelet2_file=args.lanelet2_file,
-            output_file=args.output,
-            preprocess_config_path=args.preprocess_config,
-            verbose=args.verbose,
+        preprocess_and_convert_with_hydra(
+            cfg=cfg,
+            lanelet2_file=input_path,
+            output_file=output_path,
         )
 
     except FileNotFoundError as e:
@@ -534,7 +484,7 @@ Note: MGRS code must be specified in the preprocess configuration YAML file.
         sys.exit(1)
     except Exception as e:
         logger.error(f"Error during conversion: {e}")
-        if args.verbose:
+        if cfg.verbose:
             import traceback
 
             traceback.print_exc()
