@@ -38,21 +38,13 @@ validate_operations:
     tolerance: 0.005
 
 # Move point operations - adjust individual point positions
-move_point_operations:
-  - point_id: 12345
-    new_x: 100.5
-    new_y: 200.3
-    new_z: 10.0
+move_point_operations: []
 
 # Delete point operations - remove points from linestrings
-delete_point_operations:
-  - point_ids: [12345, 12346]
+delete_point_operations: []
 
 # Remove lanelet operations - completely remove lanelets
-remove_lanelet_operations:
-  - lanelet_ids: [900, 901]
+remove_lanelet_operations: []
 
 # Remove turn direction operations - remove turn_direction attributes
-remove_turn_direction_operations:
-  - lanelet_ids: []
-  - lanelet_ids: [1000, 1001]
+remove_turn_direction_operations: []
