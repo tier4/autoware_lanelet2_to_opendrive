@@ -1,0 +1,15 @@
+# Hydra configuration for Lanelet2 to OpenDRIVE conversion
+# Usage: uv run python -m autoware_lanelet2_to_opendrive.main map=<map_name> target=<target_name>
+
+defaults:
+  - _self_
+  - map: example
+  - target: default
+
+# Input and output paths (can be overridden via CLI)
+input_map_path: ???  # Required: path to input Lanelet2 OSM file
+output_map_path: null  # Optional: output file path
+
+# Global settings
+dry_run: false    # If true, only validate without saving output
+verbose: false    # Enable detailed logging

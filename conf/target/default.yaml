@@ -1,0 +1,5 @@
+# Default target configuration
+# Standard OpenDRIVE conversion without simulator-specific settings
+
+# Signal filtering (disabled by default)
+exclude_non_junction_signals: false

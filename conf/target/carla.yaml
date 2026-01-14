@@ -1,0 +1,6 @@
+# CARLA target configuration
+# Settings specific to CARLA simulator compatibility
+
+# CARLA requires traffic signals to be associated with junctions.
+# This option excludes signals that are not in junctions.
+exclude_non_junction_signals: true

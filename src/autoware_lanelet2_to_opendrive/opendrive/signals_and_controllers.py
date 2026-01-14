@@ -75,6 +75,8 @@ class SignalsAndControllers:
         lanelet_map: lanelet2.core.LaneletMap,
         road_lanelet_mapping: RoadLaneletMapping,
         roads: Optional[List] = None,
+        exclude_non_junction_signals: bool = False,
+        junction_lanelet_ids: Optional[Set[int]] = None,
     ) -> "SignalsAndControllers":
         """
         Construct signals and controllers from Lanelet2 map.
@@ -88,6 +90,11 @@ class SignalsAndControllers:
             road_lanelet_mapping: Mapping between OpenDRIVE roads and Lanelet2 lanelets
             roads: List of Road objects to calculate elevation at signal positions.
                   If None, signal z_offset will use absolute elevation values.
+            exclude_non_junction_signals: If True, exclude traffic signals that are
+                  not associated with junction lanelets. This is required for CARLA
+                  compatibility, as CARLA does not support signals outside junctions.
+            junction_lanelet_ids: Set of lanelet IDs that belong to junctions.
+                  Required when exclude_non_junction_signals is True.
 
         Returns:
             SignalsAndControllers object with populated signals and controllers
@@ -102,6 +109,10 @@ class SignalsAndControllers:
         """
         result = SignalsAndControllers()
 
+        # Validate parameters
+        if exclude_non_junction_signals and junction_lanelet_ids is None:
+            junction_lanelet_ids = set()  # Empty set means no junctions
+
         # Step 1: Collect all traffic lights from all lanelets
         traffic_light_map = filter_regulatory_element_by_type(
             lanelet_map, element_type="trafficLights"
@@ -115,6 +126,16 @@ class SignalsAndControllers:
             traffic_light,
             lanelet_ids,
         ) in traffic_light_map.items():
+            # CARLA compatibility: Skip signals not associated with junction lanelets
+            if exclude_non_junction_signals and junction_lanelet_ids is not None:
+                # Check if any of the lanelets associated with this signal are in a junction
+                has_junction_lanelet = any(
+                    ll_id in junction_lanelet_ids for ll_id in lanelet_ids
+                )
+                if not has_junction_lanelet:
+                    # This signal is not associated with any junction lanelet, skip it
+                    continue
+
             # Determine which roads are affected by this traffic light
             affected_roads: Set[int] = set()
             for lanelet_id in lanelet_ids:

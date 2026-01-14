@@ -1,0 +1,42 @@
+# Nishishinjuku map configuration
+
+# MGRS code for map projection (REQUIRED)
+mgrs_code: 54SUE
+
+# Merge operations - merge multiple lanelets into one
+# The merged lanelet is added to the map (originals are kept)
+merge_operations:
+  - lanelet_ids: [112, 114]
+    validate: true
+  - lanelet_ids: [113, 116]
+    validate: true
+  - lanelet_ids: [113, 115]
+    validate: true
+  - lanelet_ids: [301024, 3001037, 301038]
+    validate: true
+  - lanelet_ids: [301029, 301030, 301031, 3001324]
+    validate: true
+  - lanelet_ids: [301021, 301033]
+    validate: true
+
+# Move point operations - move points to specific coordinates
+move_point_operations:
+  - point_id: 10030
+    new_x: 81509.0771
+    new_y: 50489.7863
+  - point_id: 28339
+    new_x: 81506.1119
+    new_y: 50489.4558
+  - point_id: 28301
+    new_x: 81503.3119
+    new_y: 50488.6425
+
+delete_point_operations:
+  - point_ids: [10034]
+
+# Remove lanelet operations - remove entire lanelets from the map
+remove_lanelet_operations:
+  - lanelet_ids: [468, 124219]
+
+remove_turn_direction_operations:
+  - lanelet_ids: [3001150, 554, 301028]

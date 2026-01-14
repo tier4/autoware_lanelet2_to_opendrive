@@ -137,6 +137,11 @@ class PreprocessOperation:
     dry_run: bool = False  # If True, only validate without saving
     verbose: bool = False  # Enable verbose logging
 
+    # CARLA compatibility settings
+    exclude_non_junction_signals: bool = (
+        False  # If True, exclude signals not in junctions
+    )
+
     @classmethod
     def from_yaml(cls, yaml_path: Union[str, Path]) -> "PreprocessOperation":
         """Load preprocessing configuration from a YAML file.
@@ -232,6 +237,84 @@ class PreprocessOperation:
             remove_turn_direction_operations=remove_turn_direction_ops,
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
+            exclude_non_junction_signals=config.get(
+                "exclude_non_junction_signals", False
+            ),
+        )
+
+    @classmethod
+    def from_hydra_config(cls, cfg: Any) -> "PreprocessOperation":
+        """Create PreprocessOperation from Hydra DictConfig.
+
+        Args:
+            cfg: Hydra DictConfig object containing the configuration
+
+        Returns:
+            PreprocessOperation instance configured from the Hydra config
+        """
+        from omegaconf import OmegaConf
+
+        # Convert OmegaConf to dict for easier processing
+        config = OmegaConf.to_container(cfg, resolve=True)
+
+        # Parse operations
+        merge_ops = []
+        for op in config.get("merge_operations") or []:
+            if op:  # Skip None/empty entries
+                merge_ops.append(MergeOperation(**op))
+
+        remove_ops = []
+        for op in config.get("remove_operations") or []:
+            if op:
+                remove_ops.append(RemoveOperation(**op))
+
+        replace_ops = []
+        for op in config.get("replace_operations") or []:
+            if op:
+                replace_ops.append(ReplaceOperation(**op))
+
+        validate_ops = []
+        for op in config.get("validate_operations") or []:
+            if op:
+                validate_ops.append(ValidateOperation(**op))
+
+        move_point_ops = []
+        for op in config.get("move_point_operations") or []:
+            if op:
+                move_point_ops.append(MovePointOperation(**op))
+
+        delete_point_ops = []
+        for op in config.get("delete_point_operations") or []:
+            if op:
+                delete_point_ops.append(DeletePointOperation(**op))
+
+        remove_lanelet_ops = []
+        for op in config.get("remove_lanelet_operations") or []:
+            if op:
+                remove_lanelet_ops.append(RemoveLaneletOperation(**op))
+
+        remove_turn_direction_ops = []
+        for op in config.get("remove_turn_direction_operations") or []:
+            if op:
+                remove_turn_direction_ops.append(RemoveTurnDirectionOperation(**op))
+
+        return cls(
+            input_map_path=config.get("input_map_path") or "",
+            output_map_path=config.get("output_map_path") or "",
+            mgrs_code=config.get("mgrs_code") or "",
+            merge_operations=merge_ops,
+            remove_operations=remove_ops,
+            replace_operations=replace_ops,
+            validate_operations=validate_ops,
+            move_point_operations=move_point_ops,
+            delete_point_operations=delete_point_ops,
+            remove_lanelet_operations=remove_lanelet_ops,
+            remove_turn_direction_operations=remove_turn_direction_ops,
+            dry_run=config.get("dry_run", False),
+            verbose=config.get("verbose", False),
+            exclude_non_junction_signals=config.get(
+                "exclude_non_junction_signals", False
+            ),
         )
 
     def to_yaml(self, yaml_path: Union[str, Path]) -> None:
@@ -248,6 +331,7 @@ class PreprocessOperation:
             "mgrs_code": self.mgrs_code,
             "dry_run": self.dry_run,
             "verbose": self.verbose,
+            "exclude_non_junction_signals": self.exclude_non_junction_signals,
         }
 
         # Convert operations to dict format
