@@ -13,6 +13,7 @@ from .lane_sections import Lanes
 from .reference_line import ReferenceLine
 from .enums import ContactPoint, ElementType
 from .lane_elements import LaneLink
+from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype
 
@@ -23,59 +24,6 @@ if TYPE_CHECKING:
     from .signal import Signal
     from .lane import Lane
     from .junction import Junction
-
-
-@dataclass
-class Predecessor:
-    """Predecessor link element."""
-
-    element_type: ElementType
-    element_id: int
-    contact_point: Optional[ContactPoint] = None
-
-    def to_xml(self) -> ET.Element:
-        """Convert to XML element."""
-        elem = ET.Element("predecessor")
-        elem.set("elementType", self.element_type.value)
-        elem.set("elementId", str(self.element_id))
-        if self.contact_point:
-            elem.set("contactPoint", self.contact_point.value)
-        return elem
-
-
-@dataclass
-class Successor:
-    """Successor link element."""
-
-    element_type: ElementType
-    element_id: int
-    contact_point: Optional[ContactPoint] = None
-
-    def to_xml(self) -> ET.Element:
-        """Convert to XML element."""
-        elem = ET.Element("successor")
-        elem.set("elementType", self.element_type.value)
-        elem.set("elementId", str(self.element_id))
-        if self.contact_point:
-            elem.set("contactPoint", self.contact_point.value)
-        return elem
-
-
-@dataclass
-class RoadLink:
-    """Road link element containing predecessor and successor."""
-
-    predecessor: Optional[Predecessor] = None
-    successor: Optional[Successor] = None
-
-    def to_xml(self) -> ET.Element:
-        """Convert to XML element."""
-        elem = ET.Element("link")
-        if self.predecessor:
-            elem.append(self.predecessor.to_xml())
-        if self.successor:
-            elem.append(self.successor.to_xml())
-        return elem
 
 
 @dataclass
