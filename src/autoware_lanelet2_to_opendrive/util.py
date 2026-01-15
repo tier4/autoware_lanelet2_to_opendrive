@@ -9,6 +9,22 @@ from lanelet2.geometry import intersects2d
 import mgrs
 
 
+def create_routing_graph(lanelet_map: lanelet2.core.LaneletMap) -> RoutingGraph:
+    """Create a routing graph with standard traffic rules.
+
+    Args:
+        lanelet_map: The lanelet2 map to create a routing graph for
+
+    Returns:
+        RoutingGraph configured with Germany location and Vehicle participant
+    """
+    traffic_rules = lanelet2.traffic_rules.create(
+        lanelet2.traffic_rules.Locations.Germany,
+        lanelet2.traffic_rules.Participants.Vehicle,
+    )
+    return RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+
+
 @dataclass
 class RoadLaneletMapping:
     """
@@ -67,11 +83,7 @@ def find_lanelets_without_next(
         Set of lanelets that have no successors
     """
     # Create routing graph for the map
-    traffic_rules = lanelet2.traffic_rules.create(
-        lanelet2.traffic_rules.Locations.Germany,
-        lanelet2.traffic_rules.Participants.Vehicle,
-    )
-    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+    routing_graph = create_routing_graph(lanelet_map)
 
     lanelets_without_next = set()
 
@@ -96,11 +108,7 @@ def find_lanelets_without_previous(
         Set of lanelets that have no predecessors
     """
     # Create routing graph for the map
-    traffic_rules = lanelet2.traffic_rules.create(
-        lanelet2.traffic_rules.Locations.Germany,
-        lanelet2.traffic_rules.Participants.Vehicle,
-    )
-    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+    routing_graph = create_routing_graph(lanelet_map)
 
     lanelets_without_previous = set()
 
@@ -125,11 +133,7 @@ def find_terminal_lanelets(
         Tuple of (lanelets_without_previous, lanelets_without_next)
     """
     # Create routing graph once for efficiency
-    traffic_rules = lanelet2.traffic_rules.create(
-        lanelet2.traffic_rules.Locations.Germany,
-        lanelet2.traffic_rules.Participants.Vehicle,
-    )
-    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+    routing_graph = create_routing_graph(lanelet_map)
 
     lanelets_without_previous = set()
     lanelets_without_next = set()
@@ -169,13 +173,7 @@ def find_connecting_lanelet_groups(
     """
     # Use provided routing graph or create a new one
     if routing_graph is None:
-        traffic_rules = lanelet2.traffic_rules.create(
-            lanelet2.traffic_rules.Locations.Germany,
-            lanelet2.traffic_rules.Participants.Vehicle,
-        )
-        routing_graph = RoutingGraph(
-            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
-        )
+        routing_graph = create_routing_graph(lanelet_map)
 
     # Collect all connecting lanelets
     connecting_lanelets = set()
@@ -228,13 +226,7 @@ def find_adjacent_groups(
 
     # Use provided routing graph or create a new one
     if routing_graph is None:
-        traffic_rules = lanelet2.traffic_rules.create(
-            lanelet2.traffic_rules.Locations.Germany,
-            lanelet2.traffic_rules.Participants.Vehicle,
-        )
-        routing_graph = RoutingGraph(
-            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
-        )
+        routing_graph = create_routing_graph(lanelet_map)
 
     groups = []
     visited = set()
@@ -398,11 +390,7 @@ def sort_adjacent_groups(
         return []
 
     # Create routing graph for finding adjacent relationships
-    traffic_rules = lanelet2.traffic_rules.create(
-        lanelet2.traffic_rules.Locations.Germany,
-        lanelet2.traffic_rules.Participants.Vehicle,
-    )
-    routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
+    routing_graph = create_routing_graph(lanelet_map)
 
     # Find the leftmost lanelet by traversing left until no more left neighbors
     def find_leftmost_lanelet(
