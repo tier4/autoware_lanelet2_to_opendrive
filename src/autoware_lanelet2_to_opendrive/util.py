@@ -239,7 +239,9 @@ def find_adjacent_groups(
     groups = []
     visited = set()
 
-    def get_adjacent_lanelets(lanelet: lanelet2.core.Lanelet) -> Set[lanelet2.core.Lanelet]:
+    def get_adjacent_lanelets(
+        lanelet: lanelet2.core.Lanelet,
+    ) -> Set[lanelet2.core.Lanelet]:
         """Get laterally adjacent lanelets (left/right only, not following/previous)."""
         adjacent: Set[lanelet2.core.Lanelet] = set()
 
@@ -255,7 +257,9 @@ def find_adjacent_groups(
 
         return adjacent
 
-    def dfs_group(start_lanelet: lanelet2.core.Lanelet, current_group: Set[lanelet2.core.Lanelet]) -> None:
+    def dfs_group(
+        start_lanelet: lanelet2.core.Lanelet, current_group: Set[lanelet2.core.Lanelet]
+    ) -> None:
         """Depth-first search to find all connected lanelets."""
         if start_lanelet in visited:
             return
