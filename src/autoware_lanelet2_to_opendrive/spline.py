@@ -121,7 +121,7 @@ class Splines:
         # Perform constrained spline fitting
         self._fit_constrained_spline()
 
-    def _fit_constrained_spline(self):
+    def _fit_constrained_spline(self) -> None:
         """
         Internal method to perform the constrained B-spline fitting.
         """
@@ -473,7 +473,7 @@ class Splines:
         """
         return self.spline(t, nu=derivative)
 
-    def _compute_arc_length_table(self, num_samples: int = 1000):
+    def _compute_arc_length_table(self, num_samples: int = 1000) -> None:
         """Compute arc length lookup table for accurate parameterization."""
         if hasattr(self, "_arc_length_table"):
             return
