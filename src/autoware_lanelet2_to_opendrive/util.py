@@ -231,9 +231,11 @@ def find_adjacent_groups(
     groups = []
     visited = set()
 
-    def get_adjacent_lanelets(lanelet):
+    def get_adjacent_lanelets(
+        lanelet: lanelet2.core.Lanelet,
+    ) -> Set[lanelet2.core.Lanelet]:
         """Get laterally adjacent lanelets (left/right only, not following/previous)."""
-        adjacent = set()
+        adjacent: Set[lanelet2.core.Lanelet] = set()
 
         # Add left adjacent lanelets
         left_ll = routing_graph.left(lanelet)
@@ -247,7 +249,9 @@ def find_adjacent_groups(
 
         return adjacent
 
-    def dfs_group(start_lanelet, current_group):
+    def dfs_group(
+        start_lanelet: lanelet2.core.Lanelet, current_group: Set[lanelet2.core.Lanelet]
+    ) -> None:
         """Depth-first search to find all connected lanelets."""
         if start_lanelet in visited:
             return

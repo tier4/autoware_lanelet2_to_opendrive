@@ -48,7 +48,7 @@ class Width1DSplineAdapter:
         """Get just the width value at a given arc length."""
         return self.spline_1d.evaluate(s, derivative=0)
 
-    def get_polynomial_segments(self):
+    def get_polynomial_segments(self) -> list[tuple[float, float, float, float, float]]:
         """Get polynomial segments for OpenDRIVE export."""
         return self.spline_1d.get_segments()
 
@@ -75,7 +75,7 @@ class WidthSplineWrapper:
         # Build lookup table for arc_length -> parameter t mapping
         self._build_lookup_table()
 
-    def _build_lookup_table(self, num_samples: int = 100):
+    def _build_lookup_table(self, num_samples: int = 100) -> None:
         """Build a lookup table for converting arc_length to parameter t."""
         self.t_samples = np.linspace(0, 1, num_samples)
         self.arc_length_samples = []

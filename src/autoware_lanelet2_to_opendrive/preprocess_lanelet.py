@@ -877,7 +877,7 @@ class LaneletPreprocessor:
         return lanelet_map
 
 
-def main():
+def main() -> int:
     """Main function for command-line usage."""
     import argparse
 

@@ -21,7 +21,7 @@ class OpenDRIVE:
     junctions: Optional[List[Junction]] = None
     controllers: Optional[List[Controller]] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.roads is None:
             self.roads = []
         if self.junctions is None:

@@ -1,10 +1,13 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
-import numpy as np
+from typing import TYPE_CHECKING, List, Set, Union
+
 import lanelet2
-from typing import Union, List, Set, TYPE_CHECKING
-from ..spline import Splines
+import lxml.etree as ET
+import numpy as np
+
 from ..cubic_spline_1d import CubicSpline1D
+from ..spline import Splines
 
 if TYPE_CHECKING:
     pass
@@ -140,27 +143,27 @@ class ReferenceLine:
         return reference_line
 
     @property
-    def widths(self):
+    def widths(self) -> List[LaneWidth]:
         """Access to lane widths."""
         return self._lane.widths
 
     @property
-    def road_marks(self):
+    def road_marks(self) -> List:
         """Access to road marks."""
         return self._lane.road_marks
 
     @property
-    def lane_id(self):
+    def lane_id(self) -> int:
         """Access to lane ID."""
         return self._lane.lane_id
 
     @property
-    def lane_type(self):
+    def lane_type(self) -> LaneType:
         """Access to lane type."""
         return self._lane.lane_type
 
     @property
-    def level(self):
+    def level(self) -> bool:
         """Access to lane level."""
         return self._lane.level
 
@@ -238,7 +241,7 @@ class ReferenceLine:
 
         return ElevationProfile(elevations=elevations)
 
-    def to_xml(self):
+    def to_xml(self) -> ET.Element:
         """Convert to XML element via the internal lane."""
         return self._lane.to_xml()
 
