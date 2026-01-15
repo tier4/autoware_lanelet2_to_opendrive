@@ -1,11 +1,13 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
-import numpy as np
+from typing import TYPE_CHECKING, List, Set, Union
+
 import lanelet2
 import lxml.etree as ET
-from typing import Union, List, Set, TYPE_CHECKING
-from ..spline import Splines
+import numpy as np
+
 from ..cubic_spline_1d import CubicSpline1D
+from ..spline import Splines
 
 if TYPE_CHECKING:
     pass
