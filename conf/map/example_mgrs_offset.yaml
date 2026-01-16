@@ -1,12 +1,15 @@
 # Example map configuration using MGRS grid with offset
 # This format specifies a MGRS grid zone and then provides offset coordinates
 
-# MGRS grid with offset (NEW FORMAT)
-mgrs_grid_with_offset:
-  grid: 54SUE              # MGRS grid zone designator
-  offset_x: 81655.73       # Easting offset in meters from grid origin
-  offset_y: 50137.43       # Northing offset in meters from grid origin
-  offset_z: 42.49998       # Altitude offset in meters (optional, defaults to 0.0)
+# MGRS grid code (REQUIRED)
+mgrs_grid: 54SUE
+
+# Offset from grid origin (OPTIONAL)
+# Specifies the exact position within the MGRS grid zone
+offset:
+  x: 81655.73       # Easting offset in meters from grid origin
+  y: 50137.43       # Northing offset in meters from grid origin
+  z: 42.49998       # Altitude offset in meters (optional, defaults to 0.0)
 
 # Merge operations - merge multiple lanelets into one
 merge_operations:

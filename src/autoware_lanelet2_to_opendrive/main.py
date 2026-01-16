@@ -358,8 +358,8 @@ def parse_origin_from_config(cfg: DictConfig) -> tuple[lanelet2.io.Origin, str]:
 
     Supports three methods of origin specification (mutually exclusive):
     1. mgrs_grid: Simple MGRS grid code (e.g., "54SUE")
-    2. mgrs_grid_with_offset: MGRS grid + offset {grid, offset_x, offset_y, offset_z}
-    3. lat_lon: Latitude/longitude {latitude, longitude, altitude}
+       - With optional offset: mgrs_grid + offset {x, y, z}
+    2. lat_lon: Latitude/longitude {latitude, longitude, altitude}
 
     Args:
         cfg: Hydra configuration object with map settings
@@ -378,10 +378,7 @@ def parse_origin_from_config(cfg: DictConfig) -> tuple[lanelet2.io.Origin, str]:
     has_mgrs_code = (
         "mgrs_code" in map_cfg and map_cfg.mgrs_code is not None
     )  # Legacy support
-    has_mgrs_with_offset = (
-        "mgrs_grid_with_offset" in map_cfg
-        and map_cfg.mgrs_grid_with_offset is not None
-    )
+    has_offset = "offset" in map_cfg and map_cfg.offset is not None
     has_lat_lon = "lat_lon" in map_cfg and map_cfg.lat_lon is not None
 
     # Support legacy mgrs_code field
@@ -389,42 +386,49 @@ def parse_origin_from_config(cfg: DictConfig) -> tuple[lanelet2.io.Origin, str]:
         has_mgrs_grid = True
         map_cfg.mgrs_grid = map_cfg.mgrs_code
 
-    # Count how many methods are specified
-    specified_methods = sum([has_mgrs_grid, has_mgrs_with_offset, has_lat_lon])
+    # Count how many base methods are specified (offset is an optional modifier for mgrs_grid)
+    specified_methods = sum([has_mgrs_grid, has_lat_lon])
 
     if specified_methods == 0:
         raise ValueError(
-            "Origin must be specified using one of: mgrs_grid, mgrs_grid_with_offset, or lat_lon"
+            "Origin must be specified using one of: mgrs_grid (with optional offset), or lat_lon"
         )
 
     if specified_methods > 1:
         raise ValueError(
             "Multiple origin specification methods detected. "
-            "Please specify only one of: mgrs_grid, mgrs_grid_with_offset, or lat_lon"
+            "Please specify only one of: mgrs_grid (with optional offset), or lat_lon"
+        )
+
+    # Offset can only be used with mgrs_grid
+    if has_offset and not has_mgrs_grid:
+        raise ValueError(
+            "The 'offset' field can only be used together with 'mgrs_grid'"
         )
 
     # Parse the specified method
     if has_mgrs_grid:
         mgrs_grid = map_cfg.mgrs_grid
-        logger.info(f"Using MGRS grid origin: {mgrs_grid}")
-        origin = mgrs_to_lanelet2_origin(mgrs_grid)
-        return origin, mgrs_grid
 
-    elif has_mgrs_with_offset:
-        offset_cfg = map_cfg.mgrs_grid_with_offset
-        mgrs_grid = offset_cfg.grid
-        offset_x = offset_cfg.offset_x
-        offset_y = offset_cfg.offset_y
-        offset_z = offset_cfg.get("offset_z", 0.0)
+        # Check if offset is specified
+        if has_offset:
+            offset_cfg = map_cfg.offset
+            offset_x = offset_cfg.x
+            offset_y = offset_cfg.y
+            offset_z = offset_cfg.get("z", 0.0)
 
-        logger.info(
-            f"Using MGRS grid with offset: {mgrs_grid}, "
-            f"offset x={offset_x} y={offset_y} z={offset_z}"
-        )
-        origin = mgrs_grid_with_offset_to_lanelet2_origin(
-            mgrs_grid, offset_x, offset_y, offset_z
-        )
-        return origin, mgrs_grid
+            logger.info(
+                f"Using MGRS grid with offset: {mgrs_grid}, "
+                f"offset x={offset_x} y={offset_y} z={offset_z}"
+            )
+            origin = mgrs_grid_with_offset_to_lanelet2_origin(
+                mgrs_grid, offset_x, offset_y, offset_z
+            )
+            return origin, mgrs_grid
+        else:
+            logger.info(f"Using MGRS grid origin: {mgrs_grid}")
+            origin = mgrs_to_lanelet2_origin(mgrs_grid)
+            return origin, mgrs_grid
 
     elif has_lat_lon:
         latlon_cfg = map_cfg.lat_lon

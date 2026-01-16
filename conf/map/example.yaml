@@ -3,15 +3,15 @@
 
 # Origin specification (REQUIRED - choose ONE of the following methods):
 #
-# Method 1: Simple MGRS grid code (current method)
+# Method 1: Simple MGRS grid code
 mgrs_grid: 54SUE815501
 #
 # Method 2: MGRS grid with offset (see example_mgrs_offset.yaml)
-# mgrs_grid_with_offset:
-#   grid: 54SUE
-#   offset_x: 81655.73
-#   offset_y: 50137.43
-#   offset_z: 42.49998
+# mgrs_grid: 54SUE
+# offset:
+#   x: 81655.73
+#   y: 50137.43
+#   z: 42.49998
 #
 # Method 3: Latitude/longitude (see example_latlon.yaml)
 # lat_lon:
@@ -19,7 +19,8 @@ mgrs_grid: 54SUE815501
 #   longitude: 151.234567
 #   altitude: 42.5
 #
-# NOTE: Only ONE method should be specified. Using multiple methods will cause an error.
+# NOTE: Only ONE base method (mgrs_grid or lat_lon) should be specified.
+# The offset field can only be used with mgrs_grid.
 
 # Merge operations - merge multiple lanelets into one
 # First creates all merged lanelets, then removes the original lanelets
