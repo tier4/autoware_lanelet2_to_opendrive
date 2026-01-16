@@ -14,7 +14,7 @@ from .reference_line import ReferenceLine
 from .enums import ContactPoint, ElementType
 from .lane_elements import LaneLink
 from ..centerline import AsymmetryLaneletException
-from ..util import filter_lanelets_by_subtype
+from ..util import filter_lanelets_by_subtype, to_lanelet_list, LaneletInput
 
 # Import for type hints only
 from typing import TYPE_CHECKING
@@ -321,11 +321,7 @@ class Road:
     @staticmethod
     def construct_from_lanelet_groups(
         lanelet_map: lanelet2.core.LaneletMap,
-        lanelet_group: Union[
-            Set[lanelet2.core.Lanelet],
-            List[lanelet2.core.Lanelet],
-            lanelet2.core.LaneletLayer,
-        ],
+        lanelet_group: LaneletInput,
         road_id: int,
         s_offset: float = 0.0,
     ) -> "Road":
@@ -346,10 +342,7 @@ class Road:
             raise ValueError("Lanelet group cannot be empty")
 
         # Convert input to list for consistent processing
-        if isinstance(lanelet_group, (set, lanelet2.core.LaneletLayer)):
-            lanelet_list = list(lanelet_group)
-        else:
-            lanelet_list = lanelet_group
+        lanelet_list = to_lanelet_list(lanelet_group)
 
         reference_line = ReferenceLine.construct_from_lanelet_groups(
             lanelet_map, lanelet_list
