@@ -1,0 +1,39 @@
+# Example map configuration using MGRS grid with offset
+# This format specifies a MGRS grid zone and then provides offset coordinates
+
+# MGRS grid with offset (NEW FORMAT)
+mgrs_grid_with_offset:
+  grid: 54SUE              # MGRS grid zone designator
+  offset_x: 81655.73       # Easting offset in meters from grid origin
+  offset_y: 50137.43       # Northing offset in meters from grid origin
+  offset_z: 42.49998       # Altitude offset in meters (optional, defaults to 0.0)
+
+# Merge operations - merge multiple lanelets into one
+merge_operations:
+  # - lanelet_ids: [100, 101, 102]
+
+# Remove operations - remove lanelets from the map
+remove_operations:
+  # - lanelet_ids: [300, 301, 302]
+
+# Replace operations - replace multiple lanelets with a single merged one
+replace_operations:
+  # - lanelet_ids: [500, 501, 502]
+
+# Move point operations - adjust individual point positions
+move_point_operations:
+  # - point_id: 12345
+  #   new_x: 100.5
+  #   new_y: 200.3
+
+# Delete point operations - remove points from linestrings
+delete_point_operations:
+  # - point_ids: [12345, 12346]
+
+# Remove lanelet operations - completely remove lanelets
+remove_lanelet_operations:
+  # - lanelet_ids: [900, 901]
+
+# Remove turn direction operations - remove turn_direction attributes
+remove_turn_direction_operations:
+  # - lanelet_ids: []

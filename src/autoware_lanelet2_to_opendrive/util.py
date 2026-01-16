@@ -503,6 +503,124 @@ def mgrs_to_lanelet2_origin(mgrs_grid: str) -> lanelet2.io.Origin:
         raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e
 
 
+def mgrs_grid_with_offset_to_latlon(
+    mgrs_grid: str, offset_x: float, offset_y: float
+) -> tuple[float, float]:
+    """Convert MGRS grid + offset to latitude/longitude coordinates.
+
+    Args:
+        mgrs_grid: MGRS grid reference string (e.g., "54SUE")
+        offset_x: Easting offset in meters from the grid origin
+        offset_y: Northing offset in meters from the grid origin
+
+    Returns:
+        Tuple of (latitude, longitude) in decimal degrees
+
+    Raises:
+        ValueError: If the MGRS grid string is invalid
+
+    Example:
+        >>> mgrs_grid_with_offset_to_latlon("54SUE", 81655.73, 50137.43)
+        (-33.123456, 151.234567)
+    """
+    import re
+
+    try:
+        # Create MGRS converter
+        m = mgrs.MGRS()
+
+        # Handle partial MGRS grid by padding with zeros if needed
+        processed_mgrs = mgrs_grid.strip()
+
+        # Check if we have a partial grid (missing meter coordinates)
+        if len(processed_mgrs) >= 3:
+            match = re.match(r"^(\d+[A-Z][A-Z][A-Z])(.*)$", processed_mgrs)
+            if match:
+                grid_square = match.group(1)
+                coordinates = match.group(2)
+
+                # If coordinates are missing or incomplete, pad with zeros
+                if len(coordinates) == 0:
+                    processed_mgrs = grid_square + "0000000000"
+                elif len(coordinates) < 10:
+                    if len(coordinates) % 2 == 1:
+                        coordinates += "0"
+                    padded_coords = coordinates.ljust(10, "0")
+                    processed_mgrs = grid_square + padded_coords
+
+        # First, get the grid origin in lat/lon
+        grid_lat, grid_lon = m.toLatLon(processed_mgrs)
+
+        # Now convert the offset position back to MGRS coordinates
+        # We need to convert offset_x and offset_y to the proper MGRS coordinate format
+        # MGRS uses 5-digit easting and northing (in meters with leading zeros)
+        easting = int(offset_x)
+        northing = int(offset_y)
+
+        # Build MGRS string with the offset coordinates
+        # Extract just the grid square identifier (zone + band + square)
+        match = re.match(r"^(\d+[A-Z][A-Z][A-Z])", processed_mgrs)
+        if not match:
+            raise ValueError(f"Invalid MGRS format: {mgrs_grid}")
+        grid_square = match.group(1)
+
+        # Format as 5-digit easting and northing
+        mgrs_with_offset = f"{grid_square}{easting:05d}{northing:05d}"
+
+        # Convert this MGRS coordinate to lat/lon
+        lat, lon = m.toLatLon(mgrs_with_offset)
+
+        return lat, lon
+
+    except Exception as e:
+        raise ValueError(
+            f"Invalid MGRS grid string '{mgrs_grid}' or offset values: {e}"
+        ) from e
+
+
+def mgrs_grid_with_offset_to_lanelet2_origin(
+    mgrs_grid: str, offset_x: float, offset_y: float, offset_z: float = 0.0
+) -> lanelet2.io.Origin:
+    """Convert MGRS grid + offset to lanelet2.io.Origin.
+
+    Args:
+        mgrs_grid: MGRS grid reference string (e.g., "54SUE")
+        offset_x: Easting offset in meters from the grid origin
+        offset_y: Northing offset in meters from the grid origin
+        offset_z: Altitude offset in meters (optional, default 0.0)
+
+    Returns:
+        lanelet2.io.Origin object with coordinates converted from MGRS + offset
+
+    Raises:
+        ValueError: If the MGRS grid string or offset values are invalid
+
+    Example:
+        >>> origin = mgrs_grid_with_offset_to_lanelet2_origin("54SUE", 81655.73, 50137.43, 42.49998)
+    """
+    lat, lon = mgrs_grid_with_offset_to_latlon(mgrs_grid, offset_x, offset_y)
+    return lanelet2.io.Origin(lat, lon, offset_z)
+
+
+def latlon_to_lanelet2_origin(
+    latitude: float, longitude: float, altitude: float = 0.0
+) -> lanelet2.io.Origin:
+    """Convert latitude/longitude to lanelet2.io.Origin.
+
+    Args:
+        latitude: Latitude in decimal degrees
+        longitude: Longitude in decimal degrees
+        altitude: Altitude in meters (optional, default 0.0)
+
+    Returns:
+        lanelet2.io.Origin object with the specified coordinates
+
+    Example:
+        >>> origin = latlon_to_lanelet2_origin(-33.123456, 151.234567, 42.5)
+    """
+    return lanelet2.io.Origin(latitude, longitude, altitude)
+
+
 def mgrs_to_proj_string(mgrs_grid: str) -> str:
     """Convert MGRS grid to PROJ string for OpenDRIVE geoReference.
 

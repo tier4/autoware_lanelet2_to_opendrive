@@ -11,6 +11,10 @@ from autoware_lanelet2_to_opendrive.util import (
     filter_lanelets_by_subtype,
     check_lanelet_groups_intersect,
     sort_adjacent_groups,
+    mgrs_to_lanelet2_origin,
+    mgrs_grid_with_offset_to_latlon,
+    mgrs_grid_with_offset_to_lanelet2_origin,
+    latlon_to_lanelet2_origin,
 )
 
 
@@ -747,3 +751,70 @@ def test_find_connecting_lanelet_groups():
     group_225_ids = {ll.id for ll in group_with_225}
     assert 226 in group_225_ids, "Lanelet 226 should be in the same group as 225"
     assert 227 in group_225_ids, "Lanelet 227 should be in the same group as 225"
+
+
+def test_mgrs_to_lanelet2_origin():
+    """Test conversion from MGRS grid code to lanelet2 origin."""
+    # Test with simple MGRS grid
+    origin = mgrs_to_lanelet2_origin("54SUE")
+    assert isinstance(origin, lanelet2.io.Origin)
+    # Verify latitude and longitude are in reasonable range
+    assert -90 <= origin.lat <= 90
+    assert -180 <= origin.lon <= 180
+
+
+def test_mgrs_grid_with_offset_to_latlon():
+    """Test conversion from MGRS grid + offset to lat/lon coordinates."""
+    # Test with MGRS grid and offset
+    lat, lon = mgrs_grid_with_offset_to_latlon("54SUE", 81655.73, 50137.43)
+    assert isinstance(lat, float)
+    assert isinstance(lon, float)
+    # Verify coordinates are in reasonable range
+    assert -90 <= lat <= 90
+    assert -180 <= lon <= 180
+
+
+def test_mgrs_grid_with_offset_to_lanelet2_origin():
+    """Test conversion from MGRS grid + offset to lanelet2 origin."""
+    # Test with MGRS grid, offset, and altitude
+    origin = mgrs_grid_with_offset_to_lanelet2_origin(
+        "54SUE", 81655.73, 50137.43, 42.49998
+    )
+    assert isinstance(origin, lanelet2.io.Origin)
+    # Verify latitude and longitude are in reasonable range
+    assert -90 <= origin.lat <= 90
+    assert -180 <= origin.lon <= 180
+    assert origin.alt == 42.49998
+
+
+def test_latlon_to_lanelet2_origin():
+    """Test conversion from lat/lon to lanelet2 origin."""
+    # Test with latitude, longitude, and altitude
+    origin = latlon_to_lanelet2_origin(-33.123456, 151.234567, 42.5)
+    assert isinstance(origin, lanelet2.io.Origin)
+    assert origin.lat == -33.123456
+    assert origin.lon == 151.234567
+    assert origin.alt == 42.5
+
+    # Test without altitude (should default to 0.0)
+    origin_no_alt = latlon_to_lanelet2_origin(-33.123456, 151.234567)
+    assert isinstance(origin_no_alt, lanelet2.io.Origin)
+    assert origin_no_alt.lat == -33.123456
+    assert origin_no_alt.lon == 151.234567
+    assert origin_no_alt.alt == 0.0
+
+
+def test_mgrs_origin_conversion_consistency():
+    """Test that MGRS grid conversion produces consistent results."""
+    # Same MGRS grid should produce same origin
+    origin1 = mgrs_to_lanelet2_origin("54SUE")
+    origin2 = mgrs_to_lanelet2_origin("54SUE")
+    assert origin1.lat == origin2.lat
+    assert origin1.lon == origin2.lon
+
+    # MGRS grid with zero offset should produce the grid origin
+    origin_no_offset = mgrs_grid_with_offset_to_lanelet2_origin("54SUE", 0, 0, 0)
+    # The origins should be very close (within numerical tolerance)
+    # Note: They might not be exactly equal due to MGRS padding logic
+    assert abs(origin_no_offset.lat - origin1.lat) < 0.1
+    assert abs(origin_no_offset.lon - origin1.lon) < 0.1

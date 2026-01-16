@@ -1,7 +1,8 @@
 # Nishishinjuku map configuration
 
-# MGRS code for map projection (REQUIRED)
-mgrs_code: 54SUE
+# MGRS grid for map projection (REQUIRED)
+# Using simple MGRS grid specification
+mgrs_grid: 54SUE
 
 # Merge operations - merge multiple lanelets into one
 # The merged lanelet is added to the map (originals are kept)

@@ -1,8 +1,25 @@
 # Example map-specific configuration
 # Copy this file and customize for your specific map
 
-# MGRS code for map projection (REQUIRED)
-mgrs_code: 54SUE815501
+# Origin specification (REQUIRED - choose ONE of the following methods):
+#
+# Method 1: Simple MGRS grid code (current method)
+mgrs_grid: 54SUE815501
+#
+# Method 2: MGRS grid with offset (see example_mgrs_offset.yaml)
+# mgrs_grid_with_offset:
+#   grid: 54SUE
+#   offset_x: 81655.73
+#   offset_y: 50137.43
+#   offset_z: 42.49998
+#
+# Method 3: Latitude/longitude (see example_latlon.yaml)
+# lat_lon:
+#   latitude: -33.123456
+#   longitude: 151.234567
+#   altitude: 42.5
+#
+# NOTE: Only ONE method should be specified. Using multiple methods will cause an error.
 
 # Merge operations - merge multiple lanelets into one
 # First creates all merged lanelets, then removes the original lanelets
