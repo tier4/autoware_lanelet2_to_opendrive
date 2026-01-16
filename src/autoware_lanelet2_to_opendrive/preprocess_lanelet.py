@@ -107,17 +107,46 @@ class RemoveTurnDirectionOperation:
 
 
 @dataclass
+class LatLonOrigin:
+    """Geographic origin specified by latitude and longitude.
+
+    Attributes:
+        lat: Latitude in degrees (WGS84)
+        lon: Longitude in degrees (WGS84)
+    """
+
+    lat: float
+    lon: float
+
+    def __post_init__(self) -> None:
+        """Validate latitude and longitude values."""
+        if not -90 <= self.lat <= 90:
+            raise ValueError(f"Latitude must be between -90 and 90, got {self.lat}")
+        if not -180 <= self.lon <= 180:
+            raise ValueError(f"Longitude must be between -180 and 180, got {self.lon}")
+
+
+@dataclass
 class PreprocessOperation:
     """Main configuration class for preprocessing operations.
 
     This dataclass defines all preprocessing operations to be performed
     on a Lanelet2 map. It can be loaded from a YAML configuration file.
+
+    The projection origin can be specified in two ways (mutually exclusive):
+    1. Using MGRS code: Set mgrs_code to a valid MGRS grid reference
+    2. Using exact lat/lon: Set both origin_lat and origin_lon
+
+    Specifying both methods will raise a ValueError.
     """
 
     # Input/Output paths
     input_map_path: str
     output_map_path: str
-    mgrs_code: str  # MGRS code for projection
+
+    # Projection origin - specify EITHER mgrs_code OR origin (mutually exclusive)
+    mgrs_code: Optional[str] = None  # MGRS code for projection
+    origin: Optional[LatLonOrigin] = None  # Exact lat/lon origin
 
     # Operations to perform
     merge_operations: List[MergeOperation] = field(default_factory=list)
@@ -142,6 +171,30 @@ class PreprocessOperation:
         False  # If True, exclude signals not in junctions
     )
 
+    def __post_init__(self) -> None:
+        """Validate that origin is specified correctly after initialization."""
+        self._validate_origin()
+
+    def _validate_origin(self) -> None:
+        """Validate that exactly one origin specification method is used.
+
+        Raises:
+            ValueError: If both mgrs_code and origin are specified, or if neither is specified
+        """
+        has_mgrs = self.mgrs_code is not None and self.mgrs_code != ""
+        has_origin = self.origin is not None
+
+        if has_mgrs and has_origin:
+            raise ValueError(
+                "Cannot specify both mgrs_code and origin. "
+                "Use either MGRS code or exact lat/lon coordinates, not both."
+            )
+
+        if not has_mgrs and not has_origin:
+            raise ValueError(
+                "Must specify projection origin using either mgrs_code or origin."
+            )
+
     @classmethod
     def from_yaml(cls, yaml_path: Union[str, Path]) -> "PreprocessOperation":
         """Load preprocessing configuration from a YAML file.
@@ -155,7 +208,14 @@ class PreprocessOperation:
         Example YAML format:
             input_map_path: /path/to/input.osm
             output_map_path: /path/to/output.osm
+
+            # Option 1: Use MGRS code for projection origin
             mgrs_code: 54SUE815501
+
+            # Option 2: Use exact lat/lon for projection origin (mutually exclusive with mgrs_code)
+            # origin:
+            #   lat: 35.6762
+            #   lon: 139.6503
 
             merge_operations:
               - lanelet_ids: [100, 101, 102]
@@ -223,10 +283,17 @@ class PreprocessOperation:
         for op in config.get("remove_turn_direction_operations", []):
             remove_turn_direction_ops.append(RemoveTurnDirectionOperation(**op))
 
+        # Parse origin if specified
+        origin = None
+        origin_config = config.get("origin")
+        if origin_config is not None:
+            origin = LatLonOrigin(lat=origin_config["lat"], lon=origin_config["lon"])
+
         return cls(
             input_map_path=config["input_map_path"],
             output_map_path=config["output_map_path"],
-            mgrs_code=config["mgrs_code"],
+            mgrs_code=config.get("mgrs_code"),
+            origin=origin,
             merge_operations=merge_ops,
             remove_operations=remove_ops,
             replace_operations=replace_ops,
@@ -298,10 +365,17 @@ class PreprocessOperation:
             if op:
                 remove_turn_direction_ops.append(RemoveTurnDirectionOperation(**op))
 
+        # Parse origin if specified
+        origin = None
+        origin_config = config.get("origin")
+        if origin_config is not None:
+            origin = LatLonOrigin(lat=origin_config["lat"], lon=origin_config["lon"])
+
         return cls(
             input_map_path=config.get("input_map_path") or "",
             output_map_path=config.get("output_map_path") or "",
-            mgrs_code=config.get("mgrs_code") or "",
+            mgrs_code=config.get("mgrs_code") or None,
+            origin=origin,
             merge_operations=merge_ops,
             remove_operations=remove_ops,
             replace_operations=replace_ops,
@@ -325,14 +399,19 @@ class PreprocessOperation:
         """
         yaml_path = Path(yaml_path)
 
-        config = {
+        config: dict = {
             "input_map_path": self.input_map_path,
             "output_map_path": self.output_map_path,
-            "mgrs_code": self.mgrs_code,
             "dry_run": self.dry_run,
             "verbose": self.verbose,
             "exclude_non_junction_signals": self.exclude_non_junction_signals,
         }
+
+        # Add projection origin (either mgrs_code or origin)
+        if self.mgrs_code is not None:
+            config["mgrs_code"] = self.mgrs_code
+        elif self.origin is not None:
+            config["origin"] = {"lat": self.origin.lat, "lon": self.origin.lon}
 
         # Convert operations to dict format
         if self.merge_operations:
@@ -420,6 +499,9 @@ class LaneletPreprocessor:
     def load_map(self) -> lanelet2.core.LaneletMap:
         """Load the input Lanelet2 map using MGRS projection.
 
+        The projection origin can be specified either via MGRS code or
+        exact lat/lon coordinates (mutually exclusive).
+
         Returns:
             Loaded LaneletMap
 
@@ -432,12 +514,22 @@ class LaneletPreprocessor:
             raise FileNotFoundError(f"Input map not found: {input_path}")
 
         logger.info(f"Loading map from: {input_path}")
-        logger.info(f"Using MGRS projection with code: {self.config.mgrs_code}")
 
-        # Use MGRSProjector with the provided MGRS code
-        origin = mgrs_to_lanelet2_origin(self.config.mgrs_code)
+        # Create origin from either MGRS code or lat/lon
+        if self.config.mgrs_code is not None:
+            logger.info(f"Using MGRS projection with code: {self.config.mgrs_code}")
+            origin = mgrs_to_lanelet2_origin(self.config.mgrs_code)
+        elif self.config.origin is not None:
+            logger.info(
+                f"Using lat/lon origin: lat={self.config.origin.lat}, "
+                f"lon={self.config.origin.lon}"
+            )
+            origin = lanelet2.io.Origin(self.config.origin.lat, self.config.origin.lon)
+        else:
+            # This should never happen due to __post_init__ validation
+            raise RuntimeError("No projection origin specified")
+
         self.projector = MGRSProjector(origin)
-
         self.lanelet_map = lanelet2.io.load(str(input_path), self.projector)
 
         logger.info(f"Loaded map with {len(self.lanelet_map.laneletLayer)} lanelets")
@@ -889,10 +981,18 @@ def main() -> int:
         type=str,
         help="Path to YAML configuration file",
     )
-    parser.add_argument(
+    # Projection origin options (mutually exclusive)
+    origin_group = parser.add_mutually_exclusive_group()
+    origin_group.add_argument(
         "--mgrs",
         type=str,
         help="MGRS code for projection (overrides config file)",
+    )
+    origin_group.add_argument(
+        "--origin",
+        type=str,
+        metavar="LAT,LON",
+        help="Lat/lon origin for projection as 'lat,lon' (overrides config file)",
     )
     parser.add_argument(
         "--dry-run",
@@ -923,6 +1023,17 @@ def main() -> int:
     # Override settings from command line
     if args.mgrs:
         config.mgrs_code = args.mgrs
+        config.origin = None  # Clear lat/lon origin if MGRS is specified
+    elif args.origin:
+        try:
+            lat_str, lon_str = args.origin.split(",")
+            config.origin = LatLonOrigin(lat=float(lat_str), lon=float(lon_str))
+            config.mgrs_code = None  # Clear MGRS code if lat/lon is specified
+        except ValueError:
+            logger.error(
+                f"Invalid --origin format. Expected 'lat,lon', got: {args.origin}"
+            )
+            return 1
     if args.dry_run:
         config.dry_run = True
     if args.verbose:

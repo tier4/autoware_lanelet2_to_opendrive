@@ -16,6 +16,11 @@ from .util import (
     RoadLaneletMapping,
 )
 from .main import convert_lanelet2_to_opendrive
+from .preprocess_lanelet import (
+    LatLonOrigin,
+    PreprocessOperation,
+    LaneletPreprocessor,
+)
 
 __all__ = [
     "ConnectionDirection",
@@ -27,4 +32,7 @@ __all__ = [
     "find_connecting_lanelet_groups",
     "RoadLaneletMapping",
     "convert_lanelet2_to_opendrive",
+    "LatLonOrigin",
+    "PreprocessOperation",
+    "LaneletPreprocessor",
 ]
