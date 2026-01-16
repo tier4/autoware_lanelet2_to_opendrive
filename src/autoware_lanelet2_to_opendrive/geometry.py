@@ -3,6 +3,8 @@ from typing import Optional, List, Tuple, Dict
 import lanelet2
 import logging
 
+from .config import DEFAULT_CONFIG
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ def point_to_line_segment_distance(
     seg_vec = seg_end[:2] - seg_start[:2]
     seg_length = np.linalg.norm(seg_vec)
 
-    if seg_length < 1e-10:
+    if seg_length < DEFAULT_CONFIG.geometry.epsilon:
         return np.linalg.norm(point[:2] - seg_start[:2])
 
     seg_unit = seg_vec / seg_length

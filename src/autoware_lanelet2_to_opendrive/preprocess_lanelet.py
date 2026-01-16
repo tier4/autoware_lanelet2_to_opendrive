@@ -11,6 +11,7 @@ from enum import Enum
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
 
+from .config import DEFAULT_CONFIG
 from .lanelet import (
     merge_lanelets_from_ids,
     remove_lanelets,
@@ -40,8 +41,13 @@ class MergeOperation:
 
     lanelet_ids: List[int]
     validate: bool = True
-    tolerance: float = 1e-3
+    tolerance: float = None
     base_id: Optional[int] = None
+
+    def __post_init__(self):
+        """Set default tolerance from config if not specified."""
+        if self.tolerance is None:
+            self.tolerance = DEFAULT_CONFIG.preprocessing.merge_tolerance_default
 
 
 @dataclass
@@ -57,7 +63,12 @@ class ReplaceOperation:
 
     lanelet_ids: List[int]
     validate: bool = True
-    tolerance: float = 1e-3
+    tolerance: float = None
+
+    def __post_init__(self):
+        """Set default tolerance from config if not specified."""
+        if self.tolerance is None:
+            self.tolerance = DEFAULT_CONFIG.preprocessing.replace_tolerance_default
 
 
 @dataclass
@@ -66,7 +77,12 @@ class ValidateOperation:
 
     first_lanelet_id: int
     second_lanelet_id: int
-    tolerance: float = 1e-3
+    tolerance: float = None
+
+    def __post_init__(self):
+        """Set default tolerance from config if not specified."""
+        if self.tolerance is None:
+            self.tolerance = DEFAULT_CONFIG.preprocessing.validate_tolerance_default
 
 
 @dataclass

@@ -1,6 +1,7 @@
 import numpy as np
 import lanelet2
 from typing import Set
+from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups
 from .cubic_spline_1d import CubicSpline1D
@@ -165,7 +166,7 @@ def _get_boundary_start_vel(boundary) -> np.ndarray:
     direction = next_point - start_point
     length = np.linalg.norm(direction)
 
-    if length < 1e-10:
+    if length < DEFAULT_CONFIG.geometry.epsilon:
         return np.array([1.0, 0.0, 0.0])  # Fallback
 
     return direction / length
@@ -191,7 +192,7 @@ def _get_boundary_end_vel(boundary) -> np.ndarray:
     direction = end_point - prev_point
     length = np.linalg.norm(direction)
 
-    if length < 1e-10:
+    if length < DEFAULT_CONFIG.geometry.epsilon:
         return np.array([1.0, 0.0, 0.0])  # Fallback
 
     return direction / length
@@ -228,7 +229,7 @@ def _get_start_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
 
     # Normalize to unit vector
     length = np.linalg.norm(perp_2d)
-    if length < 1e-10:
+    if length < DEFAULT_CONFIG.geometry.epsilon:
         # Fallback to default direction if boundaries are parallel
         perp_2d = np.array([1.0, 0.0])
     else:
@@ -269,7 +270,7 @@ def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
 
     # Normalize to unit vector
     length = np.linalg.norm(perp_2d)
-    if length < 1e-10:
+    if length < DEFAULT_CONFIG.geometry.epsilon:
         # Fallback to default direction if boundaries are parallel
         perp_2d = np.array([1.0, 0.0])
     else:
@@ -380,7 +381,7 @@ def _interpolate_on_line_segments(
     s2 = cumulative_lengths[segment_idx + 1]
 
     # Avoid division by zero for zero-length segments
-    if abs(s2 - s1) < 1e-10:
+    if abs(s2 - s1) < DEFAULT_CONFIG.geometry.epsilon:
         return p1
 
     # Linear interpolation within the segment

@@ -6,6 +6,8 @@ from typing import Optional, Tuple
 from scipy.interpolate import BSpline
 from scipy.optimize import minimize_scalar
 
+from .config import DEFAULT_CONFIG
+
 
 class Splines:
     """
@@ -64,20 +66,20 @@ class Splines:
                 # Use second-order estimation for better accuracy
                 start_vel = self.points[1] - self.points[0]
                 start_norm = np.linalg.norm(start_vel)
-                if start_norm > 1e-10:
+                if start_norm > DEFAULT_CONFIG.geometry.epsilon:
                     start_vel = start_vel / start_norm
                 else:
                     # Fall back to longer distance if points are duplicate
                     start_vel = self.points[2] - self.points[0]
                     start_norm = np.linalg.norm(start_vel)
-                    if start_norm > 1e-10:
+                    if start_norm > DEFAULT_CONFIG.geometry.epsilon:
                         start_vel = start_vel / start_norm
                     else:
                         start_vel = np.array([1.0, 0.0, 0.0])
             elif self.n_points >= 2:
                 start_vel = self.points[1] - self.points[0]
                 start_norm = np.linalg.norm(start_vel)
-                if start_norm > 1e-10:
+                if start_norm > DEFAULT_CONFIG.geometry.epsilon:
                     start_vel = start_vel / start_norm
                 else:
                     start_vel = np.array([1.0, 0.0, 0.0])
@@ -89,20 +91,20 @@ class Splines:
                 # Use second-order estimation for better accuracy
                 end_vel = self.points[-1] - self.points[-2]
                 end_norm = np.linalg.norm(end_vel)
-                if end_norm > 1e-10:
+                if end_norm > DEFAULT_CONFIG.geometry.epsilon:
                     end_vel = end_vel / end_norm
                 else:
                     # Fall back to longer distance if points are duplicate
                     end_vel = self.points[-1] - self.points[-3]
                     end_norm = np.linalg.norm(end_vel)
-                    if end_norm > 1e-10:
+                    if end_norm > DEFAULT_CONFIG.geometry.epsilon:
                         end_vel = end_vel / end_norm
                     else:
                         end_vel = np.array([1.0, 0.0, 0.0])
             elif self.n_points >= 2:
                 end_vel = self.points[-1] - self.points[-2]
                 end_norm = np.linalg.norm(end_vel)
-                if end_norm > 1e-10:
+                if end_norm > DEFAULT_CONFIG.geometry.epsilon:
                     end_vel = end_vel / end_norm
                 else:
                     end_vel = np.array([1.0, 0.0, 0.0])
@@ -170,8 +172,8 @@ class Splines:
             # Density function D(t) for knot placement
             # alpha: weight for uniformity (larger values approach uniform spacing)
             # beta:  weight for curvature (larger values concentrate knots at curves)
-            alpha = 2.0  # Increased for more uniform distribution
-            beta = 2.0  # Reduced to avoid over-concentration at curves
+            alpha = DEFAULT_CONFIG.spline.knot_alpha_weight
+            beta = DEFAULT_CONFIG.spline.knot_beta_weight
 
             # Define "importance" weight for each interval
             # Using curvature_metric at point positions
@@ -217,10 +219,8 @@ class Splines:
         A_vel_end = self._get_basis_matrix([1.0], deriv=1)
 
         # 4. Setup Least Squares with weights
-        w_hard = (
-            80.0  # Weight for hard constraints (balanced to ensure boundary conditions)
-        )
-        w_soft = 20.0  # Weight for data fitting (increased for better curve following)
+        w_hard = DEFAULT_CONFIG.spline.hard_constraint_weight
+        w_soft = DEFAULT_CONFIG.spline.soft_constraint_weight
 
         # Combine matrices
         A_combined = np.vstack(
@@ -265,7 +265,9 @@ class Splines:
         self._check_soft_constraints()
 
     def _verify_hard_constraints(
-        self, position_tol: float = 5.0, velocity_tol: float = 15.0
+        self,
+        position_tol: float = None,
+        velocity_tol: float = None,
     ):
         """
         Verify that hard constraints (boundary conditions) are satisfied.
@@ -277,6 +279,11 @@ class Splines:
         Raises:
             ValueError: If any hard constraint is violated beyond tolerance
         """
+        if position_tol is None:
+            position_tol = DEFAULT_CONFIG.spline.position_tolerance
+        if velocity_tol is None:
+            velocity_tol = DEFAULT_CONFIG.spline.velocity_tolerance
+
         # Check start position constraint
         start_pos_actual = self.spline(0.0, nu=0)
         start_pos_expected = self.points[0]
@@ -324,9 +331,9 @@ class Splines:
 
     def _check_soft_constraints(
         self,
-        max_avg_error: float = 2.0,
-        max_point_error: float = 8.0,
-        warn_percentile: float = 95.0,
+        max_avg_error: float = None,
+        max_point_error: float = None,
+        warn_percentile: float = None,
     ):
         """
         Check soft constraints (data fitting) and warn if error is large.
@@ -339,6 +346,13 @@ class Splines:
         Warns:
             UserWarning if fitting errors exceed thresholds
         """
+        if max_avg_error is None:
+            max_avg_error = DEFAULT_CONFIG.spline.max_avg_error
+        if max_point_error is None:
+            max_point_error = DEFAULT_CONFIG.spline.max_point_error
+        if warn_percentile is None:
+            warn_percentile = DEFAULT_CONFIG.spline.warn_percentile
+
         # Calculate errors at each input point
         errors = []
         for i, t in enumerate(self.t_data):
@@ -437,13 +451,13 @@ class Splines:
 
             if derivative == 1:
                 # dx/ds = (dx/dt) / (ds/dt)
-                if speed > 1e-12:
+                if speed > DEFAULT_CONFIG.spline.speed_epsilon:
                     return velocity_t / speed
                 else:
                     return np.array([1.0, 0.0, 0.0])  # Fallback direction
             elif derivative == 2:
                 # For second derivative: d²x/ds²
-                if speed > 1e-12:
+                if speed > DEFAULT_CONFIG.spline.speed_epsilon:
                     accel_t = self.spline(t, nu=2)  # d²x/dt²
                     # Apply chain rule for second derivative
                     # d²x/ds² = (d²x/dt²) / (ds/dt)² - (dx/dt) * (d²s/dt²) / (ds/dt)³
