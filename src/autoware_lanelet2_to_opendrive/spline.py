@@ -266,8 +266,8 @@ class Splines:
 
     def _verify_hard_constraints(
         self,
-        position_tol: float = None,
-        velocity_tol: float = None,
+        position_tol: Optional[float] = None,
+        velocity_tol: Optional[float] = None,
     ):
         """
         Verify that hard constraints (boundary conditions) are satisfied.
@@ -331,9 +331,9 @@ class Splines:
 
     def _check_soft_constraints(
         self,
-        max_avg_error: float = None,
-        max_point_error: float = None,
-        warn_percentile: float = None,
+        max_avg_error: Optional[float] = None,
+        max_point_error: Optional[float] = None,
+        warn_percentile: Optional[float] = None,
     ):
         """
         Check soft constraints (data fitting) and warn if error is large.

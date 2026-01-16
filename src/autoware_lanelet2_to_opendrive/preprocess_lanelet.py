@@ -41,7 +41,7 @@ class MergeOperation:
 
     lanelet_ids: List[int]
     validate: bool = True
-    tolerance: float = None
+    tolerance: Optional[float] = None
     base_id: Optional[int] = None
 
     def __post_init__(self):
@@ -63,7 +63,7 @@ class ReplaceOperation:
 
     lanelet_ids: List[int]
     validate: bool = True
-    tolerance: float = None
+    tolerance: Optional[float] = None
 
     def __post_init__(self):
         """Set default tolerance from config if not specified."""
@@ -77,7 +77,7 @@ class ValidateOperation:
 
     first_lanelet_id: int
     second_lanelet_id: int
-    tolerance: float = None
+    tolerance: Optional[float] = None
 
     def __post_init__(self):
         """Set default tolerance from config if not specified."""
