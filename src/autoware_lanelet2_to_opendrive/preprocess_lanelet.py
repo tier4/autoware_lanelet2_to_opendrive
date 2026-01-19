@@ -117,7 +117,9 @@ class RemoveTurnDirectionOperation:
     Otherwise, only removes from the specified lanelet IDs.
     """
 
-    lanelet_ids: List[int] = field(default_factory=list)  # Empty list means all lanelets
+    lanelet_ids: List[int] = field(
+        default_factory=list
+    )  # Empty list means all lanelets
 
 
 @dataclass
@@ -214,7 +216,9 @@ class PreprocessOperation:
     verbose: bool = False  # Enable verbose logging
 
     # CARLA compatibility settings
-    exclude_non_junction_signals: bool = False  # If True, exclude signals not in junctions
+    exclude_non_junction_signals: bool = (
+        False  # If True, exclude signals not in junctions
+    )
 
     def __post_init__(self) -> None:
         """Validate that origin is specified correctly after initialization."""
@@ -316,7 +320,9 @@ class PreprocessOperation:
             move_point_operations=operations["move_point_operations"],
             delete_point_operations=operations["delete_point_operations"],
             remove_lanelet_operations=operations["remove_lanelet_operations"],
-            remove_turn_direction_operations=operations["remove_turn_direction_operations"],
+            remove_turn_direction_operations=operations[
+                "remove_turn_direction_operations"
+            ],
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
             exclude_non_junction_signals=config.get(
@@ -361,7 +367,9 @@ class PreprocessOperation:
             move_point_operations=operations["move_point_operations"],
             delete_point_operations=operations["delete_point_operations"],
             remove_lanelet_operations=operations["remove_lanelet_operations"],
-            remove_turn_direction_operations=operations["remove_turn_direction_operations"],
+            remove_turn_direction_operations=operations[
+                "remove_turn_direction_operations"
+            ],
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
             exclude_non_junction_signals=config.get(
@@ -561,7 +569,7 @@ class LaneletPreprocessor:
         )
         for i, op in enumerate(self.config.merge_operations):
             logger.info(
-                f"  Merge operation {i+1}/{len(self.config.merge_operations)}: "
+                f"  Merge operation {i + 1}/{len(self.config.merge_operations)}: "
                 f"lanelets {op.lanelet_ids}"
             )
 
@@ -640,7 +648,7 @@ class LaneletPreprocessor:
         """
         for i, op in enumerate(self.config.remove_operations):
             logger.info(
-                f"Executing remove operation {i+1}/{len(self.config.remove_operations)}"
+                f"Executing remove operation {i + 1}/{len(self.config.remove_operations)}"
             )
             logger.debug(f"  Removing lanelets: {op.lanelet_ids}")
 
@@ -663,7 +671,7 @@ class LaneletPreprocessor:
         """
         for i, op in enumerate(self.config.replace_operations):
             logger.info(
-                f"Executing replace operation {i+1}/{len(self.config.replace_operations)}"
+                f"Executing replace operation {i + 1}/{len(self.config.replace_operations)}"
             )
             logger.debug(f"  Replacing lanelets: {op.lanelet_ids}")
 
@@ -700,7 +708,7 @@ class LaneletPreprocessor:
         """
         for i, op in enumerate(self.config.validate_operations):
             logger.info(
-                f"Executing validate operation {i+1}/{len(self.config.validate_operations)}"
+                f"Executing validate operation {i + 1}/{len(self.config.validate_operations)}"
             )
 
             try:
@@ -737,7 +745,7 @@ class LaneletPreprocessor:
 
         for i, op in enumerate(self.config.move_point_operations):
             logger.info(
-                f"Executing move point operation {i+1}/{len(self.config.move_point_operations)}"
+                f"Executing move point operation {i + 1}/{len(self.config.move_point_operations)}"
             )
             logger.info(
                 f"  Moving point {op.point_id} to ({op.new_x}, {op.new_y}, {op.new_z})"
@@ -771,7 +779,7 @@ class LaneletPreprocessor:
 
         for i, op in enumerate(self.config.delete_point_operations):
             logger.info(
-                f"Executing delete point operation {i+1}/{len(self.config.delete_point_operations)}"
+                f"Executing delete point operation {i + 1}/{len(self.config.delete_point_operations)}"
             )
             logger.info(f"  Points to delete: {op.point_ids}")
 
@@ -856,7 +864,7 @@ class LaneletPreprocessor:
 
         for i, op in enumerate(self.config.remove_turn_direction_operations):
             logger.info(
-                f"Executing remove turn_direction operation {i+1}/"
+                f"Executing remove turn_direction operation {i + 1}/"
                 f"{len(self.config.remove_turn_direction_operations)}"
             )
 
