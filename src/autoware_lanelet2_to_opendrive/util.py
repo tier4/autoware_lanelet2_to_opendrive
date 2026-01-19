@@ -8,8 +8,87 @@ import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from lanelet2.geometry import intersects2d
 import mgrs
+import numpy as np
+
+from .config import COORDINATE_OFFSET
 
 logger = logging.getLogger(__name__)
+
+
+def extract_points_3d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
+    """Extract 3D points from a Lanelet2 boundary with coordinate offset applied.
+
+    This function extracts X, Y, Z coordinates from a Lanelet2 LineString3d
+    and applies the global coordinate offset (subtracting offset values).
+
+    Args:
+        boundary: Lanelet2 LineString3d to extract points from
+
+    Returns:
+        numpy array of shape (N, 3) with [x, y, z] coordinates,
+        with coordinate offset applied
+    """
+    points = np.array([[p.x, p.y, p.z] for p in boundary])
+    if COORDINATE_OFFSET.is_active:
+        points[:, 0] -= COORDINATE_OFFSET.x
+        points[:, 1] -= COORDINATE_OFFSET.y
+        points[:, 2] -= COORDINATE_OFFSET.z
+    return points
+
+
+def extract_points_2d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
+    """Extract 2D points from a Lanelet2 boundary with coordinate offset applied.
+
+    This function extracts X, Y coordinates from a Lanelet2 LineString3d
+    and applies the global coordinate offset (subtracting offset values).
+
+    Args:
+        boundary: Lanelet2 LineString3d to extract points from
+
+    Returns:
+        numpy array of shape (N, 2) with [x, y] coordinates,
+        with coordinate offset applied
+    """
+    points = np.array([[p.x, p.y] for p in boundary])
+    if COORDINATE_OFFSET.is_active:
+        points[:, 0] -= COORDINATE_OFFSET.x
+        points[:, 1] -= COORDINATE_OFFSET.y
+    return points
+
+
+def extract_point_3d(point: lanelet2.core.Point3d) -> np.ndarray:
+    """Extract 3D coordinates from a Lanelet2 point with offset applied.
+
+    Args:
+        point: Lanelet2 Point3d to extract coordinates from
+
+    Returns:
+        numpy array of shape (3,) with [x, y, z] coordinates,
+        with coordinate offset applied
+    """
+    coords = np.array([point.x, point.y, point.z])
+    if COORDINATE_OFFSET.is_active:
+        coords[0] -= COORDINATE_OFFSET.x
+        coords[1] -= COORDINATE_OFFSET.y
+        coords[2] -= COORDINATE_OFFSET.z
+    return coords
+
+
+def extract_point_2d(point: lanelet2.core.Point3d) -> np.ndarray:
+    """Extract 2D coordinates from a Lanelet2 point with offset applied.
+
+    Args:
+        point: Lanelet2 Point3d to extract coordinates from
+
+    Returns:
+        numpy array of shape (2,) with [x, y] coordinates,
+        with coordinate offset applied
+    """
+    coords = np.array([point.x, point.y])
+    if COORDINATE_OFFSET.is_active:
+        coords[0] -= COORDINATE_OFFSET.x
+        coords[1] -= COORDINATE_OFFSET.y
+    return coords
 
 
 # Type aliases for common lanelet collection types

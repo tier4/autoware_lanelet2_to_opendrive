@@ -133,6 +133,56 @@ class ConversionConfig:
     opendrive: OpenDriveConstants = OpenDriveConstants()
 
 
+@dataclass
+class CoordinateOffset:
+    """Runtime coordinate offset configuration.
+
+    This class holds the coordinate offset values that are applied to all
+    coordinates during OpenDRIVE export. The offset is subtracted from
+    Lanelet2 coordinates to convert them to local coordinates.
+
+    When offset is configured (e.g., from MGRS grid + offset in config),
+    all coordinates in the output xodr file will be shifted by subtracting
+    these offset values, making them relative to the offset point.
+
+    Attributes:
+        x: Easting offset in meters to subtract from X coordinates
+        y: Northing offset in meters to subtract from Y coordinates
+        z: Altitude offset in meters to subtract from Z coordinates
+    """
+
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+
+    def set(self, x: float, y: float, z: float = 0.0) -> None:
+        """Set coordinate offset values.
+
+        Args:
+            x: Easting offset in meters
+            y: Northing offset in meters
+            z: Altitude offset in meters (default 0.0)
+        """
+        self.x = x
+        self.y = y
+        self.z = z
+
+    def reset(self) -> None:
+        """Reset offset to zero (no offset applied)."""
+        self.x = 0.0
+        self.y = 0.0
+        self.z = 0.0
+
+    @property
+    def is_active(self) -> bool:
+        """Check if any offset is active (non-zero)."""
+        return self.x != 0.0 or self.y != 0.0 or self.z != 0.0
+
+
 # Global default configuration instance
 # This can be imported and used directly throughout the codebase
 DEFAULT_CONFIG = ConversionConfig()
+
+# Global runtime coordinate offset
+# Set this before conversion to apply coordinate offset to all outputs
+COORDINATE_OFFSET = CoordinateOffset()

@@ -7,6 +7,7 @@ import lxml.etree as ET
 
 from .signal import Signal, Controller, ControlEntry
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
+from ..config import COORDINATE_OFFSET
 
 if TYPE_CHECKING:
     pass
@@ -292,8 +293,11 @@ class SignalsAndControllers:
             return (0.0, -4.0)
 
         # Extract 3D position (use the first point as the signal position)
+        # Apply coordinate offset to convert to local coordinates
         position = light_linestring[0]
-        x, y, z = float(position.x), float(position.y), float(position.z)
+        x = float(position.x) - COORDINATE_OFFSET.x
+        y = float(position.y) - COORDINATE_OFFSET.y
+        z = float(position.z) - COORDINATE_OFFSET.z
 
         # Build spline for this road
         from .reference_line import ReferenceLine

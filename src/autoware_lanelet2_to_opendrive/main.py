@@ -22,6 +22,7 @@ from autoware_lanelet2_to_opendrive.util import (
     mgrs_to_proj_string,
     RoadLaneletMapping,
 )
+from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
     LaneletPreprocessor,
@@ -390,7 +391,7 @@ def convert_lanelet2_to_opendrive(
 
 def parse_origin_from_config(
     cfg: DictConfig,
-) -> tuple[lanelet2.io.Origin, str, float, float]:
+) -> tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
     """
     Parse origin specification from Hydra config with mutual exclusion validation.
 
@@ -403,9 +404,11 @@ def parse_origin_from_config(
         cfg: Hydra configuration object with map settings
 
     Returns:
-        Tuple of (lanelet2.io.Origin, mgrs_code_for_proj_string, origin_lat, origin_lon)
+        Tuple of (lanelet2.io.Origin, mgrs_code_for_proj_string, origin_lat, origin_lon,
+                  offset_x, offset_y, offset_z)
         The mgrs_code_for_proj_string is used for generating the OpenDRIVE geoReference
         The origin_lat and origin_lon are the actual origin coordinates (with offset applied)
+        The offset values are used to convert coordinates to local coordinate system
 
     Raises:
         ValueError: If origin specification is invalid or multiple methods are specified
@@ -472,7 +475,15 @@ def parse_origin_from_config(
                 mgrs_grid, offset_x, offset_y, offset_z
             )
             logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-            return origin, mgrs_grid, origin_lat, origin_lon
+            return (
+                origin,
+                mgrs_grid,
+                origin_lat,
+                origin_lon,
+                offset_x,
+                offset_y,
+                offset_z,
+            )
         else:
             logger.info(f"Using MGRS grid origin: {mgrs_grid}")
             origin = mgrs_to_lanelet2_origin(mgrs_grid)
@@ -484,7 +495,8 @@ def parse_origin_from_config(
             processed_mgrs = mgrs_grid + "0000000000"
             origin_lat, origin_lon = m.toLatLon(processed_mgrs)
             logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-            return origin, mgrs_grid, origin_lat, origin_lon
+            # No offset specified
+            return origin, mgrs_grid, origin_lat, origin_lon, 0.0, 0.0, 0.0
 
     elif has_lat_lon:
         latlon_cfg = map_cfg.lat_lon
@@ -514,7 +526,8 @@ def parse_origin_from_config(
             mgrs_grid = mgrs_code[:5]  # Fallback to first 5 chars
 
         logger.info(f"Derived MGRS grid for PROJ string: {mgrs_grid}")
-        return origin, mgrs_grid, latitude, longitude
+        # No offset for lat/lon origin
+        return origin, mgrs_grid, latitude, longitude, 0.0, 0.0, 0.0
 
     # Should never reach here due to the checks above
     raise ValueError("Invalid origin configuration")
@@ -536,7 +549,17 @@ def preprocess_and_convert_with_hydra(
     input_map_path = lanelet2_file
 
     # Parse origin from config (with mutual exclusion validation)
-    origin, mgrs_code, origin_lat, origin_lon = parse_origin_from_config(cfg)
+    origin, mgrs_code, origin_lat, origin_lon, offset_x, offset_y, offset_z = (
+        parse_origin_from_config(cfg)
+    )
+
+    # Set global coordinate offset for conversion
+    # This will be applied to all coordinates during OpenDRIVE export
+    COORDINATE_OFFSET.set(offset_x, offset_y, offset_z)
+    if COORDINATE_OFFSET.is_active:
+        logger.info(
+            f"Coordinate offset enabled: x={offset_x}, y={offset_y}, z={offset_z}"
+        )
 
     # Get target-specific settings
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
