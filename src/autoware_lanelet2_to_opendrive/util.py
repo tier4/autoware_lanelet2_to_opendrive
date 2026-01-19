@@ -1,5 +1,6 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
+import logging
 from typing import Set, List, Union, Dict, Optional, Iterable
 from enum import Enum
 from dataclasses import dataclass
@@ -7,6 +8,8 @@ import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from lanelet2.geometry import intersects2d
 import mgrs
+
+logger = logging.getLogger(__name__)
 
 
 # Type aliases for common lanelet collection types
@@ -516,6 +519,11 @@ def mgrs_to_lanelet2_origin(mgrs_grid: str) -> lanelet2.io.Origin:
         # Create lanelet2 Origin with the converted coordinates
         origin = lanelet2.io.Origin(lat, lon)
 
+        logger.debug(
+            f"Origin from MGRS grid: mgrs_grid={mgrs_grid}, "
+            f"processed_mgrs={processed_mgrs}, lat={lat}, lon={lon}"
+        )
+
         return origin
 
     except Exception as e:
@@ -618,7 +626,15 @@ def mgrs_grid_with_offset_to_lanelet2_origin(
         >>> origin = mgrs_grid_with_offset_to_lanelet2_origin("54SUE", 81655.73, 50137.43, 42.49998)
     """
     lat, lon = mgrs_grid_with_offset_to_latlon(mgrs_grid, offset_x, offset_y)
-    return lanelet2.io.Origin(lat, lon, offset_z)
+    origin = lanelet2.io.Origin(lat, lon, offset_z)
+
+    logger.debug(
+        f"Origin from MGRS grid with offset: "
+        f"mgrs_grid={mgrs_grid}, offset_x={offset_x}, offset_y={offset_y}, offset_z={offset_z}, "
+        f"lat={lat}, lon={lon}"
+    )
+
+    return origin
 
 
 def latlon_to_lanelet2_origin(
@@ -637,7 +653,13 @@ def latlon_to_lanelet2_origin(
     Example:
         >>> origin = latlon_to_lanelet2_origin(-33.123456, 151.234567, 42.5)
     """
-    return lanelet2.io.Origin(latitude, longitude, altitude)
+    origin = lanelet2.io.Origin(latitude, longitude, altitude)
+
+    logger.debug(
+        f"Origin from lat/lon: lat={latitude}, lon={longitude}, altitude={altitude}"
+    )
+
+    return origin
 
 
 def mgrs_to_proj_string(mgrs_grid: str) -> str:
@@ -706,6 +728,43 @@ def mgrs_to_proj_string(mgrs_grid: str) -> str:
 
     except Exception as e:
         raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e
+
+
+def latlon_to_proj_string(lat: float, lon: float) -> str:
+    """Convert latitude/longitude to PROJ string for OpenDRIVE geoReference.
+
+    Args:
+        lat: Latitude in decimal degrees
+        lon: Longitude in decimal degrees
+
+    Returns:
+        PROJ string with UTM projection and the specified origin coordinates
+
+    Example:
+        >>> latlon_to_proj_string(35.6895, 139.6917)
+        '+proj=utm +zone=54 +lat_0=35.6895 +lon_0=139.6917 +datum=WGS84 +units=m +no_defs'
+    """
+
+    # Calculate UTM zone from longitude
+    # UTM zones are 6 degrees wide, starting at -180
+    zone = int((lon + 180) / 6) + 1
+
+    # Determine hemisphere from latitude
+    is_south = lat < 0
+    hemisphere = "+south" if is_south else ""
+
+    # Build PROJ string with UTM projection
+    proj_string = (
+        f"+proj=utm +zone={zone} {hemisphere} "
+        f"+lat_0={lat} +lon_0={lon} "
+        f"+datum=WGS84 +units=m +no_defs"
+    ).replace("  ", " ")  # Remove double spaces if hemisphere is empty
+
+    logger.debug(
+        f"PROJ string from lat/lon: lat={lat}, lon={lon}, zone={zone}, proj={proj_string}"
+    )
+
+    return proj_string
 
 
 def filter_regulatory_element_by_type(

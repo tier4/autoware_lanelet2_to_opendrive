@@ -15,6 +15,7 @@ from autoware_lanelet2_to_opendrive.util import (
     mgrs_grid_with_offset_to_latlon,
     mgrs_grid_with_offset_to_lanelet2_origin,
     latlon_to_lanelet2_origin,
+    latlon_to_proj_string,
 )
 
 
@@ -821,3 +822,89 @@ def test_mgrs_origin_conversion_consistency():
     # Verify the coordinates are in reasonable range for this MGRS grid (Tokyo area)
     assert 35 <= lat_with_offset <= 36  # Tokyo is around 35.6N
     assert 138 <= lon_with_offset <= 140  # Tokyo is around 139.6E
+
+
+def test_latlon_to_proj_string_basic():
+    """Test basic conversion from lat/lon to PROJ string."""
+    # Test with Tokyo coordinates (Northern hemisphere)
+    proj_string = latlon_to_proj_string(35.6895, 139.6917)
+
+    # Verify it contains expected components
+    assert "+proj=utm" in proj_string
+    assert "+zone=54" in proj_string  # Tokyo is in UTM zone 54
+    assert "+lat_0=35.6895" in proj_string
+    assert "+lon_0=139.6917" in proj_string
+    assert "+datum=WGS84" in proj_string
+    assert "+units=m" in proj_string
+    # Northern hemisphere should not have +south
+    assert "+south" not in proj_string
+
+
+def test_latlon_to_proj_string_southern_hemisphere():
+    """Test PROJ string generation for Southern hemisphere."""
+    # Test with Sydney coordinates (Southern hemisphere)
+    proj_string = latlon_to_proj_string(-33.8688, 151.2093)
+
+    assert "+proj=utm" in proj_string
+    assert "+zone=56" in proj_string  # Sydney is in UTM zone 56
+    assert "+lat_0=-33.8688" in proj_string
+    assert "+lon_0=151.2093" in proj_string
+    assert "+south" in proj_string  # Should have +south for Southern hemisphere
+
+
+def test_latlon_to_proj_string_nishishinjuku():
+    """Test PROJ string for Nishishinjuku area with offset."""
+    # Get lat/lon from MGRS grid with offset (same as nishishinjuku.yaml)
+    lat, lon = mgrs_grid_with_offset_to_latlon("54SUE", 81655.73, 50137.43)
+
+    proj_string = latlon_to_proj_string(lat, lon)
+
+    # Verify the coordinates in PROJ string match the input
+    assert f"+lat_0={lat}" in proj_string
+    assert f"+lon_0={lon}" in proj_string
+    assert "+zone=54" in proj_string  # Nishishinjuku is in UTM zone 54
+
+
+def test_latlon_to_proj_string_vs_mgrs_to_proj_string():
+    """Test that latlon_to_proj_string produces different result than mgrs_to_proj_string when offset is applied."""
+    from autoware_lanelet2_to_opendrive.util import mgrs_to_proj_string
+
+    # Get lat/lon with offset (Nishishinjuku coordinates)
+    lat_with_offset, lon_with_offset = mgrs_grid_with_offset_to_latlon(
+        "54SUE", 81655.73, 50137.43
+    )
+
+    # Get PROJ string using lat/lon (with offset applied)
+    proj_from_latlon = latlon_to_proj_string(lat_with_offset, lon_with_offset)
+
+    # Get PROJ string using MGRS grid only (without offset)
+    proj_from_mgrs = mgrs_to_proj_string("54SUE")
+
+    # The two PROJ strings should be different because offset is applied
+    assert proj_from_latlon != proj_from_mgrs
+
+    # Verify specific coordinates are different
+    # lat/lon with offset should be around 35.688, 139.692 (Nishishinjuku)
+    assert f"+lat_0={lat_with_offset}" in proj_from_latlon
+    assert f"+lon_0={lon_with_offset}" in proj_from_latlon
+
+    # MGRS grid origin (54SUE0000000000) should be around 35.223, 138.802
+    assert "+lat_0=35.688" not in proj_from_mgrs  # Should not have offset lat
+    assert "+lon_0=139.692" not in proj_from_mgrs  # Should not have offset lon
+
+
+def test_latlon_to_proj_string_utm_zone_calculation():
+    """Test UTM zone calculation for various longitudes."""
+    # UTM zones are 6 degrees wide, starting at zone 1 from -180 to -174
+
+    # Zone 1: -180 to -174 (e.g., lon=-177 should be zone 1)
+    proj_zone1 = latlon_to_proj_string(0.0, -177.0)
+    assert "+zone=1" in proj_zone1
+
+    # Zone 31: 0 to 6 (e.g., lon=3 should be zone 31)
+    proj_zone31 = latlon_to_proj_string(45.0, 3.0)
+    assert "+zone=31" in proj_zone31
+
+    # Zone 60: 174 to 180 (e.g., lon=177 should be zone 60)
+    proj_zone60 = latlon_to_proj_string(0.0, 177.0)
+    assert "+zone=60" in proj_zone60

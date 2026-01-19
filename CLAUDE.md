@@ -89,18 +89,21 @@ This applies to:
 - `git push origin master` or `git push origin main` (direct push to protected branches)
 - `git commit --no-verify` (bypasses pre-commit hooks and safety checks)
 - `git push --no-verify` (bypasses push hooks and safety checks)
+- `git rebase` (rewrites history, requires force push, complicates collaboration)
+- `git pull --rebase` (same issues as rebase)
 
 ### Safe Alternatives:
 - Use `git push` (normal push) - will fail safely if there are conflicts
-- Use `git pull --rebase` followed by `git push` to handle conflicts
+- Use `git merge origin/master` to integrate upstream changes (preserves history)
+- Use `git pull` (without --rebase) to fetch and merge
 - Create pull requests instead of direct pushes to main/master
 - Always let pre-commit hooks run to maintain code quality
 
 ### Exception Handling:
 If a push is rejected due to conflicts or hook failures:
-1. **DO NOT** use --force or --no-verify flags
+1. **DO NOT** use --force, --no-verify, or rebase
 2. Fix the underlying issue (resolve conflicts, fix formatting, etc.)
-3. Use `git pull --rebase` to update your branch
+3. Use `git merge origin/master` to integrate upstream changes
 4. Re-run tests and hooks to ensure everything passes
 5. Use normal `git push` after issues are resolved
 
