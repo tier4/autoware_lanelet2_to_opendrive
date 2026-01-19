@@ -142,6 +142,39 @@ class LatLonOrigin:
             raise ValueError(f"Longitude must be between -180 and 180, got {self.lon}")
 
 
+# Metadata for operation parsing - maps config key to operation class
+OPERATION_TYPES = {
+    "merge_operations": MergeOperation,
+    "remove_operations": RemoveOperation,
+    "replace_operations": ReplaceOperation,
+    "validate_operations": ValidateOperation,
+    "move_point_operations": MovePointOperation,
+    "delete_point_operations": DeletePointOperation,
+    "remove_lanelet_operations": RemoveLaneletOperation,
+    "remove_turn_direction_operations": RemoveTurnDirectionOperation,
+}
+
+
+def parse_operations(config: dict, skip_empty: bool = False) -> dict:
+    """Parse all operation types from config dictionary.
+
+    Args:
+        config: Configuration dictionary containing operation definitions
+        skip_empty: If True, skip None/empty entries (for Hydra configs)
+
+    Returns:
+        Dictionary mapping operation type names to lists of operation instances
+    """
+    result = {}
+    for config_key, op_class in OPERATION_TYPES.items():
+        ops_config = config.get(config_key, []) or []
+        if skip_empty:
+            result[config_key] = [op_class(**op) for op in ops_config if op]
+        else:
+            result[config_key] = [op_class(**op) for op in ops_config]
+    return result
+
+
 @dataclass
 class PreprocessOperation:
     """Main configuration class for preprocessing operations.
@@ -266,38 +299,8 @@ class PreprocessOperation:
         with open(yaml_path, "r") as f:
             config = yaml.safe_load(f)
 
-        # Parse operations
-        merge_ops = []
-        for op in config.get("merge_operations", []):
-            merge_ops.append(MergeOperation(**op))
-
-        remove_ops = []
-        for op in config.get("remove_operations", []):
-            remove_ops.append(RemoveOperation(**op))
-
-        replace_ops = []
-        for op in config.get("replace_operations", []):
-            replace_ops.append(ReplaceOperation(**op))
-
-        validate_ops = []
-        for op in config.get("validate_operations", []):
-            validate_ops.append(ValidateOperation(**op))
-
-        move_point_ops = []
-        for op in config.get("move_point_operations", []):
-            move_point_ops.append(MovePointOperation(**op))
-
-        delete_point_ops = []
-        for op in config.get("delete_point_operations", []):
-            delete_point_ops.append(DeletePointOperation(**op))
-
-        remove_lanelet_ops = []
-        for op in config.get("remove_lanelet_operations", []):
-            remove_lanelet_ops.append(RemoveLaneletOperation(**op))
-
-        remove_turn_direction_ops = []
-        for op in config.get("remove_turn_direction_operations", []):
-            remove_turn_direction_ops.append(RemoveTurnDirectionOperation(**op))
+        # Parse all operations using the metadata-driven approach
+        operations = parse_operations(config)
 
         # Parse origin if specified
         origin = None
@@ -310,14 +313,14 @@ class PreprocessOperation:
             output_map_path=config["output_map_path"],
             mgrs_code=config.get("mgrs_code"),
             origin=origin,
-            merge_operations=merge_ops,
-            remove_operations=remove_ops,
-            replace_operations=replace_ops,
-            validate_operations=validate_ops,
-            move_point_operations=move_point_ops,
-            delete_point_operations=delete_point_ops,
-            remove_lanelet_operations=remove_lanelet_ops,
-            remove_turn_direction_operations=remove_turn_direction_ops,
+            merge_operations=operations["merge_operations"],
+            remove_operations=operations["remove_operations"],
+            replace_operations=operations["replace_operations"],
+            validate_operations=operations["validate_operations"],
+            move_point_operations=operations["move_point_operations"],
+            delete_point_operations=operations["delete_point_operations"],
+            remove_lanelet_operations=operations["remove_lanelet_operations"],
+            remove_turn_direction_operations=operations["remove_turn_direction_operations"],
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
             exclude_non_junction_signals=config.get(
@@ -340,46 +343,9 @@ class PreprocessOperation:
         # Convert OmegaConf to dict for easier processing
         config = OmegaConf.to_container(cfg, resolve=True)
 
-        # Parse operations
-        merge_ops = []
-        for op in config.get("merge_operations") or []:
-            if op:  # Skip None/empty entries
-                merge_ops.append(MergeOperation(**op))
-
-        remove_ops = []
-        for op in config.get("remove_operations") or []:
-            if op:
-                remove_ops.append(RemoveOperation(**op))
-
-        replace_ops = []
-        for op in config.get("replace_operations") or []:
-            if op:
-                replace_ops.append(ReplaceOperation(**op))
-
-        validate_ops = []
-        for op in config.get("validate_operations") or []:
-            if op:
-                validate_ops.append(ValidateOperation(**op))
-
-        move_point_ops = []
-        for op in config.get("move_point_operations") or []:
-            if op:
-                move_point_ops.append(MovePointOperation(**op))
-
-        delete_point_ops = []
-        for op in config.get("delete_point_operations") or []:
-            if op:
-                delete_point_ops.append(DeletePointOperation(**op))
-
-        remove_lanelet_ops = []
-        for op in config.get("remove_lanelet_operations") or []:
-            if op:
-                remove_lanelet_ops.append(RemoveLaneletOperation(**op))
-
-        remove_turn_direction_ops = []
-        for op in config.get("remove_turn_direction_operations") or []:
-            if op:
-                remove_turn_direction_ops.append(RemoveTurnDirectionOperation(**op))
+        # Parse all operations using the metadata-driven approach
+        # Use skip_empty=True to handle Hydra's None/empty entries
+        operations = parse_operations(config, skip_empty=True)
 
         # Parse origin if specified
         origin = None
@@ -392,14 +358,14 @@ class PreprocessOperation:
             output_map_path=config.get("output_map_path") or "",
             mgrs_code=config.get("mgrs_code") or None,
             origin=origin,
-            merge_operations=merge_ops,
-            remove_operations=remove_ops,
-            replace_operations=replace_ops,
-            validate_operations=validate_ops,
-            move_point_operations=move_point_ops,
-            delete_point_operations=delete_point_ops,
-            remove_lanelet_operations=remove_lanelet_ops,
-            remove_turn_direction_operations=remove_turn_direction_ops,
+            merge_operations=operations["merge_operations"],
+            remove_operations=operations["remove_operations"],
+            replace_operations=operations["replace_operations"],
+            validate_operations=operations["validate_operations"],
+            move_point_operations=operations["move_point_operations"],
+            delete_point_operations=operations["delete_point_operations"],
+            remove_lanelet_operations=operations["remove_lanelet_operations"],
+            remove_turn_direction_operations=operations["remove_turn_direction_operations"],
             dry_run=config.get("dry_run", False),
             verbose=config.get("verbose", False),
             exclude_non_junction_signals=config.get(
