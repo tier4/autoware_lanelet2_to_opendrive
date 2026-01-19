@@ -32,6 +32,95 @@ uv run python <script.py>
 uv venv
 ```
 
+## Pre-commit Hooks and Lint Checking
+
+**CRITICAL**: This project uses pre-commit hooks to ensure code quality and prevent lint errors. All commits must pass these checks before being pushed.
+
+### Installation
+
+Pre-commit hooks must be installed in your local repository before making any commits:
+
+```bash
+# Install pre-commit (if not already installed)
+pip install pre-commit
+
+# Install the git hook scripts
+pre-commit install
+```
+
+### Usage
+
+#### Automatic Checking (Recommended)
+Once installed, pre-commit hooks run automatically on every `git commit`. The commit will be blocked if any checks fail.
+
+#### Manual Checking
+You can manually run pre-commit checks before committing:
+
+```bash
+# Run on all files
+pre-commit run --all-files
+
+# Run on staged files only
+pre-commit run
+
+# Run on specific files
+pre-commit run --files <file1> <file2>
+```
+
+### Common Lint Errors and Fixes
+
+If pre-commit hooks fail:
+
+1. **Review the error messages** - They usually indicate what needs to be fixed
+2. **Let pre-commit auto-fix when possible** - Many formatters (like black, isort) automatically fix issues
+3. **Stage the auto-fixed changes**:
+   ```bash
+   git add -u
+   ```
+4. **Retry the commit**:
+   ```bash
+   git commit
+   ```
+
+### Important Notes for Claude Code
+
+**MANDATORY**: When working with this repository through Claude Code:
+
+1. **Always install pre-commit hooks** at the start of any work session:
+   ```bash
+   pre-commit install
+   ```
+
+2. **Never bypass pre-commit hooks** with `--no-verify` flag (this is already prohibited in Git Operation Restrictions)
+
+3. **Run manual checks before committing** if there's any doubt:
+   ```bash
+   pre-commit run --all-files
+   ```
+
+4. **If a commit fails due to lint errors**:
+   - Review the error output
+   - Fix the issues or let pre-commit auto-fix them
+   - Stage the fixes with `git add`
+   - Retry the commit (without `--no-verify`)
+
+5. **Common pre-commit hooks in this project may include**:
+   - **black**: Python code formatting
+   - **isort**: Import statement sorting
+   - **flake8**: Python linting
+   - **mypy**: Static type checking
+   - **trailing-whitespace**: Remove trailing whitespace
+   - **end-of-file-fixer**: Ensure files end with newline
+   - **check-yaml**: Validate YAML syntax
+
+### Rationale
+
+- **Prevents CI/CD failures**: Catching lint errors locally before pushing
+- **Maintains code quality**: Consistent formatting and style across the codebase
+- **Saves time**: Faster feedback than waiting for GitHub Actions
+- **Collaborative safety**: Ensures all contributors follow the same standards
+- **Professional development**: Industry best practice for Python projects
+
 ## Project Structure
 
 - `src/autoware_lanelet2_to_opendrive/` - Main Python package directory
