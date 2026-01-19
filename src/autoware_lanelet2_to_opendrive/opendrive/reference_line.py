@@ -94,7 +94,9 @@ class ReferenceLine:
         # Extract 3D points directly from the left boundary (no 3D spline needed)
         # This avoids the 3D-to-2D arc length mapping issues on steep slopes
         boundary = leftmost_lanelet.leftBound
-        points_3d = np.array([[p.x, p.y, p.z] for p in boundary])
+        from ..util import extract_points_3d
+
+        points_3d = extract_points_3d(boundary)
 
         # Calculate XY cumulative distances (2D arc length) directly from points
         xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
