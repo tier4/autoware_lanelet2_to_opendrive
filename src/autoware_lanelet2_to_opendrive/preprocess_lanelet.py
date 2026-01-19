@@ -117,9 +117,7 @@ class RemoveTurnDirectionOperation:
     Otherwise, only removes from the specified lanelet IDs.
     """
 
-    lanelet_ids: List[int] = field(
-        default_factory=list
-    )  # Empty list means all lanelets
+    lanelet_ids: List[int] = field(default_factory=list)  # Empty list means all lanelets
 
 
 @dataclass
