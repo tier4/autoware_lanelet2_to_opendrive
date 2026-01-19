@@ -609,6 +609,9 @@ class LaneletPreprocessor:
                     op.base_id if op.base_id is not None else current_id_counter
                 )
 
+                # Tolerance is guaranteed to be set by __post_init__
+                assert op.tolerance is not None
+
                 # Create merged lanelet
                 merged_lanelet = merge_lanelets_from_ids(
                     lanelet_map,
@@ -703,6 +706,9 @@ class LaneletPreprocessor:
             logger.debug(f"  Replacing lanelets: {op.lanelet_ids}")
 
             try:
+                # Tolerance is guaranteed to be set by __post_init__
+                assert op.tolerance is not None
+
                 # Replace operations return a new map
                 lanelet_map = replace_lanelets(
                     lanelet_map,
@@ -739,6 +745,9 @@ class LaneletPreprocessor:
                 # Get lanelets
                 ll1 = lanelet_map.laneletLayer.get(op.first_lanelet_id)
                 ll2 = lanelet_map.laneletLayer.get(op.second_lanelet_id)
+
+                # Tolerance is guaranteed to be set by __post_init__
+                assert op.tolerance is not None
 
                 # Validate continuity
                 is_continuous = validate_lanelet_continuity(ll1, ll2, op.tolerance)
