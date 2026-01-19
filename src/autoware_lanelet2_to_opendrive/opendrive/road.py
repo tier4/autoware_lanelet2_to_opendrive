@@ -1,7 +1,7 @@
 """OpenDRIVE road definitions."""
 
 from dataclasses import dataclass
-from typing import Optional, Union, Set, List, cast, Dict
+from typing import Optional, Set, List, cast, Dict
 import lxml.etree as ET
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
