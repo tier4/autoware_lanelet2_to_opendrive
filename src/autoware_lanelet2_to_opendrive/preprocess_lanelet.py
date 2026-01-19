@@ -214,9 +214,7 @@ class PreprocessOperation:
     verbose: bool = False  # Enable verbose logging
 
     # CARLA compatibility settings
-    exclude_non_junction_signals: bool = (
-        False  # If True, exclude signals not in junctions
-    )
+    exclude_non_junction_signals: bool = False  # If True, exclude signals not in junctions
 
     def __post_init__(self) -> None:
         """Validate that origin is specified correctly after initialization."""
