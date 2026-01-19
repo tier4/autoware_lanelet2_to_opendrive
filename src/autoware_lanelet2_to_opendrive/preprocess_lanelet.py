@@ -387,10 +387,13 @@ class PreprocessOperation:
         if origin_config is not None:
             origin = LatLonOrigin(lat=origin_config["lat"], lon=origin_config["lon"])
 
+        # Support both mgrs_code (legacy) and mgrs_grid (current)
+        mgrs_code = config.get("mgrs_code") or config.get("mgrs_grid") or None
+
         return cls(
             input_map_path=config.get("input_map_path") or "",
             output_map_path=config.get("output_map_path") or "",
-            mgrs_code=config.get("mgrs_code") or None,
+            mgrs_code=mgrs_code,
             origin=origin,
             merge_operations=merge_ops,
             remove_operations=remove_ops,

@@ -547,7 +547,7 @@ def preprocess_and_convert_with_hydra(
     )
 
 
-@hydra.main(version_base=None, config_path="../../conf", config_name="config")
+@hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
     """
     Main entry point for the conversion script using Hydra.
