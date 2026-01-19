@@ -11,6 +11,7 @@ from enum import Enum
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
 
+from .config import DEFAULT_CONFIG
 from .lanelet import (
     merge_lanelets_from_ids,
     remove_lanelets,
@@ -40,8 +41,13 @@ class MergeOperation:
 
     lanelet_ids: List[int]
     validate: bool = True
-    tolerance: float = 1e-3
+    tolerance: Optional[float] = None
     base_id: Optional[int] = None
+
+    def __post_init__(self):
+        """Set default tolerance from config if not specified."""
+        if self.tolerance is None:
+            self.tolerance = DEFAULT_CONFIG.preprocessing.merge_tolerance_default
 
 
 @dataclass
@@ -57,7 +63,12 @@ class ReplaceOperation:
 
     lanelet_ids: List[int]
     validate: bool = True
-    tolerance: float = 1e-3
+    tolerance: Optional[float] = None
+
+    def __post_init__(self):
+        """Set default tolerance from config if not specified."""
+        if self.tolerance is None:
+            self.tolerance = DEFAULT_CONFIG.preprocessing.replace_tolerance_default
 
 
 @dataclass
@@ -66,7 +77,12 @@ class ValidateOperation:
 
     first_lanelet_id: int
     second_lanelet_id: int
-    tolerance: float = 1e-3
+    tolerance: Optional[float] = None
+
+    def __post_init__(self):
+        """Set default tolerance from config if not specified."""
+        if self.tolerance is None:
+            self.tolerance = DEFAULT_CONFIG.preprocessing.validate_tolerance_default
 
 
 @dataclass
@@ -596,6 +612,9 @@ class LaneletPreprocessor:
                     op.base_id if op.base_id is not None else current_id_counter
                 )
 
+                # Tolerance is guaranteed to be set by __post_init__
+                assert op.tolerance is not None
+
                 # Create merged lanelet
                 merged_lanelet = merge_lanelets_from_ids(
                     lanelet_map,
@@ -690,6 +709,9 @@ class LaneletPreprocessor:
             logger.debug(f"  Replacing lanelets: {op.lanelet_ids}")
 
             try:
+                # Tolerance is guaranteed to be set by __post_init__
+                assert op.tolerance is not None
+
                 # Replace operations return a new map
                 lanelet_map = replace_lanelets(
                     lanelet_map,
@@ -726,6 +748,9 @@ class LaneletPreprocessor:
                 # Get lanelets
                 ll1 = lanelet_map.laneletLayer.get(op.first_lanelet_id)
                 ll2 = lanelet_map.laneletLayer.get(op.second_lanelet_id)
+
+                # Tolerance is guaranteed to be set by __post_init__
+                assert op.tolerance is not None
 
                 # Validate continuity
                 is_continuous = validate_lanelet_continuity(ll1, ll2, op.tolerance)

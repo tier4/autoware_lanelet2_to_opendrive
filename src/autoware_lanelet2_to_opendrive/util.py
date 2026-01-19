@@ -1,7 +1,7 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
 import logging
-from typing import Set, List, Union, Dict, Optional
+from typing import Set, List, Union, Dict, Optional, Iterable
 from enum import Enum
 from dataclasses import dataclass
 import lanelet2
@@ -10,6 +10,55 @@ from lanelet2.geometry import intersects2d
 import mgrs
 
 logger = logging.getLogger(__name__)
+
+
+# Type aliases for common lanelet collection types
+LaneletInput = Union[
+    Set[lanelet2.core.Lanelet],
+    List[lanelet2.core.Lanelet],
+    lanelet2.core.LaneletLayer,
+    Iterable[lanelet2.core.Lanelet],
+]
+
+
+def to_lanelet_set(lanelets: LaneletInput) -> Set[lanelet2.core.Lanelet]:
+    """Convert various lanelet collection types to a set.
+
+    Args:
+        lanelets: Collection of lanelets in any supported format
+
+    Returns:
+        Set of lanelets
+
+    Raises:
+        TypeError: If the input cannot be converted to a set of lanelets
+    """
+    if isinstance(lanelets, set):
+        return lanelets
+    try:
+        return set(lanelets)
+    except TypeError as e:
+        raise TypeError(f"Cannot convert {type(lanelets)} to set of lanelets") from e
+
+
+def to_lanelet_list(lanelets: LaneletInput) -> List[lanelet2.core.Lanelet]:
+    """Convert various lanelet collection types to a list.
+
+    Args:
+        lanelets: Collection of lanelets in any supported format
+
+    Returns:
+        List of lanelets
+
+    Raises:
+        TypeError: If the input cannot be converted to a list of lanelets
+    """
+    if isinstance(lanelets, list):
+        return lanelets
+    try:
+        return list(lanelets)
+    except TypeError as e:
+        raise TypeError(f"Cannot convert {type(lanelets)} to list of lanelets") from e
 
 
 def create_routing_graph(lanelet_map: lanelet2.core.LaneletMap) -> RoutingGraph:
@@ -155,11 +204,7 @@ def find_terminal_lanelets(
 
 def find_connecting_lanelet_groups(
     lanelet_map: lanelet2.core.LaneletMap,
-    lanelet_group: Union[
-        Set[lanelet2.core.Lanelet],
-        List[lanelet2.core.Lanelet],
-        lanelet2.core.LaneletLayer,
-    ],
+    lanelet_group: LaneletInput,
     direction: ConnectionDirection,
     routing_graph: Optional[RoutingGraph] = None,
 ) -> List[Set[lanelet2.core.Lanelet]]:
@@ -279,11 +324,7 @@ def find_adjacent_groups(
 
 
 def filter_lanelets_by_subtype(
-    lanelets: Union[
-        Set[lanelet2.core.Lanelet],
-        List[lanelet2.core.Lanelet],
-        lanelet2.core.LaneletLayer,
-    ],
+    lanelets: LaneletInput,
     subtypes: List[str],
 ) -> Set[lanelet2.core.Lanelet]:
     """Filter lanelets by their subtype attribute.
@@ -315,20 +356,7 @@ def filter_lanelets_by_subtype(
         return set()
 
     # Convert input to a set for consistent processing
-    if isinstance(lanelets, set):
-        lanelet_set = lanelets
-    elif isinstance(lanelets, list):
-        lanelet_set = set(lanelets)
-    elif isinstance(lanelets, lanelet2.core.LaneletLayer):
-        lanelet_set = set(lanelets)
-    else:
-        # Try to convert any iterable to set
-        try:
-            lanelet_set = set(lanelets)
-        except TypeError:
-            raise TypeError(
-                f"lanelets must be a set, list, or LaneletLayer, got {type(lanelets)}"
-            )
+    lanelet_set = to_lanelet_set(lanelets)
 
     # Prepare the set of subtypes to check
     target_subtypes = set(subtypes)
@@ -346,16 +374,8 @@ def filter_lanelets_by_subtype(
 
 
 def check_lanelet_groups_intersect(
-    group1: Union[
-        Set[lanelet2.core.Lanelet],
-        List[lanelet2.core.Lanelet],
-        lanelet2.core.LaneletLayer,
-    ],
-    group2: Union[
-        Set[lanelet2.core.Lanelet],
-        List[lanelet2.core.Lanelet],
-        lanelet2.core.LaneletLayer,
-    ],
+    group1: LaneletInput,
+    group2: LaneletInput,
 ) -> bool:
     """Check if two lanelet groups have any intersecting lanelets.
 
@@ -375,11 +395,7 @@ def check_lanelet_groups_intersect(
 
 def sort_adjacent_groups(
     lanelet_map: lanelet2.core.LaneletMap,
-    target_lanelets: Union[
-        Set[lanelet2.core.Lanelet],
-        List[lanelet2.core.Lanelet],
-        lanelet2.core.LaneletLayer,
-    ],
+    target_lanelets: LaneletInput,
 ) -> List[lanelet2.core.Lanelet]:
     """Sort lanelets from left to right by following their adjacent relationships.
 
@@ -396,6 +412,9 @@ def sort_adjacent_groups(
     if not target_lanelets:
         return []
 
+    # Convert input to set for consistent processing
+    lanelet_set = to_lanelet_set(target_lanelets)
+
     # Create routing graph for finding adjacent relationships
     routing_graph = create_routing_graph(lanelet_map)
 
@@ -406,19 +425,19 @@ def sort_adjacent_groups(
         current = start_lanelet
         while True:
             left_neighbor = routing_graph.left(current)
-            if left_neighbor and left_neighbor in target_lanelets:
+            if left_neighbor and left_neighbor in lanelet_set:
                 current = left_neighbor
             else:
                 break
         return current
 
     # Start with any lanelet from the set
-    start_lanelet = next(iter(target_lanelets))
+    start_lanelet = next(iter(lanelet_set))
     leftmost = find_leftmost_lanelet(start_lanelet)
 
     # Build sorted list from left to right
     sorted_lanelets = []
-    remaining_lanelets = target_lanelets.copy()
+    remaining_lanelets = lanelet_set.copy()
     current = leftmost
 
     while current and current in remaining_lanelets:

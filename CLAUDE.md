@@ -89,18 +89,21 @@ This applies to:
 - `git push origin master` or `git push origin main` (direct push to protected branches)
 - `git commit --no-verify` (bypasses pre-commit hooks and safety checks)
 - `git push --no-verify` (bypasses push hooks and safety checks)
+- `git rebase` (rewrites history, requires force push, complicates collaboration)
+- `git pull --rebase` (same issues as rebase)
 
 ### Safe Alternatives:
 - Use `git push` (normal push) - will fail safely if there are conflicts
-- Use `git pull --rebase` followed by `git push` to handle conflicts
+- Use `git merge origin/master` to integrate upstream changes (preserves history)
+- Use `git pull` (without --rebase) to fetch and merge
 - Create pull requests instead of direct pushes to main/master
 - Always let pre-commit hooks run to maintain code quality
 
 ### Exception Handling:
 If a push is rejected due to conflicts or hook failures:
-1. **DO NOT** use --force or --no-verify flags
+1. **DO NOT** use --force, --no-verify, or rebase
 2. Fix the underlying issue (resolve conflicts, fix formatting, etc.)
-3. Use `git pull --rebase` to update your branch
+3. Use `git merge origin/master` to integrate upstream changes
 4. Re-run tests and hooks to ensure everything passes
 5. Use normal `git push` after issues are resolved
 
@@ -158,3 +161,159 @@ The settings file should include these git operation restrictions using the perm
 - `.claude/settings.local.json` now contains explicit deny rules for dangerous git operations
 - These settings will prevent Claude from executing prohibited commands
 - The permissions system provides automatic enforcement without requiring manual checks
+
+## Constants Configuration
+
+**IMPORTANT**: All magic numbers and configurable parameters must be centralized in the `config.py` module using dataclasses.
+
+### Architecture
+
+The project uses a dataclass-based configuration system to centralize all constants:
+
+- **`config.py`**: Central configuration module containing all constants organized by functional area
+- **Dataclass-based**: Constants are grouped into frozen dataclasses for type safety and immutability
+- **Global instance**: A `DEFAULT_CONFIG` instance provides easy access throughout the codebase
+
+### Constants Organization
+
+Constants are organized into logical groups:
+
+1. **GeometryConstants**: Geometry calculations and numerical stability
+   - `epsilon`: Tolerance for numerical stability (1e-10)
+   - `point_distance_threshold`: Minimum distance between distinct points (0.001)
+
+2. **SplineConstants**: B-spline fitting and interpolation
+   - `speed_epsilon`: Tolerance for speed/velocity checks (1e-12)
+   - `hard_constraint_weight`: Weight for boundary constraints (80.0)
+   - `soft_constraint_weight`: Weight for data fitting (20.0)
+   - `knot_alpha_weight`: Weight for uniform knot distribution (2.0)
+   - `knot_beta_weight`: Weight for curvature-adaptive knots (2.0)
+   - `position_tolerance`: Endpoint position error tolerance (5.0)
+   - `velocity_tolerance`: Endpoint velocity error tolerance (15.0)
+   - `max_avg_error`: Maximum average fitting error (2.0)
+   - `max_point_error`: Maximum single-point error (8.0)
+   - `warn_percentile`: Error reporting percentile (95.0)
+
+3. **PreprocessingConstants**: Lanelet preprocessing operations
+   - `merge_tolerance_default`: Default merge tolerance (1e-3)
+   - `replace_tolerance_default`: Default replacement tolerance (1e-3)
+   - `validate_tolerance_default`: Default validation tolerance (1e-3)
+
+### Usage Guidelines
+
+#### When to Add a Constant
+
+Add a constant to `config.py` when:
+- A numeric value appears in multiple locations
+- A threshold or tolerance value controls behavior
+- A value might need tuning or adjustment
+- A magic number lacks clear documentation
+
+#### How to Use Constants
+
+```python
+from .config import DEFAULT_CONFIG
+
+# Access geometry constants
+if distance < DEFAULT_CONFIG.geometry.epsilon:
+    # Handle near-zero case
+    pass
+
+# Access spline constants
+spline = Splines(
+    points,
+    num_control_points=10,
+)  # Spline class internally uses DEFAULT_CONFIG
+
+# Access preprocessing constants
+merged = merge_lanelets(
+    lanelet_map,
+    lanelet_ids,
+    tolerance=DEFAULT_CONFIG.preprocessing.merge_tolerance_default
+)
+```
+
+#### Adding New Constants
+
+When adding new constants:
+
+1. **Choose the appropriate dataclass** or create a new one if needed
+2. **Add the constant with a descriptive name** using UPPER_SNAKE_CASE
+3. **Provide a clear docstring** explaining what the constant controls
+4. **Include the default value** and units if applicable
+5. **Update this documentation** to reflect the new constant
+
+Example:
+```python
+@dataclass(frozen=True)
+class GeometryConstants:
+    """Constants for geometry calculations."""
+
+    epsilon: float = 1e-10  # Tolerance for numerical stability
+    new_threshold: float = 0.5  # NEW: Description of what this controls
+```
+
+#### Modifying Dataclasses
+
+When operation dataclasses (like `MergeOperation`, `ReplaceOperation`) need default values:
+
+```python
+@dataclass
+class MergeOperation:
+    """Configuration for merge operations."""
+
+    lanelet_ids: List[int]
+    validate: bool = True
+    tolerance: float = None  # Will default to config value
+
+    def __post_init__(self):
+        """Set default tolerance from config if not specified."""
+        if self.tolerance is None:
+            self.tolerance = DEFAULT_CONFIG.preprocessing.merge_tolerance_default
+```
+
+### Benefits
+
+- **Centralized configuration**: All constants in one location
+- **Type safety**: Dataclasses provide type hints and validation
+- **Immutability**: Frozen dataclasses prevent accidental modification
+- **Discoverability**: IDE autocomplete shows all available constants
+- **Documentation**: Each constant has clear documentation
+- **Easy tuning**: Adjust parameters without searching the codebase
+
+### Anti-Patterns to Avoid
+
+❌ **DON'T** hardcode magic numbers in implementation files:
+```python
+if distance < 1e-10:  # Bad: magic number
+    pass
+```
+
+✅ **DO** use constants from config:
+```python
+if distance < DEFAULT_CONFIG.geometry.epsilon:  # Good: documented constant
+    pass
+```
+
+❌ **DON'T** define constants separately in multiple files:
+```python
+# geometry.py
+EPSILON = 1e-10
+
+# spline.py
+EPSILON = 1e-10  # Bad: duplicated
+```
+
+✅ **DO** import from the central config:
+```python
+from .config import DEFAULT_CONFIG
+# Use DEFAULT_CONFIG.geometry.epsilon everywhere
+```
+
+### Rationale
+
+- **Prevents duplication**: Constants defined once, used everywhere
+- **Improves maintainability**: Change a value in one place
+- **Documents intent**: Clear names explain what values control
+- **Type safety**: Dataclasses catch errors at development time
+- **Professional code**: Industry best practice for configuration management
