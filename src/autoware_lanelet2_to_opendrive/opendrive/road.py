@@ -131,6 +131,7 @@ class Road:
         lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
         routing_graph: Optional[RoutingGraph] = None,
         road_lane_ids: Optional[Dict[int, Set[int]]] = None,
+        road_id_to_road: Optional[Dict[int, "Road"]] = None,
     ) -> None:
         """Set lane predecessor and successor links based on lanelet connections.
 
@@ -140,6 +141,8 @@ class Road:
             routing_graph: Optional pre-built routing graph. If None, creates a new one.
             road_lane_ids: Optional mapping from road_id to set of existing lane_ids.
                           Used to validate that lane links reference existing lanes.
+            road_id_to_road: Optional mapping from road_id to Road objects.
+                            Used to check if target roads are connecting roads in junctions.
         """
         if self.lanes is None:
             return
@@ -163,6 +166,7 @@ class Road:
                     routing_graph,
                     lanelet_to_road_and_lane,
                     road_lane_ids,
+                    road_id_to_road,
                 )
 
             # Process right lanes
@@ -173,6 +177,7 @@ class Road:
                     routing_graph,
                     lanelet_to_road_and_lane,
                     road_lane_ids,
+                    road_id_to_road,
                 )
 
     def _set_single_lane_links(
@@ -182,6 +187,7 @@ class Road:
         routing_graph: RoutingGraph,
         lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
         road_lane_ids: Optional[Dict[int, Set[int]]] = None,
+        road_id_to_road: Optional[Dict[int, "Road"]] = None,
     ) -> None:
         """Set predecessor and successor for a single lane.
 
@@ -192,6 +198,8 @@ class Road:
             lanelet_to_road_and_lane: Global mapping from lanelet_id to (road_id, lane_id)
             road_lane_ids: Optional mapping from road_id to set of existing lane_ids.
                           Used to validate that lane links reference existing lanes.
+            road_id_to_road: Optional mapping from road_id to Road objects.
+                            Used to check if target roads are connecting roads in junctions.
         """
 
         if lane.lanelet_id is None:
@@ -203,15 +211,13 @@ class Road:
         except Exception:
             return
 
-        # Get road link predecessor/successor road IDs for consistency check
-        # Lane links must reference lanes in the road link's predecessor/successor roads
-        road_link_predecessor_id: Optional[int] = None
-        road_link_successor_id: Optional[int] = None
-        if self.link:
-            if self.link.predecessor:
-                road_link_predecessor_id = self.link.predecessor.element_id
-            if self.link.successor:
-                road_link_successor_id = self.link.successor.element_id
+        # Get road link predecessor/successor for consistency check
+        road_link_predecessor = self.link.predecessor if self.link else None
+        road_link_successor = self.link.successor if self.link else None
+
+        # Issue #124 Part 1 fix: For connecting roads (junction >= 0), allow lane
+        # links even without road links
+        is_connecting_road = self.junction is not None and self.junction >= 0
 
         # Find predecessor lanelets
         previous_lanelets = routing_graph.previous(lanelet)
@@ -224,13 +230,50 @@ class Road:
                     # (same road connections would be within lane sections)
                     if pred_road_id != self.id:
                         # Check consistency with road link
-                        # Lane link must reference the road link's predecessor road
-                        # If road link has no predecessor, don't set lane predecessor
-                        if road_link_predecessor_id is None:
-                            continue
-                        if pred_road_id != road_link_predecessor_id:
-                            # This lane connects to a different road than the road link
-                            continue
+                        # For connecting roads, skip road link validation
+                        if road_link_predecessor is None:
+                            if not is_connecting_road:
+                                # No road link predecessor - don't set lane predecessor
+                                # (unless this is a connecting road)
+                                continue
+                            # For connecting roads, proceed with lane link creation
+
+                        # Check if road link predecessor is a junction
+                        if road_link_predecessor is not None:
+                            if (
+                                road_link_predecessor.element_type
+                                == ElementType.JUNCTION
+                            ):
+                                # This road's predecessor is a junction
+                                # The lane's predecessor should be a connecting road in that
+                                # junction
+                                if road_id_to_road is not None:
+                                    pred_road = road_id_to_road.get(pred_road_id)
+                                    if pred_road is None:
+                                        if not is_connecting_road:
+                                            continue
+                                    # Check if predecessor road is a connecting road in
+                                    # the junction
+                                    elif (
+                                        pred_road.junction
+                                        != road_link_predecessor.element_id
+                                    ):
+                                        if not is_connecting_road:
+                                            continue
+                                # If no road_id_to_road, we can't validate - skip for safety
+                                # (unless this is a connecting road)
+                                elif not is_connecting_road:
+                                    continue
+                            else:
+                                # Road link predecessor is a regular road
+                                # Lane link must reference the same road
+                                # (unless this is a connecting road)
+                                if (
+                                    pred_road_id != road_link_predecessor.element_id
+                                    and not is_connecting_road
+                                ):
+                                    continue
+
                         # Validate that the lane exists in the predecessor road
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(pred_road_id, set())
@@ -250,13 +293,47 @@ class Road:
                     # Only set successor if it's in a different road
                     if succ_road_id != self.id:
                         # Check consistency with road link
-                        # Lane link must reference the road link's successor road
-                        # If road link has no successor, don't set lane successor
-                        if road_link_successor_id is None:
-                            continue
-                        if succ_road_id != road_link_successor_id:
-                            # This lane connects to a different road than the road link
-                            continue
+                        # For connecting roads, skip road link validation
+                        if road_link_successor is None:
+                            if not is_connecting_road:
+                                # No road link successor - don't set lane successor
+                                # (unless this is a connecting road)
+                                continue
+                            # For connecting roads, proceed with lane link creation
+
+                        # Check if road link successor is a junction
+                        if road_link_successor is not None:
+                            if road_link_successor.element_type == ElementType.JUNCTION:
+                                # This road's successor is a junction
+                                # The lane's successor should be a connecting road in that
+                                # junction
+                                if road_id_to_road is not None:
+                                    succ_road = road_id_to_road.get(succ_road_id)
+                                    if succ_road is None:
+                                        if not is_connecting_road:
+                                            continue
+                                    # Check if successor road is a connecting road in
+                                    # the junction
+                                    elif (
+                                        succ_road.junction
+                                        != road_link_successor.element_id
+                                    ):
+                                        if not is_connecting_road:
+                                            continue
+                                # If no road_id_to_road, we can't validate - skip for safety
+                                # (unless this is a connecting road)
+                                elif not is_connecting_road:
+                                    continue
+                            else:
+                                # Road link successor is a regular road
+                                # Lane link must reference the same road
+                                # (unless this is a connecting road)
+                                if (
+                                    succ_road_id != road_link_successor.element_id
+                                    and not is_connecting_road
+                                ):
+                                    continue
+
                         # Validate that the lane exists in the successor road
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(succ_road_id, set())
@@ -661,6 +738,10 @@ class Road:
                     lane_ids.update(lane_section.right_lanes.keys())
             road_lane_ids[road.id] = lane_ids
 
+        # Build mapping from road_id to Road object
+        # This is used to check if target roads are connecting roads in junctions
+        road_id_to_road: Dict[int, "Road"] = {road.id: road for road in roads}
+
         # Use provided routing graph or create a new one
         if routing_graph is None:
             traffic_rules = lanelet2.traffic_rules.create(
@@ -676,7 +757,11 @@ class Road:
         for road in tqdm(roads, desc="Building lane links"):
             try:
                 road.set_lane_links(
-                    lanelet_map, lanelet_to_road_and_lane, routing_graph, road_lane_ids
+                    lanelet_map,
+                    lanelet_to_road_and_lane,
+                    routing_graph,
+                    road_lane_ids,
+                    road_id_to_road,
                 )
             except Exception as e:
                 tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
