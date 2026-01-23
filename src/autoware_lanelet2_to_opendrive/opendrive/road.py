@@ -215,6 +215,10 @@ class Road:
         road_link_predecessor = self.link.predecessor if self.link else None
         road_link_successor = self.link.successor if self.link else None
 
+        # Issue #124 Part 1 fix: For connecting roads (junction >= 0), allow lane
+        # links even without road links
+        is_connecting_road = self.junction is not None and self.junction >= 0
+
         # Find predecessor lanelets
         previous_lanelets = routing_graph.previous(lanelet)
         if previous_lanelets:
@@ -226,33 +230,49 @@ class Road:
                     # (same road connections would be within lane sections)
                     if pred_road_id != self.id:
                         # Check consistency with road link
+                        # For connecting roads, skip road link validation
                         if road_link_predecessor is None:
-                            # No road link predecessor - don't set lane predecessor
-                            continue
+                            if not is_connecting_road:
+                                # No road link predecessor - don't set lane predecessor
+                                # (unless this is a connecting road)
+                                continue
+                            # For connecting roads, proceed with lane link creation
 
                         # Check if road link predecessor is a junction
-                        if road_link_predecessor.element_type == ElementType.JUNCTION:
-                            # This road's predecessor is a junction
-                            # The lane's predecessor should be a connecting road in that junction
-                            if road_id_to_road is not None:
-                                pred_road = road_id_to_road.get(pred_road_id)
-                                if pred_road is None:
+                        if road_link_predecessor is not None:
+                            if (
+                                road_link_predecessor.element_type
+                                == ElementType.JUNCTION
+                            ):
+                                # This road's predecessor is a junction
+                                # The lane's predecessor should be a connecting road in that
+                                # junction
+                                if road_id_to_road is not None:
+                                    pred_road = road_id_to_road.get(pred_road_id)
+                                    if pred_road is None:
+                                        if not is_connecting_road:
+                                            continue
+                                    # Check if predecessor road is a connecting road in
+                                    # the junction
+                                    elif (
+                                        pred_road.junction
+                                        != road_link_predecessor.element_id
+                                    ):
+                                        if not is_connecting_road:
+                                            continue
+                                # If no road_id_to_road, we can't validate - skip for safety
+                                # (unless this is a connecting road)
+                                elif not is_connecting_road:
                                     continue
-                                # Check if predecessor road is a connecting road in
-                                # the junction
+                            else:
+                                # Road link predecessor is a regular road
+                                # Lane link must reference the same road
+                                # (unless this is a connecting road)
                                 if (
-                                    pred_road.junction
-                                    != road_link_predecessor.element_id
+                                    pred_road_id != road_link_predecessor.element_id
+                                    and not is_connecting_road
                                 ):
                                     continue
-                            # If no road_id_to_road, we can't validate - skip for safety
-                            else:
-                                continue
-                        else:
-                            # Road link predecessor is a regular road
-                            # Lane link must reference the same road
-                            if pred_road_id != road_link_predecessor.element_id:
-                                continue
 
                         # Validate that the lane exists in the predecessor road
                         if road_lane_ids is not None:
@@ -273,30 +293,46 @@ class Road:
                     # Only set successor if it's in a different road
                     if succ_road_id != self.id:
                         # Check consistency with road link
+                        # For connecting roads, skip road link validation
                         if road_link_successor is None:
-                            # No road link successor - don't set lane successor
-                            continue
+                            if not is_connecting_road:
+                                # No road link successor - don't set lane successor
+                                # (unless this is a connecting road)
+                                continue
+                            # For connecting roads, proceed with lane link creation
 
                         # Check if road link successor is a junction
-                        if road_link_successor.element_type == ElementType.JUNCTION:
-                            # This road's successor is a junction
-                            # The lane's successor should be a connecting road in that junction
-                            if road_id_to_road is not None:
-                                succ_road = road_id_to_road.get(succ_road_id)
-                                if succ_road is None:
+                        if road_link_successor is not None:
+                            if road_link_successor.element_type == ElementType.JUNCTION:
+                                # This road's successor is a junction
+                                # The lane's successor should be a connecting road in that
+                                # junction
+                                if road_id_to_road is not None:
+                                    succ_road = road_id_to_road.get(succ_road_id)
+                                    if succ_road is None:
+                                        if not is_connecting_road:
+                                            continue
+                                    # Check if successor road is a connecting road in
+                                    # the junction
+                                    elif (
+                                        succ_road.junction
+                                        != road_link_successor.element_id
+                                    ):
+                                        if not is_connecting_road:
+                                            continue
+                                # If no road_id_to_road, we can't validate - skip for safety
+                                # (unless this is a connecting road)
+                                elif not is_connecting_road:
                                     continue
-                                # Check if successor road is a connecting road in
-                                # the junction
-                                if succ_road.junction != road_link_successor.element_id:
-                                    continue
-                            # If no road_id_to_road, we can't validate - skip for safety
                             else:
-                                continue
-                        else:
-                            # Road link successor is a regular road
-                            # Lane link must reference the same road
-                            if succ_road_id != road_link_successor.element_id:
-                                continue
+                                # Road link successor is a regular road
+                                # Lane link must reference the same road
+                                # (unless this is a connecting road)
+                                if (
+                                    succ_road_id != road_link_successor.element_id
+                                    and not is_connecting_road
+                                ):
+                                    continue
 
                         # Validate that the lane exists in the successor road
                         if road_lane_ids is not None:

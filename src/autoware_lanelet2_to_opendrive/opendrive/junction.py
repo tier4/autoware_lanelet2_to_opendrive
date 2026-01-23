@@ -330,24 +330,66 @@ class Junction:
                 road_id_to_road.get(connecting_road_id)
             )
 
-            # Create lane links for matching lanes
-            # Match lanes by their IDs (e.g., -1 to -1, -2 to -2)
-            for lane_id in incoming_lane_ids:
-                if lane_id in connecting_lane_ids:
+            # Issue #125 fix: Create lane links for ALL incoming lanes
+            # If connecting road has fewer lanes, map multiple incoming lanes to same
+            # connecting lane
+            if incoming_lane_ids and connecting_lane_ids:
+                # Sort lane IDs (negative for right, positive for left)
+                incoming_sorted = sorted(incoming_lane_ids)
+                connecting_sorted = sorted(connecting_lane_ids)
+
+                # Map each incoming lane to a connecting lane
+                for incoming_lane in incoming_sorted:
+                    # Try to find exact match first
+                    if incoming_lane in connecting_lane_ids:
+                        to_lane = incoming_lane
+                    else:
+                        # No exact match - map to closest lane in connecting road
+                        # For right lanes (negative IDs): more negative = further from
+                        # center
+                        # For left lanes (positive IDs): more positive = further from
+                        # center
+                        to_lane = Junction._find_closest_lane(
+                            incoming_lane, connecting_sorted
+                        )
+
                     # Check if this lane link already exists
                     lane_link_exists = any(
-                        ll.from_lane == lane_id and ll.to_lane == lane_id
+                        ll.from_lane == incoming_lane and ll.to_lane == to_lane
                         for ll in connection.lane_links
                     )
                     if not lane_link_exists:
-                        connection.add_lane_link(from_lane=lane_id, to_lane=lane_id)
-
-            # If no lane links were created (roads not found or no matching lanes),
-            # fall back to default -1 to -1 link
-            if not connection.lane_links:
-                connection.add_lane_link(from_lane=-1, to_lane=-1)
+                        connection.add_lane_link(
+                            from_lane=incoming_lane, to_lane=to_lane
+                        )
+            else:
+                # If no lane links were created (roads not found or no lanes),
+                # fall back to default -1 to -1 link
+                if not connection.lane_links:
+                    connection.add_lane_link(from_lane=-1, to_lane=-1)
 
         return list(connection_map.values())
+
+    @staticmethod
+    def _find_closest_lane(incoming_lane: int, connecting_lanes: list[int]) -> int:
+        """Find the closest lane in connecting road for a given incoming lane.
+
+        Args:
+            incoming_lane: Lane ID from incoming road
+            connecting_lanes: Sorted list of lane IDs in connecting road
+
+        Returns:
+            Closest lane ID in connecting road
+        """
+        if not connecting_lanes:
+            return -1  # Fallback to default lane
+
+        # For right lanes (negative IDs), find the closest (least negative if incoming
+        # is more negative)
+        # For left lanes (positive IDs), find the closest (least positive if incoming
+        # is more positive)
+        closest = min(connecting_lanes, key=lambda x: abs(x - incoming_lane))
+        return closest
 
     @staticmethod
     def _get_driving_lane_ids(road: Optional["Road"]) -> set[int]:
