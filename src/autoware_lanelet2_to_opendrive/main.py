@@ -82,6 +82,7 @@ def convert_lanelet2_to_opendrive(
     exclude_non_junction_signals: bool = False,
     origin_lat: Optional[float] = None,
     origin_lon: Optional[float] = None,
+    no_junction_lanelet_ids: Optional[List[int]] = None,
 ) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
@@ -96,6 +97,8 @@ def convert_lanelet2_to_opendrive(
             used for more accurate geoReference generation.
         origin_lon: Longitude of the origin point (with offset applied). If provided,
             used for more accurate geoReference generation.
+        no_junction_lanelet_ids: List of lanelet IDs to exclude from junction detection.
+            These lanelets will be treated as regular roads even if they have turn_direction attribute.
 
     Returns:
         Tuple of:
@@ -158,7 +161,9 @@ def convert_lanelet2_to_opendrive(
 
     # Step 2: Get junction groups
     print("\n=== Finding junctions ===")
-    junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+    junction_lanelets = filter_lanelets_inside_junction(
+        all_lanelets, exclude_lanelet_ids=no_junction_lanelet_ids
+    )
     junction_groups = find_junction_groups(junction_lanelets)
     print(f"Found {len(junction_groups)} junctions")
 
@@ -524,6 +529,11 @@ def preprocess_and_convert_with_hydra(
     # Get target-specific settings
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
 
+    # Get no-junction lanelet IDs from map config
+    no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
+    if no_junction_lanelet_ids:
+        logger.info(f"No-junction lanelet IDs configured: {no_junction_lanelet_ids}")
+
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
 
@@ -579,6 +589,7 @@ def preprocess_and_convert_with_hydra(
         exclude_non_junction_signals=exclude_non_junction_signals,
         origin_lat=origin_lat,
         origin_lon=origin_lon,
+        no_junction_lanelet_ids=no_junction_lanelet_ids,
     )
 
     logger.info("Conversion completed successfully!")
