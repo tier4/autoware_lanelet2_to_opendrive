@@ -205,12 +205,15 @@ def convert_lanelet2_to_opendrive(
 
         # Build connections for this junction
         connecting_road_ids = junction_to_roads.get(junction_id, [])
+        # Combine regular and connecting roads for lane ID lookup
+        all_roads_for_junction = regular_roads + connecting_roads
         connections = Junction.build_connections_from_roads(
             lanelet_map=lanelet_map,
             junction_lanelet_group=junction_group,
             junction_id=junction_id,
             lanelet_to_road_id=lanelet_to_road_id,
             connecting_road_ids=connecting_road_ids,
+            roads=all_roads_for_junction,
         )
 
         junction.connections = connections
@@ -226,13 +229,8 @@ def convert_lanelet2_to_opendrive(
         f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
     )
 
-    # Step 6.5: Set lane links for all roads (including junction roads)
-    # This must be done after combining all roads so that connections between
-    # regular roads and junction roads are properly established
-    print("\n=== Building lane links for all roads ===")
-    Road.set_all_lane_links(lanelet_map, all_roads)
-
-    # Step 6.6: Set road links for connecting roads (predecessor/successor)
+    # Step 6.5: Set road links for connecting roads (predecessor/successor)
+    # This must be done BEFORE lane links so that lane link validation can use road links
     print("\n=== Building road links for connecting roads ===")
     Road.set_connecting_road_links(
         lanelet_map=lanelet_map,
@@ -241,14 +239,22 @@ def convert_lanelet2_to_opendrive(
         road_to_lanelet_ids=road_to_lanelet_ids,
     )
 
-    # Step 6.7: Set junction links for incoming roads
+    # Step 6.6: Set junction links for incoming roads
     # This ensures CARLA compatibility by setting successor/predecessor to junction
     # for roads that connect to junctions as incoming roads
+    # This must be done BEFORE lane links so we know which roads connect to junctions
     print("\n=== Setting junction links for incoming roads ===")
     Road.set_incoming_road_junction_links(
         roads=all_roads,
         junctions=junctions,
     )
+
+    # Step 6.7: Set lane links for all roads (including junction roads)
+    # This must be done after road links are set so that:
+    # 1. Connecting roads have their predecessor/successor road IDs available
+    # 2. Regular roads know which junctions they connect to
+    print("\n=== Building lane links for all roads ===")
+    Road.set_all_lane_links(lanelet_map, all_roads)
 
     # Create mapping object
     mapping = RoadLaneletMapping(

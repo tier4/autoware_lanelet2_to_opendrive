@@ -1,11 +1,14 @@
 """OpenDRIVE junction definitions."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 import lxml.etree as ET
 import lanelet2
 
 from .enums import ContactPoint
+
+if TYPE_CHECKING:
+    from .road import Road
 
 
 @dataclass
@@ -228,6 +231,7 @@ class Junction:
         junction_id: int,
         lanelet_to_road_id: dict[int, int],
         connecting_road_ids: List[int],
+        roads: Optional[List] = None,
     ) -> List[Connection]:
         """Build junction connections from road topology.
 
@@ -241,6 +245,8 @@ class Junction:
             junction_id: ID of this junction
             lanelet_to_road_id: Mapping from lanelet ID to road ID for ALL lanelets
             connecting_road_ids: List of road IDs that are inside this junction
+            roads: Optional list of all Road objects for lane ID lookup.
+                   If provided, lane links will be created for all driving lanes.
 
         Returns:
             List of Connection objects for this junction
@@ -261,6 +267,11 @@ class Junction:
         routing_graph = RoutingGraph(
             lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
         )
+
+        # Build road_id to Road mapping for lane ID lookup
+        road_id_to_road: dict[int, "Road"] = {}
+        if roads is not None:
+            road_id_to_road = {road.id: road for road in roads}
 
         # Track connections: (incoming_road_id, connecting_road_id) -> Connection
         connection_map: dict[tuple[int, int], Connection] = {}
@@ -307,25 +318,62 @@ class Junction:
                     connection_map[connection_key] = connection
                     connection_id_counter += 1
 
-                # Add lane link
-                # Note: This is a simplified mapping assuming lane IDs correspond
-                # A proper implementation would need to map OpenDRIVE lane IDs
-                # which may differ from lanelet IDs
-                connection = connection_map[connection_key]
+        # After building all connections, add lane links for all driving lanes
+        for connection_key, connection in connection_map.items():
+            incoming_road_id, connecting_road_id = connection_key
 
-                # Get lane IDs - in OpenDRIVE, negative for right lanes
-                # For simplicity, we use a basic mapping
-                # TODO: Implement proper lane ID mapping from lanelet to OpenDRIVE lane
-                from_lane_id = -1  # Simplified: assume single lane
-                to_lane_id = -1  # Simplified: assume single lane
+            # Get driving lane IDs from both roads
+            incoming_lane_ids = Junction._get_driving_lane_ids(
+                road_id_to_road.get(incoming_road_id)
+            )
+            connecting_lane_ids = Junction._get_driving_lane_ids(
+                road_id_to_road.get(connecting_road_id)
+            )
 
-                # Check if this lane link already exists
-                lane_link_exists = any(
-                    ll.from_lane == from_lane_id and ll.to_lane == to_lane_id
-                    for ll in connection.lane_links
-                )
+            # Create lane links for matching lanes
+            # Match lanes by their IDs (e.g., -1 to -1, -2 to -2)
+            for lane_id in incoming_lane_ids:
+                if lane_id in connecting_lane_ids:
+                    # Check if this lane link already exists
+                    lane_link_exists = any(
+                        ll.from_lane == lane_id and ll.to_lane == lane_id
+                        for ll in connection.lane_links
+                    )
+                    if not lane_link_exists:
+                        connection.add_lane_link(from_lane=lane_id, to_lane=lane_id)
 
-                if not lane_link_exists:
-                    connection.add_lane_link(from_lane=from_lane_id, to_lane=to_lane_id)
+            # If no lane links were created (roads not found or no matching lanes),
+            # fall back to default -1 to -1 link
+            if not connection.lane_links:
+                connection.add_lane_link(from_lane=-1, to_lane=-1)
 
         return list(connection_map.values())
+
+    @staticmethod
+    def _get_driving_lane_ids(road: Optional["Road"]) -> set[int]:
+        """Get all driving lane IDs from a road.
+
+        Args:
+            road: The Road object to extract lane IDs from
+
+        Returns:
+            Set of driving lane IDs (negative for right lanes, positive for left)
+        """
+        from .lane import LaneType
+
+        lane_ids: set[int] = set()
+
+        if road is None or road.lanes is None:
+            return lane_ids
+
+        for lane_section in road.lanes.lane_sections:
+            # Check right lanes (negative IDs)
+            for lane_id, lane in lane_section.right_lanes.items():
+                if lane.lane_type == LaneType.DRIVING:
+                    lane_ids.add(lane_id)
+            # Check left lanes (positive IDs)
+            for lane_id, lane in lane_section.left_lanes.items():
+                if lane.lane_type == LaneType.DRIVING:
+                    lane_ids.add(lane_id)
+
+        return lane_ids
