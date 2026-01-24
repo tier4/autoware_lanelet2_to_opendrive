@@ -261,9 +261,22 @@ class Road:
                         # For connecting roads, skip road link validation
                         if road_link_predecessor is None:
                             if not is_connecting_road:
-                                # No road link predecessor - don't set lane predecessor
-                                # (unless this is a connecting road)
-                                continue
+                                # Road link is None - check if predecessor is a connecting road
+                                # This allows lane branching scenarios (e.g., lane -2 comes from junction)
+                                if road_id_to_road is not None:
+                                    pred_road = road_id_to_road.get(pred_road_id)
+                                    # If predecessor is a connecting road (junction member), allow lane link
+                                    if (
+                                        pred_road is None
+                                        or pred_road.junction is None
+                                        or pred_road.junction < 0
+                                    ):
+                                        # Predecessor is a regular road but no road link - skip
+                                        continue
+                                    # Predecessor is a connecting road - proceed with lane link creation
+                                else:
+                                    # Cannot validate - skip for safety
+                                    continue
                             # For connecting roads, proceed with lane link creation
 
                         # Check if road link predecessor is a junction
@@ -300,7 +313,23 @@ class Road:
                                     pred_road_id != road_link_predecessor.element_id
                                     and not is_connecting_road
                                 ):
-                                    continue
+                                    # Lane predecessor differs from road link - check if it's a branching scenario
+                                    # Allow if predecessor is a connecting road (junction branching)
+                                    if road_id_to_road is not None:
+                                        pred_road = road_id_to_road.get(pred_road_id)
+                                        if (
+                                            pred_road is not None
+                                            and pred_road.junction is not None
+                                            and pred_road.junction >= 0
+                                        ):
+                                            # Predecessor is a connecting road - allow lane branching
+                                            pass
+                                        else:
+                                            # Predecessor is a regular road but doesn't match road link - skip
+                                            continue
+                                    else:
+                                        # Cannot validate - skip for safety
+                                        continue
 
                         # Validate that the lane exists in the predecessor road
                         if road_lane_ids is not None:
@@ -332,9 +361,22 @@ class Road:
                         # For connecting roads, skip road link validation
                         if road_link_successor is None:
                             if not is_connecting_road:
-                                # No road link successor - don't set lane successor
-                                # (unless this is a connecting road)
-                                continue
+                                # Road link is None - check if successor is a connecting road
+                                # This allows lane branching scenarios (e.g., lane -2 turns into junction)
+                                if road_id_to_road is not None:
+                                    succ_road = road_id_to_road.get(succ_road_id)
+                                    # If successor is a connecting road (junction member), allow lane link
+                                    if (
+                                        succ_road is None
+                                        or succ_road.junction is None
+                                        or succ_road.junction < 0
+                                    ):
+                                        # Successor is a regular road but no road link - skip
+                                        continue
+                                    # Successor is a connecting road - proceed with lane link creation
+                                else:
+                                    # Cannot validate - skip for safety
+                                    continue
                             # For connecting roads, proceed with lane link creation
 
                         # Check if road link successor is a junction
@@ -368,7 +410,23 @@ class Road:
                                     succ_road_id != road_link_successor.element_id
                                     and not is_connecting_road
                                 ):
-                                    continue
+                                    # Lane successor differs from road link - check if it's a branching scenario
+                                    # Allow if successor is a connecting road (junction branching)
+                                    if road_id_to_road is not None:
+                                        succ_road = road_id_to_road.get(succ_road_id)
+                                        if (
+                                            succ_road is not None
+                                            and succ_road.junction is not None
+                                            and succ_road.junction >= 0
+                                        ):
+                                            # Successor is a connecting road - allow lane branching
+                                            pass
+                                        else:
+                                            # Successor is a regular road but doesn't match road link - skip
+                                            continue
+                                    else:
+                                        # Cannot validate - skip for safety
+                                        continue
 
                         # Validate that the lane exists in the successor road
                         if road_lane_ids is not None:
