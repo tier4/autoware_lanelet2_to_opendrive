@@ -37,6 +37,7 @@ from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
 )
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -169,6 +170,8 @@ def convert_lanelet2_to_opendrive(
 
     # Step 3: Create connecting roads (inside junctions)
     print("\n=== Building connecting roads inside junctions ===")
+    # Issue #132 fix: Apply junction ID offset to avoid conflicts with road IDs
+    junction_id_offset = DEFAULT_CONFIG.opendrive.junction_id_offset
     (
         connecting_roads,
         junction_to_roads,
@@ -177,6 +180,7 @@ def convert_lanelet2_to_opendrive(
         lanelet_map=lanelet_map,
         junction_groups=junction_groups,
         starting_road_id=starting_junction_road_id,
+        junction_id_offset=junction_id_offset,
     )
 
     # Step 4: Merge lanelet-to-road mappings
@@ -200,8 +204,16 @@ def convert_lanelet2_to_opendrive(
 
     # Step 5: Build junctions with connections
     print("\n=== Building junction connections ===")
+    # junction_id_offset already defined in Step 3
+    print(
+        f"Using junction ID offset: {junction_id_offset} "
+        f"(junction IDs will be {junction_id_offset}+)"
+    )
     junctions = []
-    for junction_id, junction_group in enumerate(junction_groups):
+    for junction_index, junction_group in enumerate(junction_groups):
+        # Apply offset to junction ID to avoid conflicts with road IDs
+        junction_id = junction_index + junction_id_offset
+
         # Create base junction
         junction = Junction.construct_from_lanelet_groups(
             junction_id=junction_id,

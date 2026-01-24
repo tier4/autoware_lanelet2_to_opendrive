@@ -709,6 +709,7 @@ class Road:
         lanelet_map: lanelet2.core.LaneletMap,
         junction_groups: List[List[lanelet2.core.Lanelet]],
         starting_road_id: int = 0,
+        junction_id_offset: int = 0,
     ) -> tuple[List["Road"], dict[int, List[int]], dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -719,6 +720,8 @@ class Road:
             lanelet_map: The lanelet2 map containing all lanelets
             junction_groups: List of junction lanelet groups from find_junction_groups()
             starting_road_id: Starting ID for road numbering (default: 0)
+            junction_id_offset: Offset to add to junction IDs to avoid conflicts
+                               with road IDs (default: 0). Issue #132 fix.
 
         Returns:
             Tuple of:
@@ -731,7 +734,7 @@ class Road:
             >>> junction_lanelets = filter_lanelets_inside_junction(lanelet_map.laneletLayer)
             >>> junction_groups = find_junction_groups(junction_lanelets)
             >>> roads, junction_to_roads, lanelet_to_road = Road.construct_connecting_roads_from_junctions(
-            ...     lanelet_map, junction_groups, starting_road_id=1000
+            ...     lanelet_map, junction_groups, starting_road_id=1000, junction_id_offset=1000
             ... )
         """
         from ..util import find_adjacent_groups
@@ -746,11 +749,13 @@ class Road:
             f"Creating connecting roads from {len(junction_groups)} junction groups..."
         )
 
-        for junction_id, junction_group in tqdm(
+        for junction_index, junction_group in tqdm(
             enumerate(junction_groups),
             total=len(junction_groups),
             desc="Building junction roads",
         ):
+            # Issue #132 fix: Apply offset to junction ID
+            junction_id = junction_index + junction_id_offset
             # Find adjacent groups within this junction
             adjacent_groups_in_junction = find_adjacent_groups(
                 lanelet_map, set(junction_group)

@@ -66,6 +66,28 @@ class PreprocessingConstants:
 
 
 @dataclass(frozen=True)
+class OpenDriveConstants:
+    """Constants for OpenDRIVE format and ID management.
+
+    Issue #132 fix: OpenDRIVE specification allows roads and junctions to share
+    the same ID space, but some tools (e.g., CARLA MapBuilder) cannot distinguish
+    between them, causing ID collisions. To prevent this, we add an offset to
+    junction IDs to ensure they never conflict with road IDs.
+
+    Attributes:
+        junction_id_offset: Offset added to all junction IDs to avoid conflicts
+                           with road IDs. Default is 1000, which means:
+                           - Junction 0 becomes ID 1000
+                           - Junction 1 becomes ID 1001
+                           - etc.
+                           This ensures junction IDs never collide with road IDs
+                           even for large maps with hundreds of roads.
+    """
+
+    junction_id_offset: int = 1000
+
+
+@dataclass(frozen=True)
 class ConversionConfig:
     """Main configuration container for all conversion constants.
 
@@ -102,11 +124,13 @@ class ConversionConfig:
         geometry: Geometry calculation constants
         spline: Spline fitting constants
         preprocessing: Preprocessing operation constants
+        opendrive: OpenDRIVE format constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
     spline: SplineConstants = SplineConstants()
     preprocessing: PreprocessingConstants = PreprocessingConstants()
+    opendrive: OpenDriveConstants = OpenDriveConstants()
 
 
 # Global default configuration instance
