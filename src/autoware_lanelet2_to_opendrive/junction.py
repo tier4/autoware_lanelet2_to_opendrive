@@ -1,25 +1,32 @@
 """Junction-related utility functions for lanelet2 to OpenDRIVE conversion."""
 
-from typing import List, Set, Union
+from typing import List, Optional, Set, Union
 import lanelet2
 from .util import check_lanelet_groups_intersect
 
 
 def filter_lanelets_inside_junction(
     lanelets: Union[List[lanelet2.core.Lanelet], Set[lanelet2.core.Lanelet]],
+    exclude_lanelet_ids: Optional[List[int]] = None,
 ) -> List[lanelet2.core.Lanelet]:
     """Filter lanelets that are inside a junction (intersection).
 
     Args:
         lanelets: List or set of lanelets to filter
+        exclude_lanelet_ids: List of lanelet IDs to exclude from junction detection (optional)
 
     Returns:
-        List of lanelets that have turn_direction attribute (indicating junction lanelets)
+        List of lanelets that have turn_direction attribute (indicating junction lanelets),
+        excluding any lanelets specified in exclude_lanelet_ids
     """
+    if exclude_lanelet_ids is None:
+        exclude_lanelet_ids = []
+
     junction_lanelets = []
+    exclude_ids_set = set(exclude_lanelet_ids)
 
     for lanelet in lanelets:
-        if "turn_direction" in lanelet.attributes:
+        if "turn_direction" in lanelet.attributes and lanelet.id not in exclude_ids_set:
             junction_lanelets.append(lanelet)
 
     return junction_lanelets

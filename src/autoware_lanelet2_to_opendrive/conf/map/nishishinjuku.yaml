@@ -45,3 +45,7 @@ remove_lanelet_operations:
 
 remove_turn_direction_operations:
   - lanelet_ids: [3001150, 554, 301028]
+
+# No-junction lanelet IDs - lanelets to exclude from junction detection
+# These lanelets will be treated as regular roads even if they have turn_direction attribute
+no_junction_lanelet_ids: [472, 124435, 3001225, 3001220]
