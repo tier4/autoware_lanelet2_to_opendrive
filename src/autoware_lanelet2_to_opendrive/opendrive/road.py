@@ -180,6 +180,34 @@ class Road:
                     road_id_to_road,
                 )
 
+    @staticmethod
+    def _find_closest_lane(target_lane: int, available_lanes: list[int]) -> int:
+        """Find the closest lane ID when exact match doesn't exist.
+
+        This handles cases where a lane references a non-existent lane in the
+        target road, typically when the number of lanes changes (e.g., 3 lanes
+        merging into 2 lanes).
+
+        Args:
+            target_lane: The desired lane ID that doesn't exist
+            available_lanes: Sorted list of existing lane IDs in the target road
+
+        Returns:
+            Closest existing lane ID
+
+        Example:
+            >>> _find_closest_lane(-3, [-1, -2])  # Lane -3 merges into -2
+            -2
+        """
+        if not available_lanes:
+            return -1  # Fallback to default lane
+
+        # Find the lane with minimum distance to target_lane
+        # For right lanes (negative IDs): -3 is closer to -2 than -1
+        # For left lanes (positive IDs): 3 is closer to 2 than 1
+        closest = min(available_lanes, key=lambda x: abs(x - target_lane))
+        return closest
+
     def _set_single_lane_links(
         self,
         lane: "Lane",
@@ -278,8 +306,16 @@ class Road:
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(pred_road_id, set())
                             if pred_lane_id not in existing_lanes:
-                                # Lane doesn't exist, skip this link
-                                continue
+                                # Lane doesn't exist, find closest lane
+                                # This handles lane reduction scenarios (e.g., 3 lanes -> 2 lanes)
+                                if existing_lanes:
+                                    available_lanes = sorted(existing_lanes)
+                                    pred_lane_id = Road._find_closest_lane(
+                                        pred_lane_id, available_lanes
+                                    )
+                                else:
+                                    # No lanes available, skip this link
+                                    continue
                         lane.predecessor = LaneLink(id=pred_lane_id)
                         break
 
@@ -338,8 +374,16 @@ class Road:
                         if road_lane_ids is not None:
                             existing_lanes = road_lane_ids.get(succ_road_id, set())
                             if succ_lane_id not in existing_lanes:
-                                # Lane doesn't exist, skip this link
-                                continue
+                                # Lane doesn't exist, find closest lane
+                                # This handles lane reduction scenarios (e.g., 3 lanes -> 2 lanes)
+                                if existing_lanes:
+                                    available_lanes = sorted(existing_lanes)
+                                    succ_lane_id = Road._find_closest_lane(
+                                        succ_lane_id, available_lanes
+                                    )
+                                else:
+                                    # No lanes available, skip this link
+                                    continue
                         lane.successor = LaneLink(id=succ_lane_id)
                         break
 
