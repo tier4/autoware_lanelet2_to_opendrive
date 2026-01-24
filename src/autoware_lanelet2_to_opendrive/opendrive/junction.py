@@ -277,6 +277,10 @@ class Junction:
         connection_map: dict[tuple[int, int], Connection] = {}
         connection_id_counter = 0
 
+        # Track actual lane connections from routing graph
+        # Issue #132 fix: Store actual lanelet connections to create correct lane links
+        connection_lane_links: dict[tuple[int, int], List[tuple[int, int]]] = {}
+
         junction_lanelet_ids = {ll.id for ll in junction_lanelet_group}
 
         # For each lanelet in this junction
@@ -286,6 +290,17 @@ class Junction:
                 continue
 
             connecting_road_id = lanelet_to_road_id[junction_lanelet.id]
+
+            # Get the connecting road and its lanelet-to-lane mapping
+            connecting_road = road_id_to_road.get(connecting_road_id)
+            if connecting_road is None:
+                continue
+
+            connecting_lane_mapping = connecting_road.get_lanelet_to_lane_mapping()
+            connecting_lane_id = connecting_lane_mapping.get(junction_lanelet.id)
+
+            if connecting_lane_id is None:
+                continue
 
             # Find predecessor lanelets (incoming to junction)
             previous_lanelets = routing_graph.previous(junction_lanelet)
@@ -300,6 +315,17 @@ class Junction:
                     continue
 
                 incoming_road_id = lanelet_to_road_id[prev_lanelet.id]
+
+                # Get the incoming road and its lanelet-to-lane mapping
+                incoming_road = road_id_to_road.get(incoming_road_id)
+                if incoming_road is None:
+                    continue
+
+                incoming_lane_mapping = incoming_road.get_lanelet_to_lane_mapping()
+                incoming_lane_id = incoming_lane_mapping.get(prev_lanelet.id)
+
+                if incoming_lane_id is None:
+                    continue
 
                 # Create or get connection for this (incoming, connecting) pair
                 connection_key = (incoming_road_id, connecting_road_id)
@@ -317,56 +343,79 @@ class Junction:
                     )
                     connection_map[connection_key] = connection
                     connection_id_counter += 1
+                    connection_lane_links[connection_key] = []
 
-        # After building all connections, add lane links for all driving lanes
+                # Store the actual lane connection from routing graph
+                lane_link = (incoming_lane_id, connecting_lane_id)
+                if lane_link not in connection_lane_links[connection_key]:
+                    connection_lane_links[connection_key].append(lane_link)
+
+        # After building all connections, add lane links based on actual routing graph
         for connection_key, connection in connection_map.items():
             incoming_road_id, connecting_road_id = connection_key
 
-            # Get driving lane IDs from both roads
-            incoming_lane_ids = Junction._get_driving_lane_ids(
-                road_id_to_road.get(incoming_road_id)
-            )
-            connecting_lane_ids = Junction._get_driving_lane_ids(
-                road_id_to_road.get(connecting_road_id)
-            )
+            # Issue #132 fix: Use actual lane connections from routing graph
+            actual_lane_links = connection_lane_links.get(connection_key, [])
 
-            # Issue #125 fix: Create lane links for ALL incoming lanes
-            # If connecting road has fewer lanes, map multiple incoming lanes to same
-            # connecting lane
-            if incoming_lane_ids and connecting_lane_ids:
-                # Sort lane IDs (negative for right, positive for left)
-                incoming_sorted = sorted(incoming_lane_ids)
-                connecting_sorted = sorted(connecting_lane_ids)
-
-                # Map each incoming lane to a connecting lane
-                for incoming_lane in incoming_sorted:
-                    # Try to find exact match first
-                    if incoming_lane in connecting_lane_ids:
-                        to_lane = incoming_lane
-                    else:
-                        # No exact match - map to closest lane in connecting road
-                        # For right lanes (negative IDs): more negative = further from
-                        # center
-                        # For left lanes (positive IDs): more positive = further from
-                        # center
-                        to_lane = Junction._find_closest_lane(
-                            incoming_lane, connecting_sorted
-                        )
-
+            if actual_lane_links:
+                # Add lane links based on actual routing graph connections
+                for from_lane, to_lane in actual_lane_links:
                     # Check if this lane link already exists
                     lane_link_exists = any(
-                        ll.from_lane == incoming_lane and ll.to_lane == to_lane
+                        ll.from_lane == from_lane and ll.to_lane == to_lane
                         for ll in connection.lane_links
                     )
                     if not lane_link_exists:
-                        connection.add_lane_link(
-                            from_lane=incoming_lane, to_lane=to_lane
-                        )
+                        connection.add_lane_link(from_lane=from_lane, to_lane=to_lane)
             else:
-                # If no lane links were created (roads not found or no lanes),
-                # fall back to default -1 to -1 link
-                if not connection.lane_links:
-                    connection.add_lane_link(from_lane=-1, to_lane=-1)
+                # Fallback: If no actual connections were found, use old logic
+                # This preserves backward compatibility for edge cases
+
+                # Get driving lane IDs from both roads
+                incoming_lane_ids = Junction._get_driving_lane_ids(
+                    road_id_to_road.get(incoming_road_id)
+                )
+                connecting_lane_ids = Junction._get_driving_lane_ids(
+                    road_id_to_road.get(connecting_road_id)
+                )
+
+                # Issue #125 fix: Create lane links for ALL incoming lanes
+                # If connecting road has fewer lanes, map multiple incoming lanes to same
+                # connecting lane
+                if incoming_lane_ids and connecting_lane_ids:
+                    # Sort lane IDs (negative for right, positive for left)
+                    incoming_sorted = sorted(incoming_lane_ids)
+                    connecting_sorted = sorted(connecting_lane_ids)
+
+                    # Map each incoming lane to a connecting lane
+                    for incoming_lane in incoming_sorted:
+                        # Try to find exact match first
+                        if incoming_lane in connecting_lane_ids:
+                            to_lane = incoming_lane
+                        else:
+                            # No exact match - map to closest lane in connecting road
+                            # For right lanes (negative IDs): more negative = further
+                            # from center
+                            # For left lanes (positive IDs): more positive = further
+                            # from center
+                            to_lane = Junction._find_closest_lane(
+                                incoming_lane, connecting_sorted
+                            )
+
+                        # Check if this lane link already exists
+                        lane_link_exists = any(
+                            ll.from_lane == incoming_lane and ll.to_lane == to_lane
+                            for ll in connection.lane_links
+                        )
+                        if not lane_link_exists:
+                            connection.add_lane_link(
+                                from_lane=incoming_lane, to_lane=to_lane
+                            )
+                else:
+                    # If no lane links were created (roads not found or no lanes),
+                    # fall back to default -1 to -1 link
+                    if not connection.lane_links:
+                        connection.add_lane_link(from_lane=-1, to_lane=-1)
 
         return list(connection_map.values())
 

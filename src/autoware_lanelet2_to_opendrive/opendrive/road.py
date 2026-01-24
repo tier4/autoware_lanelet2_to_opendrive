@@ -981,9 +981,10 @@ class Road:
         For roads that connect to junctions (as incoming roads), this method
         sets the appropriate successor/predecessor link to the junction.
 
-        This is required for CARLA compatibility, which expects bidirectional
-        link consistency: if a connecting road has predecessor=RoadA, then
-        RoadA should have successor=Junction.
+        This is required for CARLA compatibility and ensures correct routing
+        through junctions. Issue #132 fix: Use connection.contactPoint directly
+        instead of checking connecting road links, which may only reference
+        one of multiple incoming roads.
 
         Args:
             roads: List of all roads (both regular and connecting roads)
@@ -1002,22 +1003,13 @@ class Road:
 
                 incoming_road = road_map[incoming_road_id]
 
-                # Determine if we should set successor or predecessor
-                # by checking the connecting road's links
-                connecting_road_id = connection.connecting_road
-                if connecting_road_id not in road_map:
-                    continue
-
-                connecting_road = road_map[connecting_road_id]
-
-                # Check if connecting road's predecessor is the incoming road
-                # This means: incoming_road -> junction -> connecting_road
-                # So incoming_road's successor should be the junction
-                if (
-                    connecting_road.link
-                    and connecting_road.link.predecessor
-                    and connecting_road.link.predecessor.element_id == incoming_road_id
-                ):
+                # Issue #132 fix: Use contactPoint to determine which side connects
+                # contactPoint indicates which end of the connecting road is used
+                # - START: connecting road starts at this junction
+                #   → incoming road ends at junction → set successor
+                # - END: connecting road ends at this junction
+                #   → incoming road starts at junction → set predecessor
+                if connection.contact_point == ContactPoint.START:
                     # The end of incoming road connects to junction
                     # Set successor to junction (if not already set)
                     if (
@@ -1029,15 +1021,7 @@ class Road:
                             element_type=ElementType.JUNCTION,
                             contact_point=None,  # Junction links don't have contact point
                         )
-
-                # Check if connecting road's successor is the incoming road
-                # This means: connecting_road -> junction -> incoming_road
-                # So incoming_road's predecessor should be the junction
-                if (
-                    connecting_road.link
-                    and connecting_road.link.successor
-                    and connecting_road.link.successor.element_id == incoming_road_id
-                ):
+                elif connection.contact_point == ContactPoint.END:
                     # The start of incoming road connects to junction
                     # Set predecessor to junction (if not already set)
                     if (
