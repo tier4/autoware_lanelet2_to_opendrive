@@ -168,6 +168,120 @@ This applies to:
 - Localization files (if the project supports multiple languages in the UI)
 - Citations or references to non-English sources (should include English translation)
 
+## GitHub Issue and Pull Request Templates
+
+**IMPORTANT**: This project uses GitHub issue and pull request templates to maintain consistency and quality in project communications.
+
+### Pull Request Template
+
+When creating a pull request, use the template provided in `.github/PULL_REQUEST_TEMPLATE.md`. The template structure follows the project's established style (see [PR #133](https://github.com/tier4/autoware_lanelet2_to_opendrive/pull/133) as reference):
+
+**Required Sections:**
+1. **Summary** (🐛 Bug Fixes / ✨ New Features / ♻️ Refactoring)
+   - Brief overview of changes categorized by type
+   - Use emoji indicators for visual clarity
+
+2. **Root Cause Analysis** (🔍)
+   - For bug fixes: Explain the root cause of the issue
+   - For features: Explain the motivation and use cases
+   - Include technical details and problem description
+
+3. **Changes** (🛠️)
+   - Describe technical changes with code examples
+   - Use before/after comparisons when applicable
+   - Reference specific files and line numbers
+
+4. **Testing** (✅)
+   - Document pre-commit hook results
+   - Describe manual testing performed
+   - Include test coverage information
+
+5. **Expected Results** (📊)
+   - List expected behaviors after merging
+   - Use checkboxes for clarity
+
+6. **Breaking Changes** (⚠️)
+   - List any breaking changes introduced
+   - Explain why they were necessary
+   - Provide migration guide for users
+
+7. **Related Issues** (📝)
+   - Link related issues using GitHub keywords (Closes, Fixes, Related to)
+
+**Important Guidelines:**
+- Always use English for all PR content (per Language Policy)
+- Use emoji indicators (🐛 ✨ ♻️ 🔍 🛠️ ✅ 📊 ⚠️ 📝) for section headers
+- Include code examples with syntax highlighting
+- Delete sections that are not applicable (e.g., Breaking Changes if none)
+- Ensure all pre-commit checks pass before creating the PR
+- Include `Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>` if assisted by Claude
+
+### Issue Templates
+
+When creating an issue, select the appropriate template:
+
+#### 🐛 Bug Report Template
+Use `.github/ISSUE_TEMPLATE/bug_report.md` for reporting bugs or unexpected behavior.
+
+**Required Information:**
+- Bug description
+- Steps to reproduce
+- Expected vs. actual behavior
+- Environment details (OS, Python version, package version)
+- Screenshots or error logs (if applicable)
+
+#### ✨ Feature Request Template
+Use `.github/ISSUE_TEMPLATE/feature_request.md` for suggesting new features or enhancements.
+
+**Required Information:**
+- Feature description
+- Motivation and use cases
+- Proposed solution
+- Expected benefits
+- Potential breaking changes
+
+**Template Selection:**
+- GitHub will automatically present template options when creating a new issue
+- Choose the most appropriate template for your use case
+- Fill out all required sections in the template
+- Use English for all issue content (per Language Policy)
+- Include relevant emoji indicators for clarity
+
+### Rationale
+
+- **Consistency**: Standardized format across all PRs and issues
+- **Quality**: Ensures all necessary information is provided
+- **Efficiency**: Reviewers can quickly understand changes
+- **Documentation**: PRs serve as historical record of design decisions
+- **Collaboration**: Clear structure facilitates team communication
+- **Professional standards**: Follows industry best practices for open-source projects
+
+### Instructions for Claude Code
+
+**MANDATORY**: When creating PRs or issues through Claude Code:
+
+1. **Always use the appropriate template**
+   - For PRs: Use `.github/PULL_REQUEST_TEMPLATE.md`
+   - For issues: Select bug_report.md or feature_request.md
+
+2. **Fill out all required sections**
+   - Do not skip sections unless explicitly marked as optional
+   - Delete sections marked as "delete if not applicable"
+
+3. **Follow the established style**
+   - Use emoji indicators for section headers
+   - Include code examples with proper formatting
+   - Use checkboxes for lists where appropriate
+
+4. **Ensure completeness**
+   - Provide thorough technical explanations
+   - Include before/after comparisons for changes
+   - Document all testing performed
+
+5. **Maintain Language Policy**
+   - All PR/issue content must be in English
+   - Use clear, professional technical writing
+
 ## Git Operation Restrictions
 
 **IMPORTANT**: The following dangerous git operations are STRICTLY PROHIBITED for safety:
