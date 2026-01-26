@@ -22,6 +22,7 @@ from autoware_lanelet2_to_opendrive.util import (
     mgrs_to_proj_string,
     RoadLaneletMapping,
 )
+from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
     LaneletPreprocessor,
@@ -37,6 +38,7 @@ from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
 )
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -82,6 +84,7 @@ def convert_lanelet2_to_opendrive(
     exclude_non_junction_signals: bool = False,
     origin_lat: Optional[float] = None,
     origin_lon: Optional[float] = None,
+    no_junction_lanelet_ids: Optional[List[int]] = None,
 ) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
@@ -96,6 +99,8 @@ def convert_lanelet2_to_opendrive(
             used for more accurate geoReference generation.
         origin_lon: Longitude of the origin point (with offset applied). If provided,
             used for more accurate geoReference generation.
+        no_junction_lanelet_ids: List of lanelet IDs to exclude from junction detection.
+            These lanelets will be treated as regular roads even if they have turn_direction attribute.
 
     Returns:
         Tuple of:
@@ -158,12 +163,16 @@ def convert_lanelet2_to_opendrive(
 
     # Step 2: Get junction groups
     print("\n=== Finding junctions ===")
-    junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+    junction_lanelets = filter_lanelets_inside_junction(
+        all_lanelets, exclude_lanelet_ids=no_junction_lanelet_ids
+    )
     junction_groups = find_junction_groups(junction_lanelets)
     print(f"Found {len(junction_groups)} junctions")
 
     # Step 3: Create connecting roads (inside junctions)
     print("\n=== Building connecting roads inside junctions ===")
+    # Issue #132 fix: Apply junction ID offset to avoid conflicts with road IDs
+    junction_id_offset = DEFAULT_CONFIG.opendrive.junction_id_offset
     (
         connecting_roads,
         junction_to_roads,
@@ -172,6 +181,7 @@ def convert_lanelet2_to_opendrive(
         lanelet_map=lanelet_map,
         junction_groups=junction_groups,
         starting_road_id=starting_junction_road_id,
+        junction_id_offset=junction_id_offset,
     )
 
     # Step 4: Merge lanelet-to-road mappings
@@ -195,8 +205,16 @@ def convert_lanelet2_to_opendrive(
 
     # Step 5: Build junctions with connections
     print("\n=== Building junction connections ===")
+    # junction_id_offset already defined in Step 3
+    print(
+        f"Using junction ID offset: {junction_id_offset} "
+        f"(junction IDs will be {junction_id_offset}+)"
+    )
     junctions = []
-    for junction_id, junction_group in enumerate(junction_groups):
+    for junction_index, junction_group in enumerate(junction_groups):
+        # Apply offset to junction ID to avoid conflicts with road IDs
+        junction_id = junction_index + junction_id_offset
+
         # Create base junction
         junction = Junction.construct_from_lanelet_groups(
             junction_id=junction_id,
@@ -373,7 +391,7 @@ def convert_lanelet2_to_opendrive(
 
 def parse_origin_from_config(
     cfg: DictConfig,
-) -> tuple[lanelet2.io.Origin, str, float, float]:
+) -> tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
     """
     Parse origin specification from Hydra config with mutual exclusion validation.
 
@@ -386,9 +404,11 @@ def parse_origin_from_config(
         cfg: Hydra configuration object with map settings
 
     Returns:
-        Tuple of (lanelet2.io.Origin, mgrs_code_for_proj_string, origin_lat, origin_lon)
+        Tuple of (lanelet2.io.Origin, mgrs_code_for_proj_string, origin_lat, origin_lon,
+                  offset_x, offset_y, offset_z)
         The mgrs_code_for_proj_string is used for generating the OpenDRIVE geoReference
         The origin_lat and origin_lon are the actual origin coordinates (with offset applied)
+        The offset values are used to convert coordinates to local coordinate system
 
     Raises:
         ValueError: If origin specification is invalid or multiple methods are specified
@@ -455,7 +475,15 @@ def parse_origin_from_config(
                 mgrs_grid, offset_x, offset_y, offset_z
             )
             logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-            return origin, mgrs_grid, origin_lat, origin_lon
+            return (
+                origin,
+                mgrs_grid,
+                origin_lat,
+                origin_lon,
+                offset_x,
+                offset_y,
+                offset_z,
+            )
         else:
             logger.info(f"Using MGRS grid origin: {mgrs_grid}")
             origin = mgrs_to_lanelet2_origin(mgrs_grid)
@@ -467,7 +495,8 @@ def parse_origin_from_config(
             processed_mgrs = mgrs_grid + "0000000000"
             origin_lat, origin_lon = m.toLatLon(processed_mgrs)
             logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-            return origin, mgrs_grid, origin_lat, origin_lon
+            # No offset specified
+            return origin, mgrs_grid, origin_lat, origin_lon, 0.0, 0.0, 0.0
 
     elif has_lat_lon:
         latlon_cfg = map_cfg.lat_lon
@@ -497,7 +526,8 @@ def parse_origin_from_config(
             mgrs_grid = mgrs_code[:5]  # Fallback to first 5 chars
 
         logger.info(f"Derived MGRS grid for PROJ string: {mgrs_grid}")
-        return origin, mgrs_grid, latitude, longitude
+        # No offset for lat/lon origin
+        return origin, mgrs_grid, latitude, longitude, 0.0, 0.0, 0.0
 
     # Should never reach here due to the checks above
     raise ValueError("Invalid origin configuration")
@@ -519,10 +549,25 @@ def preprocess_and_convert_with_hydra(
     input_map_path = lanelet2_file
 
     # Parse origin from config (with mutual exclusion validation)
-    origin, mgrs_code, origin_lat, origin_lon = parse_origin_from_config(cfg)
+    origin, mgrs_code, origin_lat, origin_lon, offset_x, offset_y, offset_z = (
+        parse_origin_from_config(cfg)
+    )
+
+    # Set global coordinate offset for conversion
+    # This will be applied to all coordinates during OpenDRIVE export
+    COORDINATE_OFFSET.set(offset_x, offset_y, offset_z)
+    if COORDINATE_OFFSET.is_active:
+        logger.info(
+            f"Coordinate offset enabled: x={offset_x}, y={offset_y}, z={offset_z}"
+        )
 
     # Get target-specific settings
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
+
+    # Get no-junction lanelet IDs from map config
+    no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
+    if no_junction_lanelet_ids:
+        logger.info(f"No-junction lanelet IDs configured: {no_junction_lanelet_ids}")
 
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
@@ -579,6 +624,7 @@ def preprocess_and_convert_with_hydra(
         exclude_non_junction_signals=exclude_non_junction_signals,
         origin_lat=origin_lat,
         origin_lon=origin_lon,
+        no_junction_lanelet_ids=no_junction_lanelet_ids,
     )
 
     logger.info("Conversion completed successfully!")

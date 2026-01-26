@@ -31,6 +31,69 @@ def test_filter_lanelets_inside_junction():
         assert "turn_direction" in lanelet.attributes
 
 
+def test_filter_lanelets_inside_junction_with_exclusion():
+    """Test filtering lanelets inside a junction with exclusion list."""
+    lanelet_map = load_test_map()
+    lanelets = list(lanelet_map.laneletLayer)
+
+    from autoware_lanelet2_to_opendrive.junction import filter_lanelets_inside_junction
+
+    # First, get all junction lanelets without exclusion
+    all_junction_lanelets = filter_lanelets_inside_junction(lanelets)
+    all_junction_ids = {ll.id for ll in all_junction_lanelets}
+
+    # Test with empty exclusion list (should be same as no exclusion)
+    junction_lanelets_empty_exclusion = filter_lanelets_inside_junction(
+        lanelets, exclude_lanelet_ids=[]
+    )
+    assert len(junction_lanelets_empty_exclusion) == len(all_junction_lanelets)
+
+    # Test with None exclusion (should be same as no exclusion)
+    junction_lanelets_none_exclusion = filter_lanelets_inside_junction(
+        lanelets, exclude_lanelet_ids=None
+    )
+    assert len(junction_lanelets_none_exclusion) == len(all_junction_lanelets)
+
+    # Test with specific exclusion
+    # Pick one junction lanelet ID to exclude
+    if all_junction_ids:
+        exclude_id = next(iter(all_junction_ids))
+        junction_lanelets_with_exclusion = filter_lanelets_inside_junction(
+            lanelets, exclude_lanelet_ids=[exclude_id]
+        )
+
+        # Should have one fewer lanelet
+        assert len(junction_lanelets_with_exclusion) == len(all_junction_lanelets) - 1
+
+        # The excluded ID should not be in the result
+        filtered_ids = {ll.id for ll in junction_lanelets_with_exclusion}
+        assert exclude_id not in filtered_ids
+
+        # All other junction lanelets should still be present
+        assert filtered_ids == all_junction_ids - {exclude_id}
+
+    # Test with multiple exclusions
+    if len(all_junction_ids) >= 2:
+        exclude_ids = list(all_junction_ids)[:2]
+        junction_lanelets_multi_exclusion = filter_lanelets_inside_junction(
+            lanelets, exclude_lanelet_ids=exclude_ids
+        )
+
+        # Should have two fewer lanelets
+        assert len(junction_lanelets_multi_exclusion) == len(all_junction_lanelets) - 2
+
+        # The excluded IDs should not be in the result
+        filtered_ids = {ll.id for ll in junction_lanelets_multi_exclusion}
+        for exclude_id in exclude_ids:
+            assert exclude_id not in filtered_ids
+
+    # Test with non-existent ID (should have no effect)
+    junction_lanelets_invalid = filter_lanelets_inside_junction(
+        lanelets, exclude_lanelet_ids=[999999]
+    )
+    assert len(junction_lanelets_invalid) == len(all_junction_lanelets)
+
+
 def test_find_junction_groups():
     """Test finding separate junction groups from lanelets."""
     from autoware_lanelet2_to_opendrive.junction import (

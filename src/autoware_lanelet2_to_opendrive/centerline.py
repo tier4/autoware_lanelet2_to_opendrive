@@ -3,7 +3,7 @@ import lanelet2
 from typing import Set
 from .config import DEFAULT_CONFIG
 from .spline import Splines
-from .util import sort_adjacent_groups
+from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
 
 
@@ -303,9 +303,9 @@ def extract_centerline_as_spline(
     if len(left_bound) < 2 or len(right_bound) < 2:
         raise ValueError("Both boundaries must have at least 2 points")
 
-    # Convert to numpy arrays
-    left_points = np.array([[p.x, p.y, p.z] for p in left_bound])
-    right_points = np.array([[p.x, p.y, p.z] for p in right_bound])
+    # Convert to numpy arrays with coordinate offset applied
+    left_points = extract_points_3d(left_bound)
+    right_points = extract_points_3d(right_bound)
 
     # Calculate cumulative arc lengths for both boundaries
     left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
@@ -432,7 +432,8 @@ def extract_border_from_spline(
         )
 
     # Extract 2D points from the boundary (XY only, per OpenDRIVE spec)
-    points = np.array([[point.x, point.y] for point in boundary])
+    # Coordinate offset is applied automatically
+    points = extract_points_2d(boundary)
 
     # Get velocity vectors (XY components only)
     start_vel = _get_boundary_start_vel(boundary)[:2]
@@ -481,9 +482,9 @@ def estimate_lanelet_width_as_spline(
     if len(left_bound) < 2 or len(right_bound) < 2:
         raise ValueError("Both boundaries must have at least 2 points")
 
-    # Convert to numpy arrays
-    left_points = np.array([[p.x, p.y, p.z] for p in left_bound])
-    right_points = np.array([[p.x, p.y, p.z] for p in right_bound])
+    # Convert to numpy arrays with coordinate offset applied
+    left_points = extract_points_3d(left_bound)
+    right_points = extract_points_3d(right_bound)
 
     # Calculate cumulative arc lengths for both boundaries
     left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
@@ -602,11 +603,8 @@ def extract_centerline_as_spline_from_two_lanelets(
     if len(right_bound) < 2:
         raise ValueError("Left lanelet must have at least 2 points in its right bound")
 
-    points = []
-    for point in right_bound:
-        points.append([point.x, point.y, point.z])
-
-    points = np.array(points)
+    # Extract 3D points with coordinate offset applied
+    points = extract_points_3d(right_bound)
 
     # Create and return the B-spline
     return Splines(
