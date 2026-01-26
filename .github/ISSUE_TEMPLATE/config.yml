@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Discussion
+    url: https://github.com/tier4/autoware_lanelet2_to_opendrive/discussions
+    about: Ask questions or discuss ideas with the community
+  - name: 📚 Documentation
+    url: https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/README.md
+    about: Read the project documentation and guides

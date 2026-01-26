@@ -168,6 +168,53 @@ This applies to:
 - Localization files (if the project supports multiple languages in the UI)
 - Citations or references to non-English sources (should include English translation)
 
+## GitHub Issue and Pull Request Templates
+
+**IMPORTANT**: This project uses GitHub issue and pull request templates to maintain consistency and quality in project communications.
+
+### Template Files
+
+- **Pull Request Template**: `.github/PULL_REQUEST_TEMPLATE.md`
+- **Bug Report Template**: `.github/ISSUE_TEMPLATE/bug_report.md`
+- **Feature Request Template**: `.github/ISSUE_TEMPLATE/feature_request.md`
+- **Template Configuration**: `.github/ISSUE_TEMPLATE/config.yml`
+
+### Style Reference
+
+See [PR #133](https://github.com/tier4/autoware_lanelet2_to_opendrive/pull/133) as an example of the project's established PR description style with emoji indicators (🐛 ✨ ♻️ 🔍 🛠️ ✅ 📊 ⚠️ 📝) and comprehensive documentation.
+
+### Instructions for Claude Code
+
+**MANDATORY**: When creating PRs or issues through Claude Code:
+
+1. **Read the appropriate template file first**
+   - For PRs: Read `.github/PULL_REQUEST_TEMPLATE.md` and use its structure
+   - For bug reports: Read `.github/ISSUE_TEMPLATE/bug_report.md` and follow its format
+   - For feature requests: Read `.github/ISSUE_TEMPLATE/feature_request.md` and follow its format
+
+2. **Follow template structure exactly**
+   - Fill out all required sections in the template
+   - Delete optional sections marked as "delete if not applicable"
+   - Use emoji indicators as specified in the template
+   - Include code examples with syntax highlighting where appropriate
+   - Use checkboxes for lists where indicated
+
+3. **Maintain Language Policy**
+   - All PR/issue content must be in English
+   - Use clear, professional technical writing
+
+4. **Ensure pre-commit compliance**
+   - All pre-commit checks must pass before creating the PR
+   - Include `Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>` if assisted by Claude
+
+### Rationale
+
+- **Consistency**: Standardized format across all PRs and issues
+- **Quality**: Ensures all necessary information is provided
+- **Efficiency**: Reviewers can quickly understand changes
+- **Documentation**: PRs serve as historical record of design decisions
+- **Professional standards**: Follows industry best practices for open-source projects
+
 ## Git Operation Restrictions
 
 **IMPORTANT**: The following dangerous git operations are STRICTLY PROHIBITED for safety:
