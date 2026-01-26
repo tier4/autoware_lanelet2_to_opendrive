@@ -174,6 +174,42 @@ Tests cover:
 - XML formatting and structure
 - Error handling for invalid inputs
 
+## Signal References
+
+Signal references (`<signalReference>`) are companion elements to signals that specify the signal's position on the road reference line. While a `<signal>` element can be placed at any lateral offset (t-coordinate), a `<signalReference>` is always placed at t=0.0 (on the reference line) to facilitate lane assignment.
+
+### Implementation
+
+For each `<signal>` element generated, a corresponding `<signalReference>` element is automatically created with:
+
+- **id**: Same as the signal's id
+- **s**: Same s-coordinate as the signal
+- **t**: Always "0.0" (on the reference line)
+- **orientation**: Same orientation as the signal
+- **validity**: Copy of the signal's validity elements
+
+### XML Example
+
+```xml
+<signals>
+  <!-- Original signal at lateral offset -->
+  <signal id="59" name="TrafficLight_3002245"
+          s="44.13" t="6.51" orientation="+"
+          dynamic="yes" type="1000001">
+    <validity fromLane="-1" toLane="-1"/>
+  </signal>
+
+  <!-- Corresponding signalReference on reference line -->
+  <signalReference id="59" s="44.13" t="0.0" orientation="+">
+    <validity fromLane="-1" toLane="-1"/>
+  </signalReference>
+</signals>
+```
+
+### Usage
+
+Signal references are generated automatically by the conversion process. No manual intervention is required.
+
 ## References
 
 - **ASAM OpenDRIVE v1.8.1 Specification**: [Section 14 - Signals](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/v1.8.1/specification/14_signals/14_01_introduction.html)
@@ -210,6 +246,6 @@ signal = Signal.construct_from_lanelet2_traffic_signal(
 
 Potential future enhancements:
 - Signal dependencies and relationships
-- Signal references (signalReference element)
+- ✅ Signal references (signalReference element) - Implemented in Issue #135
 - More signal type constants for different countries
 - Signal controllers for coordinated traffic light control

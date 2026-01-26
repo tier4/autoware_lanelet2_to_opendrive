@@ -61,8 +61,15 @@ class Road:
             elem.append(self.lanes.to_xml())
         if self.signals:
             signals_elem = ET.SubElement(elem, "signals")
+
+            # Generate signal elements
             for signal in self.signals:
                 signals_elem.append(signal.to_xml())
+
+            # Generate signalReference elements (Issue #135)
+            # Each signal gets a corresponding signalReference on the reference line
+            for signal in self.signals:
+                signals_elem.append(signal.to_signal_reference_xml())
 
         return elem
 
