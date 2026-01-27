@@ -169,12 +169,16 @@ def _calculate_boundary_velocity_vector(boundary, at_start: bool) -> np.ndarray:
         neighbor_idx = -2
 
     # Calculate direction vector
-    endpoint = np.array(
-        [boundary[endpoint_idx].x, boundary[endpoint_idx].y, boundary[endpoint_idx].z]
-    )
-    neighbor = np.array(
-        [boundary[neighbor_idx].x, boundary[neighbor_idx].y, boundary[neighbor_idx].z]
-    )
+    endpoint = np.array([
+        boundary[endpoint_idx].x,
+        boundary[endpoint_idx].y,
+        boundary[endpoint_idx].z,
+    ])
+    neighbor = np.array([
+        boundary[neighbor_idx].x,
+        boundary[neighbor_idx].y,
+        boundary[neighbor_idx].z,
+    ])
 
     if at_start:
         direction = neighbor - endpoint
