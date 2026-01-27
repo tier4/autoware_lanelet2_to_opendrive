@@ -487,7 +487,9 @@ class Splines:
         """
         return self.spline(t, nu=derivative)
 
-    def _compute_arc_length_table(self, num_samples: int = 1000) -> None:
+    def _compute_arc_length_table(
+        self, num_samples: int = DEFAULT_CONFIG.spline.arc_length_table_samples
+    ) -> None:
         """Compute arc length lookup table for accurate parameterization."""
         if hasattr(self, "_arc_length_table"):
             return

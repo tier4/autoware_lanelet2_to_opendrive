@@ -36,6 +36,7 @@ class SplineConstants:
         max_avg_error: Maximum acceptable average fitting error
         max_point_error: Maximum acceptable single-point fitting error
         warn_percentile: Percentile for error reporting in warnings
+        arc_length_table_samples: Number of samples for arc length lookup table
     """
 
     speed_epsilon: float = 1e-12
@@ -48,6 +49,22 @@ class SplineConstants:
     max_avg_error: float = 2.0
     max_point_error: float = 8.0
     warn_percentile: float = 95.0
+    arc_length_table_samples: int = 1000
+
+
+@dataclass(frozen=True)
+class CenterlineConstants:
+    """Constants for centerline extraction and width estimation.
+
+    Attributes:
+        min_sample_points_for_centerline: Minimum number of sample points for centerline extraction
+        sample_point_multiplier: Multiplier for calculating sample points based on control points
+        boundary_condition_default: Default boundary condition for cubic spline interpolation
+    """
+
+    min_sample_points_for_centerline: int = 20
+    sample_point_multiplier: int = 2
+    boundary_condition_default: str = "not-a-knot"
 
 
 @dataclass(frozen=True)
@@ -123,12 +140,14 @@ class ConversionConfig:
     Attributes:
         geometry: Geometry calculation constants
         spline: Spline fitting constants
+        centerline: Centerline extraction constants
         preprocessing: Preprocessing operation constants
         opendrive: OpenDRIVE format constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
     spline: SplineConstants = SplineConstants()
+    centerline: CenterlineConstants = CenterlineConstants()
     preprocessing: PreprocessingConstants = PreprocessingConstants()
     opendrive: OpenDriveConstants = OpenDriveConstants()
 
