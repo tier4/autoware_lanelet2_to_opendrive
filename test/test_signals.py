@@ -498,3 +498,81 @@ def test_construct_from_lanelet2_traffic_signal_with_coordinate_offset():
         COORDINATE_OFFSET.x = original_x
         COORDINATE_OFFSET.y = original_y
         COORDINATE_OFFSET.z = original_z
+
+
+def test_signal_to_signal_reference_xml():
+    """Test Signal conversion to signalReference XML."""
+    signal = Signal(
+        id=59,
+        name="TrafficLight_3002245",
+        s=44.13,
+        t=6.51,  # Original signal lateral offset
+        orientation="+",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=1000001,
+        subtype=-1,
+        validities=[Validity(from_lane=-1, to_lane=-1)],
+    )
+
+    xml = signal.to_signal_reference_xml()
+
+    assert xml.tag == "signalReference"
+    assert xml.get("id") == "59"
+    assert xml.get("s") == "4.4130000000000003e+01"  # Scientific notation
+    assert xml.get("t") == "0.0000000000000000e+00"  # Always 0.0
+    assert xml.get("orientation") == "+"
+
+    # Should NOT have signal-specific attributes
+    assert xml.get("name") is None
+    assert xml.get("dynamic") is None
+    assert xml.get("type") is None
+
+    # Should have validity
+    validity_elem = xml.find("validity")
+    assert validity_elem is not None
+    assert validity_elem.get("fromLane") == "-1"
+    assert validity_elem.get("toLane") == "-1"
+
+
+def test_signal_reference_with_multiple_validities():
+    """Test signalReference with multiple validity elements."""
+    signal = Signal(
+        id=100,
+        name="Signal1",
+        s=50.0,
+        t=-3.5,
+        orientation="-",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=1000001,
+        subtype=-1,
+        validities=[
+            Validity(from_lane=-3, to_lane=-1),
+            Validity(from_lane=1, to_lane=3),
+        ],
+    )
+
+    xml = signal.to_signal_reference_xml()
+    validity_elems = xml.findall("validity")
+    assert len(validity_elems) == 2
+
+
+def test_signal_reference_without_validities():
+    """Test signalReference when signal has no validities."""
+    signal = Signal(
+        id=200,
+        name="Signal2",
+        s=75.0,
+        t=-4.0,
+        orientation="-",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=1000001,
+        subtype=-1,
+        validities=None,
+    )
+
+    xml = signal.to_signal_reference_xml()
+    validity_elems = xml.findall("validity")
+    assert len(validity_elems) == 0

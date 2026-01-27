@@ -164,6 +164,31 @@ class Signal:
 
         return elem
 
+    def to_signal_reference_xml(self) -> ET.Element:
+        """Convert to XML signalReference element.
+
+        SignalReferences are simplified versions of signals that reference
+        the signal position on the reference line (t=0.0) for lane assignment.
+        They share the same id, s, orientation, and validity as the signal.
+
+        Returns:
+            XML element for signalReference
+        """
+        elem = ET.Element("signalReference")
+
+        # Set required attributes (subset of signal attributes)
+        elem.set("id", str(self.id))
+        elem.set("s", f"{self.s:.16e}")  # Same scientific notation as Signal
+        elem.set("t", "0.0000000000000000e+00")  # Always on reference line
+        elem.set("orientation", self.orientation)
+
+        # Add validities (same as signal)
+        if self.validities:
+            for validity in self.validities:
+                elem.append(validity.to_xml())
+
+        return elem
+
     def __repr__(self) -> str:
         """String representation of the signal."""
         return (
