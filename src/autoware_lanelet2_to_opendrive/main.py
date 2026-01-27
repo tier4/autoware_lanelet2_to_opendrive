@@ -35,6 +35,7 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
 )
@@ -85,6 +86,7 @@ def convert_lanelet2_to_opendrive(
     origin_lat: Optional[float] = None,
     origin_lon: Optional[float] = None,
     no_junction_lanelet_ids: Optional[List[int]] = None,
+    traffic_rule: Optional[TrafficRule] = None,
 ) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
@@ -101,6 +103,8 @@ def convert_lanelet2_to_opendrive(
             used for more accurate geoReference generation.
         no_junction_lanelet_ids: List of lanelet IDs to exclude from junction detection.
             These lanelets will be treated as regular roads even if they have turn_direction attribute.
+        traffic_rule: Optional traffic rule (RHT or LHT) to apply to all roads.
+            If None, roads will not have a rule attribute (OpenDRIVE default is RHT).
 
     Returns:
         Tuple of:
@@ -136,7 +140,9 @@ def convert_lanelet2_to_opendrive(
 
     # Step 1: Create regular roads (outside junctions)
     print("\n=== Building regular roads ===")
-    regular_roads = Road.construct_from_lanelet_map(lanelet_map)
+    regular_roads = Road.construct_from_lanelet_map(
+        lanelet_map, traffic_rule=traffic_rule
+    )
     starting_junction_road_id = len(regular_roads)
 
     # Build lanelet-to-road mapping for regular roads
@@ -182,6 +188,7 @@ def convert_lanelet2_to_opendrive(
         junction_groups=junction_groups,
         starting_road_id=starting_junction_road_id,
         junction_id_offset=junction_id_offset,
+        traffic_rule=traffic_rule,
     )
 
     # Step 4: Merge lanelet-to-road mappings
@@ -569,6 +576,22 @@ def preprocess_and_convert_with_hydra(
     if no_junction_lanelet_ids:
         logger.info(f"No-junction lanelet IDs configured: {no_junction_lanelet_ids}")
 
+    # Parse traffic rule from map config
+    traffic_rule = None
+    traffic_rule_str = cfg.map.get("traffic_rule", None)
+    if traffic_rule_str:
+        try:
+            traffic_rule = TrafficRule[traffic_rule_str.upper()]
+            logger.info(f"Traffic rule configured: {traffic_rule.value}")
+        except KeyError:
+            logger.warning(
+                f"Invalid traffic rule '{traffic_rule_str}', using default. "
+                f"Valid values: RHT, LHT"
+            )
+            traffic_rule = None
+    else:
+        logger.info("No traffic rule specified, roads will use OpenDRIVE default")
+
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
 
@@ -625,6 +648,7 @@ def preprocess_and_convert_with_hydra(
         origin_lat=origin_lat,
         origin_lon=origin_lon,
         no_junction_lanelet_ids=no_junction_lanelet_ids,
+        traffic_rule=traffic_rule,
     )
 
     logger.info("Conversion completed successfully!")

@@ -5,6 +5,15 @@
 #
 # Method 1: Simple MGRS grid code
 mgrs_grid: 54SUE815501
+
+# Traffic rule (OPTIONAL - defaults to RHT if not specified)
+# Specifies traffic direction for the entire map
+# Valid values: RHT (right-hand traffic) or LHT (left-hand traffic)
+# Examples:
+#   traffic_rule: RHT  # For USA, Germany, China, etc.
+#   traffic_rule: LHT  # For Japan, UK, Australia, etc.
+# If not specified, OpenDRIVE tools will default to RHT
+traffic_rule: RHT
 #
 # Method 2: MGRS grid with offset (see example_mgrs_offset.yaml)
 # mgrs_grid: 54SUE

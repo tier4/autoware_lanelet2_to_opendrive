@@ -11,7 +11,7 @@ from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
-from .enums import ContactPoint, ElementType
+from .enums import ContactPoint, ElementType, TrafficRule
 from .lane_elements import LaneLink
 from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
@@ -40,6 +40,7 @@ class Road:
     link: Optional[RoadLink] = None
     signals: Optional[List["Signal"]] = None
     elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
+    rule: Optional[TrafficRule] = None  # Traffic direction rule (RHT/LHT)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -50,6 +51,9 @@ class Road:
 
         if self.name:
             elem.set("name", self.name)
+
+        if self.rule is not None:
+            elem.set("rule", self.rule.value)
 
         if self.link:
             elem.append(self.link.to_xml())
@@ -458,13 +462,16 @@ class Road:
         lanelet_group: LaneletInput,
         road_id: int,
         s_offset: float = 0.0,
+        traffic_rule: Optional[TrafficRule] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
         Args:
             lanelet_map: The lanelet2 map containing the lanelets
             lanelet_group: Group of lanelets to convert to a road
+            road_id: Road ID to assign
             s_offset: Starting s-coordinate offset for the road
+            traffic_rule: Optional traffic rule (RHT or LHT) to apply to road geometry
 
         Returns:
             Road object constructed from the lanelet group
@@ -479,7 +486,7 @@ class Road:
         lanelet_list = to_lanelet_list(lanelet_group)
 
         reference_line = ReferenceLine.construct_from_lanelet_groups(
-            lanelet_map, lanelet_list
+            lanelet_map, lanelet_list, traffic_rule=traffic_rule
         )
         centerline_2d = reference_line.centerline_2d
 
@@ -502,7 +509,7 @@ class Road:
             from .lane_section import LaneSection
 
             lane_section = LaneSection.construct_from_lanelet_groups(
-                lanelet_map, lanelet_list, s_offset=s_offset
+                lanelet_map, lanelet_list, s_offset=s_offset, traffic_rule=traffic_rule
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -528,6 +535,7 @@ class Road:
             elevation_profile=elevation_profile,
             lanes=get_lanes(),
             elevation_offset=reference_line.elevation_offset,
+            rule=traffic_rule,  # Apply traffic rule to road
         )
 
         return road
@@ -535,11 +543,13 @@ class Road:
     @staticmethod
     def construct_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
+        traffic_rule: Optional[TrafficRule] = None,
     ) -> List["Road"]:
         """Construct Roads from a lanelet map.
 
         Args:
             lanelet_map: The lanelet2 map containing all lanelets
+            traffic_rule: Optional traffic rule (RHT or LHT) to apply to all roads
 
         Returns:
             List of Road objects constructed from non-junction lanelets grouped by adjacency
@@ -605,6 +615,7 @@ class Road:
                     lanelet_group=adjacent_group,
                     road_id=road_id,
                     s_offset=0.0,
+                    traffic_rule=traffic_rule,
                 )
                 roads.append(road)
 
@@ -717,6 +728,7 @@ class Road:
         junction_groups: List[List[lanelet2.core.Lanelet]],
         starting_road_id: int = 0,
         junction_id_offset: int = 0,
+        traffic_rule: Optional[TrafficRule] = None,
     ) -> tuple[List["Road"], dict[int, List[int]], dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -729,6 +741,7 @@ class Road:
             starting_road_id: Starting ID for road numbering (default: 0)
             junction_id_offset: Offset to add to junction IDs to avoid conflicts
                                with road IDs (default: 0). Issue #132 fix.
+            traffic_rule: Optional traffic rule (RHT or LHT) to apply to all connecting roads
 
         Returns:
             Tuple of:
@@ -778,6 +791,7 @@ class Road:
                         lanelet_group=adjacent_group,
                         road_id=current_road_id,
                         s_offset=0.0,
+                        traffic_rule=traffic_rule,
                     )
 
                     # Set the junction field to mark this as a connecting road

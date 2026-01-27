@@ -16,6 +16,7 @@ from .opendrive_dataclass import (
     LaneBorder,
     LaneHeight,
 )
+from .enums import TrafficRule
 
 
 class Lane:
@@ -127,7 +128,11 @@ class Lane:
 
     @staticmethod
     def construct_from_lanelet(
-        lanelet_map: lanelet2.core.LaneletMap, lanelet: lanelet2.core.Lanelet
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet: lanelet2.core.Lanelet,
+        lane_id: int = 0,
+        s_offset: float = 0.0,
+        traffic_rule: Optional[TrafficRule] = None,
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -135,12 +140,15 @@ class Lane:
         Args:
             lanelet_map: The Lanelet2 map containing the lanelet
             lanelet: The lanelet to convert to Lane
+            lane_id: Lane ID to assign (default: 0)
+            s_offset: Start position along the reference line (default: 0.0)
+            traffic_rule: Optional traffic rule (RHT or LHT) to determine width reference.
+                RHT: uses left_bound reference (default)
+                LHT: uses right_bound reference
 
         Returns:
             Lane instance constructed from the lanelet
         """
-        # TODO: Determine lane ID based on lanelet position and direction
-        lane_id = 0
 
         # Determine lane type from lanelet attributes
         if "subtype" in lanelet.attributes:
@@ -173,12 +181,21 @@ class Lane:
 
         groups = find_adjacent_groups(lanelet_map, {lanelet})
 
+        # Width reference selection based on traffic rule and lane count
         if len(groups) == 1 and len(groups[0]) == 1:
-            width_spline = estimate_lanelet_width_as_spline(
-                lanelet, reference="left_bound"
-            )
+            # Single lanelet: use boundary as reference
+            if traffic_rule == TrafficRule.LHT:
+                # For LHT: use right boundary as reference
+                width_spline = estimate_lanelet_width_as_spline(
+                    lanelet, reference="right_bound"
+                )
+            else:
+                # For RHT (default): use left boundary as reference
+                width_spline = estimate_lanelet_width_as_spline(
+                    lanelet, reference="left_bound"
+                )
         else:
-            # Calculate lane width using spline curve from estimate_lanelet_width_as_spline
+            # Multiple lanelets: always use centerline
             width_spline = estimate_lanelet_width_as_spline(
                 lanelet, reference="center_line"
             )

@@ -1,7 +1,7 @@
 """OpenDRIVE dataclass definitions - Main module for backward compatibility."""
 
 # Import all classes from the split modules for backward compatibility
-from .enums import LaneType, RoadMarkType, RoadMarkColor, GeometryType
+from .enums import LaneType, RoadMarkType, RoadMarkColor, GeometryType, TrafficRule
 from .lane_elements import LaneWidth, RoadMark, LaneLink, LaneBorder, LaneHeight
 from .geometry import GeometryBase, Line, Arc, Spiral, PlanView
 from .elevation import Elevation, ElevationProfile
@@ -22,6 +22,7 @@ __all__ = [
     "RoadMarkType",
     "RoadMarkColor",
     "GeometryType",
+    "TrafficRule",
     # Lane elements
     "LaneWidth",
     "RoadMark",

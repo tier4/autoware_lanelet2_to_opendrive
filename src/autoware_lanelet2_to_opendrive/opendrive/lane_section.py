@@ -7,6 +7,7 @@ import lxml.etree as ET
 if TYPE_CHECKING:
     from .lane import Lane
 from .reference_line import ReferenceLine
+from .enums import TrafficRule
 
 
 class LaneSection:
@@ -66,6 +67,7 @@ class LaneSection:
             lanelet2.core.LaneletLayer,
         ],
         s_offset: float = 0.0,
+        traffic_rule: Optional[TrafficRule] = None,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -74,6 +76,9 @@ class LaneSection:
             lanelet_map: The Lanelet2 map containing the lanelets
             lanelet_group: Group of lanelets representing lanes in a road section
             s_offset: Start position of the lane section
+            traffic_rule: Optional traffic rule (RHT or LHT) to determine lane IDs.
+                RHT: lanes get negative IDs (right lanes) (default)
+                LHT: lanes get positive IDs (left lanes)
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -102,18 +107,33 @@ class LaneSection:
 
         # Create and set the reference line
         reference_line = ReferenceLine.construct_from_lanelet_groups(
-            lanelet_map, lanelet_group
+            lanelet_map, lanelet_group, traffic_rule=traffic_rule
         )
         lane_section._set_center_lane(reference_line)
 
-        # All lanes are treated as right lanes (negative IDs) since reference line
-        # is the left boundary of the leftmost lanelet
-        # Lane IDs: -1, -2, -3, ... from left to right
-        for i, lanelet in enumerate(sorted_lanelets):
-            lane_id = -(i + 1)  # -1, -2, -3, ...
-            lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
-            lane.lane_id = lane_id
-            lane_section._add_right_lane(lane)
+        # Lane ID assignment based on traffic rule:
+        # RHT (Right-Hand Traffic): lanes are RIGHT lanes (negative IDs: -1, -2, -3...)
+        # LHT (Left-Hand Traffic): lanes are LEFT lanes (positive IDs: +1, +2, +3...)
+        if traffic_rule == TrafficRule.LHT:
+            # For LHT: lanes are LEFT lanes (positive IDs)
+            # Reverse order to maintain physical positioning
+            for i in range(len(sorted_lanelets)):
+                lane_id = i + 1  # +1, +2, +3, ...
+                # Reverse iteration for proper ordering
+                lanelet = sorted_lanelets[-(i + 1)]
+                lane = Lane.construct_from_lanelet(
+                    lanelet_map, lanelet, lane_id, s_offset, traffic_rule
+                )
+                lane_section._add_left_lane(lane)
+        else:
+            # For RHT (default): lanes are RIGHT lanes (negative IDs)
+            # Lane IDs: -1, -2, -3, ... from left to right
+            for i, lanelet in enumerate(sorted_lanelets):
+                lane_id = -(i + 1)  # -1, -2, -3, ...
+                lane = Lane.construct_from_lanelet(
+                    lanelet_map, lanelet, lane_id, s_offset, traffic_rule
+                )
+                lane_section._add_right_lane(lane)
 
         return lane_section
 

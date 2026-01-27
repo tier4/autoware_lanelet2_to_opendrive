@@ -74,3 +74,10 @@ class ElementType(Enum):
 
     ROAD = "road"
     JUNCTION = "junction"
+
+
+class TrafficRule(Enum):
+    """Traffic rule for road direction according to OpenDRIVE standard."""
+
+    RHT = "RHT"  # Right-Hand Traffic
+    LHT = "LHT"  # Left-Hand Traffic

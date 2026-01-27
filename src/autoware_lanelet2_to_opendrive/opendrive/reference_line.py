@@ -1,6 +1,6 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
-from typing import TYPE_CHECKING, List, Set, Union
+from typing import TYPE_CHECKING, List, Set, Union, Optional
 
 import lanelet2
 import lxml.etree as ET
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     pass
 
 # Import enums directly to avoid circular import
-from .enums import LaneType
+from .enums import LaneType, TrafficRule
 from .lane_elements import LaneWidth
 from .elevation import ElevationProfile, Elevation
 
@@ -67,6 +67,7 @@ class ReferenceLine:
             List[lanelet2.core.Lanelet],
             lanelet2.core.LaneletLayer,
         ],
+        traffic_rule: "Optional[TrafficRule]" = None,
     ) -> "ReferenceLine":
         """
         Construct a ReferenceLine from a group of Lanelet2 lanelets.
@@ -74,6 +75,9 @@ class ReferenceLine:
         Args:
             lanelet_map: The Lanelet2 map containing the lanelets
             lanelet_group: List of lanelets representing lanes in a road
+            traffic_rule: Optional traffic rule (RHT or LHT) to determine reference line position.
+                RHT: uses left boundary of leftmost lanelet (default)
+                LHT: uses right boundary of rightmost lanelet
 
         Returns:
             ReferenceLine instance constructed from the center of the lanelet group
@@ -86,14 +90,22 @@ class ReferenceLine:
 
         sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_group)
 
-        # Always use the left boundary of the leftmost lanelet as reference line
-        leftmost_lanelet = sorted_lanelets[0]
-
         from ..centerline import extract_border_from_spline
 
-        # Extract 3D points directly from the left boundary (no 3D spline needed)
-        # This avoids the 3D-to-2D arc length mapping issues on steep slopes
-        boundary = leftmost_lanelet.leftBound
+        # Select boundary based on traffic rule
+        # RHT (Right-Hand Traffic): use left boundary of leftmost lanelet (default)
+        # LHT (Left-Hand Traffic): use right boundary of rightmost lanelet
+        if traffic_rule == TrafficRule.LHT:
+            # For LHT: use right boundary of rightmost lanelet
+            reference_lanelet = sorted_lanelets[-1]
+            boundary = reference_lanelet.rightBound
+            border_name = "right"
+        else:
+            # For RHT (default): use left boundary of leftmost lanelet
+            reference_lanelet = sorted_lanelets[0]
+            boundary = reference_lanelet.leftBound
+            border_name = "left"
+
         from ..util import extract_points_3d
 
         points_3d = extract_points_3d(boundary)
@@ -105,9 +117,9 @@ class ReferenceLine:
         # Get elevation offset (absolute Z at s=0)
         elevation_offset = points_3d[0, 2]
 
-        # Extract the left boundary as 2D spline (XY only) for reference line geometry
+        # Extract the boundary as 2D spline (XY only) for reference line geometry
         centerline_2d = extract_border_from_spline(
-            leftmost_lanelet, border="left", dimensions=2
+            reference_lanelet, border=border_name, dimensions=2
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)
