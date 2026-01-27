@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Optional, List
 import lxml.etree as ET
 
+from ..config import COORDINATE_OFFSET
+
 
 @dataclass
 class Validity:
@@ -266,7 +268,7 @@ class Signal:
         # Calculate z_offset (height above road surface)
         # OpenDRIVE zOffset is relative to road surface, not absolute elevation
         if hasattr(position, "z"):
-            signal_absolute_z = float(position.z)
+            signal_absolute_z = float(position.z) - COORDINATE_OFFSET.z
             if road_elevation_at_s is not None:
                 # Calculate relative height: signal height - road surface elevation
                 z_offset = signal_absolute_z - road_elevation_at_s
