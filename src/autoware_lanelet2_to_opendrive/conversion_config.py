@@ -48,21 +48,14 @@ class ConversionConfig:
         no_junction_lanelet_ids: List of lanelet IDs to exclude from junction
             detection, treating them as regular roads
         junction_id_offset: Offset added to junction IDs to avoid conflicts
-            with road IDs (default: from config)
+            with road IDs (default: 1000)
     """
 
     output_path: Optional[Path] = None
     origin: OriginSpec = field(default_factory=OriginSpec)
     exclude_non_junction_signals: bool = False
     no_junction_lanelet_ids: List[int] = field(default_factory=list)
-    junction_id_offset: Optional[int] = None
-
-    def __post_init__(self):
-        """Set default junction_id_offset from config if not specified."""
-        if self.junction_id_offset is None:
-            from .config import DEFAULT_CONFIG
-
-            self.junction_id_offset = DEFAULT_CONFIG.opendrive.junction_id_offset
+    junction_id_offset: int = 1000
 
 
 @dataclass
