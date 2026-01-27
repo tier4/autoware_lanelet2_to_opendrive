@@ -146,6 +146,45 @@ class WidthSplineWrapper:
         return result[1]  # Return just the width component
 
 
+def _calculate_boundary_velocity_vector(boundary, at_start: bool) -> np.ndarray:
+    """
+    Calculate velocity vector at boundary point.
+
+    Args:
+        boundary: List of points representing a boundary
+        at_start: True for start point, False for end point
+
+    Returns:
+        Normalized 3D velocity vector along the boundary direction
+    """
+    if len(boundary) < 2:
+        return np.array([1.0, 0.0, 0.0])  # Default direction
+
+    # Select endpoint and neighbor based on at_start parameter
+    if at_start:
+        endpoint_idx = 0
+        neighbor_idx = 1
+    else:
+        endpoint_idx = -1
+        neighbor_idx = -2
+
+    # Calculate direction vector
+    endpoint = np.array([boundary[endpoint_idx].x, boundary[endpoint_idx].y, boundary[endpoint_idx].z])
+    neighbor = np.array([boundary[neighbor_idx].x, boundary[neighbor_idx].y, boundary[neighbor_idx].z])
+
+    if at_start:
+        direction = neighbor - endpoint
+    else:
+        direction = endpoint - neighbor
+
+    length = np.linalg.norm(direction)
+
+    if length < DEFAULT_CONFIG.geometry.epsilon:
+        return np.array([1.0, 0.0, 0.0])  # Fallback
+
+    return direction / length
+
+
 def _get_boundary_start_vel(boundary) -> np.ndarray:
     """
     Calculate start velocity vector for a boundary spline.
@@ -156,20 +195,7 @@ def _get_boundary_start_vel(boundary) -> np.ndarray:
     Returns:
         3D velocity vector along the boundary direction
     """
-    if len(boundary) < 2:
-        return np.array([1.0, 0.0, 0.0])  # Default direction
-
-    # Calculate direction from first to second point
-    start_point = np.array([boundary[0].x, boundary[0].y, boundary[0].z])
-    next_point = np.array([boundary[1].x, boundary[1].y, boundary[1].z])
-
-    direction = next_point - start_point
-    length = np.linalg.norm(direction)
-
-    if length < DEFAULT_CONFIG.geometry.epsilon:
-        return np.array([1.0, 0.0, 0.0])  # Fallback
-
-    return direction / length
+    return _calculate_boundary_velocity_vector(boundary, at_start=True)
 
 
 def _get_boundary_end_vel(boundary) -> np.ndarray:
@@ -182,20 +208,55 @@ def _get_boundary_end_vel(boundary) -> np.ndarray:
     Returns:
         3D velocity vector along the boundary direction
     """
-    if len(boundary) < 2:
-        return np.array([1.0, 0.0, 0.0])  # Default direction
+    return _calculate_boundary_velocity_vector(boundary, at_start=False)
 
-    # Calculate direction from second-to-last to last point
-    prev_point = np.array([boundary[-2].x, boundary[-2].y, boundary[-2].z])
-    end_point = np.array([boundary[-1].x, boundary[-1].y, boundary[-1].z])
 
-    direction = end_point - prev_point
-    length = np.linalg.norm(direction)
+def _calculate_centerline_velocity_vector(lanelet: lanelet2.core.Lanelet, at_start: bool) -> np.ndarray:
+    """
+    Calculate velocity vector for centerline spline from lanelet boundaries.
 
+    This function computes a velocity vector perpendicular to the line segment
+    connecting the left and right boundaries at either the start or end of the lanelet.
+
+    Args:
+        lanelet: A Lanelet2 lanelet object
+        at_start: True for start point, False for end point
+
+    Returns:
+        3D velocity vector perpendicular to the line connecting left and right boundaries
+    """
+    left_bound = lanelet.leftBound
+    right_bound = lanelet.rightBound
+
+    if len(left_bound) < 1 or len(right_bound) < 1:
+        raise ValueError(
+            "Lanelet must have at least 1 point in both left and right boundaries"
+        )
+
+    # Select endpoint based on at_start parameter
+    idx = 0 if at_start else -1
+
+    # Get points at the selected endpoint
+    left_point = np.array([left_bound[idx].x, left_bound[idx].y])
+    right_point = np.array([right_bound[idx].x, right_bound[idx].y])
+
+    # Calculate line segment connecting left and right boundaries
+    segment = right_point - left_point  # Vector from left to right
+
+    # Calculate perpendicular vector (2D) pointing forward along the lanelet
+    # Rotate 90 degrees counter-clockwise: (x, y) -> (-y, x)
+    perp_2d = np.array([-segment[1], segment[0]])
+
+    # Normalize to unit vector
+    length = np.linalg.norm(perp_2d)
     if length < DEFAULT_CONFIG.geometry.epsilon:
-        return np.array([1.0, 0.0, 0.0])  # Fallback
+        # Fallback to default direction if boundaries are parallel
+        perp_2d = np.array([1.0, 0.0])
+    else:
+        perp_2d = perp_2d / length
 
-    return direction / length
+    # Convert to 3D by adding z=0
+    return np.array([perp_2d[0], perp_2d[1], 0.0])
 
 
 def _get_start_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
@@ -208,35 +269,7 @@ def _get_start_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
     Returns:
         3D velocity vector perpendicular to the line connecting first points of left and right boundaries
     """
-    left_bound = lanelet.leftBound
-    right_bound = lanelet.rightBound
-
-    if len(left_bound) < 1 or len(right_bound) < 1:
-        raise ValueError(
-            "Lanelet must have at least 1 point in both left and right boundaries"
-        )
-
-    # Get first points of boundaries
-    left_first = np.array([left_bound[0].x, left_bound[0].y])
-    right_first = np.array([right_bound[0].x, right_bound[0].y])
-
-    # Calculate line segment connecting left and right boundaries
-    segment = right_first - left_first  # Vector from left to right
-
-    # Calculate perpendicular vector (2D) pointing forward along the lanelet
-    # Rotate 90 degrees counter-clockwise: (x, y) -> (-y, x)
-    perp_2d = np.array([-segment[1], segment[0]])
-
-    # Normalize to unit vector
-    length = np.linalg.norm(perp_2d)
-    if length < DEFAULT_CONFIG.geometry.epsilon:
-        # Fallback to default direction if boundaries are parallel
-        perp_2d = np.array([1.0, 0.0])
-    else:
-        perp_2d = perp_2d / length
-
-    # Convert to 3D by adding z=0
-    return np.array([perp_2d[0], perp_2d[1], 0.0])
+    return _calculate_centerline_velocity_vector(lanelet, at_start=True)
 
 
 def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
@@ -249,35 +282,7 @@ def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
     Returns:
         3D velocity vector perpendicular to the line connecting last points of left and right boundaries
     """
-    left_bound = lanelet.leftBound
-    right_bound = lanelet.rightBound
-
-    if len(left_bound) < 1 or len(right_bound) < 1:
-        raise ValueError(
-            "Lanelet must have at least 1 point in both left and right boundaries"
-        )
-
-    # Get last points of boundaries
-    left_last = np.array([left_bound[-1].x, left_bound[-1].y])
-    right_last = np.array([right_bound[-1].x, right_bound[-1].y])
-
-    # Calculate line segment connecting left and right boundaries
-    segment = right_last - left_last  # Vector from left to right
-
-    # Calculate perpendicular vector (2D) pointing forward along the lanelet
-    # Rotate 90 degrees counter-clockwise: (x, y) -> (-y, x)
-    perp_2d = np.array([-segment[1], segment[0]])
-
-    # Normalize to unit vector
-    length = np.linalg.norm(perp_2d)
-    if length < DEFAULT_CONFIG.geometry.epsilon:
-        # Fallback to default direction if boundaries are parallel
-        perp_2d = np.array([1.0, 0.0])
-    else:
-        perp_2d = perp_2d / length
-
-    # Convert to 3D by adding z=0
-    return np.array([perp_2d[0], perp_2d[1], 0.0])
+    return _calculate_centerline_velocity_vector(lanelet, at_start=False)
 
 
 def extract_centerline_as_spline(
