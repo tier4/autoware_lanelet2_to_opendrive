@@ -7,7 +7,7 @@ with many parameters, improving type safety and API clarity.
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional, List, Dict, Set, Any
+from typing import Any, Dict, List, Optional, Set, Tuple
 from lanelet2.routing import RoutingGraph
 
 
@@ -83,7 +83,7 @@ class LaneLinksContext:
     """
 
     lanelet_map: Any  # lanelet2.core.LaneletMap
-    lanelet_to_road_and_lane: Dict[int, tuple[int, int]]
+    lanelet_to_road_and_lane: Dict[int, Tuple[int, int]]
     routing_graph: Optional[RoutingGraph] = None
     road_lane_ids: Optional[Dict[int, Set[int]]] = None
     road_id_to_road: Optional[Dict[int, Any]] = None  # Dict[int, Road]

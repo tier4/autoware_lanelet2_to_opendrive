@@ -1,6 +1,6 @@
 """Lane implementation for OpenDRIVE conversion."""
 
-from typing import List, Optional, Dict, Union, Any
+from typing import Any, Dict, List, Optional, Union
 import lanelet2
 import lxml.etree as ET
 

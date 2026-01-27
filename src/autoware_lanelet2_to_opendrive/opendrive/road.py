@@ -1,7 +1,7 @@
 """OpenDRIVE road definitions."""
 
 from dataclasses import dataclass
-from typing import Optional, Set, List, cast, Dict
+from typing import Dict, List, Optional, Set, Tuple, cast
 import lxml.etree as ET
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
@@ -210,7 +210,7 @@ class Road:
         lane: "Lane",
         lanelet_map: lanelet2.core.LaneletMap,
         routing_graph: RoutingGraph,
-        lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
+        lanelet_to_road_and_lane: Dict[int, Tuple[int, int]],
         road_lane_ids: Optional[Dict[int, Set[int]]] = None,
         road_id_to_road: Optional[Dict[int, "Road"]] = None,
     ) -> None:
@@ -707,7 +707,7 @@ class Road:
         junction_groups: List[List[lanelet2.core.Lanelet]],
         starting_road_id: int = 0,
         junction_id_offset: int = 0,
-    ) -> tuple[List["Road"], dict[int, List[int]], dict[int, int]]:
+    ) -> Tuple[List["Road"], Dict[int, List[int]], Dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
         Creates roads from lanelets inside junctions. These roads have their
@@ -825,7 +825,7 @@ class Road:
             >>> Road.set_all_lane_links(lanelet_map, all_roads)
         """
         # Build global mapping from lanelet_id to (road_id, lane_id)
-        lanelet_to_road_and_lane: Dict[int, tuple[int, int]] = {}
+        lanelet_to_road_and_lane: Dict[int, Tuple[int, int]] = {}
         for road in roads:
             lane_mapping = road.get_lanelet_to_lane_mapping()
             for lanelet_id, lane_id in lane_mapping.items():

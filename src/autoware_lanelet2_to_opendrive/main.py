@@ -3,7 +3,7 @@
 
 import sys
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import tempfile
 import logging
 
@@ -389,7 +389,7 @@ def convert_lanelet2_to_opendrive(
 
 def parse_origin_from_config(
     cfg: DictConfig,
-) -> tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
+) -> Tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
     """
     Parse origin specification from Hydra config with mutual exclusion validation.
 

@@ -1,6 +1,6 @@
 import numpy as np
 import lanelet2
-from typing import Set
+from typing import List, Set, Tuple
 from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
@@ -50,7 +50,7 @@ class Width1DSplineAdapter:
         """Get just the width value at a given arc length."""
         return self.spline_1d.evaluate(s, derivative=0)
 
-    def get_polynomial_segments(self) -> list[tuple[float, float, float, float, float]]:
+    def get_polynomial_segments(self) -> List[Tuple[float, float, float, float, float]]:
         """Get polynomial segments for OpenDRIVE export."""
         return self.spline_1d.get_segments()
 
@@ -498,8 +498,8 @@ def estimate_lanelet_width_as_spline(
     normalized_positions = np.linspace(0.0, 1.0, num_samples)
 
     # Calculate widths at each normalized position
-    arc_lengths: list[float] = []
-    widths: list[float] = []
+    arc_lengths: List[float] = []
+    widths: List[float] = []
 
     for t_norm in normalized_positions:
         # Convert normalized position to actual arc length for each boundary
