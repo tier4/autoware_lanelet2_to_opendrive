@@ -5,6 +5,7 @@ from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
+from .conversion_config import WidthEstimationConfig, WidthReference
 
 
 class AsymmetryLaneletException(Exception):
@@ -453,9 +454,7 @@ def extract_border_from_spline(
 
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
-    num_samples: int = 20,
-    num_control_points: int = 10,
-    reference: str = "center_line",
+    config: WidthEstimationConfig,
 ) -> Width1DSplineAdapter:
     """
     Estimate lanelet width as a spline by measuring distances between corresponding
@@ -463,20 +462,17 @@ def estimate_lanelet_width_as_spline(
 
     Args:
         lanelet: A Lanelet2 lanelet object
-        num_samples: Number of points to sample along the lanelet for width estimation
-        num_control_points: Number of control points for width spline interpolation (unused, kept for compatibility)
-        reference: Reference line to use - "center_line", "left_bound", or "right_bound"
+        config: WidthEstimationConfig specifying width calculation parameters
 
     Returns:
         Width1DSplineAdapter object representing width as a function of arc length along the reference
 
     Raises:
-        ValueError: If reference is invalid or if lanelet has insufficient points
+        ValueError: If lanelet has insufficient points
     """
-    if reference not in ["center_line", "left_bound", "right_bound"]:
-        raise ValueError(
-            f"Invalid reference: {reference}. Must be 'center_line', 'left_bound', or 'right_bound'"
-        )
+    # Extract parameters from config
+    num_samples = config.num_samples
+    reference = config.reference.value  # Get string value from enum
 
     # Get raw boundary points directly from lanelet
     left_bound = lanelet.leftBound

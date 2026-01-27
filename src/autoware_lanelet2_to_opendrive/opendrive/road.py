@@ -16,6 +16,7 @@ from .lane_elements import LaneLink
 from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype, to_lanelet_list, LaneletInput
+from ..conversion_config import LaneLinksContext
 
 # Import for type hints only
 from typing import TYPE_CHECKING
@@ -132,59 +133,48 @@ class Road:
 
         return mapping
 
-    def set_lane_links(
-        self,
-        lanelet_map: lanelet2.core.LaneletMap,
-        lanelet_to_road_and_lane: Dict[int, tuple[int, int]],
-        routing_graph: Optional[RoutingGraph] = None,
-        road_lane_ids: Optional[Dict[int, Set[int]]] = None,
-        road_id_to_road: Optional[Dict[int, "Road"]] = None,
-    ) -> None:
+    def set_lane_links(self, context: LaneLinksContext) -> None:
         """Set lane predecessor and successor links based on lanelet connections.
 
         Args:
-            lanelet_map: The Lanelet2 map containing connectivity information
-            lanelet_to_road_and_lane: Global mapping from lanelet_id to (road_id, lane_id)
-            routing_graph: Optional pre-built routing graph. If None, creates a new one.
-            road_lane_ids: Optional mapping from road_id to set of existing lane_ids.
-                          Used to validate that lane links reference existing lanes.
-            road_id_to_road: Optional mapping from road_id to Road objects.
-                            Used to check if target roads are connecting roads in junctions.
+            context: LaneLinksContext containing all parameters needed for lane link setup
         """
         if self.lanes is None:
             return
 
         # Use provided routing graph or create a new one
-        if routing_graph is None:
+        if context.routing_graph is None:
             traffic_rules = lanelet2.traffic_rules.create(
                 lanelet2.traffic_rules.Locations.Germany,
                 lanelet2.traffic_rules.Participants.Vehicle,
             )
             routing_graph = RoutingGraph(
-                lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+                context.lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
             )
+        else:
+            routing_graph = context.routing_graph
 
         for lane_section in self.lanes.lane_sections:
             # Process left lanes
             for lane in lane_section.left_lanes.values():
                 self._set_single_lane_links(
                     lane,
-                    lanelet_map,
+                    context.lanelet_map,
                     routing_graph,
-                    lanelet_to_road_and_lane,
-                    road_lane_ids,
-                    road_id_to_road,
+                    context.lanelet_to_road_and_lane,
+                    context.road_lane_ids,
+                    context.road_id_to_road,
                 )
 
             # Process right lanes
             for lane in lane_section.right_lanes.values():
                 self._set_single_lane_links(
                     lane,
-                    lanelet_map,
+                    context.lanelet_map,
                     routing_graph,
-                    lanelet_to_road_and_lane,
-                    road_lane_ids,
-                    road_id_to_road,
+                    context.lanelet_to_road_and_lane,
+                    context.road_lane_ids,
+                    context.road_id_to_road,
                 )
 
     @staticmethod
@@ -870,13 +860,14 @@ class Road:
         print(f"Building lane links for {len(roads)} roads...")
         for road in tqdm(roads, desc="Building lane links"):
             try:
-                road.set_lane_links(
-                    lanelet_map,
-                    lanelet_to_road_and_lane,
-                    routing_graph,
-                    road_lane_ids,
-                    road_id_to_road,
+                context = LaneLinksContext(
+                    lanelet_map=lanelet_map,
+                    lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+                    routing_graph=routing_graph,
+                    road_lane_ids=road_lane_ids,
+                    road_id_to_road=road_id_to_road,
                 )
+                road.set_lane_links(context)
             except Exception as e:
                 tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
 
