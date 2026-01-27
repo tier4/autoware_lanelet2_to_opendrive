@@ -317,7 +317,10 @@ def extract_centerline_as_spline(
     right_total_length = right_cumulative[-1]
 
     # Number of sample points for centerline
-    num_samples = max(20, num_control_points * 2)
+    num_samples = max(
+        DEFAULT_CONFIG.centerline.min_sample_points_for_centerline,
+        num_control_points * DEFAULT_CONFIG.centerline.sample_point_multiplier,
+    )
 
     centerline_points = []
     for i in range(num_samples):
@@ -562,7 +565,9 @@ def estimate_lanelet_width_as_spline(
 
     # Use not-a-knot boundary conditions for smoother interpolation with less oscillation
     width_spline_1d = CubicSpline1D(
-        arc_lengths_array, widths_array, bc_type="not-a-knot"
+        arc_lengths_array,
+        widths_array,
+        bc_type=DEFAULT_CONFIG.centerline.boundary_condition_default,
     )
 
     # Create a wrapper that provides the same interface as the old WidthSplineWrapper
