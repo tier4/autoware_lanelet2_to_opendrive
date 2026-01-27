@@ -439,3 +439,62 @@ def test_construct_from_lanelet2_traffic_signal_empty_linestring():
         Signal.construct_from_lanelet2_traffic_signal(
             traffic_light=traffic_light, signal_id=600, s=50.0, t=-4.0
         )
+
+
+def test_construct_from_lanelet2_traffic_signal_with_coordinate_offset():
+    """Test z_offset calculation with coordinate offset enabled."""
+    from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
+
+    # Set up coordinate offset (UTM to local)
+    original_x = COORDINATE_OFFSET.x
+    original_y = COORDINATE_OFFSET.y
+    original_z = COORDINATE_OFFSET.z
+    COORDINATE_OFFSET.x = 0.0
+    COORDINATE_OFFSET.y = 0.0
+    COORDINATE_OFFSET.z = 40.0
+
+    try:
+        # Create mock traffic light at UTM height 45.0
+        class MockPoint:
+            def __init__(self, x, y, z):
+                self.x = x
+                self.y = y
+                self.z = z
+
+        class MockLineString:
+            def __init__(self, points):
+                self.points = points
+
+            def __len__(self):
+                return len(self.points)
+
+            def __getitem__(self, index):
+                return self.points[index]
+
+        class MockTrafficLight:
+            def __init__(self, traffic_light_id, geometry):
+                self.id = traffic_light_id
+                self.trafficLights = geometry
+                self.attributes = {}
+
+        point = MockPoint(100.0, 200.0, 45.0)
+        linestring = MockLineString([point])
+        traffic_light = MockTrafficLight(12345, [linestring])
+
+        # Road elevation: 3.0m in local coordinates
+        signal = Signal.construct_from_lanelet2_traffic_signal(
+            traffic_light=traffic_light,
+            signal_id=100,
+            s=50.0,
+            t=-4.5,
+            lane_ids=[-1],
+            road_elevation_at_s=3.0,
+        )
+
+        # Expected: (45.0 - 40.0) - 3.0 = 2.0m relative height
+        assert signal.z_offset == 2.0
+    finally:
+        # Restore original offset
+        COORDINATE_OFFSET.x = original_x
+        COORDINATE_OFFSET.y = original_y
+        COORDINATE_OFFSET.z = original_z
