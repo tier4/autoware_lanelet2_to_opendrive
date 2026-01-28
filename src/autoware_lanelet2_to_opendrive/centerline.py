@@ -223,7 +223,9 @@ def _get_boundary_end_vel(boundary) -> np.ndarray:
     return _calculate_boundary_velocity_vector(boundary, at_start=False)
 
 
-def _calculate_centerline_velocity_vector(lanelet: lanelet2.core.Lanelet, at_start: bool) -> np.ndarray:
+def _calculate_centerline_velocity_vector(
+    lanelet: lanelet2.core.Lanelet, at_start: bool
+) -> np.ndarray:
     """
     Calculate velocity vector for centerline spline from lanelet boundaries.
 
