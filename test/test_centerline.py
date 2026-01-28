@@ -32,9 +32,7 @@ def test_estimate_lanelet_width_as_spline_constant_width():
     assert lanelet_555 is not None, "Lanelet with ID=555 not found in test map"
 
     # Estimate width as spline using left_bound reference to avoid asymmetry check
-    config = WidthEstimationConfig(
-        num_samples=10, reference=WidthReference.LEFT_BOUND
-    )
+    config = WidthEstimationConfig(num_samples=10, reference=WidthReference.LEFT_BOUND)
     width_spline = estimate_lanelet_width_as_spline(lanelet_555, config)
 
     # Sample points along the spline and check width values

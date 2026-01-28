@@ -38,7 +38,6 @@ from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
 )
-from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.conversion_config import (
     ConversionConfig,
     OriginSpec,

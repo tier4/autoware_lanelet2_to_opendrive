@@ -5,7 +5,7 @@ from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
-from .conversion_config import WidthEstimationConfig, WidthReference
+from .conversion_config import WidthEstimationConfig
 
 
 class AsymmetryLaneletException(Exception):
