@@ -350,11 +350,27 @@ class Road:
                                 # This handles lane reduction scenarios (e.g., 3 lanes -> 2 lanes)
                                 if existing_lanes:
                                     available_lanes = sorted(existing_lanes)
+                                    original_pred_lane_id = pred_lane_id
                                     pred_lane_id = Road._find_closest_lane(
                                         pred_lane_id, available_lanes
                                     )
+                                    import warnings
+
+                                    warnings.warn(
+                                        f"Lane link remapping: Road {self.id}, Lane {lane.lane_id} → "
+                                        f"predecessor Lane {original_pred_lane_id} (not found in Road {pred_road_id}) "
+                                        f"remapped to Lane {pred_lane_id}. Available lanes: {sorted(existing_lanes)}",
+                                        UserWarning,
+                                    )
                                 else:
                                     # No lanes available, skip this link
+                                    import warnings
+
+                                    warnings.warn(
+                                        f"Skipping lane link: Road {self.id}, Lane {lane.lane_id} → "
+                                        f"predecessor Road {pred_road_id} has no lanes available",
+                                        UserWarning,
+                                    )
                                     continue
 
                         # Check for self-reference (lane linking to itself)
@@ -460,11 +476,27 @@ class Road:
                                 # This handles lane reduction scenarios (e.g., 3 lanes -> 2 lanes)
                                 if existing_lanes:
                                     available_lanes = sorted(existing_lanes)
+                                    original_succ_lane_id = succ_lane_id
                                     succ_lane_id = Road._find_closest_lane(
                                         succ_lane_id, available_lanes
                                     )
+                                    import warnings
+
+                                    warnings.warn(
+                                        f"Lane link remapping: Road {self.id}, Lane {lane.lane_id} → "
+                                        f"successor Lane {original_succ_lane_id} (not found in Road {succ_road_id}) "
+                                        f"remapped to Lane {succ_lane_id}. Available lanes: {sorted(existing_lanes)}",
+                                        UserWarning,
+                                    )
                                 else:
                                     # No lanes available, skip this link
+                                    import warnings
+
+                                    warnings.warn(
+                                        f"Skipping lane link: Road {self.id}, Lane {lane.lane_id} → "
+                                        f"successor Road {succ_road_id} has no lanes available",
+                                        UserWarning,
+                                    )
                                     continue
 
                         # Check for self-reference (lane linking to itself)
@@ -908,6 +940,9 @@ class Road:
                 for lane_section in road.lanes.lane_sections:
                     lane_ids.update(lane_section.left_lanes.keys())
                     lane_ids.update(lane_section.right_lanes.keys())
+                    # Include center lane (ID=0)
+                    if lane_section.center_lane is not None:
+                        lane_ids.add(0)
             road_lane_ids[road.id] = lane_ids
 
         # Build mapping from road_id to Road object
