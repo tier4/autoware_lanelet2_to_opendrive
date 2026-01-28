@@ -68,6 +68,7 @@ class LaneSection:
         ],
         s_offset: float = 0.0,
         traffic_rule: Optional[TrafficRule] = None,
+        use_spec_compliant_lane_positioning: bool = True,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -78,7 +79,10 @@ class LaneSection:
             s_offset: Start position of the lane section
             traffic_rule: Optional traffic rule (RHT or LHT) to determine lane IDs.
                 RHT: lanes get negative IDs (right lanes) (default)
-                LHT: lanes get positive IDs (left lanes)
+                LHT: lanes get positive IDs (left lanes) if spec-compliant mode
+            use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT
+                lanes for RHT (spec-compliant). If False, use RIGHT lanes for all traffic
+                rules (CARLA compatibility mode)
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -111,11 +115,14 @@ class LaneSection:
         )
         lane_section._set_center_lane(reference_line)
 
-        # Lane ID assignment based on traffic rule:
-        # RHT (Right-Hand Traffic): lanes are RIGHT lanes (negative IDs: -1, -2, -3...)
-        # LHT (Left-Hand Traffic): lanes are LEFT lanes (positive IDs: +1, +2, +3...)
-        if traffic_rule == TrafficRule.LHT:
-            # For LHT: lanes are LEFT lanes (positive IDs)
+        # Lane ID assignment based on traffic rule and compatibility mode:
+        # Spec-compliant mode (use_spec_compliant_lane_positioning=True):
+        #   RHT: lanes are RIGHT lanes (negative IDs: -1, -2, -3...)
+        #   LHT: lanes are LEFT lanes (positive IDs: +1, +2, +3...)
+        # CARLA compatibility mode (use_spec_compliant_lane_positioning=False):
+        #   All lanes are RIGHT lanes (negative IDs) regardless of traffic rule
+        if traffic_rule == TrafficRule.LHT and use_spec_compliant_lane_positioning:
+            # For LHT (spec-compliant): lanes are LEFT lanes (positive IDs)
             # Reverse order to maintain physical positioning
             for i in range(len(sorted_lanelets)):
                 lane_id = i + 1  # +1, +2, +3, ...
@@ -126,7 +133,7 @@ class LaneSection:
                 )
                 lane_section._add_left_lane(lane)
         else:
-            # For RHT (default): lanes are RIGHT lanes (negative IDs)
+            # For RHT (default) or CARLA compatibility mode: lanes are RIGHT lanes (negative IDs)
             # Lane IDs: -1, -2, -3, ... from left to right
             for i, lanelet in enumerate(sorted_lanelets):
                 lane_id = -(i + 1)  # -1, -2, -3, ...

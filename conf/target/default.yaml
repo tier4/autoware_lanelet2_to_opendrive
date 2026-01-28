@@ -1,0 +1,12 @@
+# Default target configuration
+# This configuration follows OpenDRIVE specification exactly
+
+# Exclude traffic signals not associated with junctions
+# Default: false (include all signals)
+exclude_non_junction_signals: false
+
+# Use specification-compliant lane positioning
+# - true: Use LEFT lanes (<left> element, positive IDs) for LHT, RIGHT lanes for RHT (spec-compliant)
+# - false: Use RIGHT lanes (<right> element, negative IDs) for all traffic rules (CARLA compatibility)
+# Default: true (specification-compliant)
+use_spec_compliant_lane_positioning: true

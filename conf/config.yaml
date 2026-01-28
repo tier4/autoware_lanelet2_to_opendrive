@@ -1,0 +1,13 @@
+# Base configuration for Lanelet2 to OpenDRIVE conversion
+
+defaults:
+  - target: default
+  - _self_
+
+# Input/output paths
+input_map_path: ???  # Required: path to input Lanelet2 OSM file
+output_map_path: null  # Optional: output file path (defaults to input_path.xodr)
+
+# Execution modes
+dry_run: false  # If true, validate without saving
+verbose: false  # Enable verbose logging

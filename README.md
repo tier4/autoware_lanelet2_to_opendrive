@@ -161,3 +161,90 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
   input_map_path=/path/to/map.osm \
   dry_run=true
 ```
+
+## Traffic Rules and Lane ID Assignment
+
+This tool supports both Left-Hand Traffic (LHT) and Right-Hand Traffic (RHT) according to the official [ASAM OpenDRIVE specification](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_01_introduction.html).
+
+### OpenDRIVE Lane ID System
+
+OpenDRIVE uses a directional lane numbering system based on the road reference line:
+
+```
+        Left Lanes          Center    Right Lanes
+    +3  +2  +1         0         -1  -2  -3
+    ←────────────────────────────────────→
+    Positive IDs                  Negative IDs
+```
+
+- **Positive IDs** (+1, +2, +3, ...): Lanes in the `<left>` element (left side of reference line)
+- **Zero (0)**: Center lane in the `<center>` element (reference line itself)
+- **Negative IDs** (-1, -2, -3, ...): Lanes in the `<right>` element (right side of reference line)
+
+### Standard Compliant Behavior
+
+According to the OpenDRIVE specification, lane positioning depends on the traffic rule:
+
+#### For LHT (Left-Hand Traffic) Countries
+
+Countries: Japan, UK, Australia, India, etc.
+
+**Standard-compliant implementation:**
+- Driving lanes are positioned on the **left side** of the road
+- Uses **`<left>` element** with **positive lane IDs** (+1, +2, +3, ...)
+- Road element includes `rule="LHT"` attribute
+- Example: `<road id="0" rule="LHT"><lanes><laneSection><left><lane id="1" type="driving">...</lane></left></laneSection></lanes></road>`
+
+#### For RHT (Right-Hand Traffic) Countries
+
+Countries: USA, Germany, China, France, etc.
+
+**Standard-compliant implementation:**
+- Driving lanes are positioned on the **right side** of the road
+- Uses **`<right>` element** with **negative lane IDs** (-1, -2, -3, ...)
+- Road element includes `rule="RHT"` attribute (or omitted, as RHT is the default)
+- Example: `<road id="0" rule="RHT"><lanes><laneSection><right><lane id="-1" type="driving">...</lane></right></laneSection></lanes></road>`
+
+### CARLA Compatibility Mode
+
+**Known Limitation:** CARLA simulator has incomplete support for LEFT lanes (positive IDs) as required by the OpenDRIVE specification for LHT scenarios. When loading LHT maps with standard-compliant LEFT lanes, CARLA may crash or behave incorrectly.
+
+To ensure CARLA compatibility, use the `target=carla` configuration, which enables a compatibility mode:
+
+```bash
+uv run python -m autoware_lanelet2_to_opendrive.main \
+  input_map_path=/path/to/map.osm \
+  target=carla
+```
+
+**CARLA compatibility mode behavior:**
+- All driving lanes use **`<right>` element** with **negative IDs** (-1, -2, -3, ...)
+- The `rule` attribute still correctly indicates "LHT" or "RHT" for metadata purposes
+- This violates the OpenDRIVE specification but ensures CARLA can load the map without crashes
+
+**Trade-offs:**
+- ✅ Works with CARLA immediately
+- ✅ Still preserves traffic rule information via `rule` attribute
+- ❌ Not fully compliant with OpenDRIVE specification
+- ❌ May not work correctly with other spec-compliant tools (e.g., SUMO, CarMaker)
+
+### Configuration Options
+
+Enable CARLA compatibility mode in `conf/target/carla.yaml`:
+
+```yaml
+exclude_non_junction_signals: true
+use_spec_compliant_lane_positioning: false  # Use RIGHT lanes for all traffic rules
+```
+
+For standard-compliant behavior (default):
+
+```yaml
+use_spec_compliant_lane_positioning: true  # Use LEFT lanes for LHT, RIGHT lanes for RHT
+```
+
+### References
+
+- [ASAM OpenDRIVE Lane Introduction](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_01_introduction.html)
+- [ASAM OpenDRIVE Lane Groups](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_02_lane_groups.html)
+- [ASAM OpenDRIVE Road Introduction](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_01_introduction.html)

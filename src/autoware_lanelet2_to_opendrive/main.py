@@ -87,6 +87,7 @@ def convert_lanelet2_to_opendrive(
     origin_lon: Optional[float] = None,
     no_junction_lanelet_ids: Optional[List[int]] = None,
     traffic_rule: Optional[TrafficRule] = None,
+    use_spec_compliant_lane_positioning: bool = True,
 ) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
@@ -105,6 +106,9 @@ def convert_lanelet2_to_opendrive(
             These lanelets will be treated as regular roads even if they have turn_direction attribute.
         traffic_rule: Optional traffic rule (RHT or LHT) to apply to all roads.
             If None, roads will not have a rule attribute (OpenDRIVE default is RHT).
+        use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT lanes
+            for RHT as per OpenDRIVE specification. If False, use RIGHT lanes for all traffic
+            rules (CARLA compatibility mode).
 
     Returns:
         Tuple of:
@@ -141,7 +145,9 @@ def convert_lanelet2_to_opendrive(
     # Step 1: Create regular roads (outside junctions)
     print("\n=== Building regular roads ===")
     regular_roads = Road.construct_from_lanelet_map(
-        lanelet_map, traffic_rule=traffic_rule
+        lanelet_map,
+        traffic_rule=traffic_rule,
+        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
     )
     starting_junction_road_id = len(regular_roads)
 
@@ -189,6 +195,7 @@ def convert_lanelet2_to_opendrive(
         starting_road_id=starting_junction_road_id,
         junction_id_offset=junction_id_offset,
         traffic_rule=traffic_rule,
+        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
     )
 
     # Step 4: Merge lanelet-to-road mappings
@@ -556,9 +563,15 @@ def preprocess_and_convert_with_hydra(
     input_map_path = lanelet2_file
 
     # Parse origin from config (with mutual exclusion validation)
-    origin, mgrs_code, origin_lat, origin_lon, offset_x, offset_y, offset_z = (
-        parse_origin_from_config(cfg)
-    )
+    (
+        origin,
+        mgrs_code,
+        origin_lat,
+        origin_lon,
+        offset_x,
+        offset_y,
+        offset_z,
+    ) = parse_origin_from_config(cfg)
 
     # Set global coordinate offset for conversion
     # This will be applied to all coordinates during OpenDRIVE export
@@ -570,6 +583,9 @@ def preprocess_and_convert_with_hydra(
 
     # Get target-specific settings
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
+    use_spec_compliant_lane_positioning = cfg.target.get(
+        "use_spec_compliant_lane_positioning", True
+    )
 
     # Get no-junction lanelet IDs from map config
     no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
@@ -649,6 +665,7 @@ def preprocess_and_convert_with_hydra(
         origin_lon=origin_lon,
         no_junction_lanelet_ids=no_junction_lanelet_ids,
         traffic_rule=traffic_rule,
+        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
     )
 
     logger.info("Conversion completed successfully!")

@@ -356,6 +356,19 @@ class Road:
                                 else:
                                     # No lanes available, skip this link
                                     continue
+
+                        # Check for self-reference (lane linking to itself)
+                        if pred_lane_id == lane.lane_id and pred_road_id == self.id:
+                            import warnings
+
+                            warnings.warn(
+                                f"Skipping self-referencing predecessor: "
+                                f"Road {self.id}, Lane {lane.lane_id} → "
+                                f"Road {pred_road_id}, Lane {pred_lane_id}",
+                                UserWarning,
+                            )
+                            continue
+
                         lane.predecessor = LaneLink(id=pred_lane_id)
                         break
 
@@ -453,6 +466,19 @@ class Road:
                                 else:
                                     # No lanes available, skip this link
                                     continue
+
+                        # Check for self-reference (lane linking to itself)
+                        if succ_lane_id == lane.lane_id and succ_road_id == self.id:
+                            import warnings
+
+                            warnings.warn(
+                                f"Skipping self-referencing successor: "
+                                f"Road {self.id}, Lane {lane.lane_id} → "
+                                f"Road {succ_road_id}, Lane {succ_lane_id}",
+                                UserWarning,
+                            )
+                            continue
+
                         lane.successor = LaneLink(id=succ_lane_id)
                         break
 
@@ -463,6 +489,7 @@ class Road:
         road_id: int,
         s_offset: float = 0.0,
         traffic_rule: Optional[TrafficRule] = None,
+        use_spec_compliant_lane_positioning: bool = True,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -472,6 +499,9 @@ class Road:
             road_id: Road ID to assign
             s_offset: Starting s-coordinate offset for the road
             traffic_rule: Optional traffic rule (RHT or LHT) to apply to road geometry
+            use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT
+                lanes for RHT (spec-compliant). If False, use RIGHT lanes for all traffic
+                rules (CARLA compatibility mode)
 
         Returns:
             Road object constructed from the lanelet group
@@ -509,7 +539,11 @@ class Road:
             from .lane_section import LaneSection
 
             lane_section = LaneSection.construct_from_lanelet_groups(
-                lanelet_map, lanelet_list, s_offset=s_offset, traffic_rule=traffic_rule
+                lanelet_map,
+                lanelet_list,
+                s_offset=s_offset,
+                traffic_rule=traffic_rule,
+                use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -544,12 +578,16 @@ class Road:
     def construct_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
         traffic_rule: Optional[TrafficRule] = None,
+        use_spec_compliant_lane_positioning: bool = True,
     ) -> List["Road"]:
         """Construct Roads from a lanelet map.
 
         Args:
             lanelet_map: The lanelet2 map containing all lanelets
             traffic_rule: Optional traffic rule (RHT or LHT) to apply to all roads
+            use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT
+                lanes for RHT (spec-compliant). If False, use RIGHT lanes for all traffic
+                rules (CARLA compatibility mode)
 
         Returns:
             List of Road objects constructed from non-junction lanelets grouped by adjacency
@@ -616,6 +654,7 @@ class Road:
                     road_id=road_id,
                     s_offset=0.0,
                     traffic_rule=traffic_rule,
+                    use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
                 )
                 roads.append(road)
 
@@ -729,6 +768,7 @@ class Road:
         starting_road_id: int = 0,
         junction_id_offset: int = 0,
         traffic_rule: Optional[TrafficRule] = None,
+        use_spec_compliant_lane_positioning: bool = True,
     ) -> tuple[List["Road"], dict[int, List[int]], dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -742,6 +782,9 @@ class Road:
             junction_id_offset: Offset to add to junction IDs to avoid conflicts
                                with road IDs (default: 0). Issue #132 fix.
             traffic_rule: Optional traffic rule (RHT or LHT) to apply to all connecting roads
+            use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT
+                lanes for RHT (spec-compliant). If False, use RIGHT lanes for all traffic
+                rules (CARLA compatibility mode)
 
         Returns:
             Tuple of:
@@ -792,6 +835,7 @@ class Road:
                         road_id=current_road_id,
                         s_offset=0.0,
                         traffic_rule=traffic_rule,
+                        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
                     )
 
                     # Set the junction field to mark this as a connecting road

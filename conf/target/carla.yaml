@@ -1,0 +1,11 @@
+# CARLA target configuration
+# This configuration enables CARLA compatibility mode
+
+# Exclude traffic signals not associated with junctions (required for CARLA)
+exclude_non_junction_signals: true
+
+# Use specification-compliant lane positioning
+# CARLA compatibility mode: Use RIGHT lanes for all traffic rules
+# This works around CARLA's incomplete support for LEFT lanes (positive IDs) in LHT scenarios
+# The 'rule' attribute will still correctly indicate "LHT" or "RHT"
+use_spec_compliant_lane_positioning: false

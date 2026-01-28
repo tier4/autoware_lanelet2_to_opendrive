@@ -28,6 +28,9 @@ build-backend = "uv_build"
 [project.scripts]
 convert = "autoware_lanelet2_to_opendrive.main:main"
 preprocess-lanelet = "autoware_lanelet2_to_opendrive.preprocess_lanelet:main"
+validate-opendrive = "autoware_lanelet2_to_opendrive.validation.validate_opendrive:main"
+diagnose-lane-links = "autoware_lanelet2_to_opendrive.validation.diagnose_lane_links:main"
+debug-lht-links = "autoware_lanelet2_to_opendrive.validation.debug_lht_links:debug_road_0_lane_links"
 
 [dependency-groups]
 dev = [
