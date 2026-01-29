@@ -255,6 +255,19 @@ class Road:
             for prev_ll in previous_lanelets:
                 if prev_ll.id in lanelet_to_road_and_lane:
                     pred_road_id, pred_lane_id = lanelet_to_road_and_lane[prev_ll.id]
+
+                    # Check for self-reference FIRST (before road_id check)
+                    if pred_lane_id == lane.lane_id and pred_road_id == self.id:
+                        import warnings
+
+                        warnings.warn(
+                            f"Skipping self-referencing predecessor: "
+                            f"Road {self.id}, Lane {lane.lane_id} → "
+                            f"Road {pred_road_id}, Lane {pred_lane_id}",
+                            UserWarning,
+                        )
+                        continue
+
                     # Only set predecessor if it's in a different road
                     # (same road connections would be within lane sections)
                     if pred_road_id != self.id:
@@ -363,18 +376,6 @@ class Road:
                                     )
                                     continue
 
-                        # Check for self-reference (lane linking to itself)
-                        if pred_lane_id == lane.lane_id and pred_road_id == self.id:
-                            import warnings
-
-                            warnings.warn(
-                                f"Skipping self-referencing predecessor: "
-                                f"Road {self.id}, Lane {lane.lane_id} → "
-                                f"Road {pred_road_id}, Lane {pred_lane_id}",
-                                UserWarning,
-                            )
-                            continue
-
                         lane.predecessor = LaneLink(id=pred_lane_id)
                         break
 
@@ -385,6 +386,19 @@ class Road:
             for next_ll in following_lanelets:
                 if next_ll.id in lanelet_to_road_and_lane:
                     succ_road_id, succ_lane_id = lanelet_to_road_and_lane[next_ll.id]
+
+                    # Check for self-reference FIRST (before road_id check)
+                    if succ_lane_id == lane.lane_id and succ_road_id == self.id:
+                        import warnings
+
+                        warnings.warn(
+                            f"Skipping self-referencing successor: "
+                            f"Road {self.id}, Lane {lane.lane_id} → "
+                            f"Road {succ_road_id}, Lane {succ_lane_id}",
+                            UserWarning,
+                        )
+                        continue
+
                     # Only set successor if it's in a different road
                     if succ_road_id != self.id:
                         # Check consistency with road link
@@ -488,18 +502,6 @@ class Road:
                                         UserWarning,
                                     )
                                     continue
-
-                        # Check for self-reference (lane linking to itself)
-                        if succ_lane_id == lane.lane_id and succ_road_id == self.id:
-                            import warnings
-
-                            warnings.warn(
-                                f"Skipping self-referencing successor: "
-                                f"Road {self.id}, Lane {lane.lane_id} → "
-                                f"Road {succ_road_id}, Lane {succ_lane_id}",
-                                UserWarning,
-                            )
-                            continue
 
                         lane.successor = LaneLink(id=succ_lane_id)
                         break
