@@ -1,5 +1,5 @@
 # Default target configuration
-# This configuration follows OpenDRIVE specification exactly
+# This configuration follows OpenDRIVE specification
 #
 # Usage:
 #   uv run python -m autoware_lanelet2_to_opendrive.main input_map_path=/path/to/map.osm
@@ -7,26 +7,12 @@
 #
 # This will:
 #   - Read traffic_rule from map config if specified
-#   - Use specification-compliant lane positioning
-#   - Result: Correct OpenDRIVE output per ASAM specification
+#   - Generate OpenDRIVE-compliant output:
+#     * LHT maps: Use LEFT lanes (positive IDs: +1, +2, +3...)
+#     * RHT maps: Use RIGHT lanes (negative IDs: -1, -2, -3...)
+#   - Compatible with ASAM OpenDRIVE specification and tools like CARLA, SUMO, CarMaker
 
 # Exclude traffic signals not associated with junctions
 # Default: false (include all signals)
-# CARLA requires true, but most tools accept false
+# CARLA requires true (use target=carla for CARLA-specific settings)
 exclude_non_junction_signals: false
-
-# Use specification-compliant lane positioning
-# Default: true (follow OpenDRIVE specification)
-#
-# When true (spec-compliant, recommended):
-#   - LHT maps: Use LEFT lanes (positive IDs: +1, +2, +3...)
-#   - RHT maps: Use RIGHT lanes (negative IDs: -1, -2, -3...)
-#   - Follows ASAM OpenDRIVE specification exactly
-#   - Compatible with SUMO, CarMaker, and other spec-compliant tools
-#   - May not work with current CARLA versions for LHT maps
-#
-# When false (CARLA compatibility):
-#   - All maps: Use RIGHT lanes (negative IDs) regardless of traffic rule
-#   - Required for CARLA to load LHT maps without crashes
-#   - Violates OpenDRIVE specification
-use_spec_compliant_lane_positioning: true

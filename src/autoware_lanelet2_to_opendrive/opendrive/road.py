@@ -521,7 +521,6 @@ class Road:
         road_id: int,
         s_offset: float = 0.0,
         traffic_rule: Optional[TrafficRule] = None,
-        use_spec_compliant_lane_positioning: bool = True,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -530,10 +529,10 @@ class Road:
             lanelet_group: Group of lanelets to convert to a road
             road_id: Road ID to assign
             s_offset: Starting s-coordinate offset for the road
-            traffic_rule: Optional traffic rule (RHT or LHT) to apply to road geometry
-            use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT
-                lanes for RHT (spec-compliant). If False, use RIGHT lanes for all traffic
-                rules (CARLA compatibility mode)
+            traffic_rule: Optional traffic rule (RHT or LHT) to apply to road geometry.
+                Lane positioning follows OpenDRIVE specification:
+                - RHT: RIGHT lanes (negative IDs)
+                - LHT: LEFT lanes (positive IDs)
 
         Returns:
             Road object constructed from the lanelet group
@@ -575,7 +574,6 @@ class Road:
                 lanelet_list,
                 s_offset=s_offset,
                 traffic_rule=traffic_rule,
-                use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -610,16 +608,15 @@ class Road:
     def construct_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
         traffic_rule: Optional[TrafficRule] = None,
-        use_spec_compliant_lane_positioning: bool = True,
     ) -> List["Road"]:
         """Construct Roads from a lanelet map.
 
         Args:
             lanelet_map: The lanelet2 map containing all lanelets
-            traffic_rule: Optional traffic rule (RHT or LHT) to apply to all roads
-            use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT
-                lanes for RHT (spec-compliant). If False, use RIGHT lanes for all traffic
-                rules (CARLA compatibility mode)
+            traffic_rule: Optional traffic rule (RHT or LHT) to apply to all roads.
+                Lane positioning follows OpenDRIVE specification:
+                - RHT: RIGHT lanes (negative IDs)
+                - LHT: LEFT lanes (positive IDs)
 
         Returns:
             List of Road objects constructed from non-junction lanelets grouped by adjacency
@@ -686,7 +683,6 @@ class Road:
                     road_id=road_id,
                     s_offset=0.0,
                     traffic_rule=traffic_rule,
-                    use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
                 )
                 roads.append(road)
 
@@ -800,7 +796,6 @@ class Road:
         starting_road_id: int = 0,
         junction_id_offset: int = 0,
         traffic_rule: Optional[TrafficRule] = None,
-        use_spec_compliant_lane_positioning: bool = True,
     ) -> tuple[List["Road"], dict[int, List[int]], dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -813,10 +808,10 @@ class Road:
             starting_road_id: Starting ID for road numbering (default: 0)
             junction_id_offset: Offset to add to junction IDs to avoid conflicts
                                with road IDs (default: 0). Issue #132 fix.
-            traffic_rule: Optional traffic rule (RHT or LHT) to apply to all connecting roads
-            use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT
-                lanes for RHT (spec-compliant). If False, use RIGHT lanes for all traffic
-                rules (CARLA compatibility mode)
+            traffic_rule: Optional traffic rule (RHT or LHT) to apply to all connecting roads.
+                Lane positioning follows OpenDRIVE specification:
+                - RHT: RIGHT lanes (negative IDs)
+                - LHT: LEFT lanes (positive IDs)
 
         Returns:
             Tuple of:
@@ -867,7 +862,6 @@ class Road:
                         road_id=current_road_id,
                         s_offset=0.0,
                         traffic_rule=traffic_rule,
-                        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
                     )
 
                     # Set the junction field to mark this as a connecting road

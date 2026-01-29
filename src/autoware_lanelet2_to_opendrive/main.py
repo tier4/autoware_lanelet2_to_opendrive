@@ -87,7 +87,6 @@ def convert_lanelet2_to_opendrive(
     origin_lon: Optional[float] = None,
     no_junction_lanelet_ids: Optional[List[int]] = None,
     traffic_rule: Optional[TrafficRule] = None,
-    use_spec_compliant_lane_positioning: bool = True,
 ) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
@@ -106,9 +105,8 @@ def convert_lanelet2_to_opendrive(
             These lanelets will be treated as regular roads even if they have turn_direction attribute.
         traffic_rule: Optional traffic rule (RHT or LHT) to apply to all roads.
             If None, roads will not have a rule attribute (OpenDRIVE default is RHT).
-        use_spec_compliant_lane_positioning: If True, use LEFT lanes for LHT and RIGHT lanes
-            for RHT as per OpenDRIVE specification. If False, use RIGHT lanes for all traffic
-            rules (CARLA compatibility mode).
+            Lane positioning follows OpenDRIVE specification: LEFT lanes (positive IDs) for LHT,
+            RIGHT lanes (negative IDs) for RHT.
 
     Returns:
         Tuple of:
@@ -147,7 +145,6 @@ def convert_lanelet2_to_opendrive(
     regular_roads = Road.construct_from_lanelet_map(
         lanelet_map,
         traffic_rule=traffic_rule,
-        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
     )
     starting_junction_road_id = len(regular_roads)
 
@@ -195,7 +192,6 @@ def convert_lanelet2_to_opendrive(
         starting_road_id=starting_junction_road_id,
         junction_id_offset=junction_id_offset,
         traffic_rule=traffic_rule,
-        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
     )
 
     # Step 4: Merge lanelet-to-road mappings
@@ -583,13 +579,6 @@ def preprocess_and_convert_with_hydra(
 
     # Get target-specific settings
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
-    use_spec_compliant_lane_positioning = cfg.target.get(
-        "use_spec_compliant_lane_positioning", True
-    )
-    logger.info(
-        f"Lane positioning mode: "
-        f"{'spec-compliant' if use_spec_compliant_lane_positioning else 'CARLA compatibility'}"
-    )
 
     # Get no-junction lanelet IDs from map config
     no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
@@ -669,7 +658,6 @@ def preprocess_and_convert_with_hydra(
         origin_lon=origin_lon,
         no_junction_lanelet_ids=no_junction_lanelet_ids,
         traffic_rule=traffic_rule,
-        use_spec_compliant_lane_positioning=use_spec_compliant_lane_positioning,
     )
 
     logger.info("Conversion completed successfully!")

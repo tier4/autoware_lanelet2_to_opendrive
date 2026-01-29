@@ -1,28 +1,14 @@
 # CARLA target configuration
-# This configuration enables CARLA compatibility mode
+# Settings specific to CARLA simulator requirements
 #
 # Usage:
 #   uv run python -m autoware_lanelet2_to_opendrive.main input_map_path=/path/to/map.osm map=nishishinjuku target=carla
 #
 # This will:
 #   - Read traffic_rule from map config (e.g., nishishinjuku.yaml: traffic_rule: LHT)
-#   - Apply CARLA compatibility mode from this file (use_spec_compliant_lane_positioning: false)
-#   - Result: LHT map with RIGHT lanes (CARLA compatible)
+#   - Exclude non-junction signals as required by CARLA
+#   - Generate OpenDRIVE-compliant output (LHT uses LEFT lanes, RHT uses RIGHT lanes)
 
-# Exclude traffic signals not associated with junctions (required for CARLA)
+# CARLA requires traffic signals to be associated with junctions.
+# This option excludes signals that are not in junctions.
 exclude_non_junction_signals: true
-
-# Use specification-compliant lane positioning
-# CARLA compatibility mode: Use RIGHT lanes for all traffic rules
-#
-# When false (CARLA mode):
-#   - LHT maps: Use RIGHT lanes (negative IDs) instead of LEFT lanes
-#   - RHT maps: Use RIGHT lanes (negative IDs) as normal
-#   - The 'rule' attribute still correctly indicates "LHT" or "RHT"
-#   - Works around CARLA's incomplete LEFT lane support
-#
-# When true (spec-compliant):
-#   - LHT maps: Use LEFT lanes (positive IDs) per OpenDRIVE spec
-#   - RHT maps: Use RIGHT lanes (negative IDs) per OpenDRIVE spec
-#   - May not work with current CARLA versions
-use_spec_compliant_lane_positioning: false

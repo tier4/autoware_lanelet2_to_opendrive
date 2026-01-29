@@ -226,31 +226,27 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
   target=carla
 ```
 
-**CARLA compatibility mode behavior:**
-- All driving lanes use **`<right>` element** with **negative IDs** (-1, -2, -3, ...)
-- The `rule` attribute still correctly indicates "LHT" or "RHT" for metadata purposes
-- This violates the OpenDRIVE specification but ensures CARLA can load the map without crashes
-
-**Trade-offs:**
-- ✅ Works with CARLA immediately
-- ✅ Still preserves traffic rule information via `rule` attribute
-- ❌ Not fully compliant with OpenDRIVE specification
-- ❌ May not work correctly with other spec-compliant tools (e.g., SUMO, CarMaker)
+**OpenDRIVE specification behavior:**
+- **LHT maps**: Use **LEFT lanes** (`<left>` element) with **positive IDs** (+1, +2, +3, ...)
+- **RHT maps**: Use **RIGHT lanes** (`<right>` element) with **negative IDs** (-1, -2, -3, ...)
+- The `rule` attribute correctly indicates "LHT" or "RHT" for all roads
+- Fully compliant with ASAM OpenDRIVE specification
+- Compatible with CARLA, SUMO, CarMaker, and other spec-compliant tools
 
 ### Configuration Options
 
-Enable CARLA compatibility mode in `conf/target/carla.yaml`:
+CARLA-specific settings in `conf/target/carla.yaml`:
 
 ```yaml
+# CARLA requires traffic signals to be associated with junctions
 exclude_non_junction_signals: true
-use_spec_compliant_lane_positioning: false  # Use RIGHT lanes for all traffic rules
 ```
 
-For standard-compliant behavior (default):
+All generated OpenDRIVE files follow the ASAM OpenDRIVE specification:
+- **LHT (Left-Hand Traffic)**: Uses LEFT lanes with positive IDs (+1, +2, +3...)
+- **RHT (Right-Hand Traffic)**: Uses RIGHT lanes with negative IDs (-1, -2, -3...)
 
-```yaml
-use_spec_compliant_lane_positioning: true  # Use LEFT lanes for LHT, RIGHT lanes for RHT
-```
+This is compatible with CARLA, SUMO, CarMaker, and other OpenDRIVE-compliant tools.
 
 ### References
 
