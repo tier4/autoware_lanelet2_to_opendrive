@@ -29,7 +29,7 @@ def test_no_self_referencing_lane_links_lht():
         lanelet2.traffic_rules.Participants.Vehicle,
     )
     routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
-    Road.set_all_lane_links(roads, lanelet_map, routing_graph=routing_graph)
+    Road.set_all_lane_links(lanelet_map, roads, routing_graph=routing_graph)
 
     # Check for self-references
     self_references = []
@@ -91,7 +91,7 @@ def test_no_self_referencing_lane_links_rht():
         lanelet2.traffic_rules.Participants.Vehicle,
     )
     routing_graph = RoutingGraph(lanelet_map, traffic_rules, [RoutingCostDistance(0.0)])
-    Road.set_all_lane_links(roads, lanelet_map, routing_graph=routing_graph)
+    Road.set_all_lane_links(lanelet_map, roads, routing_graph=routing_graph)
 
     # Check for self-references
     self_references = []
@@ -158,7 +158,7 @@ def test_debug_road_0_lane_links():
         print(f"  Lanelet {lanelet_id} → Lane {lane_id}")
 
     # Set lane links
-    routing_graph = create_routing_graph(lanelet_map, TrafficRule.LHT.value)
+    routing_graph = create_routing_graph(lanelet_map)
 
     # Build global mapping
     lanelet_to_road_and_lane = {}
@@ -214,7 +214,7 @@ def test_debug_road_0_lane_links():
                             )
 
     # Now set links
-    Road.set_all_lane_links(roads, lanelet_map, routing_graph=routing_graph)
+    Road.set_all_lane_links(lanelet_map, roads, routing_graph=routing_graph)
 
     # Check Road 0, Lane 1 after setting links
     if road_0.lanes and road_0.lanes.lane_sections:

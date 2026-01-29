@@ -586,6 +586,10 @@ def preprocess_and_convert_with_hydra(
     use_spec_compliant_lane_positioning = cfg.target.get(
         "use_spec_compliant_lane_positioning", True
     )
+    logger.info(
+        f"Lane positioning mode: "
+        f"{'spec-compliant' if use_spec_compliant_lane_positioning else 'CARLA compatibility'}"
+    )
 
     # Get no-junction lanelet IDs from map config
     no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
