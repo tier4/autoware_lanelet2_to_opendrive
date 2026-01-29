@@ -22,9 +22,19 @@ class ReferenceLine:
     """
     OpenDRIVE reference line representation.
 
-    The reference line is the center line of a road and serves as the basis
-    for defining lane geometry in OpenDRIVE format. It contains a Lane
-    instance for compatibility but is specifically designed for reference line purposes.
+    The reference line serves as the basis for defining lane geometry in OpenDRIVE format.
+
+    Note: In this Lanelet2-to-OpenDRIVE converter, the reference line is positioned
+    at the edge of the road rather than the center, due to Lanelet2's structure:
+    - RHT: Reference line at left edge (left boundary of leftmost lanelet)
+    - LHT: Reference line at right edge (right boundary of rightmost lanelet)
+
+    This differs from typical OpenDRIVE convention (center placement) but is
+    more natural for Lanelet2 conversion, as each lanelet already has well-defined
+    boundaries but no inherent concept of a road-wide centerline.
+
+    It contains a Lane instance for compatibility but is specifically designed
+    for reference line purposes.
     """
 
     def __init__(
@@ -72,15 +82,19 @@ class ReferenceLine:
         """
         Construct a ReferenceLine from a group of Lanelet2 lanelets.
 
+        The reference line is positioned at the edge of the road to align with
+        Lanelet2's boundary-based structure, placing all lanes on one side of
+        the reference line for simpler geometry calculation.
+
         Args:
             lanelet_map: The Lanelet2 map containing the lanelets
             lanelet_group: List of lanelets representing lanes in a road
             traffic_rule: Optional traffic rule (RHT or LHT) to determine reference line position.
-                RHT: uses left boundary of leftmost lanelet (default)
-                LHT: uses right boundary of rightmost lanelet
+                RHT: uses left boundary of leftmost lanelet (places reference at left edge)
+                LHT: uses right boundary of rightmost lanelet (places reference at right edge)
 
         Returns:
-            ReferenceLine instance constructed from the center of the lanelet group
+            ReferenceLine instance constructed from the edge boundary of the lanelet group
         """
         if not lanelet_group:
             raise ValueError("Lanelet group cannot be empty")

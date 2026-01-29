@@ -230,8 +230,15 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 - **LHT maps**: Use **LEFT lanes** (`<left>` element) with **positive IDs** (+1, +2, +3, ...)
 - **RHT maps**: Use **RIGHT lanes** (`<right>` element) with **negative IDs** (-1, -2, -3, ...)
 - The `rule` attribute correctly indicates "LHT" or "RHT" for all roads
-- Fully compliant with ASAM OpenDRIVE specification
+- Fully compliant with ASAM OpenDRIVE lane numbering specification
 - Compatible with CARLA, SUMO, CarMaker, and other spec-compliant tools
+
+**Reference line positioning:**
+- Due to Lanelet2's boundary-based structure (no inherent road-wide centerline concept), the reference line is positioned at the edge rather than center:
+  - **RHT**: Reference line at **left edge** of road (left boundary of leftmost lanelet)
+  - **LHT**: Reference line at **right edge** of road (right boundary of rightmost lanelet)
+- This differs from typical OpenDRIVE convention (center placement) but is more natural for Lanelet2 conversion
+- All lanes are positioned on one side of the reference line, simplifying geometry calculations
 
 ### Configuration Options
 

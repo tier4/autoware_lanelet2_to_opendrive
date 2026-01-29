@@ -1,5 +1,5 @@
 # Default target configuration
-# This configuration follows OpenDRIVE specification
+# This configuration follows OpenDRIVE lane numbering specification
 #
 # Usage:
 #   uv run python -m autoware_lanelet2_to_opendrive.main input_map_path=/path/to/map.osm
@@ -7,10 +7,15 @@
 #
 # This will:
 #   - Read traffic_rule from map config if specified
-#   - Generate OpenDRIVE-compliant output:
+#   - Generate OpenDRIVE output with proper lane numbering:
 #     * LHT maps: Use LEFT lanes (positive IDs: +1, +2, +3...)
 #     * RHT maps: Use RIGHT lanes (negative IDs: -1, -2, -3...)
-#   - Compatible with ASAM OpenDRIVE specification and tools like CARLA, SUMO, CarMaker
+#   - Compatible with CARLA, SUMO, CarMaker, and other OpenDRIVE-compliant tools
+#
+# Note: Reference line is positioned at road edge (not center) due to Lanelet2 structure:
+#   - RHT: Reference at left edge (left boundary of leftmost lanelet)
+#   - LHT: Reference at right edge (right boundary of rightmost lanelet)
+#   This differs from typical OpenDRIVE convention but is more natural for Lanelet2 conversion.
 
 # Exclude traffic signals not associated with junctions
 # Default: false (include all signals)

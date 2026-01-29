@@ -1,5 +1,13 @@
 # CARLA target configuration
 # Settings specific to CARLA simulator requirements
+#
+# Generates OpenDRIVE output with proper lane numbering:
+#   - LHT: LEFT lanes (positive IDs) for driving lanes
+#   - RHT: RIGHT lanes (negative IDs) for driving lanes
+#
+# Note: Reference line is positioned at road edge (not center) due to Lanelet2 structure:
+#   - RHT: Reference at left edge
+#   - LHT: Reference at right edge
 
 # CARLA requires traffic signals to be associated with junctions.
 # This option excludes signals that are not in junctions.
