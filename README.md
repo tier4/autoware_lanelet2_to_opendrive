@@ -212,8 +212,17 @@ Countries: USA, Germany, China, France, etc.
 To ensure CARLA compatibility, use the `target=carla` configuration, which enables a compatibility mode:
 
 ```bash
+# Basic usage (generic map)
 uv run python -m autoware_lanelet2_to_opendrive.main \
   input_map_path=/path/to/map.osm \
+  target=carla
+
+# With specific map config (e.g., Nishishinjuku)
+# Map config provides traffic_rule (LHT/RHT)
+# Target config provides CARLA compatibility mode
+uv run python -m autoware_lanelet2_to_opendrive.main \
+  input_map_path=/path/to/nishishinjuku.osm \
+  map=nishishinjuku \
   target=carla
 ```
 
