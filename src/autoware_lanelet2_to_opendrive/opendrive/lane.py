@@ -1,12 +1,13 @@
 """Lane implementation for OpenDRIVE conversion."""
 
-from typing import List, Optional, Dict, Union, Any
+from typing import Any, Dict, List, Optional, Union
 import lanelet2
 import lxml.etree as ET
 
 from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
 from ..spline import Splines
 from ..util import find_adjacent_groups
+from ..conversion_config import WidthEstimationConfig, WidthReference
 
 from .opendrive_dataclass import (
     LaneType,
@@ -186,19 +187,15 @@ class Lane:
             # Single lanelet: use boundary as reference
             if traffic_rule == TrafficRule.LHT:
                 # For LHT: use right boundary as reference
-                width_spline = estimate_lanelet_width_as_spline(
-                    lanelet, reference="right_bound"
-                )
+                config = WidthEstimationConfig(reference=WidthReference.RIGHT_BOUND)
             else:
                 # For RHT (default): use left boundary as reference
-                width_spline = estimate_lanelet_width_as_spline(
-                    lanelet, reference="left_bound"
-                )
+                config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
+            width_spline = estimate_lanelet_width_as_spline(lanelet, config)
         else:
             # Multiple lanelets: always use centerline
-            width_spline = estimate_lanelet_width_as_spline(
-                lanelet, reference="center_line"
-            )
+            config = WidthEstimationConfig(reference=WidthReference.CENTER_LINE)
+            width_spline = estimate_lanelet_width_as_spline(lanelet, config)
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)
