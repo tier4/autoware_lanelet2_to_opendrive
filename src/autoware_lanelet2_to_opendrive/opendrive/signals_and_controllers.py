@@ -177,8 +177,44 @@ class SignalsAndControllers:
                     road_lanelet_mapping=road_lanelet_mapping,
                 )
 
-                # Determine lane IDs (negative for right lanes in OpenDRIVE)
-                lane_ids = [-1]  # Simplified: assume rightmost lane
+                # Determine lane IDs from actual road structure
+                lane_ids = []
+                if roads is not None:
+                    # Find the corresponding Road object
+                    matching_road = next((r for r in roads if r.id == road_id), None)
+                    if (
+                        matching_road
+                        and matching_road.lanes
+                        and matching_road.lanes.lane_sections
+                    ):
+                        # Get lanelet-to-lane mapping from the first lane section
+                        # (most roads have a single lane section)
+                        lane_section = matching_road.lanes.lane_sections[0]
+                        lanelet_to_lane = lane_section.get_lanelet_to_lane_mapping()
+
+                        # Find lane IDs for lanelets associated with this traffic light
+                        for lanelet_id in road_lanelets_with_signal:
+                            if lanelet_id in lanelet_to_lane:
+                                lane_ids.append(lanelet_to_lane[lanelet_id])
+
+                # Fallback: if no lane IDs found, determine based on traffic rule
+                if not lane_ids:
+                    if roads is not None:
+                        matching_road = next(
+                            (r for r in roads if r.id == road_id), None
+                        )
+                        if matching_road and matching_road.rule:
+                            from .enums import TrafficRule
+
+                            # Use positive lane IDs for LHT, negative for RHT
+                            if matching_road.rule == TrafficRule.LHT:
+                                lane_ids = [1]  # Default to leftmost lane for LHT
+                            else:
+                                lane_ids = [-1]  # Default to rightmost lane for RHT
+                        else:
+                            lane_ids = [-1]  # Ultimate fallback: assume RHT
+                    else:
+                        lane_ids = [-1]  # Ultimate fallback: assume RHT
 
                 # Calculate road elevation at signal position
                 road_elevation_at_s = None

@@ -311,7 +311,9 @@ class Signal:
         # Create lane validities
         validities = []
         if lane_ids is None:
-            # Default to lane -1 (rightmost lane)
+            # DEPRECATED: This fallback assumes RHT (rightmost lane = -1).
+            # Callers should always provide lane_ids based on actual road structure
+            # to avoid mismatches with LHT roads (which use positive lane IDs).
             validities.append(Validity(from_lane=-1, to_lane=-1))
         else:
             # Create validity for specified lanes
