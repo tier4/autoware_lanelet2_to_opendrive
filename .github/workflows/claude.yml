@@ -49,7 +49,7 @@ jobs:
       - name: Configure git for private repositories
         run: |
           git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-        if: secrets.GH_PAT != ''
+        if: ${{ secrets.GH_PAT != '' }}
 
       - name: Install dependencies and pre-commit
         run: |
