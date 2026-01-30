@@ -93,25 +93,68 @@ If pre-commit hooks fail:
 
 2. **Never bypass pre-commit hooks** with `--no-verify` flag (this is already prohibited in Git Operation Restrictions)
 
-3. **Run manual checks before committing** if there's any doubt:
+3. **CRITICAL: Auto-format code BEFORE committing** to prevent CI/CD failures:
    ```bash
+   # Step 1: Run pre-commit on all files to auto-fix formatting issues
    pre-commit run --all-files
+
+   # Step 2: If files were modified, stage the changes
+   git add -u
+
+   # Step 3: Now commit (pre-commit will pass because code is already formatted)
+   git commit -m "your message"
    ```
 
-4. **If a commit fails due to lint errors**:
+   **Rationale**: GitHub Actions fails when pre-commit hooks modify files (exit code 1). By running `pre-commit run --all-files` before committing, formatters like `ruff-format` will fix issues locally first, preventing CI failures.
+
+4. **Automated workflow for code generation and PR creation**:
+
+   When generating code and creating a PR, **ALWAYS** follow this sequence:
+
+   ```bash
+   # 1. Make code changes (via Write/Edit tools)
+
+   # 2. Auto-format all files
+   pre-commit run --all-files
+
+   # 3. Stage all changes (including formatter modifications)
+   git add -u
+
+   # 4. Commit with proper message
+   git commit -m "feat: your feature description
+
+   Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+
+   # 5. Push to remote
+   git push -u origin branch-name
+
+   # 6. Create PR using gh CLI
+   gh pr create --title "..." --body "..."
+   ```
+
+5. **If a commit fails due to lint errors**:
    - Review the error output
-   - Fix the issues or let pre-commit auto-fix them
-   - Stage the fixes with `git add`
+   - Run `pre-commit run --all-files` to let formatters auto-fix
+   - Stage the fixes with `git add -u`
    - Retry the commit (without `--no-verify`)
 
-5. **Common pre-commit hooks in this project may include**:
-   - **black**: Python code formatting
-   - **isort**: Import statement sorting
-   - **flake8**: Python linting
+   **NEVER** bypass hooks with `--no-verify` even if the commit fails multiple times.
+
+6. **Common pre-commit hooks in this project**:
+   - **ruff**: Python linting (checks code style, imports, etc.)
+   - **ruff-format**: Python code formatting (auto-fixes formatting issues)
    - **mypy**: Static type checking
    - **trailing-whitespace**: Remove trailing whitespace
    - **end-of-file-fixer**: Ensure files end with newline
    - **check-yaml**: Validate YAML syntax
+   - **check-toml**: Validate TOML syntax
+   - **debug-statements**: Detect debug statements like `breakpoint()`
+   - **mixed-line-ending**: Detect mixed line endings
+
+7. **Understanding pre-commit hook results**:
+   - **Passed**: Hook found no issues
+   - **Failed (files were modified by this hook)**: Hook auto-fixed issues - you MUST stage changes with `git add -u` and retry
+   - **Failed (errors found)**: Manual fixes required - review output and fix issues
 
 ### Rationale
 
@@ -214,6 +257,218 @@ See [PR #133](https://github.com/tier4/autoware_lanelet2_to_opendrive/pull/133) 
 - **Efficiency**: Reviewers can quickly understand changes
 - **Documentation**: PRs serve as historical record of design decisions
 - **Professional standards**: Follows industry best practices for open-source projects
+
+## GitHub Actions and Automated PR Creation
+
+**CRITICAL**: This section describes the mandatory workflow for creating PRs to ensure all GitHub Actions checks pass.
+
+### Problem: Pre-commit Formatting in CI/CD
+
+GitHub Actions runs `pre-commit run --all-files` in the `lint-and-format` job. If any hook modifies files (e.g., `ruff-format` reformats code), the job **fails with exit code 1** even though the formatting is correct. This is because:
+
+1. Pre-commit hooks modify files during CI
+2. Modified files indicate the committed code was not properly formatted
+3. GitHub Actions interprets this as a failure
+
+**Example failure from PR #160**:
+```
+ruff-format..............................................................Failed
+- hook id: ruff-format
+- files were modified by this hook
+
+1 file reformatted, 50 files left unchanged
+##[error]Process completed with exit code 1.
+```
+
+### Solution: Pre-format Code Before Committing
+
+**MANDATORY**: Claude Code must **ALWAYS** run formatters locally before committing code, ensuring that the code pushed to GitHub is already formatted correctly.
+
+### Automated PR Creation Workflow
+
+When creating a PR (manually or through automation), **STRICTLY FOLLOW** this sequence:
+
+```bash
+# 1. Complete all code changes using Write/Edit tools
+
+# 2. Format all files before committing
+#    This step is CRITICAL to prevent CI failures
+pre-commit run --all-files
+
+# 3. Check if formatters modified any files
+#    If "files were modified by this hook" appears, proceed to step 4
+#    If all hooks passed, proceed to step 5
+
+# 4. Stage formatter changes
+git add -u
+
+# 5. Commit with proper message (hooks will pass now)
+git commit -m "feat: your feature description
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+
+# 6. Push to remote branch
+git push -u origin feature-branch-name
+
+# 7. Create PR using gh CLI with template
+gh pr create --title "..." --body "..."
+```
+
+### Detailed Step-by-Step Instructions for Claude Code
+
+When you are asked to create a PR or when you autonomously decide to create a PR:
+
+1. **After writing/editing code files**:
+   - Use Write/Edit tools to make all necessary code changes
+   - Do NOT commit yet
+
+2. **Run pre-commit formatters**:
+   ```bash
+   pre-commit run --all-files
+   ```
+   - This will auto-format code using `ruff-format`, `ruff`, etc.
+   - Watch for "files were modified by this hook" messages
+   - If any hook reports modifications, proceed to step 3
+   - If all hooks pass without modifications, proceed to step 4
+
+3. **Stage formatter modifications** (if any hooks modified files):
+   ```bash
+   git add -u
+   ```
+   - This stages all tracked file modifications
+   - Includes formatting changes made by pre-commit hooks
+
+4. **Commit with formatted code**:
+   ```bash
+   git commit -m "feat: implement feature X
+
+   Detailed explanation of changes.
+
+   Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+   ```
+   - Pre-commit hooks run again but will pass immediately
+   - Code is already formatted from step 2
+
+5. **Push to remote**:
+   ```bash
+   git push -u origin feature-branch-name
+   ```
+
+6. **Create PR**:
+   - Read `.github/PULL_REQUEST_TEMPLATE.md` first
+   - Use `gh pr create` with appropriate title and body
+   - Follow template structure and emoji conventions
+
+### Common Errors and Solutions
+
+#### Error: "ruff-format failed - files were modified by this hook"
+
+**Cause**: Code was not formatted before committing
+
+**Solution**:
+```bash
+# Run pre-commit to format
+pre-commit run --all-files
+
+# Stage the formatting changes
+git add -u
+
+# Create a new commit OR amend if not pushed yet
+git commit -m "style: apply ruff formatting"
+
+# Push
+git push
+```
+
+#### Error: "lint-and-format job failed in GitHub Actions"
+
+**Cause**: Committed code does not pass pre-commit checks
+
+**Solution**:
+1. Pull the branch locally
+2. Run `pre-commit run --all-files`
+3. Fix any remaining errors manually
+4. Stage changes with `git add -u`
+5. Commit and push
+6. CI will re-run automatically
+
+### Rationale
+
+- **Prevents CI failures**: Ensures code is formatted before reaching GitHub Actions
+- **Saves time**: Avoids failed CI runs and resubmissions
+- **Consistency**: All code follows project formatting standards
+- **Professionalism**: Clean commit history without formatting-only commits
+- **Automation-friendly**: Works seamlessly with Claude Code's automated workflows
+
+### Integration with Commit Workflow
+
+This formatting requirement is integrated into the commit workflow described in the Bash tool's "Committing changes with git" section. The sequence is:
+
+1. Write/Edit code → 2. **Format with pre-commit** → 3. Stage changes → 4. Commit → 5. Push
+
+**Step 2 is mandatory and must never be skipped.**
+
+### Automated Formatting in GitHub Actions
+
+**IMPORTANT**: The `.github/workflows/claude.yml` workflow includes automatic formatting as a safety net.
+
+#### How It Works
+
+When Claude Code GitHub Actions runs:
+
+1. **Setup Phase**:
+   - Checkout repository with full git history
+   - Install Python, uv, system dependencies
+   - Install project dependencies with `uv sync --dev`
+   - Install pre-commit hooks with `uv run pre-commit install`
+
+2. **Claude Code Execution**:
+   - Claude Code runs with write permissions (`contents: write`, `pull-requests: write`)
+   - Claude Code should follow CLAUDE.md guidelines and format code before committing
+   - Creates commits and pushes to branch
+
+3. **Auto-format Safety Net** (runs after Claude Code):
+   - Runs `uv run pre-commit run --all-files` on all code
+   - Detects if any files were modified by formatters
+   - If changes detected:
+     - Stages changes with `git add -u`
+     - Commits with message: `"style: auto-format code with ruff-format"`
+     - Pushes to the same branch
+   - If no changes: Reports success, no action needed
+
+4. **Summary**:
+   - GitHub Actions summary shows whether formatting was needed
+   - Provides transparency on what was done
+
+#### Permissions
+
+The workflow has these permissions:
+- `contents: write` - Allows committing formatting changes
+- `pull-requests: write` - Allows creating/updating PRs
+- `actions: read` - Allows reading CI results
+
+#### Benefits
+
+- ✅ **Safety net**: Even if Claude Code misses formatting, it's automatically fixed
+- ✅ **CI/CD compliance**: Ensures all code passes `lint-and-format` checks
+- ✅ **Zero manual intervention**: Fully automated formatting pipeline
+- ✅ **Transparent**: GitHub Actions summary shows what was done
+- ✅ **Best practices**: Follows the same workflow as local development
+
+#### Configuration File
+
+The automated formatting is configured in:
+- **Workflow**: `.github/workflows/claude.yml`
+- **Pre-commit config**: `.pre-commit-config.yaml`
+- **Project config**: `pyproject.toml` (for ruff settings)
+
+#### What This Means for Claude Code
+
+When Claude Code runs in GitHub Actions:
+1. **Primary responsibility**: Claude Code should still format code before committing (following CLAUDE.md guidelines)
+2. **Backup protection**: If formatting is missed, the workflow automatically fixes it
+3. **No manual fixes needed**: Users don't need to manually fix formatting issues in PRs created by Claude Code
+4. **Clean history**: Formatting commits are clearly marked and attributed
 
 ## Git Operation Restrictions
 

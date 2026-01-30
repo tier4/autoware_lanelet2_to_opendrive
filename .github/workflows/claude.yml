@@ -19,8 +19,8 @@ jobs:
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
+      contents: write # Allow Claude to commit formatting changes
+      pull-requests: write # Allow Claude to create/update PRs
       issues: read
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
@@ -28,7 +28,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0 # Fetch full history for proper git operations
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographic-dev libboost-python-dev libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Configure git for private repositories
+        run: |
+          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+        if: secrets.GH_PAT != ''
+
+      - name: Install dependencies and pre-commit
+        run: |
+          uv sync --dev
+          uv run pre-commit install
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.GH_PAT }}
 
       - name: Run Claude Code
         id: claude
@@ -47,3 +75,63 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
           # claude_args: '--allowed-tools Bash(gh pr:*)'
+
+      - name: Auto-format code (safety net)
+        id: format
+        if: always() && steps.claude.conclusion == 'success'
+        run: |
+          # Store current branch
+          CURRENT_BRANCH=$(git branch --show-current)
+          echo "current_branch=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+
+          # Run pre-commit to format all files
+          echo "Running pre-commit hooks to ensure code is formatted..."
+          uv run pre-commit run --all-files || true
+
+          # Check if there are any changes
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "formatted=true" >> $GITHUB_OUTPUT
+            echo "Files were modified by pre-commit hooks"
+            git status --short
+          else
+            echo "formatted=false" >> $GITHUB_OUTPUT
+            echo "No formatting changes needed"
+          fi
+
+      - name: Commit formatting changes
+        if: always() && steps.format.outputs.formatted == 'true'
+        run: |
+          # Configure git
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage all changes
+          git add -u
+
+          # Commit formatting changes
+          git commit -m "$(cat <<'EOF'
+          style: auto-format code with ruff-format
+
+          This commit was automatically created by GitHub Actions to ensure
+          code formatting compliance with project standards.
+
+          Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+          EOF
+          )"
+
+          # Push changes
+          git push origin HEAD
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Claude Code Action Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.format.outputs.formatted }}" == "true" ]]; then
+            echo "✅ Code was automatically formatted after Claude's changes" >> $GITHUB_STEP_SUMMARY
+            echo "- Pre-commit hooks were run" >> $GITHUB_STEP_SUMMARY
+            echo "- Formatting changes were committed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ No additional formatting needed" >> $GITHUB_STEP_SUMMARY
+            echo "- Code was already properly formatted" >> $GITHUB_STEP_SUMMARY
+          fi
