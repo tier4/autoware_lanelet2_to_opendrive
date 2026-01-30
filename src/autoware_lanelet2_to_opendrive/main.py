@@ -3,7 +3,7 @@
 
 import sys
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import tempfile
 import logging
 
@@ -38,7 +38,10 @@ from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
 )
-from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+from autoware_lanelet2_to_opendrive.conversion_config import (
+    ConversionConfig,
+    OriginSpec,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -79,28 +82,17 @@ def load_lanelet2_map(
 
 def convert_lanelet2_to_opendrive(
     lanelet_map: lanelet2.core.LaneletMap,
-    mgrs_code: str,
-    output_path: Optional[Path] = None,
-    exclude_non_junction_signals: bool = False,
-    origin_lat: Optional[float] = None,
-    origin_lon: Optional[float] = None,
-    no_junction_lanelet_ids: Optional[List[int]] = None,
+    config: ConversionConfig,
+    mgrs_code: Optional[str] = None,
 ) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
 
     Args:
         lanelet_map: Loaded Lanelet2 map
-        mgrs_code: MGRS code for generating geoReference PROJ string (used as fallback)
-        output_path: Optional output path for saving the OpenDRIVE file
-        exclude_non_junction_signals: If True, exclude traffic signals not associated
-            with junction lanelets. Required for CARLA compatibility.
-        origin_lat: Latitude of the origin point (with offset applied). If provided,
-            used for more accurate geoReference generation.
-        origin_lon: Longitude of the origin point (with offset applied). If provided,
-            used for more accurate geoReference generation.
-        no_junction_lanelet_ids: List of lanelet IDs to exclude from junction detection.
-            These lanelets will be treated as regular roads even if they have turn_direction attribute.
+        config: ConversionConfig object containing all conversion parameters
+        mgrs_code: Optional MGRS code for generating geoReference PROJ string.
+            If not provided, will be derived from config.origin.
 
     Returns:
         Tuple of:
@@ -113,12 +105,17 @@ def convert_lanelet2_to_opendrive(
 
     # Generate PROJ string for geoReference
     # Prefer using lat/lon if provided (more accurate with offset)
-    if origin_lat is not None and origin_lon is not None:
-        geo_reference_proj = latlon_to_proj_string(origin_lat, origin_lon)
+    if config.origin.lat is not None and config.origin.lon is not None:
+        geo_reference_proj = latlon_to_proj_string(config.origin.lat, config.origin.lon)
         print(f"Using geoReference (from origin lat/lon): {geo_reference_proj}")
-    else:
+    elif mgrs_code is not None:
         geo_reference_proj = mgrs_to_proj_string(mgrs_code)
         print(f"Using geoReference (from MGRS code): {geo_reference_proj}")
+    elif config.origin.mgrs_code is not None:
+        geo_reference_proj = mgrs_to_proj_string(config.origin.mgrs_code)
+        print(f"Using geoReference (from config MGRS code): {geo_reference_proj}")
+    else:
+        raise ValueError("Must provide either origin lat/lon or MGRS code")
 
     # Create header
     header = Header(
@@ -164,7 +161,7 @@ def convert_lanelet2_to_opendrive(
     # Step 2: Get junction groups
     print("\n=== Finding junctions ===")
     junction_lanelets = filter_lanelets_inside_junction(
-        all_lanelets, exclude_lanelet_ids=no_junction_lanelet_ids
+        all_lanelets, exclude_lanelet_ids=config.no_junction_lanelet_ids
     )
     junction_groups = find_junction_groups(junction_lanelets)
     print(f"Found {len(junction_groups)} junctions")
@@ -172,7 +169,7 @@ def convert_lanelet2_to_opendrive(
     # Step 3: Create connecting roads (inside junctions)
     print("\n=== Building connecting roads inside junctions ===")
     # Issue #132 fix: Apply junction ID offset to avoid conflicts with road IDs
-    junction_id_offset = DEFAULT_CONFIG.opendrive.junction_id_offset
+    junction_id_offset = config.junction_id_offset
     (
         connecting_roads,
         junction_to_roads,
@@ -283,7 +280,7 @@ def convert_lanelet2_to_opendrive(
     print("\n=== Extracting signals and controllers ===")
     # Get junction lanelet IDs for filtering (if needed for CARLA compatibility)
     junction_lanelet_ids = {ll.id for ll in junction_lanelets}
-    if exclude_non_junction_signals:
+    if config.exclude_non_junction_signals:
         print(
             f"CARLA compatibility mode: excluding signals not in {len(junction_lanelet_ids)} junction lanelets"
         )
@@ -291,7 +288,7 @@ def convert_lanelet2_to_opendrive(
         lanelet_map=lanelet_map,
         road_lanelet_mapping=mapping,
         roads=all_roads,
-        exclude_non_junction_signals=exclude_non_junction_signals,
+        exclude_non_junction_signals=config.exclude_non_junction_signals,
         junction_lanelet_ids=junction_lanelet_ids,
     )
     print(
@@ -382,16 +379,16 @@ def convert_lanelet2_to_opendrive(
     print("\nConversion completed successfully!")
 
     # Save to file if output path is provided
-    if output_path:
-        save_opendrive_to_file(opendrive, output_path)
-        print(f"OpenDRIVE file saved to: {output_path}")
+    if config.output_path:
+        save_opendrive_to_file(opendrive, config.output_path)
+        print(f"OpenDRIVE file saved to: {config.output_path}")
 
     return opendrive, mapping
 
 
 def parse_origin_from_config(
     cfg: DictConfig,
-) -> tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
+) -> Tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
     """
     Parse origin specification from Hydra config with mutual exclusion validation.
 
@@ -617,14 +614,23 @@ def preprocess_and_convert_with_hydra(
 
     # Convert to OpenDRIVE
     logger.info("Converting to OpenDRIVE format...")
+
+    # Build ConversionConfig from parameters
+    conversion_config = ConversionConfig(
+        output_path=output_file,
+        origin=OriginSpec(
+            mgrs_code=mgrs_code,
+            lat=origin_lat,
+            lon=origin_lon,
+        ),
+        exclude_non_junction_signals=exclude_non_junction_signals,
+        no_junction_lanelet_ids=no_junction_lanelet_ids,
+    )
+
     opendrive, mapping = convert_lanelet2_to_opendrive(
         lanelet_map,
-        mgrs_code,
-        output_file,
-        exclude_non_junction_signals=exclude_non_junction_signals,
-        origin_lat=origin_lat,
-        origin_lon=origin_lon,
-        no_junction_lanelet_ids=no_junction_lanelet_ids,
+        conversion_config,
+        mgrs_code=mgrs_code,
     )
 
     logger.info("Conversion completed successfully!")
