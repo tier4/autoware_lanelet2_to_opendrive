@@ -1,8 +1,6 @@
 """Tests for utility functions."""
 
-from pathlib import Path
 import lanelet2
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from autoware_lanelet2_to_opendrive.util import (
     find_lanelets_without_next,
     find_lanelets_without_previous,
@@ -19,18 +17,8 @@ from autoware_lanelet2_to_opendrive.util import (
 )
 
 
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(
-        lanelet2.io.Origin(35.23, 139.16)
-    )  # MGRS origin for Tokyo area (54SUE)
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_find_lanelets_without_next():
+def test_find_lanelets_without_next(lanelet_map):
     """Test finding lanelets without successors."""
-    lanelet_map = load_test_map()
 
     # Find lanelets without next
     terminal_lanelets = find_lanelets_without_next(lanelet_map)
@@ -61,9 +49,8 @@ def test_find_lanelets_without_next():
         ), f"Lanelet {lanelet.id} has following lanelets but was marked as terminal"
 
 
-def test_find_lanelets_without_previous():
+def test_find_lanelets_without_previous(lanelet_map):
     """Test finding lanelets without predecessors."""
-    lanelet_map = load_test_map()
 
     # Find lanelets without previous
     start_lanelets = find_lanelets_without_previous(lanelet_map)
@@ -94,9 +81,8 @@ def test_find_lanelets_without_previous():
         ), f"Lanelet {lanelet.id} has previous lanelets but was marked as start"
 
 
-def test_find_terminal_lanelets():
+def test_find_terminal_lanelets(lanelet_map):
     """Test finding both start and end terminal lanelets."""
-    lanelet_map = load_test_map()
 
     # Find terminal lanelets
     start_lanelets, end_lanelets = find_terminal_lanelets(lanelet_map)
@@ -127,9 +113,8 @@ def test_find_terminal_lanelets():
     assert end_lanelets == end_lanelets_individual
 
 
-def test_terminal_lanelets_completeness():
+def test_terminal_lanelets_completeness(lanelet_map):
     """Test that all lanelets are properly categorized."""
-    lanelet_map = load_test_map()
 
     # Get terminal lanelets
     start_lanelets, end_lanelets = find_terminal_lanelets(lanelet_map)
@@ -186,9 +171,8 @@ def test_empty_map():
     assert len(terminal_end) == 0
 
 
-def test_find_adjacent_groups_all_lanelets():
+def test_find_adjacent_groups_all_lanelets(lanelet_map):
     """Test finding adjacent groups with all lanelets."""
-    lanelet_map = load_test_map()
 
     # Find groups with empty set (should return all lanelets grouped)
     groups = find_adjacent_groups(lanelet_map, set())
@@ -216,9 +200,8 @@ def test_find_adjacent_groups_all_lanelets():
     assert all_lanelets_in_groups == all_lanelets_in_map
 
 
-def test_find_adjacent_groups_subset():
+def test_find_adjacent_groups_subset(lanelet_map):
     """Test finding adjacent groups with a subset of lanelets."""
-    lanelet_map = load_test_map()
 
     # Get a subset of lanelets (terminal lanelets)
     start_lanelets, end_lanelets = find_terminal_lanelets(lanelet_map)
@@ -251,9 +234,8 @@ def test_find_adjacent_groups_subset():
     assert terminal_lanelets.issubset(all_lanelets_in_groups)
 
 
-def test_find_adjacent_groups_empty_target():
+def test_find_adjacent_groups_empty_target(lanelet_map):
     """Test find_adjacent_groups with empty target set."""
-    lanelet_map = load_test_map()
 
     # Test with empty set
     groups = find_adjacent_groups(lanelet_map, set())
@@ -284,9 +266,8 @@ def test_find_adjacent_groups_empty_map():
     assert len(groups) == 0
 
 
-def test_find_adjacent_groups_connectivity():
+def test_find_adjacent_groups_connectivity(lanelet_map):
     """Test that adjacent groups are properly connected."""
-    lanelet_map = load_test_map()
 
     # Get all groups
     groups = find_adjacent_groups(lanelet_map, set())
@@ -333,9 +314,8 @@ def test_find_adjacent_groups_connectivity():
                 pass
 
 
-def test_find_adjacent_groups_includes_neighbors():
+def test_find_adjacent_groups_includes_neighbors(lanelet_map):
     """Test that groups include adjacent lanelets not in target set."""
-    lanelet_map = load_test_map()
 
     # Get a small subset of lanelets (just start terminals)
     start_lanelets, _ = find_terminal_lanelets(lanelet_map)
@@ -368,9 +348,8 @@ def test_find_adjacent_groups_includes_neighbors():
             assert isinstance(ll, (lanelet2.core.Lanelet, lanelet2.core.ConstLanelet))
 
 
-def test_find_adjacent_groups_specific_lanelets_together():
+def test_find_adjacent_groups_specific_lanelets_together(lanelet_map):
     """Test that specific lanelets 3002094 and 3002093 are in the same group."""
-    lanelet_map = load_test_map()
 
     # Find the lanelets with specific IDs
     lanelet_3002094 = None
@@ -434,9 +413,8 @@ def test_find_adjacent_groups_specific_lanelets_together():
         assert True, "Correctly raised ValueError"
 
 
-def test_filter_lanelets_by_single_subtype():
+def test_filter_lanelets_by_single_subtype(lanelet_map):
     """Test filtering lanelets by a single subtype."""
-    lanelet_map = load_test_map()
 
     # Check what subtypes exist in the map first
     subtypes_in_map = set()
@@ -468,9 +446,8 @@ def test_filter_lanelets_by_single_subtype():
         assert len(filtered) == expected_count
 
 
-def test_filter_lanelets_by_multiple_subtypes():
+def test_filter_lanelets_by_multiple_subtypes(lanelet_map):
     """Test filtering lanelets by multiple subtypes."""
-    lanelet_map = load_test_map()
 
     # Get all subtypes in the map
     subtypes_in_map = set()
@@ -491,9 +468,8 @@ def test_filter_lanelets_by_multiple_subtypes():
             assert ll.attributes["subtype"] in test_subtypes
 
 
-def test_filter_lanelets_with_nonexistent_subtype():
+def test_filter_lanelets_with_nonexistent_subtype(lanelet_map):
     """Test filtering with a subtype that doesn't exist."""
-    lanelet_map = load_test_map()
 
     # Use a subtype that definitely doesn't exist
     filtered = filter_lanelets_by_subtype(
@@ -516,9 +492,8 @@ def test_filter_lanelets_with_empty_input():
     assert len(filtered) == 0
 
 
-def test_filter_lanelets_with_no_subtype_specified():
+def test_filter_lanelets_with_no_subtype_specified(lanelet_map):
     """Test filtering when no subtype is specified."""
-    lanelet_map = load_test_map()
 
     # Call with empty list
     filtered = filter_lanelets_by_subtype(lanelet_map.laneletLayer, [])
@@ -528,9 +503,8 @@ def test_filter_lanelets_with_no_subtype_specified():
     assert len(filtered) == 0
 
 
-def test_filter_lanelets_from_list():
+def test_filter_lanelets_from_list(lanelet_map):
     """Test filtering from a list of lanelets."""
-    lanelet_map = load_test_map()
 
     # Convert to list
     lanelet_list = list(lanelet_map.laneletLayer)[:10]  # Take first 10 for testing
@@ -556,9 +530,8 @@ def test_filter_lanelets_from_list():
             assert ll.attributes["subtype"] == test_subtype
 
 
-def test_filter_lanelets_from_set():
+def test_filter_lanelets_from_set(lanelet_map):
     """Test filtering from a set of lanelets."""
-    lanelet_map = load_test_map()
 
     # Get terminal lanelets as a set
     terminal_lanelets, _ = find_terminal_lanelets(lanelet_map)
@@ -624,9 +597,8 @@ def test_filter_lanelets_without_subtype_attribute():
     assert lanelet_without_subtype not in filtered
 
 
-def test_filter_lanelets():
+def test_filter_lanelets(lanelet_map):
     """Test filtering lanelets by subtype."""
-    lanelet_map = load_test_map()
 
     # Filter lanelets with subtype 'road'
     road_lanelets = filter_lanelets_by_subtype(lanelet_map.laneletLayer, ["road"])
@@ -643,9 +615,8 @@ def test_filter_lanelets():
     assert 301105 in walkway_ids
 
 
-def test_check_lanelet_groups_intersect():
+def test_check_lanelet_groups_intersect(lanelet_map):
     """Test checking intersection between lanelet groups."""
-    lanelet_map = load_test_map()
 
     # Create two groups of lanelets
     group1 = set()
@@ -674,14 +645,12 @@ def test_check_lanelet_groups_intersect():
     assert check_lanelet_groups_intersect(group3, group4)
 
 
-def test_find_connecting_lanelet_groups():
+def test_find_connecting_lanelet_groups(lanelet_map):
     """Test find_connecting_lanelet_groups with specific lanelets 228/229/230."""
     from autoware_lanelet2_to_opendrive.util import (
         find_connecting_lanelet_groups,
         ConnectionDirection,
     )
-
-    lanelet_map = load_test_map()
 
     # Find the specific lanelets 228, 229, 230
     lanelet_228 = None

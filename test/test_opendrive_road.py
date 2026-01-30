@@ -1,23 +1,10 @@
 """Tests for OpenDRIVE lane section functions."""
 
-from pathlib import Path
-import lanelet2
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 
 
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(
-        lanelet2.io.Origin(35.23, 139.16)
-    )  # MGRS origin for Tokyo area (54SUE)
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_construct_road_from_two_lanes():
+def test_construct_road_from_two_lanes(lanelet_map):
     """Test constructing a Road from two adjacent lanelets."""
-    lanelet_map = load_test_map()
 
     # Use two adjacent lanelets
     lanelet_group = [
@@ -34,9 +21,8 @@ def test_construct_road_from_two_lanes():
     # print(etree.tostring(road.to_xml(), pretty_print=True).decode())
 
 
-def test_elevation_profile_extraction():
+def test_elevation_profile_extraction(lanelet_map):
     """Test that elevation profile is extracted from lanelets."""
-    lanelet_map = load_test_map()
 
     # Use two adjacent lanelets
     lanelet_group = [
@@ -76,9 +62,8 @@ def test_elevation_profile_extraction():
         ), "Coefficient 'd' should be numeric"
 
 
-def test_elevation_profile_xml_output():
+def test_elevation_profile_xml_output(lanelet_map):
     """Test that elevation profile can be converted to XML."""
-    lanelet_map = load_test_map()
 
     # Use two adjacent lanelets
     lanelet_group = [
