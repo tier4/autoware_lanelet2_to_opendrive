@@ -121,6 +121,157 @@ If pre-commit hooks fail:
 - **Collaborative safety**: Ensures all contributors follow the same standards
 - **Professional development**: Industry best practice for Python projects
 
+## Test Performance and Optimization
+
+**CRITICAL**: This project uses performance-optimized testing practices to ensure fast test execution. All tests must follow these guidelines to prevent test suite slowdown.
+
+### Test Fixtures and Data Loading
+
+This project uses a large test dataset (`test/data/lanelet2_map.osm`, 11MB, 307k+ lines) that must be loaded efficiently:
+
+#### Session-scoped Fixture (MANDATORY)
+
+**ALWAYS** use the session-scoped `lanelet_map` fixture defined in `test/conftest.py`:
+
+```python
+# ✅ CORRECT: Use session-scoped fixture
+def test_something(lanelet_map):
+    """Test with lanelet map."""
+    # Use lanelet_map fixture (loaded once per session)
+    roads = Road.construct_from_lanelet_map(lanelet_map)
+    assert len(roads) > 0
+
+# ❌ WRONG: Load map in each test
+def test_something():
+    """Test with lanelet map."""
+    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
+    projector = MGRSProjector(lanelet2.io.Origin(35.23, 139.16))
+    lanelet_map = lanelet2.io.load(str(test_data_path), projector)  # Redundant I/O!
+```
+
+#### Why Session-scoped Fixtures?
+
+- **10-20x faster**: Eliminates redundant file I/O and parsing
+- **Single load**: Map loaded once per test session, reused across all tests
+- **Reduced memory**: Shared instance instead of multiple copies
+- **CI/CD efficiency**: Shorter GitHub Actions runtime
+
+### Parallel Test Execution
+
+This project uses `pytest-xdist` for parallel test execution:
+
+#### Running Tests in Parallel
+
+```bash
+# Use all CPU cores (recommended for CI/CD)
+pytest -n auto
+
+# Use specific number of workers
+pytest -n 4
+
+# Run tests sequentially (debugging only)
+pytest
+```
+
+#### Writing Parallel-safe Tests
+
+**ALL tests must be parallel-safe**:
+
+1. **No shared state**: Tests must not modify global state or shared resources
+2. **Isolated fixtures**: Use fixtures that don't interfere with other tests
+3. **No file system conflicts**: Avoid writing to the same file paths
+4. **Thread-safe operations**: Ensure all operations are thread-safe
+
+```python
+# ✅ CORRECT: Parallel-safe test
+def test_road_construction(lanelet_map):
+    """Test road construction (parallel-safe)."""
+    roads = Road.construct_from_lanelet_map(lanelet_map)
+    assert len(roads) > 0
+
+# ❌ WRONG: File system conflict
+def test_write_output(lanelet_map):
+    """Test output writing (NOT parallel-safe)."""
+    with open("output.xodr", "w") as f:  # Same file across all workers!
+        f.write(generate_output(lanelet_map))
+```
+
+### Test Categorization with Markers
+
+Use pytest markers to categorize tests by execution time:
+
+#### Available Markers
+
+- **`@pytest.mark.slow`**: Tests that take >10 seconds (integration tests, large data processing)
+
+#### Using Markers
+
+```python
+import pytest
+
+@pytest.mark.slow
+def test_full_conversion(lanelet_map):
+    """Test full map conversion (slow)."""
+    # This test takes >10 seconds
+    roads = Road.construct_from_lanelet_map(lanelet_map)
+    xodr = convert_to_opendrive(roads)
+    validate_opendrive(xodr)
+
+def test_single_road(lanelet_map):
+    """Test single road construction (fast)."""
+    # This test takes <1 second
+    lanelet_group = [lanelet_map.laneletLayer.get(3002094)]
+    road = Road.construct_from_lanelet_groups(lanelet_map, lanelet_group, road_id=0)
+    assert road is not None
+```
+
+#### Selective Test Execution
+
+```bash
+# Development: Run only fast tests
+pytest -m "not slow"
+
+# CI/CD: Run all tests
+pytest
+
+# Debug: Run only slow tests
+pytest -m slow
+```
+
+### Performance Guidelines
+
+**MANDATORY rules for maintaining test performance**:
+
+1. **Use session-scoped fixtures**: Never load `lanelet2_map.osm` directly in tests
+2. **Keep tests fast**: Individual tests should complete in <10 seconds
+3. **Mark slow tests**: Use `@pytest.mark.slow` for tests >10 seconds
+4. **Write parallel-safe code**: No shared state, no file system conflicts
+5. **Use fixtures over helpers**: Prefer pytest fixtures over custom loading functions
+6. **Avoid redundant operations**: Don't repeat expensive computations in every test
+
+### CI/CD Configuration
+
+The GitHub Actions workflow automatically uses parallel execution:
+
+```yaml
+- name: Run tests
+  run: uv run pytest test/ -v --tb=short -n auto
+```
+
+### Performance Targets
+
+- **Quick tests** (without slow markers): ~30 seconds
+- **Full test suite** (parallel): ~3-5 minutes
+- **Individual test**: <10 seconds (most tests <1 second)
+
+### Rationale
+
+- **Fast feedback**: Developers get quick test results during development
+- **Efficient CI/CD**: Shorter GitHub Actions runtime reduces costs
+- **Better DX**: Quick iteration cycles improve productivity
+- **Scalability**: Test suite can grow without becoming a bottleneck
+- **Professional standards**: Industry best practice for large test suites
+
 ## Project Structure
 
 - `src/autoware_lanelet2_to_opendrive/` - Main Python package directory

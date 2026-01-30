@@ -1,25 +1,12 @@
 """Tests for Road traffic rule attribute support."""
 
-from pathlib import Path
-import lanelet2
 import lxml.etree as ET
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
 
 
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(
-        lanelet2.io.Origin(35.23, 139.16)
-    )  # MGRS origin for Tokyo area (54SUE)
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_road_with_rht_rule():
+def test_road_with_rht_rule(lanelet_map):
     """Test that Road with RHT rule generates correct XML attribute."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
@@ -48,9 +35,8 @@ def test_road_with_rht_rule():
     assert 'rule="RHT"' in xml_str, "XML should contain rule='RHT' attribute"
 
 
-def test_road_with_lht_rule():
+def test_road_with_lht_rule(lanelet_map):
     """Test that Road with LHT rule generates correct XML attribute."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
@@ -79,9 +65,8 @@ def test_road_with_lht_rule():
     assert 'rule="LHT"' in xml_str, "XML should contain rule='LHT' attribute"
 
 
-def test_road_without_rule():
+def test_road_without_rule(lanelet_map):
     """Test that Road without rule does not generate rule attribute."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
@@ -116,9 +101,8 @@ def test_road_rule_enum_values():
     assert TrafficRule["LHT"] == TrafficRule.LHT, "Should construct LHT from string"
 
 
-def test_lane_ids_rht():
+def test_lane_ids_rht(lanelet_map):
     """Test that lanes have negative IDs for RHT (right lanes)."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
@@ -153,9 +137,8 @@ def test_lane_ids_rht():
         ), f"RHT lane.lane_id should be negative, got {lane.lane_id}"
 
 
-def test_lane_ids_lht():
+def test_lane_ids_lht(lanelet_map):
     """Test that lanes have positive IDs for LHT (left lanes)."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
@@ -190,9 +173,8 @@ def test_lane_ids_lht():
         ), f"LHT lane.lane_id should be positive, got {lane.lane_id}"
 
 
-def test_reference_line_positioning_rht():
+def test_reference_line_positioning_rht(lanelet_map):
     """Test that ReferenceLine uses left boundary for RHT."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
@@ -214,9 +196,8 @@ def test_reference_line_positioning_rht():
     assert len(road.plan_view.geometries) > 0, "Road should have geometries"
 
 
-def test_reference_line_positioning_lht():
+def test_reference_line_positioning_lht(lanelet_map):
     """Test that ReferenceLine uses right boundary for LHT."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),

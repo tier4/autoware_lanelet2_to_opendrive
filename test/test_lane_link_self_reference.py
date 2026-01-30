@@ -1,24 +1,14 @@
 """Test for lane link self-reference bug."""
 
-from pathlib import Path
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
 from autoware_lanelet2_to_opendrive.util import create_routing_graph
 
 
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(lanelet2.io.Origin(35.23, 139.16))
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_no_self_referencing_lane_links_lht():
+def test_no_self_referencing_lane_links_lht(lanelet_map):
     """Test that LHT roads don't have self-referencing lane links."""
-    lanelet_map = load_test_map()
 
     # Build all roads with LHT
     roads = Road.construct_from_lanelet_map(lanelet_map, traffic_rule=TrafficRule.LHT)
@@ -78,9 +68,8 @@ def test_no_self_referencing_lane_links_lht():
     )
 
 
-def test_no_self_referencing_lane_links_rht():
+def test_no_self_referencing_lane_links_rht(lanelet_map):
     """Test that RHT roads don't have self-referencing lane links."""
-    lanelet_map = load_test_map()
 
     # Build all roads with RHT
     roads = Road.construct_from_lanelet_map(lanelet_map, traffic_rule=TrafficRule.RHT)
@@ -140,9 +129,8 @@ def test_no_self_referencing_lane_links_rht():
     )
 
 
-def test_debug_road_0_lane_links():
+def test_debug_road_0_lane_links(lanelet_map):
     """Debug Road 0 lane links in detail."""
-    lanelet_map = load_test_map()
 
     # Build all roads with LHT
     roads = Road.construct_from_lanelet_map(lanelet_map, traffic_rule=TrafficRule.LHT)
