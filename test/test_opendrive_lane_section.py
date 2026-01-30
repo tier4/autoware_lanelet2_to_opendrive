@@ -1,25 +1,12 @@
 """Tests for OpenDRIVE lane section functions."""
 
-from pathlib import Path
-import lanelet2
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.reference_line import ReferenceLine
 
 
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(
-        lanelet2.io.Origin(35.23, 139.16)
-    )  # MGRS origin for Tokyo area (54SUE)
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_construct_lane_section_from_two_lanes():
+def test_construct_lane_section_from_two_lanes(lanelet_map):
     """Test constructing a LaneSection from two adjacent lanelets."""
-    lanelet_map = load_test_map()
 
     # Use two adjacent lanelets
     lanelet_group = [
@@ -54,9 +41,8 @@ def test_construct_lane_section_from_two_lanes():
     assert isinstance(lane_section.right_lanes[-2], Lane)
 
 
-def test_get_all_lanes():
+def test_get_all_lanes(lanelet_map):
     """Test getting all lanes from a LaneSection."""
-    lanelet_map = load_test_map()
 
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
@@ -83,9 +69,8 @@ def test_get_all_lanes():
     assert center_lane.get("type") == "none"
 
 
-def test_single_lane_section_with_lane_offset():
+def test_single_lane_section_with_lane_offset(lanelet_map):
     """Test constructing a LaneSection from a single lanelet with laneOffset."""
-    lanelet_map = load_test_map()
 
     # Use a single lanelet
     single_lanelet = lanelet_map.laneletLayer.get(3002094)

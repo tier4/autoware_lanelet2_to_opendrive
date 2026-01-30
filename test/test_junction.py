@@ -1,22 +1,8 @@
 """Tests for junction functions."""
 
-from pathlib import Path
-from autoware_lanelet2_extension_python.projection import MGRSProjector
-import lanelet2
 
-
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(
-        lanelet2.io.Origin(35.23, 139.16)
-    )  # MGRS origin for Tokyo area (54SUE)
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_filter_lanelets_inside_junction():
+def test_filter_lanelets_inside_junction(lanelet_map):
     """Test filtering lanelets inside a junction."""
-    lanelet_map = load_test_map()
     lanelets = list(lanelet_map.laneletLayer)
 
     from autoware_lanelet2_to_opendrive.junction import filter_lanelets_inside_junction
@@ -31,9 +17,8 @@ def test_filter_lanelets_inside_junction():
         assert "turn_direction" in lanelet.attributes
 
 
-def test_filter_lanelets_inside_junction_with_exclusion():
+def test_filter_lanelets_inside_junction_with_exclusion(lanelet_map):
     """Test filtering lanelets inside a junction with exclusion list."""
-    lanelet_map = load_test_map()
     lanelets = list(lanelet_map.laneletLayer)
 
     from autoware_lanelet2_to_opendrive.junction import filter_lanelets_inside_junction
@@ -94,14 +79,13 @@ def test_filter_lanelets_inside_junction_with_exclusion():
     assert len(junction_lanelets_invalid) == len(all_junction_lanelets)
 
 
-def test_find_junction_groups():
+def test_find_junction_groups(lanelet_map):
     """Test finding separate junction groups from lanelets."""
     from autoware_lanelet2_to_opendrive.junction import (
         filter_lanelets_inside_junction,
         find_junction_groups,
     )
 
-    lanelet_map = load_test_map()
     lanelets = list(lanelet_map.laneletLayer)
 
     # First filter to get only junction lanelets
@@ -165,7 +149,7 @@ def test_find_junction_groups():
     ), "Lanelets 397 and 403 should be in the same junction group"
 
 
-def test_construct_from_lanelet_groups():
+def test_construct_from_lanelet_groups(lanelet_map):
     """Test constructing Junction instances from lanelet groups."""
     from autoware_lanelet2_to_opendrive.junction import (
         filter_lanelets_inside_junction,
@@ -173,7 +157,6 @@ def test_construct_from_lanelet_groups():
     )
     from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 
-    lanelet_map = load_test_map()
     lanelets = list(lanelet_map.laneletLayer)
 
     # Get junction lanelets and group them
@@ -216,15 +199,13 @@ def test_construct_from_lanelet_groups():
     assert empty_junction.connections == []
 
 
-def test_construct_from_lanelet_map():
+def test_construct_from_lanelet_map(lanelet_map):
     """Test constructing Junction instances directly from a lanelet map."""
     from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
     from autoware_lanelet2_to_opendrive.junction import (
         filter_lanelets_inside_junction,
         find_junction_groups,
     )
-
-    lanelet_map = load_test_map()
 
     # Test with default starting ID
     junctions = Junction.construct_from_lanelet_map(lanelet_map)

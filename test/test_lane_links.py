@@ -1,25 +1,13 @@
 """Tests for lane predecessor and successor link functionality."""
 
-from pathlib import Path
 import lanelet2
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 
 
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(
-        lanelet2.io.Origin(35.23, 139.16)
-    )  # MGRS origin for Tokyo area (54SUE)
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_lane_has_lanelet_id():
+def test_lane_has_lanelet_id(lanelet_map):
     """Test that Lane stores the corresponding lanelet ID."""
-    lanelet_map = load_test_map()
 
     # Get a specific lanelet
     lanelet = lanelet_map.laneletLayer.get(3002094)
@@ -31,9 +19,8 @@ def test_lane_has_lanelet_id():
     assert lane.lanelet_id == 3002094
 
 
-def test_lane_section_lanelet_to_lane_mapping():
+def test_lane_section_lanelet_to_lane_mapping(lanelet_map):
     """Test that LaneSection provides correct lanelet to lane ID mapping."""
-    lanelet_map = load_test_map()
 
     # Use two adjacent lanelets
     lanelet_group = [
@@ -60,9 +47,8 @@ def test_lane_section_lanelet_to_lane_mapping():
     assert mapping[3002094] != mapping[3002093]
 
 
-def test_road_lanelet_to_lane_mapping():
+def test_road_lanelet_to_lane_mapping(lanelet_map):
     """Test that Road provides correct lanelet to lane ID mapping."""
-    lanelet_map = load_test_map()
 
     # Use two adjacent lanelets
     lanelet_group = [
@@ -82,7 +68,7 @@ def test_road_lanelet_to_lane_mapping():
     assert 3002093 in mapping
 
 
-def test_lane_links_set_correctly():
+def test_lane_links_set_correctly(lanelet_map):
     """Test that lane links infrastructure works correctly.
 
     Note: This test was modified from using Road.construct_from_lanelet_map()
@@ -90,7 +76,6 @@ def test_lane_links_set_correctly():
     hang in CI/CD). Instead, we test the lane links functionality using a
     single road and verify that the set_all_lane_links method runs without error.
     """
-    lanelet_map = load_test_map()
 
     # Use a small group of adjacent lanelets for testing
     lanelet_group = [
@@ -126,14 +111,13 @@ def test_lane_links_set_correctly():
     assert total_lanes > 0, "Expected to create some lanes from the lanelet group"
 
 
-def test_lane_link_xml_output():
+def test_lane_link_xml_output(lanelet_map):
     """Test that lane links are correctly output in XML.
 
     Note: This test was modified to avoid using Road.construct_from_lanelet_map()
     which processes the entire test map. Instead, we create a simple road and
     manually set lane links to test the XML output.
     """
-    lanelet_map = load_test_map()
 
     # Use a small group of adjacent lanelets
     lanelet_group = [
@@ -188,14 +172,13 @@ def test_lane_link_xml_output():
             assert found_link, "Expected to find at least one lane link in XML output"
 
 
-def test_connected_lanelets_have_lane_links():
+def test_connected_lanelets_have_lane_links(lanelet_map):
     """Test that the lane link infrastructure can handle lanelet connections.
 
     Note: This test was modified to avoid using Road.construct_from_lanelet_map()
     which processes the entire test map. Instead, we create simple test roads and
     verify that set_all_lane_links works correctly with routing graph connections.
     """
-    lanelet_map = load_test_map()
 
     # Use a small group of adjacent lanelets
     lanelet_group = [
