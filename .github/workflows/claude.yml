@@ -11,6 +11,17 @@ on:
     types: [submitted]
 
 jobs:
+  # Fallback job to prevent workflow failure when main job is skipped
+  # This ensures the workflow succeeds even when triggered by push events
+  fallback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Workflow triggered but no action needed
+        run: |
+          echo "Workflow was triggered by ${{ github.event_name }} event"
+          echo "Main Claude job will only run on supported events with @claude mention"
+          echo "This is expected behavior - no action required"
+
   claude:
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
