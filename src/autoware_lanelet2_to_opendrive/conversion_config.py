@@ -49,6 +49,8 @@ class ConversionConfig:
             detection, treating them as regular roads
         junction_id_offset: Offset added to junction IDs to avoid conflicts
             with road IDs (default: 1000)
+        traffic_rule: Traffic rule for lanes (RHT: Right-Hand Traffic,
+            LHT: Left-Hand Traffic). Defaults to "RHT"
     """
 
     output_path: Optional[Path] = None
@@ -56,6 +58,14 @@ class ConversionConfig:
     exclude_non_junction_signals: bool = False
     no_junction_lanelet_ids: List[int] = field(default_factory=list)
     junction_id_offset: int = 1000
+    traffic_rule: Optional[str] = "RHT"
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        if self.traffic_rule not in ("RHT", "LHT", None):
+            raise ValueError(
+                f"traffic_rule must be 'RHT' or 'LHT', got '{self.traffic_rule}'"
+            )
 
 
 @dataclass

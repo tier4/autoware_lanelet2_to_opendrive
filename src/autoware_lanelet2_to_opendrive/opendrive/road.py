@@ -448,6 +448,7 @@ class Road:
         lanelet_group: LaneletInput,
         road_id: int,
         s_offset: float = 0.0,
+        traffic_rule: Optional[str] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -455,6 +456,7 @@ class Road:
             lanelet_map: The lanelet2 map containing the lanelets
             lanelet_group: Group of lanelets to convert to a road
             s_offset: Starting s-coordinate offset for the road
+            traffic_rule: Traffic rule for lanes (RHT or LHT)
 
         Returns:
             Road object constructed from the lanelet group
@@ -492,7 +494,7 @@ class Road:
             from .lane_section import LaneSection
 
             lane_section = LaneSection.construct_from_lanelet_groups(
-                lanelet_map, lanelet_list, s_offset=s_offset
+                lanelet_map, lanelet_list, s_offset=s_offset, traffic_rule=traffic_rule
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -525,11 +527,13 @@ class Road:
     @staticmethod
     def construct_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
+        traffic_rule: Optional[str] = None,
     ) -> List["Road"]:
         """Construct Roads from a lanelet map.
 
         Args:
             lanelet_map: The lanelet2 map containing all lanelets
+            traffic_rule: Traffic rule for lanes (RHT or LHT)
 
         Returns:
             List of Road objects constructed from non-junction lanelets grouped by adjacency
@@ -595,6 +599,7 @@ class Road:
                     lanelet_group=adjacent_group,
                     road_id=road_id,
                     s_offset=0.0,
+                    traffic_rule=traffic_rule,
                 )
                 roads.append(road)
 
@@ -707,6 +712,7 @@ class Road:
         junction_groups: List[List[lanelet2.core.Lanelet]],
         starting_road_id: int = 0,
         junction_id_offset: int = 0,
+        traffic_rule: Optional[str] = None,
     ) -> Tuple[List["Road"], Dict[int, List[int]], Dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -719,6 +725,7 @@ class Road:
             starting_road_id: Starting ID for road numbering (default: 0)
             junction_id_offset: Offset to add to junction IDs to avoid conflicts
                                with road IDs (default: 0). Issue #132 fix.
+            traffic_rule: Traffic rule for lanes (RHT or LHT)
 
         Returns:
             Tuple of:
@@ -768,6 +775,7 @@ class Road:
                         lanelet_group=adjacent_group,
                         road_id=current_road_id,
                         s_offset=0.0,
+                        traffic_rule=traffic_rule,
                     )
 
                     # Set the junction field to mark this as a connecting road
