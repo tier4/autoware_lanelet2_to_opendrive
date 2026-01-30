@@ -1,27 +1,14 @@
 """Tests for centerline functions."""
 
-from pathlib import Path
 import numpy as np
-import lanelet2
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from autoware_lanelet2_to_opendrive.centerline import (
     extract_centerline_as_spline,
     estimate_lanelet_width_as_spline,
 )
 
 
-def load_test_map():
-    """Load the test lanelet2 map."""
-    test_data_path = Path(__file__).parent / "data" / "lanelet2_map.osm"
-    projector = MGRSProjector(
-        lanelet2.io.Origin(35.23, 139.16)
-    )  # MGRS origin for Tokyo area (54SUE)
-    return lanelet2.io.load(str(test_data_path), projector)
-
-
-def test_estimate_lanelet_width_as_spline_constant_width():
+def test_estimate_lanelet_width_as_spline_constant_width(lanelet_map):
     """Test that lanelet ID=555 width spline interpolation produces values in expected range (3.64-3.66m)."""
-    lanelet_map = load_test_map()
 
     # Get lanelet with ID=555
     lanelet_555 = lanelet_map.laneletLayer.get(555)
@@ -79,9 +66,8 @@ def test_estimate_lanelet_width_as_spline_constant_width():
     )
 
 
-def test_extract_centerline_as_spline():
+def test_extract_centerline_as_spline(lanelet_map):
     """Test centerline extraction as spline."""
-    lanelet_map = load_test_map()
 
     # Get a lanelet for testing
     lanelet = lanelet_map.laneletLayer.get(555)

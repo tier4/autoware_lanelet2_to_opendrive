@@ -40,7 +40,11 @@ dev = [
     "pre-commit>=4.5.0",
     "pytest>=9.0.1",
     "pytest-testmon>=2.2.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
 addopts = "--testmon"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
