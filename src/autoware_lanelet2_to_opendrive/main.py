@@ -564,7 +564,7 @@ def preprocess_and_convert_with_hydra(
     # Get target-specific settings
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
     # Priority: map config > target config > default (RHT)
-    traffic_rule = cfg.get("traffic_rule") or cfg.target.get("traffic_rule", "RHT")
+    traffic_rule = cfg.map.get("traffic_rule") or cfg.target.get("traffic_rule", "RHT")
 
     # Get no-junction lanelet IDs from map config
     no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
