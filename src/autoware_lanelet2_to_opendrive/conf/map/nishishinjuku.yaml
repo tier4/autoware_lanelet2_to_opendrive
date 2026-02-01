@@ -8,6 +8,10 @@ offset:
   y: 50137.43
   z: 42.49998
 
+# Traffic rule override for Japan (Left-Hand Traffic)
+target:
+  traffic_rule: "LHT"
+
 # Merge operations - merge multiple lanelets into one
 # The merged lanelet is added to the map (originals are kept)
 merge_operations:
