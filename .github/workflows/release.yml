@@ -116,8 +116,8 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$new_version\"/" pyproject.toml
 
           # Set outputs
-          echo "new_version=$new_version" >> $GITHUB_OUTPUT
-          echo "bump_type=$bump_type" >> $GITHUB_OUTPUT
+          echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
+          echo "bump_type=${bump_type}" >> "$GITHUB_OUTPUT"
 
       - name: Commit version bump
         if: steps.pr-labels.outputs.bump_type != 'none'
