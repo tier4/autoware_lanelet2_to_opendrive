@@ -107,3 +107,34 @@ jobs:
           else
             echo "✅ No end-of-file issues found."
           fi
+
+  check-version-bump-label:
+    name: Check Version Bump Label
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check for version bump label
+        run: |
+          echo "Checking for version bump labels..."
+          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+          echo "PR Labels: $LABELS"
+
+          # Check if any of the required labels exist
+          if echo "$LABELS" | grep -q "bump patch"; then
+            echo "✅ Found 'bump patch' label"
+            exit 0
+          elif echo "$LABELS" | grep -q "bump minor"; then
+            echo "✅ Found 'bump minor' label"
+            exit 0
+          elif echo "$LABELS" | grep -q "bump major"; then
+            echo "✅ Found 'bump major' label"
+            exit 0
+          else
+            echo "❌ ERROR: PR must have one of the following labels:"
+            echo "  - bump patch"
+            echo "  - bump minor"
+            echo "  - bump major"
+            echo ""
+            echo "Please add the appropriate label to indicate the version bump type."
+            exit 1
+          fi
