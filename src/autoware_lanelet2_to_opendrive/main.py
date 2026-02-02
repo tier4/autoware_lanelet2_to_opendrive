@@ -133,7 +133,9 @@ def convert_lanelet2_to_opendrive(
 
     # Step 1: Create regular roads (outside junctions)
     print("\n=== Building regular roads ===")
-    regular_roads = Road.construct_from_lanelet_map(lanelet_map)
+    regular_roads = Road.construct_from_lanelet_map(
+        lanelet_map, traffic_rule=config.traffic_rule
+    )
     starting_junction_road_id = len(regular_roads)
 
     # Build lanelet-to-road mapping for regular roads
@@ -179,6 +181,7 @@ def convert_lanelet2_to_opendrive(
         junction_groups=junction_groups,
         starting_road_id=starting_junction_road_id,
         junction_id_offset=junction_id_offset,
+        traffic_rule=config.traffic_rule,
     )
 
     # Step 4: Merge lanelet-to-road mappings
@@ -560,6 +563,8 @@ def preprocess_and_convert_with_hydra(
 
     # Get target-specific settings
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
+    # Priority: map config > target config > default (RHT)
+    traffic_rule = cfg.map.get("traffic_rule") or cfg.target.get("traffic_rule", "RHT")
 
     # Get no-junction lanelet IDs from map config
     no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
@@ -625,6 +630,7 @@ def preprocess_and_convert_with_hydra(
         ),
         exclude_non_junction_signals=exclude_non_junction_signals,
         no_junction_lanelet_ids=no_junction_lanelet_ids,
+        traffic_rule=traffic_rule,
     )
 
     opendrive, mapping = convert_lanelet2_to_opendrive(

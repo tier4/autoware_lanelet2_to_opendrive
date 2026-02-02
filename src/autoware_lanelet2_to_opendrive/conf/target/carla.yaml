@@ -4,3 +4,6 @@
 # CARLA requires traffic signals to be associated with junctions.
 # This option excludes signals that are not in junctions.
 exclude_non_junction_signals: true
+
+# Traffic rule defaults to RHT (can be overridden via command line)
+# traffic_rule: "RHT"

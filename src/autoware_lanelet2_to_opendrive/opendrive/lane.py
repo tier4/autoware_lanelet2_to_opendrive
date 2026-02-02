@@ -35,6 +35,7 @@ class Lane:
         predecessor: Optional[LaneLink] = None,
         successor: Optional[LaneLink] = None,
         lanelet_id: Optional[int] = None,
+        rule: Optional[str] = None,
     ):
         """
         Initialize a Lane object.
@@ -46,6 +47,7 @@ class Lane:
             predecessor: Link to predecessor lane
             successor: Link to successor lane
             lanelet_id: ID of the corresponding Lanelet2 lanelet (for tracing connections)
+            rule: Traffic rule for the lane (RHT or LHT)
         """
         self.lane_id = lane_id
         self.lane_type = lane_type
@@ -53,6 +55,7 @@ class Lane:
         self.predecessor = predecessor
         self.successor = successor
         self.lanelet_id = lanelet_id
+        self.rule = rule
 
         # Lane geometry definitions
         self.widths: List[LaneWidth] = []
@@ -128,7 +131,9 @@ class Lane:
 
     @staticmethod
     def construct_from_lanelet(
-        lanelet_map: lanelet2.core.LaneletMap, lanelet: lanelet2.core.Lanelet
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet: lanelet2.core.Lanelet,
+        rule: Optional[str] = None,
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -136,6 +141,7 @@ class Lane:
         Args:
             lanelet_map: The Lanelet2 map containing the lanelet
             lanelet: The lanelet to convert to Lane
+            rule: Traffic rule for the lane (RHT or LHT)
 
         Returns:
             Lane instance constructed from the lanelet
@@ -170,6 +176,7 @@ class Lane:
             predecessor=predecessor,
             successor=successor,
             lanelet_id=lanelet.id,
+            rule=rule,
         )
 
         groups = find_adjacent_groups(lanelet_map, {lanelet})
@@ -211,6 +218,10 @@ class Lane:
         elem.set("id", str(self.lane_id))
         elem.set("type", self.lane_type.value)
         elem.set("level", "true" if self.level else "false")
+
+        # Add rule attribute if specified
+        if self.rule:
+            elem.set("rule", self.rule)
 
         # Add predecessor and successor links if available
         if self.predecessor or self.successor:

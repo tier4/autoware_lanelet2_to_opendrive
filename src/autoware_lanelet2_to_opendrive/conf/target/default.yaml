@@ -3,3 +3,6 @@
 
 # Signal filtering (disabled by default)
 exclude_non_junction_signals: false
+
+# Traffic rule (RHT: Right-Hand Traffic, LHT: Left-Hand Traffic)
+traffic_rule: "RHT"

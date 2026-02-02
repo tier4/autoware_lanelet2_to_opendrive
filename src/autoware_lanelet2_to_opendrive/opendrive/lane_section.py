@@ -66,6 +66,7 @@ class LaneSection:
             lanelet2.core.LaneletLayer,
         ],
         s_offset: float = 0.0,
+        traffic_rule: Optional[str] = None,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -74,6 +75,7 @@ class LaneSection:
             lanelet_map: The Lanelet2 map containing the lanelets
             lanelet_group: Group of lanelets representing lanes in a road section
             s_offset: Start position of the lane section
+            traffic_rule: Traffic rule for lanes (RHT or LHT)
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -111,7 +113,7 @@ class LaneSection:
         # Lane IDs: -1, -2, -3, ... from left to right
         for i, lanelet in enumerate(sorted_lanelets):
             lane_id = -(i + 1)  # -1, -2, -3, ...
-            lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+            lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule=traffic_rule)
             lane.lane_id = lane_id
             lane_section._add_right_lane(lane)
 
