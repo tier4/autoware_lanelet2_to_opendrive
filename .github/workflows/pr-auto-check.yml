@@ -114,27 +114,36 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Check for version bump label
-        run: |
-          echo "Checking for version bump labels..."
-          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
-          echo "PR Labels: $LABELS"
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            console.log('Checking for version bump labels...');
 
-          # Check if any of the required labels exist
-          if echo "$LABELS" | grep -q "bump patch"; then
-            echo "✅ Found 'bump patch' label"
-            exit 0
-          elif echo "$LABELS" | grep -q "bump minor"; then
-            echo "✅ Found 'bump minor' label"
-            exit 0
-          elif echo "$LABELS" | grep -q "bump major"; then
-            echo "✅ Found 'bump major' label"
-            exit 0
-          else
-            echo "❌ ERROR: PR must have one of the following labels:"
-            echo "  - bump patch"
-            echo "  - bump minor"
-            echo "  - bump major"
-            echo ""
-            echo "Please add the appropriate label to indicate the version bump type."
-            exit 1
-          fi
+            // Fetch PR details to get current labels
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const labels = pr.labels.map(label => label.name);
+            console.log(`PR Labels: ${labels.join(', ')}`);
+
+            // Check if any of the required labels exist
+            if (labels.includes('bump patch')) {
+              console.log('✅ Found "bump patch" label');
+              return;
+            } else if (labels.includes('bump minor')) {
+              console.log('✅ Found "bump minor" label');
+              return;
+            } else if (labels.includes('bump major')) {
+              console.log('✅ Found "bump major" label');
+              return;
+            } else {
+              core.setFailed('❌ ERROR: PR must have one of the following labels:\n' +
+                '  - bump patch\n' +
+                '  - bump minor\n' +
+                '  - bump major\n\n' +
+                'Please add the appropriate label to indicate the version bump type.');
+            }
