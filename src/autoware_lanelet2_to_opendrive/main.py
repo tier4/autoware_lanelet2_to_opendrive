@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import tempfile
 import logging
+from datetime import datetime
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -484,7 +485,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             rev_minor="4",
             name="Converted from Lanelet2",
             version="1.0",
-            date="2024-01-01T00:00:00",
+            date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             north="0.0",
             south="0.0",
             east="0.0",
