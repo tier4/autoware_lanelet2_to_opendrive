@@ -19,14 +19,16 @@ jobs:
         run: |
           # Get changed files in .github/workflows/
           CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
-          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "changed_files<<EOF"
+            echo "$CHANGED_FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           if [ -n "$CHANGED_FILES" ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Display changed workflow files
@@ -39,7 +41,7 @@ jobs:
         if: steps.changed-workflows.outputs.has_changes == 'true'
         run: |
           bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          echo "$(pwd)" >> $GITHUB_PATH
+          pwd >> "$GITHUB_PATH"
 
       - name: Run actionlint on changed workflows
         if: steps.changed-workflows.outputs.has_changes == 'true'
@@ -80,12 +82,12 @@ jobs:
       - name: Check for changes
         id: check_changes
         run: |
-          if [[ -n $(git status --porcelain) ]]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
             echo "Files modified by end-of-file-fixer:"
             git status --short
           else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No files needed end-of-file fixes."
           fi
 
