@@ -378,9 +378,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 road.signals = road_signals[road.id]
                 signals_assigned_count += len(road.signals)
 
-        print(
-            f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads"
-        )
+        print(f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads")
 
         return signals_and_controllers
 
@@ -428,10 +426,8 @@ class _Lanelet2ToOpenDRIVEConverter:
                     # Get road IDs for all signals controlled by this controller
                     controller_road_ids = set()
                     for control_entry in controller.controls:
-                        signal_road_id = (
-                            signals_and_controllers.signal_to_road_id.get(
-                                control_entry.signal_id
-                            )
+                        signal_road_id = signals_and_controllers.signal_to_road_id.get(
+                            control_entry.signal_id
                         )
                         if signal_road_id is not None:
                             controller_road_ids.add(signal_road_id)
@@ -472,17 +468,13 @@ class _Lanelet2ToOpenDRIVEConverter:
             geo_reference_proj = latlon_to_proj_string(
                 self.config.origin.lat, self.config.origin.lon
             )
-            print(
-                f"Using geoReference (from origin lat/lon): {geo_reference_proj}"
-            )
+            print(f"Using geoReference (from origin lat/lon): {geo_reference_proj}")
         elif self.mgrs_code is not None:
             geo_reference_proj = mgrs_to_proj_string(self.mgrs_code)
             print(f"Using geoReference (from MGRS code): {geo_reference_proj}")
         elif self.config.origin.mgrs_code is not None:
             geo_reference_proj = mgrs_to_proj_string(self.config.origin.mgrs_code)
-            print(
-                f"Using geoReference (from config MGRS code): {geo_reference_proj}"
-            )
+            print(f"Using geoReference (from config MGRS code): {geo_reference_proj}")
         else:
             raise ValueError("Must provide either origin lat/lon or MGRS code")
 
