@@ -80,6 +80,504 @@ def load_lanelet2_map(
         raise Exception(f"Failed to load Lanelet2 map: {e}")
 
 
+class _Lanelet2ToOpenDRIVEConverter:
+    """
+    Helper class for converting Lanelet2 maps to OpenDRIVE format.
+
+    This class breaks down the conversion process into focused, testable methods.
+    """
+
+    def __init__(
+        self,
+        lanelet_map: lanelet2.core.LaneletMap,
+        config: ConversionConfig,
+        mgrs_code: Optional[str] = None,
+    ):
+        """
+        Initialize the converter.
+
+        Args:
+            lanelet_map: Loaded Lanelet2 map
+            config: ConversionConfig object containing all conversion parameters
+            mgrs_code: Optional MGRS code for generating geoReference PROJ string
+        """
+        self.lanelet_map = lanelet_map
+        self.config = config
+        self.mgrs_code = mgrs_code
+
+    def _build_regular_roads(
+        self,
+    ) -> Tuple[List[Road], Dict[int, int]]:
+        """
+        Build roads from non-junction lanelets.
+
+        Returns:
+            Tuple of:
+                - List of Road objects for non-junction lanelets
+                - Dictionary mapping lanelet ID to road ID for regular roads
+        """
+        from autoware_lanelet2_to_opendrive.junction import (
+            filter_lanelets_outside_junction,
+        )
+        from autoware_lanelet2_to_opendrive.util import (
+            find_adjacent_groups,
+            filter_lanelets_by_subtype,
+        )
+
+        print("\n=== Building regular roads ===")
+        regular_roads = Road.construct_from_lanelet_map(
+            self.lanelet_map, traffic_rule=self.config.traffic_rule
+        )
+
+        # Build lanelet-to-road mapping for regular roads
+        all_lanelets = list(self.lanelet_map.laneletLayer)
+        road_lanelets = filter_lanelets_outside_junction(
+            filter_lanelets_by_subtype(all_lanelets, ["road"])
+        )
+        adjacent_groups = find_adjacent_groups(self.lanelet_map, set(road_lanelets))
+
+        lanelet_to_road_id: Dict[int, int] = {}
+        for road_id, adjacent_group in enumerate(adjacent_groups):
+            for lanelet in adjacent_group:
+                lanelet_to_road_id[lanelet.id] = road_id
+
+        return regular_roads, lanelet_to_road_id
+
+    def _build_junction_structure(
+        self,
+        regular_roads: List[Road],
+        lanelet_to_road_id: Dict[int, int],
+    ) -> Tuple[
+        List[Road],
+        List[Junction],
+        Dict[int, List[int]],
+        Dict[int, int],
+        List[lanelet2.core.Lanelet],
+    ]:
+        """
+        Build junction structure from junction lanelets.
+
+        Args:
+            regular_roads: Already-built regular roads
+            lanelet_to_road_id: Existing lanelet-to-road mapping from regular roads
+
+        Returns:
+            Tuple of:
+                - List of connecting Road objects
+                - List of Junction objects
+                - Dictionary mapping junction ID to connecting road IDs
+                - Dictionary mapping junction lanelet IDs to road IDs
+                - List of junction lanelets
+        """
+        from autoware_lanelet2_to_opendrive.junction import (
+            filter_lanelets_inside_junction,
+            find_junction_groups,
+        )
+
+        # Get junction groups
+        print("\n=== Finding junctions ===")
+        all_lanelets = list(self.lanelet_map.laneletLayer)
+        junction_lanelets = filter_lanelets_inside_junction(
+            all_lanelets, exclude_lanelet_ids=self.config.no_junction_lanelet_ids
+        )
+        junction_groups = find_junction_groups(junction_lanelets)
+        print(f"Found {len(junction_groups)} junctions")
+
+        # Create connecting roads
+        print("\n=== Building connecting roads inside junctions ===")
+        starting_junction_road_id = len(regular_roads)
+        junction_id_offset = self.config.junction_id_offset
+
+        (
+            connecting_roads,
+            junction_to_roads,
+            junction_lanelet_to_road,
+        ) = Road.construct_connecting_roads_from_junctions(
+            lanelet_map=self.lanelet_map,
+            junction_groups=junction_groups,
+            starting_road_id=starting_junction_road_id,
+            junction_id_offset=junction_id_offset,
+            traffic_rule=self.config.traffic_rule,
+        )
+
+        # Merge lanelet-to-road mappings
+        lanelet_to_road_id.update(junction_lanelet_to_road)
+
+        # Build junctions with connections
+        print("\n=== Building junction connections ===")
+        print(
+            f"Using junction ID offset: {junction_id_offset} "
+            f"(junction IDs will be {junction_id_offset}+)"
+        )
+
+        junctions = []
+        for junction_index, junction_group in enumerate(junction_groups):
+            junction_id = junction_index + junction_id_offset
+
+            # Create base junction
+            junction = Junction.construct_from_lanelet_groups(
+                junction_id=junction_id,
+                lanelet_group=junction_group,
+            )
+
+            # Build connections for this junction
+            connecting_road_ids = junction_to_roads.get(junction_id, [])
+            all_roads_for_junction = regular_roads + connecting_roads
+            connections = Junction.build_connections_from_roads(
+                lanelet_map=self.lanelet_map,
+                junction_lanelet_group=junction_group,
+                junction_id=junction_id,
+                lanelet_to_road_id=lanelet_to_road_id,
+                connecting_road_ids=connecting_road_ids,
+                roads=all_roads_for_junction,
+            )
+
+            junction.connections = connections
+            junctions.append(junction)
+
+        print(
+            f"Built {len(junctions)} junctions with {sum(len(j.connections) for j in junctions)} total connections"
+        )
+
+        return (
+            connecting_roads,
+            junctions,
+            junction_to_roads,
+            junction_lanelet_to_road,
+            junction_lanelets,
+        )
+
+    def _build_road_lanelet_mappings(
+        self,
+        lanelet_to_road_id: Dict[int, int],
+    ) -> RoadLaneletMapping:
+        """
+        Create bidirectional mappings between roads and lanelets.
+
+        Args:
+            lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
+
+        Returns:
+            RoadLaneletMapping dataclass with bidirectional maps
+        """
+        print("\n=== Building Road-Lanelet mapping ===")
+
+        # Build reverse mapping (road_id -> list of lanelet IDs)
+        road_to_lanelet_ids: Dict[int, List[int]] = {}
+        for lanelet_id, road_id in lanelet_to_road_id.items():
+            if road_id not in road_to_lanelet_ids:
+                road_to_lanelet_ids[road_id] = []
+            road_to_lanelet_ids[road_id].append(lanelet_id)
+
+        # Sort lanelet IDs for each road for consistency
+        for road_id in road_to_lanelet_ids:
+            road_to_lanelet_ids[road_id].sort()
+
+        print(
+            f"Created mapping for {len(road_to_lanelet_ids)} roads covering {len(lanelet_to_road_id)} lanelets"
+        )
+
+        return RoadLaneletMapping(
+            road_to_lanelets=road_to_lanelet_ids,
+            lanelet_to_road=lanelet_to_road_id,
+        )
+
+    def _setup_connections(
+        self,
+        all_roads: List[Road],
+        connecting_roads: List[Road],
+        road_to_lanelet_ids: Dict[int, List[int]],
+        lanelet_to_road_id: Dict[int, int],
+        junctions: List[Junction],
+    ) -> None:
+        """
+        Set up predecessor/successor connections for roads and lanes.
+
+        Args:
+            all_roads: All roads (regular + connecting)
+            connecting_roads: Connecting roads only
+            road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
+            lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
+            junctions: All junctions
+        """
+        # Set road links for connecting roads
+        print("\n=== Building road links for connecting roads ===")
+        Road.set_connecting_road_links(
+            lanelet_map=self.lanelet_map,
+            connecting_roads=connecting_roads,
+            lanelet_to_road_id=lanelet_to_road_id,
+            road_to_lanelet_ids=road_to_lanelet_ids,
+        )
+
+        # Set junction links for incoming roads
+        print("\n=== Setting junction links for incoming roads ===")
+        Road.set_incoming_road_junction_links(
+            roads=all_roads,
+            junctions=junctions,
+        )
+
+        # Set lane links for all roads
+        print("\n=== Building lane links for all roads ===")
+        Road.set_all_lane_links(self.lanelet_map, all_roads)
+
+    def _extract_and_assign_signals(
+        self,
+        all_roads: List[Road],
+        mapping: RoadLaneletMapping,
+        junction_lanelets: List[lanelet2.core.Lanelet],
+    ) -> SignalsAndControllers:
+        """
+        Extract traffic signals and assign to roads.
+
+        Args:
+            all_roads: All roads
+            mapping: Road-lanelet bidirectional mapping
+            junction_lanelets: List of junction lanelets
+
+        Returns:
+            SignalsAndControllers object with all signals and controllers
+        """
+        print("\n=== Extracting signals and controllers ===")
+
+        # Get junction lanelet IDs for filtering
+        junction_lanelet_ids = {ll.id for ll in junction_lanelets}
+        if self.config.exclude_non_junction_signals:
+            print(
+                f"CARLA compatibility mode: excluding signals not in {len(junction_lanelet_ids)} junction lanelets"
+            )
+
+        # Extract signals and controllers
+        signals_and_controllers = SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=self.lanelet_map,
+            road_lanelet_mapping=mapping,
+            roads=all_roads,
+            exclude_non_junction_signals=self.config.exclude_non_junction_signals,
+            junction_lanelet_ids=junction_lanelet_ids,
+        )
+        print(
+            f"Extracted {len(signals_and_controllers.signals)} signals and "
+            f"{len(signals_and_controllers.controllers)} controllers"
+        )
+
+        # Assign signals to roads
+        print("\n=== Assigning signals to roads ===")
+        road_signals: Dict[int, List] = {}
+        for signal in signals_and_controllers.signals:
+            signal_road_id: Optional[int] = (
+                signals_and_controllers.signal_to_road_id.get(signal.id)
+            )
+            if signal_road_id is not None:
+                if signal_road_id not in road_signals:
+                    road_signals[signal_road_id] = []
+                road_signals[signal_road_id].append(signal)
+
+        # Assign signals to road objects
+        signals_assigned_count = 0
+        for road in all_roads:
+            if road.id in road_signals:
+                road.signals = road_signals[road.id]
+                signals_assigned_count += len(road.signals)
+
+        print(
+            f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads"
+        )
+
+        return signals_and_controllers
+
+    def _assign_controllers_to_junctions(
+        self,
+        signals_and_controllers: SignalsAndControllers,
+        junctions: List[Junction],
+        all_roads: List[Road],
+    ) -> None:
+        """
+        Create controllers and assign to junctions.
+
+        Args:
+            signals_and_controllers: All extracted signals and controllers
+            junctions: All junctions
+            all_roads: All roads
+        """
+        print("\n=== Associating controllers with junctions ===")
+
+        controllers_assigned_count = 0
+        for junction in junctions:
+            # Get all road IDs related to this junction
+            junction_incoming_road_ids = {
+                conn.incoming_road for conn in junction.connections
+            }
+            junction_connecting_road_ids = {
+                conn.connecting_road for conn in junction.connections
+            }
+
+            # Include roads that belong to this junction by attribute
+            junction_roads_by_attribute = {
+                road.id for road in all_roads if road.junction == junction.id
+            }
+
+            junction_related_road_ids = (
+                junction_incoming_road_ids
+                | junction_connecting_road_ids
+                | junction_roads_by_attribute
+            )
+
+            # Find controllers whose signals are on roads related to this junction
+            junction_controller_ids: List[int] = []
+            for controller in signals_and_controllers.controllers:
+                if controller.controls:
+                    # Get road IDs for all signals controlled by this controller
+                    controller_road_ids = set()
+                    for control_entry in controller.controls:
+                        signal_road_id = (
+                            signals_and_controllers.signal_to_road_id.get(
+                                control_entry.signal_id
+                            )
+                        )
+                        if signal_road_id is not None:
+                            controller_road_ids.add(signal_road_id)
+
+                    # If any of the controller's roads are related to this junction,
+                    # associate the controller with the junction
+                    if controller_road_ids & junction_related_road_ids:
+                        junction_controller_ids.append(controller.id)
+
+            junction.controller_ids = junction_controller_ids
+            controllers_assigned_count += len(junction_controller_ids)
+
+        print(
+            f"Associated {controllers_assigned_count} controller references across {len(junctions)} junctions"
+        )
+
+    def _write_opendrive_output(
+        self,
+        all_roads: List[Road],
+        junctions: List[Junction],
+        signals_and_controllers: SignalsAndControllers,
+    ) -> OpenDRIVE:
+        """
+        Write final OpenDRIVE XML output.
+
+        Args:
+            all_roads: All roads to write
+            junctions: All junctions to write
+            signals_and_controllers: All signals and controllers
+
+        Returns:
+            OpenDRIVE object
+        """
+        from autoware_lanelet2_to_opendrive.util import latlon_to_proj_string
+
+        # Generate PROJ string for geoReference
+        if self.config.origin.lat is not None and self.config.origin.lon is not None:
+            geo_reference_proj = latlon_to_proj_string(
+                self.config.origin.lat, self.config.origin.lon
+            )
+            print(
+                f"Using geoReference (from origin lat/lon): {geo_reference_proj}"
+            )
+        elif self.mgrs_code is not None:
+            geo_reference_proj = mgrs_to_proj_string(self.mgrs_code)
+            print(f"Using geoReference (from MGRS code): {geo_reference_proj}")
+        elif self.config.origin.mgrs_code is not None:
+            geo_reference_proj = mgrs_to_proj_string(self.config.origin.mgrs_code)
+            print(
+                f"Using geoReference (from config MGRS code): {geo_reference_proj}"
+            )
+        else:
+            raise ValueError("Must provide either origin lat/lon or MGRS code")
+
+        # Create header
+        header = Header(
+            rev_major="1",
+            rev_minor="4",
+            name="Converted from Lanelet2",
+            version="1.0",
+            date="2024-01-01T00:00:00",
+            north="0.0",
+            south="0.0",
+            east="0.0",
+            west="0.0",
+            geo_reference=geo_reference_proj,
+        )
+
+        # Create OpenDRIVE object
+        opendrive = OpenDRIVE(
+            header=header,
+            roads=all_roads,
+            junctions=junctions,
+            controllers=signals_and_controllers.controllers,
+        )
+
+        print("\nConversion completed successfully!")
+
+        # Save to file if output path is provided
+        if self.config.output_path:
+            save_opendrive_to_file(opendrive, self.config.output_path)
+            print(f"OpenDRIVE file saved to: {self.config.output_path}")
+
+        return opendrive
+
+    def convert(self) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
+        """
+        Convert Lanelet2 map to OpenDRIVE format.
+
+        High-level orchestration of conversion pipeline.
+
+        Returns:
+            Tuple of:
+                - OpenDRIVE object representing the converted map
+                - RoadLaneletMapping containing bidirectional mapping
+        """
+        print("Converting Lanelet2 map to OpenDRIVE format...")
+
+        # Step 1: Build regular roads from non-junction lanelets
+        regular_roads, lanelet_to_road_id = self._build_regular_roads()
+
+        # Step 2: Build junction structure
+        (
+            connecting_roads,
+            junctions,
+            junction_to_roads,
+            junction_lanelet_to_road,
+            junction_lanelets,
+        ) = self._build_junction_structure(regular_roads, lanelet_to_road_id)
+
+        # Step 3: Create bidirectional mappings
+        mapping = self._build_road_lanelet_mappings(lanelet_to_road_id)
+
+        # Combine all roads
+        all_roads = regular_roads + connecting_roads
+        print(
+            f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
+        )
+
+        # Step 4: Set up road and lane connections
+        self._setup_connections(
+            all_roads,
+            connecting_roads,
+            mapping.road_to_lanelets,
+            lanelet_to_road_id,
+            junctions,
+        )
+
+        # Step 5: Extract and assign signals
+        signals_and_controllers = self._extract_and_assign_signals(
+            all_roads, mapping, junction_lanelets
+        )
+
+        # Step 6: Create and assign controllers
+        self._assign_controllers_to_junctions(
+            signals_and_controllers, junctions, all_roads
+        )
+
+        # Step 7: Write OpenDRIVE output
+        opendrive = self._write_opendrive_output(
+            all_roads, junctions, signals_and_controllers
+        )
+
+        return opendrive, mapping
+
+
 def convert_lanelet2_to_opendrive(
     lanelet_map: lanelet2.core.LaneletMap,
     config: ConversionConfig,
@@ -99,294 +597,8 @@ def convert_lanelet2_to_opendrive(
             - OpenDRIVE object representing the converted map
             - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
     """
-    from autoware_lanelet2_to_opendrive.util import latlon_to_proj_string
-
-    print("Converting Lanelet2 map to OpenDRIVE format...")
-
-    # Generate PROJ string for geoReference
-    # Prefer using lat/lon if provided (more accurate with offset)
-    if config.origin.lat is not None and config.origin.lon is not None:
-        geo_reference_proj = latlon_to_proj_string(config.origin.lat, config.origin.lon)
-        print(f"Using geoReference (from origin lat/lon): {geo_reference_proj}")
-    elif mgrs_code is not None:
-        geo_reference_proj = mgrs_to_proj_string(mgrs_code)
-        print(f"Using geoReference (from MGRS code): {geo_reference_proj}")
-    elif config.origin.mgrs_code is not None:
-        geo_reference_proj = mgrs_to_proj_string(config.origin.mgrs_code)
-        print(f"Using geoReference (from config MGRS code): {geo_reference_proj}")
-    else:
-        raise ValueError("Must provide either origin lat/lon or MGRS code")
-
-    # Create header
-    header = Header(
-        rev_major="1",
-        rev_minor="4",
-        name="Converted from Lanelet2",
-        version="1.0",
-        date="2024-01-01T00:00:00",
-        north="0.0",
-        south="0.0",
-        east="0.0",
-        west="0.0",
-        geo_reference=geo_reference_proj,
-    )
-
-    # Step 1: Create regular roads (outside junctions)
-    print("\n=== Building regular roads ===")
-    regular_roads = Road.construct_from_lanelet_map(
-        lanelet_map, traffic_rule=config.traffic_rule
-    )
-    starting_junction_road_id = len(regular_roads)
-
-    # Build lanelet-to-road mapping for regular roads
-    from autoware_lanelet2_to_opendrive.junction import (
-        filter_lanelets_inside_junction,
-        filter_lanelets_outside_junction,
-        find_junction_groups,
-    )
-    from autoware_lanelet2_to_opendrive.util import (
-        find_adjacent_groups,
-        filter_lanelets_by_subtype,
-    )
-
-    all_lanelets = list(lanelet_map.laneletLayer)
-    road_lanelets = filter_lanelets_outside_junction(
-        filter_lanelets_by_subtype(all_lanelets, ["road"])
-    )
-    adjacent_groups = find_adjacent_groups(lanelet_map, set(road_lanelets))
-
-    lanelet_to_road_id: dict[int, int] = {}
-    for road_id, adjacent_group in enumerate(adjacent_groups):
-        for lanelet in adjacent_group:
-            lanelet_to_road_id[lanelet.id] = road_id
-
-    # Step 2: Get junction groups
-    print("\n=== Finding junctions ===")
-    junction_lanelets = filter_lanelets_inside_junction(
-        all_lanelets, exclude_lanelet_ids=config.no_junction_lanelet_ids
-    )
-    junction_groups = find_junction_groups(junction_lanelets)
-    print(f"Found {len(junction_groups)} junctions")
-
-    # Step 3: Create connecting roads (inside junctions)
-    print("\n=== Building connecting roads inside junctions ===")
-    # Issue #132 fix: Apply junction ID offset to avoid conflicts with road IDs
-    junction_id_offset = config.junction_id_offset
-    (
-        connecting_roads,
-        junction_to_roads,
-        junction_lanelet_to_road,
-    ) = Road.construct_connecting_roads_from_junctions(
-        lanelet_map=lanelet_map,
-        junction_groups=junction_groups,
-        starting_road_id=starting_junction_road_id,
-        junction_id_offset=junction_id_offset,
-        traffic_rule=config.traffic_rule,
-    )
-
-    # Step 4: Merge lanelet-to-road mappings
-    lanelet_to_road_id.update(junction_lanelet_to_road)
-
-    # Step 4.5: Build reverse mapping (road_id -> list of lanelet IDs)
-    print("\n=== Building Road-Lanelet mapping ===")
-    road_to_lanelet_ids: Dict[int, List[int]] = {}
-    for lanelet_id, road_id in lanelet_to_road_id.items():
-        if road_id not in road_to_lanelet_ids:
-            road_to_lanelet_ids[road_id] = []
-        road_to_lanelet_ids[road_id].append(lanelet_id)
-
-    # Sort lanelet IDs for each road for consistency
-    for road_id in road_to_lanelet_ids:
-        road_to_lanelet_ids[road_id].sort()
-
-    print(
-        f"Created mapping for {len(road_to_lanelet_ids)} roads covering {len(lanelet_to_road_id)} lanelets"
-    )
-
-    # Step 5: Build junctions with connections
-    print("\n=== Building junction connections ===")
-    # junction_id_offset already defined in Step 3
-    print(
-        f"Using junction ID offset: {junction_id_offset} "
-        f"(junction IDs will be {junction_id_offset}+)"
-    )
-    junctions = []
-    for junction_index, junction_group in enumerate(junction_groups):
-        # Apply offset to junction ID to avoid conflicts with road IDs
-        junction_id = junction_index + junction_id_offset
-
-        # Create base junction
-        junction = Junction.construct_from_lanelet_groups(
-            junction_id=junction_id,
-            lanelet_group=junction_group,
-        )
-
-        # Build connections for this junction
-        connecting_road_ids = junction_to_roads.get(junction_id, [])
-        # Combine regular and connecting roads for lane ID lookup
-        all_roads_for_junction = regular_roads + connecting_roads
-        connections = Junction.build_connections_from_roads(
-            lanelet_map=lanelet_map,
-            junction_lanelet_group=junction_group,
-            junction_id=junction_id,
-            lanelet_to_road_id=lanelet_to_road_id,
-            connecting_road_ids=connecting_road_ids,
-            roads=all_roads_for_junction,
-        )
-
-        junction.connections = connections
-        junctions.append(junction)
-
-    print(
-        f"Built {len(junctions)} junctions with {sum(len(j.connections) for j in junctions)} total connections"
-    )
-
-    # Step 6: Combine all roads
-    all_roads = regular_roads + connecting_roads
-    print(
-        f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
-    )
-
-    # Step 6.5: Set road links for connecting roads (predecessor/successor)
-    # This must be done BEFORE lane links so that lane link validation can use road links
-    print("\n=== Building road links for connecting roads ===")
-    Road.set_connecting_road_links(
-        lanelet_map=lanelet_map,
-        connecting_roads=connecting_roads,
-        lanelet_to_road_id=lanelet_to_road_id,
-        road_to_lanelet_ids=road_to_lanelet_ids,
-    )
-
-    # Step 6.6: Set junction links for incoming roads
-    # This ensures CARLA compatibility by setting successor/predecessor to junction
-    # for roads that connect to junctions as incoming roads
-    # This must be done BEFORE lane links so we know which roads connect to junctions
-    print("\n=== Setting junction links for incoming roads ===")
-    Road.set_incoming_road_junction_links(
-        roads=all_roads,
-        junctions=junctions,
-    )
-
-    # Step 6.7: Set lane links for all roads (including junction roads)
-    # This must be done after road links are set so that:
-    # 1. Connecting roads have their predecessor/successor road IDs available
-    # 2. Regular roads know which junctions they connect to
-    print("\n=== Building lane links for all roads ===")
-    Road.set_all_lane_links(lanelet_map, all_roads)
-
-    # Create mapping object
-    mapping = RoadLaneletMapping(
-        road_to_lanelets=road_to_lanelet_ids, lanelet_to_road=lanelet_to_road_id
-    )
-
-    # Step 7: Extract signals and controllers from Lanelet2 map
-    print("\n=== Extracting signals and controllers ===")
-    # Get junction lanelet IDs for filtering (if needed for CARLA compatibility)
-    junction_lanelet_ids = {ll.id for ll in junction_lanelets}
-    if config.exclude_non_junction_signals:
-        print(
-            f"CARLA compatibility mode: excluding signals not in {len(junction_lanelet_ids)} junction lanelets"
-        )
-    signals_and_controllers = SignalsAndControllers.construct_from_lanelet_map(
-        lanelet_map=lanelet_map,
-        road_lanelet_mapping=mapping,
-        roads=all_roads,
-        exclude_non_junction_signals=config.exclude_non_junction_signals,
-        junction_lanelet_ids=junction_lanelet_ids,
-    )
-    print(
-        f"Extracted {len(signals_and_controllers.signals)} signals and "
-        f"{len(signals_and_controllers.controllers)} controllers"
-    )
-
-    # Step 8: Assign signals to roads
-    print("\n=== Assigning signals to roads ===")
-    road_signals: Dict[int, List] = {}
-    for signal in signals_and_controllers.signals:
-        signal_road_id: Optional[int] = signals_and_controllers.signal_to_road_id.get(
-            signal.id
-        )
-        if signal_road_id is not None:
-            if signal_road_id not in road_signals:
-                road_signals[signal_road_id] = []
-            road_signals[signal_road_id].append(signal)
-
-    # Assign signals to road objects
-    signals_assigned_count = 0
-    for road in all_roads:
-        if road.id in road_signals:
-            road.signals = road_signals[road.id]
-            signals_assigned_count += len(road.signals)
-
-    print(f"Assigned {signals_assigned_count} signals to {len(road_signals)} roads")
-
-    # Step 9: Associate controllers with junctions
-    # Controllers that manage signals on incoming or connecting roads should be referenced
-    print("\n=== Associating controllers with junctions ===")
-    controllers_assigned_count = 0
-    for junction in junctions:
-        # Get all road IDs related to this junction (both incoming and connecting)
-        junction_incoming_road_ids = {
-            conn.incoming_road for conn in junction.connections
-        }
-        junction_connecting_road_ids = {
-            conn.connecting_road for conn in junction.connections
-        }
-
-        # Also include roads that belong to this junction (based on road.junction attribute)
-        # This handles cases where roads are inside the junction but not in any connection
-        # (e.g., roads whose predecessor is also inside the junction)
-        junction_roads_by_attribute = {
-            road.id for road in all_roads if road.junction == junction.id
-        }
-
-        junction_related_road_ids = (
-            junction_incoming_road_ids
-            | junction_connecting_road_ids
-            | junction_roads_by_attribute
-        )
-
-        # Find controllers whose signals are on roads related to this junction
-        junction_controller_ids: List[int] = []
-        for controller in signals_and_controllers.controllers:
-            if controller.controls:
-                # Get road IDs for all signals controlled by this controller
-                controller_road_ids = set()
-                for control_entry in controller.controls:
-                    signal_road_id = signals_and_controllers.signal_to_road_id.get(
-                        control_entry.signal_id
-                    )
-                    if signal_road_id is not None:
-                        controller_road_ids.add(signal_road_id)
-
-                # If any of the controller's roads are related to this junction,
-                # associate the controller with the junction
-                if controller_road_ids & junction_related_road_ids:
-                    junction_controller_ids.append(controller.id)
-
-        junction.controller_ids = junction_controller_ids
-        controllers_assigned_count += len(junction_controller_ids)
-
-    print(
-        f"Associated {controllers_assigned_count} controller references across {len(junctions)} junctions"
-    )
-
-    # Create OpenDRIVE object
-    opendrive = OpenDRIVE(
-        header=header,
-        roads=all_roads,
-        junctions=junctions,
-        controllers=signals_and_controllers.controllers,
-    )
-
-    print("\nConversion completed successfully!")
-
-    # Save to file if output path is provided
-    if config.output_path:
-        save_opendrive_to_file(opendrive, config.output_path)
-        print(f"OpenDRIVE file saved to: {config.output_path}")
-
-    return opendrive, mapping
+    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config, mgrs_code)
+    return converter.convert()
 
 
 def parse_origin_from_config(
