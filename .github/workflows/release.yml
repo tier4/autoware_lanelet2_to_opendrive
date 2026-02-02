@@ -34,7 +34,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          result-encoding: string
           script: |
             const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
               owner: context.repo.owner,
@@ -47,7 +46,8 @@ jobs:
 
             if (!mergedPR) {
               console.log('No merged PR found for this commit');
-              return 'none';
+              core.setOutput('bump_type', 'none');
+              return;
             }
 
             console.log(`Found merged PR #${mergedPR.number}`);
@@ -55,22 +55,29 @@ jobs:
             const labels = mergedPR.labels.map(label => label.name);
             console.log(`PR labels: ${labels.join(', ')}`);
 
+            // Store PR information
+            core.setOutput('pr_number', mergedPR.number);
+            core.setOutput('pr_title', mergedPR.title);
+            core.setOutput('pr_url', mergedPR.html_url);
+            core.setOutput('pr_author', mergedPR.user.login);
+
             // Check for version bump labels
+            let bumpType = 'none';
             if (labels.includes('bump major')) {
-              return 'major';
+              bumpType = 'major';
             } else if (labels.includes('bump minor')) {
-              return 'minor';
+              bumpType = 'minor';
             } else if (labels.includes('bump patch')) {
-              return 'patch';
+              bumpType = 'patch';
             }
 
-            return 'none';
+            core.setOutput('bump_type', bumpType);
 
       - name: Bump version
-        if: steps.pr-labels.outputs.result != 'none'
+        if: steps.pr-labels.outputs.bump_type != 'none'
         id: bump-version
         run: |
-          bump_type="${{ steps.pr-labels.outputs.result }}"
+          bump_type="${{ steps.pr-labels.outputs.bump_type }}"
 
           # Extract current version from pyproject.toml
           current_version=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/' || true)
@@ -109,11 +116,11 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$new_version\"/" pyproject.toml
 
           # Set outputs
-          echo "new_version=$new_version" >> $GITHUB_OUTPUT
-          echo "bump_type=$bump_type" >> $GITHUB_OUTPUT
+          echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
+          echo "bump_type=${bump_type}" >> "$GITHUB_OUTPUT"
 
       - name: Commit version bump
-        if: steps.pr-labels.outputs.result != 'none'
+        if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -123,29 +130,50 @@ jobs:
           git push origin master
 
       - name: Create Git tag
-        if: steps.pr-labels.outputs.result != 'none'
+        if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
           git tag "v${{ steps.bump-version.outputs.new_version }}"
           git push origin "v${{ steps.bump-version.outputs.new_version }}"
 
       - name: Create GitHub Release
-        if: steps.pr-labels.outputs.result != 'none'
+        if: steps.pr-labels.outputs.bump_type != 'none'
         uses: actions/github-script@v7
         env:
           NEW_VERSION: ${{ steps.bump-version.outputs.new_version }}
           BUMP_TYPE: ${{ steps.bump-version.outputs.bump_type }}
+          PR_NUMBER: ${{ steps.pr-labels.outputs.pr_number }}
+          PR_TITLE: ${{ steps.pr-labels.outputs.pr_title }}
+          PR_URL: ${{ steps.pr-labels.outputs.pr_url }}
+          PR_AUTHOR: ${{ steps.pr-labels.outputs.pr_author }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const newVersion = process.env.NEW_VERSION;
             const bumpType = process.env.BUMP_TYPE;
+            const prNumber = process.env.PR_NUMBER;
+            const prTitle = process.env.PR_TITLE;
+            const prUrl = process.env.PR_URL;
+            const prAuthor = process.env.PR_AUTHOR;
+
+            // Create release body with PR link
+            const releaseBody = [
+              `## What's Changed`,
+              ``,
+              `- ${prTitle} (#${prNumber}) by @${prAuthor}`,
+              ``,
+              `**Full Changelog**: ${prUrl}`,
+              ``,
+              `---`,
+              ``,
+              `This release was created by automated workflow (bump ${bumpType}).`
+            ].join('\n');
 
             const { data: release } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: `v${newVersion}`,
               name: `Release v${newVersion}`,
-              body: `Release created by automated workflow (bump ${bumpType})`,
+              body: releaseBody,
               draft: false,
               prerelease: false
             });
@@ -153,6 +181,6 @@ jobs:
             console.log(`Created release: ${release.html_url}`);
 
       - name: No version bump needed
-        if: steps.pr-labels.outputs.result == 'none'
+        if: steps.pr-labels.outputs.bump_type == 'none'
         run: |
           echo "No version bump label found. Skipping release."
