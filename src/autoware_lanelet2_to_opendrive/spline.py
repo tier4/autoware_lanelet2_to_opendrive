@@ -180,9 +180,7 @@ class Splines:
         # Check soft constraints and warn if fitting error is large
         self._check_soft_constraints()
 
-    def _create_parameterization(
-        self, points: np.ndarray
-    ) -> Tuple[np.ndarray, float]:
+    def _create_parameterization(self, points: np.ndarray) -> Tuple[np.ndarray, float]:
         """
         Create chord-length parameterization for input points.
 
@@ -324,10 +322,6 @@ class Splines:
         b_fit = points
 
         # Boundary condition terms (Hard constraints)
-        # Positions at t=0, t=1
-        A_pos_start = self._get_basis_matrix([0.0], deriv=0)
-        A_pos_end = self._get_basis_matrix([1.0], deriv=0)
-
         # Derivatives (Tangent vectors) at t=0, t=1
         A_vel_start = self._get_basis_matrix([0.0], deriv=1)
         A_vel_end = self._get_basis_matrix([1.0], deriv=1)
@@ -349,9 +343,7 @@ class Splines:
 
         return matrices
 
-    def _solve_constrained_least_squares(
-        self, matrices: DesignMatrices
-    ) -> np.ndarray:
+    def _solve_constrained_least_squares(self, matrices: DesignMatrices) -> np.ndarray:
         """
         Solve weighted least squares with hard and soft constraints.
 
