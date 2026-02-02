@@ -11,8 +11,8 @@ from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
-from .enums import ContactPoint, ElementType
-from .lane_elements import LaneLink
+from .enums import ContactPoint, ElementType, RoadType
+from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype, to_lanelet_list, LaneletInput
@@ -41,6 +41,7 @@ class Road:
     link: Optional[RoadLink] = None
     signals: Optional[List["Signal"]] = None
     elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
+    road_types: Optional[List[RoadTypeDefinition]] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -54,6 +55,12 @@ class Road:
 
         if self.link:
             elem.append(self.link.to_xml())
+
+        # Add road type definitions with speed limits
+        if self.road_types:
+            for road_type in self.road_types:
+                elem.append(road_type.to_xml())
+
         if self.plan_view:
             elem.append(self.plan_view.to_xml())
         if self.elevation_profile:
@@ -443,6 +450,69 @@ class Road:
                         break
 
     @staticmethod
+    def _extract_road_types_from_lanelets(
+        lanelet_list: List[lanelet2.core.Lanelet],
+    ) -> Optional[List[RoadTypeDefinition]]:
+        """Extract road types and speed limits from lanelets.
+
+        Args:
+            lanelet_list: List of lanelets to extract information from
+
+        Returns:
+            List of RoadTypeDefinition objects, or None if no speed limit found
+        """
+        if not lanelet_list:
+            return None
+
+        # Get the first lanelet to extract attributes
+        first_lanelet = lanelet_list[0]
+
+        # Extract speed limit
+        speed_limit = None
+        if "speed_limit" in first_lanelet.attributes:
+            try:
+                speed_limit_str = first_lanelet.attributes["speed_limit"]
+                speed_limit = float(speed_limit_str)
+            except (ValueError, TypeError):
+                speed_limit = None
+
+        # Determine road type from location and speed limit
+        road_type = RoadType.UNKNOWN
+        if "location" in first_lanelet.attributes:
+            location = first_lanelet.attributes["location"]
+            if location == "urban":
+                road_type = RoadType.TOWN
+            elif location == "highway":
+                road_type = RoadType.MOTORWAY
+            elif location == "rural":
+                road_type = RoadType.RURAL
+            elif location == "private":
+                if speed_limit and speed_limit <= 10:
+                    road_type = RoadType.LOW_SPEED
+                else:
+                    road_type = RoadType.TOWN
+        else:
+            # If no location attribute, infer from speed limit
+            if speed_limit:
+                if speed_limit <= 10:
+                    road_type = RoadType.LOW_SPEED
+                elif speed_limit <= 50:
+                    road_type = RoadType.TOWN
+                elif speed_limit <= 100:
+                    road_type = RoadType.RURAL
+                else:
+                    road_type = RoadType.MOTORWAY
+
+        # Create road type definition
+        road_type_speed = None
+        if speed_limit is not None:
+            road_type_speed = RoadTypeSpeed(max=speed_limit, unit=SpeedUnit.KMH)
+
+        road_type_def = RoadTypeDefinition(s=0.0, type=road_type, speed=road_type_speed)
+
+        return [road_type_def]
+
+    @staticmethod
     def construct_from_lanelet_groups(
         lanelet_map: lanelet2.core.LaneletMap,
         lanelet_group: LaneletInput,
@@ -506,6 +576,9 @@ class Road:
         # Get elevation profile from reference line, aligned with geometry boundaries
         elevation_profile = reference_line.get_elevation_profile(geometry_s_values)
 
+        # Extract speed limit and road type from lanelets
+        road_types_list = Road._extract_road_types_from_lanelets(lanelet_list)
+
         # Create a basic road with the extracted information
         # Note: This is a simplified implementation
         # A complete implementation would also need to:
@@ -520,6 +593,7 @@ class Road:
             elevation_profile=elevation_profile,
             lanes=get_lanes(),
             elevation_offset=reference_line.elevation_offset,
+            road_types=road_types_list,
         )
 
         return road

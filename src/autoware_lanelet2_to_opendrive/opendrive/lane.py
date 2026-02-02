@@ -16,6 +16,8 @@ from .opendrive_dataclass import (
     LaneLink,
     LaneBorder,
     LaneHeight,
+    LaneSpeed,
+    SpeedUnit,
 )
 
 
@@ -62,6 +64,7 @@ class Lane:
         self.road_marks: List[RoadMark] = []
         self.borders: List[LaneBorder] = []
         self.heights: List[LaneHeight] = []
+        self.speeds: List[LaneSpeed] = []
 
     def _add_width(self, width: LaneWidth) -> None:
         """Add a width definition to the lane."""
@@ -78,6 +81,10 @@ class Lane:
     def _add_height(self, height: LaneHeight) -> None:
         """Add a height definition to the lane."""
         self.heights.append(height)
+
+    def _add_speed(self, speed: LaneSpeed) -> None:
+        """Add a speed limit to the lane."""
+        self.speeds.append(speed)
 
     def _add_width_from_spline(
         self,
@@ -193,6 +200,19 @@ class Lane:
         lane._add_width_from_spline(width_spline)
         # TODO: Add road marks based on lanelet line types
 
+        # Extract speed limit from lanelet attributes
+        if "speed_limit" in lanelet.attributes:
+            try:
+                speed_limit_str = lanelet.attributes["speed_limit"]
+                speed_limit = float(speed_limit_str)
+                # Add speed limit at the start of the lane (s_offset=0.0)
+                lane._add_speed(
+                    LaneSpeed(s_offset=0.0, max=speed_limit, unit=SpeedUnit.KMH)
+                )
+            except (ValueError, TypeError):
+                # If speed limit cannot be parsed, skip it
+                pass
+
         return lane
 
     def to_lane_def_data(self) -> Dict[str, Any]:
@@ -240,6 +260,10 @@ class Lane:
         # Add road marks
         for road_mark in self.road_marks:
             elem.append(road_mark.to_xml())
+
+        # Add speeds
+        for speed in self.speeds:
+            elem.append(speed.to_xml())
 
         # Add borders
         for border in self.borders:
