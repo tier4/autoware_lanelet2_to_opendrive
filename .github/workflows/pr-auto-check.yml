@@ -1,0 +1,140 @@
+name: PR Auto Check
+
+on:
+  pull_request:
+    branches: [ master, main, develop ]
+
+jobs:
+  workflow-yaml-check:
+    name: Workflow YAML Syntax Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed workflow files
+        id: changed-workflows
+        run: |
+          # Get changed files in .github/workflows/
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+          {
+            echo "changed_files<<EOF"
+            echo "$CHANGED_FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ -n "$CHANGED_FILES" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Display changed workflow files
+        if: steps.changed-workflows.outputs.has_changes == 'true'
+        run: |
+          echo "Changed workflow files:"
+          echo "${{ steps.changed-workflows.outputs.changed_files }}"
+
+      - name: Install actionlint
+        if: steps.changed-workflows.outputs.has_changes == 'true'
+        run: |
+          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          pwd >> "$GITHUB_PATH"
+
+      - name: Run actionlint on changed workflows
+        if: steps.changed-workflows.outputs.has_changes == 'true'
+        run: |
+          echo "Running actionlint on changed workflow files..."
+          echo "${{ steps.changed-workflows.outputs.changed_files }}" | tr '\n' '\0' | xargs -0 -I {} ./actionlint {}
+
+      - name: Summary
+        if: steps.changed-workflows.outputs.has_changes == 'false'
+        run: |
+          echo "No workflow files changed, skipping YAML syntax check."
+
+  end-of-file-fixer:
+    name: Auto-fix End of File
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run end-of-file-fixer
+        run: |
+          echo "Running end-of-file-fixer on all files..."
+          pre-commit run end-of-file-fixer --all-files || true
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Files modified by end-of-file-fixer:"
+            git status --short
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No files needed end-of-file fixes."
+          fi
+
+      - name: Commit and push changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -u
+          git commit -m "style: auto-fix end-of-file formatting"
+          git push
+
+      - name: Summary
+        run: |
+          if [[ "${{ steps.check_changes.outputs.has_changes }}" == "true" ]]; then
+            echo "✅ End-of-file issues fixed and committed automatically."
+          else
+            echo "✅ No end-of-file issues found."
+          fi
+
+  check-version-bump-label:
+    name: Check Version Bump Label
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check for version bump label
+        run: |
+          echo "Checking for version bump labels..."
+          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+          echo "PR Labels: $LABELS"
+
+          # Check if any of the required labels exist
+          if echo "$LABELS" | grep -q "bump patch"; then
+            echo "✅ Found 'bump patch' label"
+            exit 0
+          elif echo "$LABELS" | grep -q "bump minor"; then
+            echo "✅ Found 'bump minor' label"
+            exit 0
+          elif echo "$LABELS" | grep -q "bump major"; then
+            echo "✅ Found 'bump major' label"
+            exit 0
+          else
+            echo "❌ ERROR: PR must have one of the following labels:"
+            echo "  - bump patch"
+            echo "  - bump minor"
+            echo "  - bump major"
+            echo ""
+            echo "Please add the appropriate label to indicate the version bump type."
+            exit 1
+          fi

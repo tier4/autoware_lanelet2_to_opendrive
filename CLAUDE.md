@@ -250,6 +250,16 @@ See [PR #133](https://github.com/tier4/autoware_lanelet2_to_opendrive/pull/133) 
    - All pre-commit checks must pass before creating the PR
    - Include `Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>` if assisted by Claude
 
+5. **Add version bump label**
+   - **MANDATORY**: Every PR must have exactly one version bump label
+   - Choose the appropriate label based on semantic versioning:
+     - `bump patch`: Bug fixes, documentation updates, minor changes (0.0.X)
+     - `bump minor`: New features, non-breaking enhancements (0.X.0)
+     - `bump major`: Breaking changes, major refactoring (X.0.0)
+   - Add the label when creating the PR using: `gh pr create --label "bump patch"`
+   - **Important**: The `Check Version Bump Label` GitHub Action will fail if no version bump label is present
+   - **Default recommendation**: Use `bump patch` if uncertain about the appropriate level
+
 ### Rationale
 
 - **Consistency**: Standardized format across all PRs and issues
@@ -310,8 +320,12 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 # 6. Push to remote branch
 git push -u origin feature-branch-name
 
-# 7. Create PR using gh CLI with template
-gh pr create --title "..." --body "..."
+# 7. Create PR using gh CLI with template and version bump label
+gh pr create --title "..." --body "..." --label "bump patch"
+# Note: Choose the appropriate label:
+#   - "bump patch" for bug fixes and minor changes
+#   - "bump minor" for new features
+#   - "bump major" for breaking changes
 ```
 
 ### Detailed Step-by-Step Instructions for Claude Code
@@ -354,10 +368,15 @@ When you are asked to create a PR or when you autonomously decide to create a PR
    git push -u origin feature-branch-name
    ```
 
-6. **Create PR**:
+6. **Create PR with version bump label**:
    - Read `.github/PULL_REQUEST_TEMPLATE.md` first
-   - Use `gh pr create` with appropriate title and body
+   - Use `gh pr create` with appropriate title, body, and **version bump label**
    - Follow template structure and emoji conventions
+   - **MANDATORY**: Add one of the following labels:
+     - `--label "bump patch"` for bug fixes and minor changes (default if uncertain)
+     - `--label "bump minor"` for new features
+     - `--label "bump major"` for breaking changes
+   - Example: `gh pr create --title "feat: add new feature" --body "..." --label "bump minor"`
 
 ### Common Errors and Solutions
 
