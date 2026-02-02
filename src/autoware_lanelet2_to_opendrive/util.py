@@ -1,7 +1,7 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
 import logging
-from typing import Set, List, Union, Dict, Optional, Iterable
+from typing import Set, List, Union, Dict, Optional, Iterable, Literal
 from enum import Enum
 from dataclasses import dataclass
 import lanelet2
@@ -13,6 +13,42 @@ import numpy as np
 from .config import COORDINATE_OFFSET
 
 logger = logging.getLogger(__name__)
+
+
+def extract_points(
+    boundary: lanelet2.core.LineString3d,
+    dimensions: Literal[2, 3] = 3,
+) -> np.ndarray:
+    """Extract points from a Lanelet2 boundary with coordinate offset applied.
+
+    This function extracts coordinates from a Lanelet2 LineString3d
+    and applies the global coordinate offset (subtracting offset values).
+
+    Args:
+        boundary: Lanelet2 LineString3d to extract points from
+        dimensions: Number of dimensions to extract (2 or 3)
+
+    Returns:
+        numpy array of shape (N, dimensions) with coordinates,
+        with coordinate offset applied
+
+    Raises:
+        ValueError: If dimensions is not 2 or 3
+    """
+    if dimensions == 3:
+        points = np.array([[p.x, p.y, p.z] for p in boundary])
+        if COORDINATE_OFFSET.is_active:
+            points[:, 0] -= COORDINATE_OFFSET.x
+            points[:, 1] -= COORDINATE_OFFSET.y
+            points[:, 2] -= COORDINATE_OFFSET.z
+    elif dimensions == 2:
+        points = np.array([[p.x, p.y] for p in boundary])
+        if COORDINATE_OFFSET.is_active:
+            points[:, 0] -= COORDINATE_OFFSET.x
+            points[:, 1] -= COORDINATE_OFFSET.y
+    else:
+        raise ValueError(f"Dimensions must be 2 or 3, got {dimensions}")
+    return points
 
 
 def extract_points_3d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
@@ -28,12 +64,7 @@ def extract_points_3d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
         numpy array of shape (N, 3) with [x, y, z] coordinates,
         with coordinate offset applied
     """
-    points = np.array([[p.x, p.y, p.z] for p in boundary])
-    if COORDINATE_OFFSET.is_active:
-        points[:, 0] -= COORDINATE_OFFSET.x
-        points[:, 1] -= COORDINATE_OFFSET.y
-        points[:, 2] -= COORDINATE_OFFSET.z
-    return points
+    return extract_points(boundary, dimensions=3)
 
 
 def extract_points_2d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
@@ -49,11 +80,40 @@ def extract_points_2d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
         numpy array of shape (N, 2) with [x, y] coordinates,
         with coordinate offset applied
     """
-    points = np.array([[p.x, p.y] for p in boundary])
-    if COORDINATE_OFFSET.is_active:
-        points[:, 0] -= COORDINATE_OFFSET.x
-        points[:, 1] -= COORDINATE_OFFSET.y
-    return points
+    return extract_points(boundary, dimensions=2)
+
+
+def extract_point(
+    point: lanelet2.core.Point3d,
+    dimensions: Literal[2, 3] = 3,
+) -> np.ndarray:
+    """Extract coordinates from a Lanelet2 point with coordinate offset applied.
+
+    Args:
+        point: Lanelet2 Point3d to extract coordinates from
+        dimensions: Number of dimensions to extract (2 or 3)
+
+    Returns:
+        numpy array of shape (dimensions,) with coordinates,
+        with coordinate offset applied
+
+    Raises:
+        ValueError: If dimensions is not 2 or 3
+    """
+    if dimensions == 3:
+        coords = np.array([point.x, point.y, point.z])
+        if COORDINATE_OFFSET.is_active:
+            coords[0] -= COORDINATE_OFFSET.x
+            coords[1] -= COORDINATE_OFFSET.y
+            coords[2] -= COORDINATE_OFFSET.z
+    elif dimensions == 2:
+        coords = np.array([point.x, point.y])
+        if COORDINATE_OFFSET.is_active:
+            coords[0] -= COORDINATE_OFFSET.x
+            coords[1] -= COORDINATE_OFFSET.y
+    else:
+        raise ValueError(f"Dimensions must be 2 or 3, got {dimensions}")
+    return coords
 
 
 def extract_point_3d(point: lanelet2.core.Point3d) -> np.ndarray:
@@ -66,12 +126,7 @@ def extract_point_3d(point: lanelet2.core.Point3d) -> np.ndarray:
         numpy array of shape (3,) with [x, y, z] coordinates,
         with coordinate offset applied
     """
-    coords = np.array([point.x, point.y, point.z])
-    if COORDINATE_OFFSET.is_active:
-        coords[0] -= COORDINATE_OFFSET.x
-        coords[1] -= COORDINATE_OFFSET.y
-        coords[2] -= COORDINATE_OFFSET.z
-    return coords
+    return extract_point(point, dimensions=3)
 
 
 def extract_point_2d(point: lanelet2.core.Point3d) -> np.ndarray:
@@ -84,11 +139,7 @@ def extract_point_2d(point: lanelet2.core.Point3d) -> np.ndarray:
         numpy array of shape (2,) with [x, y] coordinates,
         with coordinate offset applied
     """
-    coords = np.array([point.x, point.y])
-    if COORDINATE_OFFSET.is_active:
-        coords[0] -= COORDINATE_OFFSET.x
-        coords[1] -= COORDINATE_OFFSET.y
-    return coords
+    return extract_point(point, dimensions=2)
 
 
 # Type aliases for common lanelet collection types
