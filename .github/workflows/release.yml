@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Get merged PR labels
+        id: pr-labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          result-encoding: string
+          script: |
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha
+            });
+
+            // Find the merged PR
+            const mergedPR = prs.find(pr => pr.merged_at !== null);
+
+            if (!mergedPR) {
+              console.log('No merged PR found for this commit');
+              return 'none';
+            }
+
+            console.log(`Found merged PR #${mergedPR.number}`);
+
+            const labels = mergedPR.labels.map(label => label.name);
+            console.log(`PR labels: ${labels.join(', ')}`);
+
+            // Check for version bump labels
+            if (labels.includes('bump major')) {
+              return 'major';
+            } else if (labels.includes('bump minor')) {
+              return 'minor';
+            } else if (labels.includes('bump patch')) {
+              return 'patch';
+            }
+
+            return 'none';
+
+      - name: Bump version
+        if: steps.pr-labels.outputs.result != 'none'
+        id: bump-version
+        run: |
+          bump_type="${{ steps.pr-labels.outputs.result }}"
+
+          # Extract current version from pyproject.toml
+          current_version=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/' || true)
+
+          # Validate version extraction
+          if [ -z "$current_version" ]; then
+            echo "ERROR: Could not extract version from pyproject.toml"
+            exit 1
+          fi
+
+          echo "Current version: $current_version"
+
+          # Parse version components
+          IFS='.' read -r major minor patch <<< "$current_version"
+
+          # Bump version based on label
+          case "$bump_type" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+          esac
+
+          new_version="${major}.${minor}.${patch}"
+          echo "New version: $new_version"
+
+          # Update pyproject.toml
+          sed -i "s/^version = \".*\"/version = \"$new_version\"/" pyproject.toml
+
+          # Set outputs
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          echo "bump_type=$bump_type" >> $GITHUB_OUTPUT
+
+      - name: Commit version bump
+        if: steps.pr-labels.outputs.result != 'none'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add pyproject.toml
+          git commit -m "chore: bump version to ${{ steps.bump-version.outputs.new_version }}"
+          git push origin master
+
+      - name: Create Git tag
+        if: steps.pr-labels.outputs.result != 'none'
+        run: |
+          git tag "v${{ steps.bump-version.outputs.new_version }}"
+          git push origin "v${{ steps.bump-version.outputs.new_version }}"
+
+      - name: Create GitHub Release
+        if: steps.pr-labels.outputs.result != 'none'
+        uses: actions/github-script@v7
+        env:
+          NEW_VERSION: ${{ steps.bump-version.outputs.new_version }}
+          BUMP_TYPE: ${{ steps.bump-version.outputs.bump_type }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const newVersion = process.env.NEW_VERSION;
+            const bumpType = process.env.BUMP_TYPE;
+
+            const { data: release } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${newVersion}`,
+              name: `Release v${newVersion}`,
+              body: `Release created by automated workflow (bump ${bumpType})`,
+              draft: false,
+              prerelease: false
+            });
+
+            console.log(`Created release: ${release.html_url}`);
+
+      - name: No version bump needed
+        if: steps.pr-labels.outputs.result == 'none'
+        run: |
+          echo "No version bump label found. Skipping release."
