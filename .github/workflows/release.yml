@@ -34,6 +34,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          result-encoding: string
           script: |
             const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
               owner: context.repo.owner,
@@ -64,7 +65,6 @@ jobs:
             }
 
             return 'none';
-          result-encoding: string
 
       - name: Bump version
         if: steps.pr-labels.outputs.result != 'none'
@@ -73,7 +73,14 @@ jobs:
           bump_type="${{ steps.pr-labels.outputs.result }}"
 
           # Extract current version from pyproject.toml
-          current_version=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          current_version=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/' || true)
+
+          # Validate version extraction
+          if [ -z "$current_version" ]; then
+            echo "ERROR: Could not extract version from pyproject.toml"
+            exit 1
+          fi
+
           echo "Current version: $current_version"
 
           # Parse version components
@@ -124,15 +131,21 @@ jobs:
       - name: Create GitHub Release
         if: steps.pr-labels.outputs.result != 'none'
         uses: actions/github-script@v7
+        env:
+          NEW_VERSION: ${{ steps.bump-version.outputs.new_version }}
+          BUMP_TYPE: ${{ steps.bump-version.outputs.bump_type }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const newVersion = process.env.NEW_VERSION;
+            const bumpType = process.env.BUMP_TYPE;
+
             const { data: release } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: 'v${{ steps.bump-version.outputs.new_version }}',
-              name: 'Release v${{ steps.bump-version.outputs.new_version }}',
-              body: 'Release created by automated workflow (bump ${{ steps.bump-version.outputs.bump_type }})',
+              tag_name: `v${newVersion}`,
+              name: `Release v${newVersion}`,
+              body: `Release created by automated workflow (bump ${bumpType})`,
               draft: false,
               prerelease: false
             });
