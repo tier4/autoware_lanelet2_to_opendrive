@@ -298,14 +298,14 @@ The following Point-level attributes are created during preprocessing but are no
 
 For developers seeking to understand or modify tag handling:
 
-| Operation | File | Lines | Description |
-|-----------|------|-------|-------------|
-| **Road type extraction** | `opendrive/road.py` | 453-513 | Reads `location` and `speed_limit` tags |
-| **Lane type extraction** | `opendrive/lane.py` | 150-216 | Reads `subtype` and `speed_limit` tags |
-| **Junction filtering** | `junction.py` | 8-52 | Checks for `turn_direction` tag presence |
-| **Signal type mapping** | `opendrive/signal.py` | 281-304 | Reads `type`/`subtype` from traffic lights |
-| **Signal extraction** | `opendrive/signals_and_controllers.py` | 75-249 | Extracts regulatory elements |
-| **Subtype filtering** | `util.py` | 456-503 | Filters lanelets by `subtype` |
+| Operation | File | Code Link | Description |
+|-----------|------|-----------|-------------|
+| **Road type extraction** | `opendrive/road.py` | [Lines 453-513](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L453-L513) | Reads `location` and `speed_limit` tags |
+| **Lane type extraction** | `opendrive/lane.py` | [Lines 150-216](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L150-L216) | Reads `subtype` and `speed_limit` tags |
+| **Junction filtering** | `junction.py` | [Lines 8-52](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L8-L52) | Checks for `turn_direction` tag presence |
+| **Signal type mapping** | `opendrive/signal.py` | [Lines 281-304](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signal.py#L281-L304) | Reads `type`/`subtype` from traffic lights |
+| **Signal extraction** | `opendrive/signals_and_controllers.py` | [Lines 75-249](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py#L75-L249) | Extracts regulatory elements |
+| **Subtype filtering** | `util.py` | [Lines 456-503](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L456-L503) | Filters lanelets by `subtype` |
 
 ---
 

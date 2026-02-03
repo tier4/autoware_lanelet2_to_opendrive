@@ -73,3 +73,6 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/tier4/autoware_lanelet2_to_opendrive
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
