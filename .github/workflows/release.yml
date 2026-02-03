@@ -204,9 +204,10 @@ jobs:
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
           # Get git info
-          export GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          export GIT_COMMIT=$(git rev-parse --short HEAD)
-          export VERSION="${{ steps.bump-version.outputs.new_version }}"
+          GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          VERSION="${{ steps.bump-version.outputs.new_version }}"
+          export GIT_BRANCH GIT_COMMIT VERSION
 
           # Update mkdocs.yml with version info
           cat >> mkdocs.yml << EOF
@@ -222,7 +223,8 @@ jobs:
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
           # Enable PDF export
-          export ENABLE_PDF_EXPORT=1
+          ENABLE_PDF_EXPORT=1
+          export ENABLE_PDF_EXPORT
 
           # Build with PDF plugin enabled
           uv run mkdocs build

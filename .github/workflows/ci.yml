@@ -90,6 +90,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -118,9 +120,10 @@ jobs:
     - name: Build documentation with version info
       run: |
         # Get git info
-        export GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-        export GIT_COMMIT=$(git rev-parse --short HEAD)
-        export VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+        GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        GIT_COMMIT=$(git rev-parse --short HEAD)
+        VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+        export GIT_BRANCH GIT_COMMIT VERSION
 
         # Update mkdocs.yml with version info
         cat >> mkdocs.yml << EOF
