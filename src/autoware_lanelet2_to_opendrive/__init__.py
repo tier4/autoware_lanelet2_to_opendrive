@@ -5,6 +5,7 @@
 from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
 import lanelet2  # noqa: F401
 
+from .types import Point2D, Point3D, Point
 from .util import (
     ConnectionDirection,
     find_lanelets_without_next,
@@ -23,6 +24,9 @@ from .preprocess_lanelet import (
 )
 
 __all__ = [
+    "Point2D",
+    "Point3D",
+    "Point",
     "ConnectionDirection",
     "find_lanelets_without_next",
     "find_lanelets_without_previous",
