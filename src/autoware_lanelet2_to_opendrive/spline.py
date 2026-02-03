@@ -2,11 +2,35 @@
 
 import numpy as np
 import warnings
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
 from scipy.interpolate import BSpline
 from scipy.optimize import minimize_scalar
 
 from .config import DEFAULT_CONFIG
+
+
+@dataclass
+class DesignMatrices:
+    """Design matrices for constrained spline fitting.
+
+    Attributes:
+        basis_data: Basis functions evaluated at data points (N x num_control_points)
+        basis_start_vel: Basis function derivatives at start (1 x num_control_points)
+        basis_end_vel: Basis function derivatives at end (1 x num_control_points)
+        target_data: Target data points (N x 3)
+        target_start_vel: Target start velocity (1 x 3)
+        target_end_vel: Target end velocity (1 x 3)
+        weights: Constraint weights (hard, soft)
+    """
+
+    basis_data: np.ndarray
+    basis_start_vel: np.ndarray
+    basis_end_vel: np.ndarray
+    target_data: np.ndarray
+    target_start_vel: np.ndarray
+    target_end_vel: np.ndarray
+    weights: Dict[str, float]
 
 
 class Splines:
@@ -125,135 +149,27 @@ class Splines:
 
     def _fit_constrained_spline(self) -> None:
         """
-        Internal method to perform the constrained B-spline fitting.
+        Fit constrained B-spline through points with boundary conditions.
+
+        High-level orchestration of spline fitting pipeline:
+        1. Create parameterization (chord-length)
+        2. Create knot vector (curvature-adaptive)
+        3. Build design matrices for constraints
+        4. Solve constrained least squares problem
         """
-        # 1. Parameterization (Chord length parameterization)
-        dists = np.linalg.norm(np.diff(self.points, axis=0), axis=1)
-        self.t_data = np.concatenate(([0], np.cumsum(dists)))
-        self.t_max = self.t_data[-1]
+        # Step 1: Create parameterization
+        self.t_data, self.t_max = self._create_parameterization(self.points)
 
-        # Handle zero length case
-        if self.t_max == 0:
-            self.t_max = 1.0
-            self.t_data = np.linspace(0, 1, self.n_points)
-        else:
-            self.t_data /= self.t_max  # Normalize to 0.0 ~ 1.0
+        # Step 2: Create knot vector
+        self.knots = self._create_knot_vector(self.t_data, self.points)
 
-        # 2. Create knot vector (Adaptive based on curvature)
-        n_internal = self.num_control_points - (self.k + 1)
-        if n_internal < 0:
-            raise ValueError(f"Too few control points. Must be at least {self.k + 1}.")
-
-        if n_internal > 0:
-            # --- Curvature-adaptive knot placement logic ---
-
-            # A. Calculate tangent vectors for each segment
-            # diffs: (N-1, 3)
-            diffs = np.diff(self.points, axis=0)
-            norms = np.linalg.norm(diffs, axis=1)
-            # Avoid division by zero
-            norms[norms == 0] = 1.0
-            tangents = diffs / norms[:, None]
-
-            # B. Calculate angles between adjacent tangents (approximation of curvature)
-            # Compute angles corresponding to internal points
-
-            # Compute dot products to get angles (N-2 angles)
-            dot_products = np.sum(tangents[:-1] * tangents[1:], axis=1)
-            # Clip for numerical stability
-            dot_products = np.clip(dot_products, -1.0, 1.0)
-            angles = np.arccos(dot_products)
-
-            # C. Create weight distribution
-            # Create weight array for all data points (length equals N points)
-            # Endpoints have no angle, so set to 0
-            curvature_metric = np.concatenate(([0], angles, [0]))
-
-            # Density function D(t) for knot placement
-            # alpha: weight for uniformity (larger values approach uniform spacing)
-            # beta:  weight for curvature (larger values concentrate knots at curves)
-            alpha = DEFAULT_CONFIG.spline.knot_alpha_weight
-            beta = DEFAULT_CONFIG.spline.knot_beta_weight
-
-            # Define "importance" weight for each interval
-            # Using curvature_metric at point positions
-
-            weights = alpha + beta * curvature_metric
-
-            # D. Create Cumulative Distribution Function (CDF)
-            # Accumulate weights along t_data
-            cdf = np.cumsum(weights)
-            cdf_normalized = cdf / cdf[-1]
-
-            # E. Select knots uniformly in CDF space and map back to t-space (Inverse Transform Sampling)
-            # Create target positions in CDF space for internal knots
-            target_knots_cdf = np.linspace(0, 1, n_internal + 2)[1:-1]
-
-            # Find t_data values (x-axis) where cdf_normalized (y-axis) equals target_knots_cdf
-            internal_knots = np.interp(target_knots_cdf, cdf_normalized, self.t_data)
-
-            # --- End of curvature-adaptive logic ---
-        else:
-            internal_knots = []
-
-        self.knots = np.concatenate(
-            [
-                np.zeros(self.k + 1),
-                internal_knots,
-                np.ones(self.k + 1),
-            ]
+        # Step 3: Build design matrices
+        matrices = self._build_design_matrices(
+            self.t_data, self.knots, self.points, self.start_vel, self.end_vel
         )
 
-        # 3. Build Design Matrix
-        # Data fitting term (Soft constraint)
-        A_fit = self._get_basis_matrix(self.t_data, deriv=0)
-        b_fit = self.points
-
-        # Boundary condition terms (Hard constraints)
-        # Positions at t=0, t=1
-        A_pos_start = self._get_basis_matrix([0.0], deriv=0)
-        A_pos_end = self._get_basis_matrix([1.0], deriv=0)
-
-        # Derivatives (Tangent vectors) at t=0, t=1
-        A_vel_start = self._get_basis_matrix([0.0], deriv=1)
-        A_vel_end = self._get_basis_matrix([1.0], deriv=1)
-
-        # 4. Setup Least Squares with weights
-        w_hard = DEFAULT_CONFIG.spline.hard_constraint_weight
-        w_soft = DEFAULT_CONFIG.spline.soft_constraint_weight
-
-        # Combine matrices
-        A_combined = np.vstack(
-            [
-                A_fit * w_soft,
-                A_pos_start * w_hard,
-                A_pos_end * w_hard,
-                A_vel_start * w_hard,
-                A_vel_end * w_hard,
-            ]
-        )
-
-        # Combine targets (scale velocities by t_max for normalized parameter space)
-        b_combined = np.vstack(
-            [
-                b_fit * w_soft,
-                self.points[[0]] * w_hard,  # Start position
-                self.points[[-1]] * w_hard,  # End position
-                (self.start_vel * self.t_max * w_hard).reshape(
-                    1, -1
-                ),  # Start velocity (scaled)
-                (self.end_vel * self.t_max * w_hard).reshape(
-                    1, -1
-                ),  # End velocity (scaled)
-            ]
-        )
-
-        # 5. Solve for control points (Least Squares)
-        coeffs_x, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 0], rcond=None)
-        coeffs_y, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 1], rcond=None)
-        coeffs_z, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 2], rcond=None)
-
-        self.coeffs = np.column_stack([coeffs_x, coeffs_y, coeffs_z])
+        # Step 4: Solve least squares problem
+        self.coeffs = self._solve_constrained_least_squares(matrices)
 
         # Create the B-Spline object
         self.spline = BSpline(self.knots, self.coeffs, self.k)
@@ -263,6 +179,226 @@ class Splines:
 
         # Check soft constraints and warn if fitting error is large
         self._check_soft_constraints()
+
+    def _create_parameterization(self, points: np.ndarray) -> Tuple[np.ndarray, float]:
+        """
+        Create chord-length parameterization for input points.
+
+        Args:
+            points: Nx3 array of data points
+
+        Returns:
+            Tuple of (t_values, t_max) where:
+                t_values: Parameter values t_i in [0, 1]
+                t_max: Maximum parameter value before normalization
+        """
+        # Compute cumulative chord lengths
+        dists = np.linalg.norm(np.diff(points, axis=0), axis=1)
+        t_data = np.concatenate(([0], np.cumsum(dists)))
+        t_max = t_data[-1]
+
+        # Handle zero length case
+        if t_max == 0:
+            t_max = 1.0
+            t_data = np.linspace(0, 1, len(points))
+        else:
+            t_data /= t_max  # Normalize to 0.0 ~ 1.0
+
+        return t_data, t_max
+
+    def _compute_curvature_weights(self, points: np.ndarray) -> np.ndarray:
+        """
+        Compute curvature-based weights for adaptive knot placement.
+
+        Calculates angles between adjacent tangent vectors as an approximation
+        of curvature. Higher angles (sharper turns) receive higher weights.
+
+        Args:
+            points: Nx3 array of data points
+
+        Returns:
+            Weights for each point based on local curvature (length N)
+        """
+        # A. Calculate tangent vectors for each segment
+        diffs = np.diff(points, axis=0)
+        norms = np.linalg.norm(diffs, axis=1)
+        # Avoid division by zero
+        norms[norms == 0] = 1.0
+        tangents = diffs / norms[:, None]
+
+        # B. Calculate angles between adjacent tangents (approximation of curvature)
+        # Compute dot products to get angles (N-2 angles)
+        dot_products = np.sum(tangents[:-1] * tangents[1:], axis=1)
+        # Clip for numerical stability
+        dot_products = np.clip(dot_products, -1.0, 1.0)
+        angles = np.arccos(dot_products)
+
+        # C. Create weight distribution
+        # Endpoints have no angle, so set to 0
+        curvature_metric = np.concatenate(([0], angles, [0]))
+
+        # Density function D(t) for knot placement
+        # alpha: weight for uniformity (larger values approach uniform spacing)
+        # beta:  weight for curvature (larger values concentrate knots at curves)
+        alpha = DEFAULT_CONFIG.spline.knot_alpha_weight
+        beta = DEFAULT_CONFIG.spline.knot_beta_weight
+
+        weights = alpha + beta * curvature_metric
+
+        return weights
+
+    def _create_knot_vector(
+        self, t_values: np.ndarray, points: np.ndarray
+    ) -> np.ndarray:
+        """
+        Create curvature-adaptive knot vector for B-spline.
+
+        Uses inverse transform sampling to place knots based on curvature:
+        more knots are placed in high-curvature regions.
+
+        Args:
+            t_values: Parameter values for data points (length N)
+            points: Original data points for curvature calculation (Nx3)
+
+        Returns:
+            Knot vector for B-spline basis (includes endpoint multiplicities)
+        """
+        n_internal = self.num_control_points - (self.k + 1)
+        if n_internal < 0:
+            raise ValueError(f"Too few control points. Must be at least {self.k + 1}.")
+
+        if n_internal > 0:
+            # Compute curvature-based weights
+            weights = self._compute_curvature_weights(points)
+
+            # Create Cumulative Distribution Function (CDF)
+            cdf = np.cumsum(weights)
+            cdf_normalized = cdf / cdf[-1]
+
+            # Select knots uniformly in CDF space and map back to t-space
+            # (Inverse Transform Sampling)
+            target_knots_cdf = np.linspace(0, 1, n_internal + 2)[1:-1]
+            internal_knots = np.interp(target_knots_cdf, cdf_normalized, t_values)
+        else:
+            internal_knots = []
+
+        # Create full knot vector with endpoint multiplicities
+        knots = np.concatenate(
+            [
+                np.zeros(self.k + 1),
+                internal_knots,
+                np.ones(self.k + 1),
+            ]
+        )
+
+        return knots
+
+    def _build_design_matrices(
+        self,
+        t_values: np.ndarray,
+        knot_vector: np.ndarray,
+        points: np.ndarray,
+        start_vel: np.ndarray,
+        end_vel: np.ndarray,
+    ) -> DesignMatrices:
+        """
+        Build design matrices for constrained least squares.
+
+        Creates basis function matrices for data fitting (soft constraints)
+        and boundary conditions (hard constraints).
+
+        Args:
+            t_values: Parameter values for data points
+            knot_vector: Knot vector for basis functions
+            points: Data points to fit
+            start_vel: Desired start velocity
+            end_vel: Desired end velocity
+
+        Returns:
+            DesignMatrices containing all components for solving
+        """
+        # Data fitting term (Soft constraint)
+        A_fit = self._get_basis_matrix(t_values, deriv=0)
+        b_fit = points
+
+        # Boundary condition terms (Hard constraints)
+        # Derivatives (Tangent vectors) at t=0, t=1
+        A_vel_start = self._get_basis_matrix([0.0], deriv=1)
+        A_vel_end = self._get_basis_matrix([1.0], deriv=1)
+
+        # Get weights from config
+        w_hard = DEFAULT_CONFIG.spline.hard_constraint_weight
+        w_soft = DEFAULT_CONFIG.spline.soft_constraint_weight
+
+        # Package everything into DesignMatrices dataclass
+        matrices = DesignMatrices(
+            basis_data=A_fit,
+            basis_start_vel=A_vel_start,
+            basis_end_vel=A_vel_end,
+            target_data=b_fit,
+            target_start_vel=start_vel,
+            target_end_vel=end_vel,
+            weights={"hard": w_hard, "soft": w_soft},
+        )
+
+        return matrices
+
+    def _solve_constrained_least_squares(self, matrices: DesignMatrices) -> np.ndarray:
+        """
+        Solve weighted least squares with hard and soft constraints.
+
+        Combines data fitting constraints (soft) and boundary conditions (hard)
+        into a single weighted least squares problem.
+
+        Args:
+            matrices: Pre-assembled design matrices and targets
+
+        Returns:
+            Optimal control points (num_control_points x 3)
+        """
+        w_hard = matrices.weights["hard"]
+        w_soft = matrices.weights["soft"]
+
+        # Get boundary position constraints
+        # We need to get the actual start/end positions from target_data
+        # since DesignMatrices doesn't store them separately
+        start_pos = matrices.target_data[[0]]
+        end_pos = matrices.target_data[[-1]]
+
+        # Build basis matrices for position constraints
+        A_pos_start = self._get_basis_matrix([0.0], deriv=0)
+        A_pos_end = self._get_basis_matrix([1.0], deriv=0)
+
+        # Combine matrices with weights
+        A_combined = np.vstack(
+            [
+                matrices.basis_data * w_soft,
+                A_pos_start * w_hard,
+                A_pos_end * w_hard,
+                matrices.basis_start_vel * w_hard,
+                matrices.basis_end_vel * w_hard,
+            ]
+        )
+
+        # Combine targets (scale velocities by t_max for normalized parameter space)
+        b_combined = np.vstack(
+            [
+                matrices.target_data * w_soft,
+                start_pos * w_hard,
+                end_pos * w_hard,
+                (matrices.target_start_vel * self.t_max * w_hard).reshape(1, -1),
+                (matrices.target_end_vel * self.t_max * w_hard).reshape(1, -1),
+            ]
+        )
+
+        # Solve for control points (Least Squares)
+        coeffs_x, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 0], rcond=None)
+        coeffs_y, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 1], rcond=None)
+        coeffs_z, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 2], rcond=None)
+
+        coeffs = np.column_stack([coeffs_x, coeffs_y, coeffs_z])
+
+        return coeffs
 
     def _verify_hard_constraints(
         self,

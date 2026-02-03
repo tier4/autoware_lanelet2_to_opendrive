@@ -28,7 +28,7 @@ The package provides functionality to convert Lanelet2 map format to OpenDRIVE f
 
 ### Preprocessing and Conversion Pipeline
 
-::: autoware_lanelet2_to_opendrive.main.preprocess_and_convert
+::: autoware_lanelet2_to_opendrive.main.preprocess_and_convert_with_hydra
     options:
       show_root_heading: true
       heading_level: 4
