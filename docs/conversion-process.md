@@ -163,6 +163,63 @@ Format: `+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m
 
 Eight preprocessing operation types are available, executed in this order:
 
+---
+
+##### **Preprocessing Operation Parameters Summary**
+
+The following table lists all preprocessing operations and their parameters:
+
+| Operation | Parameter | Type | Required | Default | Description |
+|-----------|-----------|------|----------|---------|-------------|
+| **Move Point** | `point_id` | int | ✓ | - | ID of point to move |
+| | `new_x` | float | ✓ | - | New X coordinate (meters) |
+| | `new_y` | float | ✓ | - | New Y coordinate (meters) |
+| | `new_z` | float | ✗ | (unchanged) | New Z coordinate (meters) |
+| **Delete Point** | `point_ids` | List[int] | ✓ | - | List of point IDs to delete |
+| **Validate** | `first_lanelet_id` | int | ✓ | - | ID of first lanelet |
+| | `second_lanelet_id` | int | ✓ | - | ID of second lanelet (successor) |
+| | `tolerance` | float | ✗ | 0.001 | Max distance for continuity (meters) |
+| **Replace** | `lanelet_ids` | List[int] | ✓ | - | List of lanelet IDs to merge and replace |
+| | `validate` | bool | ✗ | false | Validate continuity before merging |
+| | `tolerance` | float | ✗ | 0.001 | Max distance for continuity check (meters) |
+| **Merge** | `lanelet_ids` | List[int] | ✓ | - | List of lanelet IDs to merge |
+| | `validate` | bool | ✗ | false | Validate continuity before merging |
+| | `base_id` | int | ✗ | (auto) | Base ID for merged lanelet |
+| | `tolerance` | float | ✗ | 0.001 | Max distance for continuity check (meters) |
+| **Remove** | `lanelet_ids` | List[int] | ✓ | - | List of lanelet IDs to remove (old style) |
+| **Remove Lanelet** | `lanelet_ids` | List[int] | ✓ | - | List of lanelet IDs to completely remove |
+| **Remove Turn Direction** | `lanelet_ids` | List[int] | ✓ | - | List of lanelet IDs (empty = all lanelets) |
+
+**Key:**
+- ✓ = Required parameter
+- ✗ = Optional parameter
+- Default values from [config.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/config.py) and operation dataclasses
+
+---
+
+##### **Operation Behavior and Impact**
+
+| Operation | Modifies Map | Creates New Elements | Removes Elements | Validation | Use Case |
+|-----------|--------------|----------------------|------------------|------------|----------|
+| **Move Point** | ✓ | ✗ | ✗ | ✗ | Fix misaligned geometry, adjust point positions |
+| **Delete Point** | ✓ | ✗ | ✓ (points) | Min 2 points/linestring | Remove redundant points, simplify geometry |
+| **Validate** | ✗ | ✗ | ✗ | ✓ | Debug connectivity, verify lanelet continuity |
+| **Replace** | ✓ | ✓ (merged) | ✓ (originals) | Optional | Merge lanelets and remove originals |
+| **Merge** | ✓ | ✓ (merged) | ✗ | Optional | Create merged lanelet, keep originals |
+| **Remove** | ✓ | ✗ | ✓ (lanelets) | ✗ | Legacy removal (prefer Remove Lanelet) |
+| **Remove Lanelet** | ✓ | ✗ | ✓ (lanelets) | ✗ | Completely remove unwanted lanelets |
+| **Remove Turn Direction** | ✓ | ✗ | ✗ | ✗ | Convert junction lanelets to regular roads |
+
+**Execution Order:** Move Point → Delete Point → Validate → Replace → Merge → Remove → Remove Lanelet → Remove Turn Direction
+
+**Key:**
+- ✓ = Yes / Applies
+- ✗ = No / Does not apply
+
+---
+
+##### **Detailed Operation Descriptions**
+
 **A. Move Point Operations** ([geometry.py:311-379](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L311-L379))
 ```yaml
 move_point_operations:
