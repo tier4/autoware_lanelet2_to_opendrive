@@ -1,5 +1,6 @@
 """Preprocessing script for Lanelet2 maps using configurable operations."""
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Union, Any
 from pathlib import Path
@@ -36,18 +37,41 @@ class OperationType(Enum):
 
 
 @dataclass
-class MergeOperation:
-    """Configuration for merge operations."""
+class PreprocessingOperation(ABC):
+    """Base class for lanelet preprocessing operations with tolerance initialization.
 
-    lanelet_ids: List[int]
-    validate: bool = True
-    tolerance: Optional[float] = None
-    base_id: Optional[int] = None
+    Provides common tolerance initialization logic from config. Subclasses must implement
+    _get_default_tolerance() to specify their default tolerance value.
+    """
+
+    tolerance: Optional[float] = field(default=None, kw_only=True)
 
     def __post_init__(self):
         """Set default tolerance from config if not specified."""
         if self.tolerance is None:
-            self.tolerance = DEFAULT_CONFIG.preprocessing.merge_tolerance_default
+            self.tolerance = self._get_default_tolerance()
+
+    @abstractmethod
+    def _get_default_tolerance(self) -> float:
+        """Get the default tolerance for this operation type.
+
+        Returns:
+            The default tolerance value from configuration.
+        """
+        pass
+
+
+@dataclass
+class MergeOperation(PreprocessingOperation):
+    """Configuration for merge operations."""
+
+    lanelet_ids: List[int]
+    validate: bool = True
+    base_id: Optional[int] = None
+
+    def _get_default_tolerance(self) -> float:
+        """Get the default tolerance for merge operations."""
+        return DEFAULT_CONFIG.preprocessing.merge_tolerance_default
 
 
 @dataclass
@@ -58,31 +82,27 @@ class RemoveOperation:
 
 
 @dataclass
-class ReplaceOperation:
+class ReplaceOperation(PreprocessingOperation):
     """Configuration for replace operations."""
 
     lanelet_ids: List[int]
     validate: bool = True
-    tolerance: Optional[float] = None
 
-    def __post_init__(self):
-        """Set default tolerance from config if not specified."""
-        if self.tolerance is None:
-            self.tolerance = DEFAULT_CONFIG.preprocessing.replace_tolerance_default
+    def _get_default_tolerance(self) -> float:
+        """Get the default tolerance for replace operations."""
+        return DEFAULT_CONFIG.preprocessing.replace_tolerance_default
 
 
 @dataclass
-class ValidateOperation:
+class ValidateOperation(PreprocessingOperation):
     """Configuration for validate operations."""
 
     first_lanelet_id: int
     second_lanelet_id: int
-    tolerance: Optional[float] = None
 
-    def __post_init__(self):
-        """Set default tolerance from config if not specified."""
-        if self.tolerance is None:
-            self.tolerance = DEFAULT_CONFIG.preprocessing.validate_tolerance_default
+    def _get_default_tolerance(self) -> float:
+        """Get the default tolerance for validate operations."""
+        return DEFAULT_CONFIG.preprocessing.validate_tolerance_default
 
 
 @dataclass
