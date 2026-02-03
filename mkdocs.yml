@@ -7,6 +7,7 @@ repo_name: tier4/autoware_lanelet2_to_opendrive
 theme:
   name: material
   language: en
+  custom_dir: overrides
   palette:
     # Light mode
     - scheme: default
@@ -32,6 +33,10 @@ theme:
 
 plugins:
   - search
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+      fallback_to_build_date: true
   - mkdocstrings:
       handlers:
         python:
@@ -40,6 +45,15 @@ plugins:
             show_source: true
             show_root_heading: true
             show_root_full_path: false
+  - with-pdf:
+      author: Tier4 Autoware Team
+      copyright: Copyright © 2025 Tier4
+      cover_title: Autoware Lanelet2 to OpenDRIVE
+      cover_subtitle: Release Notes and Documentation
+      output_path: pdf/release-notes.pdf
+      enabled_if_env: ENABLE_PDF_EXPORT
+      exclude_pages:
+        - 'api/'
 
 markdown_extensions:
   - admonition
@@ -61,10 +75,17 @@ nav:
   - Usage: usage.md
   - Known Limitations: limitations.md
   - Signals: signals.md
+  - Release Notes: release-notes.md
   - API Reference: api.md
   - Development: development.md
 
 extra:
+  version:
+    provider: mike
+    default: latest
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/tier4/autoware_lanelet2_to_opendrive
+  version_string: v1.2.2-dev
+  git_branch: docs/add-release-notes-with-pdf-html
+  git_commit: d7d2309

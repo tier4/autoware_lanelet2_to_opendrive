@@ -115,8 +115,22 @@ jobs:
       env:
         GIT_AUTH_TOKEN: ${{ secrets.GH_PAT }}
 
-    - name: Build documentation
-      run: uv run mkdocs build --strict
+    - name: Build documentation with version info
+      run: |
+        # Get git info
+        export GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        export GIT_COMMIT=$(git rev-parse --short HEAD)
+        export VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+
+        # Update mkdocs.yml with version info
+        cat >> mkdocs.yml << EOF
+          version_string: v${VERSION}
+          git_branch: ${GIT_BRANCH}
+          git_commit: ${GIT_COMMIT}
+        EOF
+
+        # Build documentation
+        uv run mkdocs build --strict
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v4

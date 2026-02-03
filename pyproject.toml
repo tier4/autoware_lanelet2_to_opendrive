@@ -33,14 +33,18 @@ preprocess-lanelet = "autoware_lanelet2_to_opendrive.preprocess_lanelet:main"
 dev = [
     "black>=25.11.0",
     "lark>=1.3.1",
+    "mike>=2.1.3",
     "mkdocs>=1.6.0",
+    "mkdocs-git-revision-date-localized-plugin>=1.5.1",
     "mkdocs-material>=9.5.0",
+    "mkdocs-with-pdf>=0.9.3",
     "mkdocstrings[python]>=0.27.0",
     "mypy>=1.19.0",
     "pre-commit>=4.5.0",
     "pytest>=9.0.1",
     "pytest-testmon>=2.2.0",
     "pytest-xdist>=3.8.0",
+    "weasyprint>=68.0",
 ]
 
 [tool.pytest.ini_options]
