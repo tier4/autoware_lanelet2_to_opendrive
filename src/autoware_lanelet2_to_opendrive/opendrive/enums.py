@@ -74,3 +74,23 @@ class ElementType(Enum):
 
     ROAD = "road"
     JUNCTION = "junction"
+
+
+class RoadType(Enum):
+    """Road type classification according to OpenDRIVE standard."""
+
+    UNKNOWN = "unknown"
+    RURAL = "rural"
+    MOTORWAY = "motorway"
+    TOWN = "town"
+    LOW_SPEED = "lowSpeed"
+    PEDESTRIAN = "pedestrian"
+    BICYCLE = "bicycle"
+
+
+class SpeedUnit(Enum):
+    """Speed unit for speed limits."""
+
+    MS = "m/s"  # meters per second
+    MPH = "mph"  # miles per hour
+    KMH = "km/h"  # kilometers per hour

@@ -1,9 +1,10 @@
 """OpenDRIVE lane element definitions."""
 
 from dataclasses import dataclass
+from typing import Optional
 import lxml.etree as ET
 
-from .enums import RoadMarkType, RoadMarkColor
+from .enums import RoadMarkType, RoadMarkColor, SpeedUnit, RoadType
 
 
 @dataclass
@@ -92,4 +93,68 @@ class LaneHeight:
         elem.set("sOffset", str(self.s_offset))
         elem.set("inner", str(self.inner))
         elem.set("outer", str(self.outer))
+        return elem
+
+
+@dataclass
+class LaneSpeed:
+    """Lane speed limit definition.
+
+    Represents individual lane speed limits in OpenDRIVE format.
+    Corresponds to <lane><speed> element.
+    """
+
+    s_offset: float
+    max: float
+    unit: SpeedUnit = SpeedUnit.KMH
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("speed")
+        elem.set("sOffset", str(self.s_offset))
+        elem.set("max", str(self.max))
+        elem.set("unit", self.unit.value)
+        return elem
+
+
+@dataclass
+class RoadTypeSpeed:
+    """Road type speed limit definition.
+
+    Represents speed limits for a road type in OpenDRIVE format.
+    Corresponds to <road><type><speed> element.
+    """
+
+    max: float
+    unit: SpeedUnit = SpeedUnit.KMH
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("speed")
+        elem.set("max", str(self.max))
+        elem.set("unit", self.unit.value)
+        return elem
+
+
+@dataclass
+class RoadTypeDefinition:
+    """Road type definition.
+
+    Represents road type information in OpenDRIVE format.
+    Corresponds to <road><type> element.
+    """
+
+    s: float
+    type: RoadType
+    speed: Optional[RoadTypeSpeed] = None
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("type")
+        elem.set("s", str(self.s))
+        elem.set("type", self.type.value)
+
+        if self.speed:
+            elem.append(self.speed.to_xml())
+
         return elem
