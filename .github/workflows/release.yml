@@ -230,8 +230,8 @@ jobs:
           uv run mkdocs build
 
           # Copy PDF to root for easy access
-          if [ -f site/pdf/release-notes.pdf ]; then
-            cp site/pdf/release-notes.pdf release-notes-v${{ steps.bump-version.outputs.new_version }}.pdf
+          if [ -f site/pdf/documentation.pdf ]; then
+            cp site/pdf/documentation.pdf documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
           fi
 
       - name: Create documentation archive
@@ -259,8 +259,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: ./release-notes-v${{ steps.bump-version.outputs.new_version }}.pdf
-          asset_name: release-notes-v${{ steps.bump-version.outputs.new_version }}.pdf
+          asset_path: ./documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          asset_name: documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
           asset_content_type: application/pdf
 
       - name: Deploy to GitHub Pages with mike

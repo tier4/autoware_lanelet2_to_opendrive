@@ -49,8 +49,8 @@ plugins:
       author: Tier4 Autoware Team
       copyright: Copyright © 2025 Tier4
       cover_title: Autoware Lanelet2 to OpenDRIVE
-      cover_subtitle: Release Notes and Documentation
-      output_path: pdf/release-notes.pdf
+      cover_subtitle: Documentation
+      output_path: pdf/documentation.pdf
       enabled_if_env: ENABLE_PDF_EXPORT
       verbose: false
       exclude_pages:
@@ -76,7 +76,6 @@ nav:
   - Usage: usage.md
   - Known Limitations: limitations.md
   - Signals: signals.md
-  - Release Notes: release-notes.md
   - API Reference: api.md
   - Development: development.md
 
