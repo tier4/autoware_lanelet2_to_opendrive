@@ -1,31 +1,11 @@
 {% extends "base.html" %}
 
-{% block announce %}
-  <style>
-    .md-version__current {
-      font-weight: bold;
-    }
-    .version-info {
-      background-color: var(--md-code-bg-color);
-      padding: 0.5em 1em;
-      border-radius: 0.2em;
-      margin-bottom: 1em;
-      font-family: var(--md-code-font-family);
-      font-size: 0.85em;
-    }
-    .version-info .label {
-      font-weight: bold;
-      color: var(--md-primary-fg-color);
-    }
-  </style>
-
-  <div class="version-info">
-    <span class="label">Version:</span> {{ config.extra.version_string | default('dev') }}
-    {% if config.extra.git_branch %}
-    | <span class="label">Branch:</span> {{ config.extra.git_branch }}
-    {% endif %}
-    {% if config.extra.git_commit %}
-    | <span class="label">Commit:</span> <a href="{{ config.repo_url }}/commit/{{ config.extra.git_commit }}" target="_blank">{{ config.extra.git_commit[:7] }}</a>
-    {% endif %}
-  </div>
+<!-- Version warning for outdated documentation (only shown when using mike versioning) -->
+{% block outdated %}
+  {% if version is defined and version.title %}
+    You are viewing documentation for version <strong>{{ version.title }}</strong>.
+    <a href="{{ '../' ~ base_url }}">
+      <strong>Click here to view the latest version.</strong>
+    </a>
+  {% endif %}
 {% endblock %}

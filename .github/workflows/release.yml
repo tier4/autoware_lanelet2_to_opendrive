@@ -261,14 +261,20 @@ jobs:
           asset_name: release-notes-v${{ steps.bump-version.outputs.new_version }}.pdf
           asset_content_type: application/pdf
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages with mike
         if: steps.pr-labels.outputs.bump_type != 'none'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./site
-          publish_branch: gh-pages
-          commit_message: "docs: deploy documentation v${{ steps.bump-version.outputs.new_version }}"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Fetch gh-pages branch
+          git fetch origin gh-pages --depth=1 || true
+
+          # Deploy new version with mike
+          uv run mike deploy --push --update-aliases ${{ steps.bump-version.outputs.new_version }} latest
+
+          # Set latest as default version
+          uv run mike set-default --push latest
 
       - name: No version bump needed
         if: steps.pr-labels.outputs.bump_type == 'none'

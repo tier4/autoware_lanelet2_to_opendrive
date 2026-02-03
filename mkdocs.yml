@@ -83,9 +83,7 @@ extra:
   version:
     provider: mike
     default: latest
+    alias: true
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/tier4/autoware_lanelet2_to_opendrive
-  version_string: v1.2.2-dev
-  git_branch: docs/add-release-notes-with-pdf-html
-  git_commit: d7d2309
