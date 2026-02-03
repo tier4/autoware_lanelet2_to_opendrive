@@ -1,11 +1,67 @@
 import numpy as np
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Union
 import lanelet2
 import logging
 
 from .config import DEFAULT_CONFIG
+from .types import Point2D, Point3D
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_point2d(p: Union[Point2D, Point3D, np.ndarray, List[float]]) -> Point2D:
+    """Convert any point representation to Point2D.
+
+    This helper function provides backward compatibility with legacy code
+    using numpy arrays or lists, while also accepting the new Point types.
+
+    Args:
+        p: Point as Point2D, Point3D, numpy array, or list
+
+    Returns:
+        Point2D instance
+
+    Example:
+        ```python
+        # Works with all representations
+        p1 = ensure_point2d([1.0, 2.0])
+        p2 = ensure_point2d(np.array([1.0, 2.0]))
+        p3 = ensure_point2d(Point2D(1.0, 2.0))
+        p4 = ensure_point2d(Point3D(1.0, 2.0, 3.0))  # Drops z
+        ```
+    """
+    if isinstance(p, Point2D):
+        return p
+    if isinstance(p, Point3D):
+        return p.to_2d()
+    # Handle numpy array or list
+    return Point2D.from_array(p)
+
+
+def ensure_point3d(p: Union[Point3D, np.ndarray, List[float]]) -> Point3D:
+    """Convert any 3D point representation to Point3D.
+
+    This helper function provides backward compatibility with legacy code
+    using numpy arrays or lists, while also accepting the new Point3D type.
+
+    Args:
+        p: Point as Point3D, numpy array, or list (must have 3 elements)
+
+    Returns:
+        Point3D instance
+
+    Example:
+        ```python
+        # Works with all representations
+        p1 = ensure_point3d([1.0, 2.0, 3.0])
+        p2 = ensure_point3d(np.array([1.0, 2.0, 3.0]))
+        p3 = ensure_point3d(Point3D(1.0, 2.0, 3.0))
+        ```
+    """
+    if isinstance(p, Point3D):
+        return p
+    # Handle numpy array or list
+    return Point3D.from_array(p)
 
 
 def point_to_line_segment_distance(
@@ -130,9 +186,12 @@ def line_line_intersection_2d(
     """
     Calculate the intersection point of two 2D lines defined by two points each.
 
+    **Legacy function**: This function accepts numpy arrays for backward compatibility.
+    For new code, consider using `line_line_intersection_typed` with Point2D/Point3D.
+
     Args:
-        p1, p2: Points defining the first line
-        p3, p4: Points defining the second line
+        p1, p2: Points defining the first line (numpy array or list)
+        p3, p4: Points defining the second line (numpy array or list)
 
     Returns:
         Intersection point as numpy array, or None if lines are parallel
@@ -169,6 +228,83 @@ def line_line_intersection_2d(
             intersection = np.append(intersection, z)
 
         return intersection
+
+    except np.linalg.LinAlgError:
+        # Lines are parallel or coincident
+        return None
+
+
+def line_line_intersection_typed(
+    p1: Union[Point2D, Point3D],
+    p2: Union[Point2D, Point3D],
+    p3: Union[Point2D, Point3D],
+    p4: Union[Point2D, Point3D],
+) -> Optional[Union[Point2D, Point3D]]:
+    """
+    Calculate the intersection point of two lines with type-safe Point classes.
+
+    This is the type-safe version of `line_line_intersection_2d` that uses
+    Point2D/Point3D instead of numpy arrays. Dimension errors are caught at
+    type-check time rather than runtime.
+
+    Args:
+        p1, p2: Points defining the first line
+        p3, p4: Points defining the second line
+
+    Returns:
+        Intersection point (same type as input points), or None if lines are parallel
+
+    Example:
+        ```python
+        # Type-safe 2D intersection
+        p1 = Point2D(0.0, 0.0)
+        p2 = Point2D(1.0, 1.0)
+        p3 = Point2D(0.0, 1.0)
+        p4 = Point2D(1.0, 0.0)
+        intersection = line_line_intersection_typed(p1, p2, p3, p4)
+
+        # Type-safe 3D intersection (projects to 2D, returns 3D with interpolated z)
+        p1_3d = Point3D(0.0, 0.0, 0.0)
+        p2_3d = Point3D(1.0, 1.0, 1.0)
+        p3_3d = Point3D(0.0, 1.0, 0.5)
+        p4_3d = Point3D(1.0, 0.0, 0.5)
+        intersection_3d = line_line_intersection_typed(p1_3d, p2_3d, p3_3d, p4_3d)
+        ```
+    """
+    # Determine if we're working with 3D points
+    is_3d = isinstance(p1, Point3D)
+
+    # Convert to 2D for intersection calculation
+    p1_2d = ensure_point2d(p1)
+    p2_2d = ensure_point2d(p2)
+    p3_2d = ensure_point2d(p3)
+    p4_2d = ensure_point2d(p4)
+
+    # Line 1: p1 + t * (p2 - p1)
+    # Line 2: p3 + s * (p4 - p3)
+    d1 = p2_2d.to_array() - p1_2d.to_array()
+    d2 = p4_2d.to_array() - p3_2d.to_array()
+
+    # Solve: p1 + t * d1 = p3 + s * d2
+    # Rearrange: t * d1 - s * d2 = p3 - p1
+    A = np.column_stack([d1, -d2])
+    b = p3_2d.to_array() - p1_2d.to_array()
+
+    try:
+        solution = np.linalg.solve(A, b)
+        t = solution[0]
+
+        # Calculate intersection point in 2D
+        intersection_arr = p1_2d.to_array() + t * d1
+        intersection_2d = Point2D.from_array(intersection_arr)
+
+        # If original points were 3D, interpolate z and return Point3D
+        if is_3d:
+            assert isinstance(p1, Point3D) and isinstance(p2, Point3D)
+            z = p1.z + t * (p2.z - p1.z)
+            return Point3D(intersection_2d.x, intersection_2d.y, z)
+
+        return intersection_2d
 
     except np.linalg.LinAlgError:
         # Lines are parallel or coincident
