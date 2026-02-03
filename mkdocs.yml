@@ -44,7 +44,11 @@ plugins:
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -61,6 +65,7 @@ nav:
   - Usage: usage.md
   - Known Limitations: limitations.md
   - Signals: signals.md
+  - Conversion Process: conversion-process.md
   - API Reference: api.md
   - Development: development.md
 
