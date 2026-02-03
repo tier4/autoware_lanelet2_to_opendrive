@@ -52,6 +52,7 @@ plugins:
       cover_subtitle: Release Notes and Documentation
       output_path: pdf/release-notes.pdf
       enabled_if_env: ENABLE_PDF_EXPORT
+      verbose: false
       exclude_pages:
         - 'api/'
 

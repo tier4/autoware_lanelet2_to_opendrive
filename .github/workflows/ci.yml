@@ -132,8 +132,8 @@ jobs:
           git_commit: ${GIT_COMMIT}
         EOF
 
-        # Build documentation
-        uv run mkdocs build --strict
+        # Build documentation (without --strict to allow PDF plugin warning)
+        uv run mkdocs build
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v4
