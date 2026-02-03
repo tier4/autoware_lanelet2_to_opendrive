@@ -44,7 +44,7 @@ class PreprocessingOperation(ABC):
     _get_default_tolerance() to specify their default tolerance value.
     """
 
-    tolerance: Optional[float] = None
+    tolerance: Optional[float] = field(default=None, kw_only=True)
 
     def __post_init__(self):
         """Set default tolerance from config if not specified."""
