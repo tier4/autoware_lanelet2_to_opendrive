@@ -30,45 +30,98 @@ def point_to_line_segment_distance(
     seg_vec = seg_end[:2] - seg_start[:2]
     seg_length = np.linalg.norm(seg_vec)
 
+    # Guard: Handle degenerate segment
     if seg_length < DEFAULT_CONFIG.geometry.epsilon:
         return np.linalg.norm(point[:2] - seg_start[:2])
 
     seg_unit = seg_vec / seg_length
 
-    if direction is not None:
-        direction_2d = direction[:2] / np.linalg.norm(direction[:2])
+    # Guard: If no direction specified, use shortest distance
+    if direction is None:
+        return _calculate_shortest_distance_to_segment(
+            point, seg_start, seg_unit, seg_length
+        )
 
-        # Find intersection of ray from point in given direction with infinite line
-        # Line equation: seg_start + s * seg_unit
-        # Ray equation: point + t * direction
-        # Solve: seg_start + s * seg_unit = point + t * direction
+    # Calculate distance in specified direction
+    return _calculate_distance_in_direction(
+        point, seg_start, seg_unit, seg_length, direction
+    )
 
-        # Create 2x2 matrix: [seg_unit, -direction]
-        # Solve for s and t
-        A = np.column_stack([seg_unit, -direction_2d])
-        b = point[:2] - seg_start[:2]
 
-        try:
-            # Solve linear system
-            solution = np.linalg.solve(A, b)
-            s, t = solution
+def _calculate_distance_in_direction(
+    point: np.ndarray,
+    seg_start: np.ndarray,
+    seg_unit: np.ndarray,
+    seg_length: float,
+    direction: np.ndarray,
+) -> Optional[float]:
+    """
+    Calculate distance from point to segment along a specified direction.
 
-            # Check if intersection is on the line segment (0 <= s <= seg_length)
-            # and ray goes in positive direction (t >= 0)
-            if 0 <= s <= seg_length and t >= 0:
-                return t  # Distance along the ray
-            else:
-                return None
-        except np.linalg.LinAlgError:
-            # Matrix is singular (parallel lines)
+    Args:
+        point: Point from which to measure distance
+        seg_start: Start of line segment
+        seg_unit: Unit direction vector of segment
+        seg_length: Length of segment
+        direction: Direction vector for measurement
+
+    Returns:
+        Distance along direction if ray intersects segment, None otherwise
+    """
+    direction_2d = direction[:2] / np.linalg.norm(direction[:2])
+
+    # Find intersection of ray from point in given direction with infinite line
+    # Line equation: seg_start + s * seg_unit
+    # Ray equation: point + t * direction
+    # Solve: seg_start + s * seg_unit = point + t * direction
+
+    # Create 2x2 matrix: [seg_unit, -direction]
+    # Solve for s and t
+    A = np.column_stack([seg_unit, -direction_2d])
+    b = point[:2] - seg_start[:2]
+
+    try:
+        # Solve linear system
+        solution = np.linalg.solve(A, b)
+        s, t = solution
+
+        # Guard: Check if intersection is valid
+        # Must be on line segment (0 <= s <= seg_length)
+        # and ray must go in positive direction (t >= 0)
+        if not (0 <= s <= seg_length and t >= 0):
             return None
-    else:
-        point_vec = point[:2] - seg_start[:2]
-        projection = np.dot(point_vec, seg_unit)
-        projection = np.clip(projection, 0, seg_length)
 
-        closest = seg_start[:2] + projection * seg_unit
-        return np.linalg.norm(point[:2] - closest)
+        return t  # Distance along the ray
+
+    except np.linalg.LinAlgError:
+        # Matrix is singular (parallel lines)
+        return None
+
+
+def _calculate_shortest_distance_to_segment(
+    point: np.ndarray,
+    seg_start: np.ndarray,
+    seg_unit: np.ndarray,
+    seg_length: float,
+) -> float:
+    """
+    Calculate shortest distance from point to line segment.
+
+    Args:
+        point: Point from which to measure distance
+        seg_start: Start of line segment
+        seg_unit: Unit direction vector of segment
+        seg_length: Length of segment
+
+    Returns:
+        Shortest distance from point to segment
+    """
+    point_vec = point[:2] - seg_start[:2]
+    projection = np.dot(point_vec, seg_unit)
+    projection = np.clip(projection, 0, seg_length)
+
+    closest = seg_start[:2] + projection * seg_unit
+    return np.linalg.norm(point[:2] - closest)
 
 
 def line_line_intersection_2d(

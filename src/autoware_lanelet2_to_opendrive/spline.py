@@ -726,21 +726,65 @@ class Splines:
         query_point_local = query_point - self._origin_offset
 
         # Step 1: Find the parameter t that minimizes distance to the query point
-        def distance_squared(t: float) -> float:
-            """Calculate squared distance from spline to query point at parameter t."""
-            t = np.clip(t, 0.0, 1.0)  # Ensure t is within valid range
-            spline_point = self._evaluate_normalized(t, derivative=0)
-            diff = spline_point - query_point_local
-            return np.dot(diff, diff)
-
-        # Use bounded optimization to find closest point on spline
-        result = minimize_scalar(distance_squared, bounds=(0.0, 1.0), method="bounded")
-        t_closest = result.x
+        t_closest = self._find_closest_parameter(query_point_local)
 
         # Step 2: Convert parameter t to arc length s
         s = np.interp(t_closest, self._param_table, self._arc_length_table)
 
         # Step 3: Calculate lateral offset d
+        d = self._calculate_lateral_offset(query_point_local, t_closest)
+
+        return s, d
+
+    def _find_closest_parameter(self, query_point_local: np.ndarray) -> float:
+        """
+        Find the parameter t that minimizes distance to the query point.
+
+        Args:
+            query_point_local: Query point in spline's local coordinate system
+
+        Returns:
+            Parameter t in [0, 1] that gives the closest point on spline
+        """
+        # Use bounded optimization to find closest point on spline
+        result = minimize_scalar(
+            lambda t: self._distance_squared_at_parameter(t, query_point_local),
+            bounds=(0.0, 1.0),
+            method="bounded",
+        )
+        return result.x
+
+    def _distance_squared_at_parameter(
+        self, t: float, query_point_local: np.ndarray
+    ) -> float:
+        """
+        Calculate squared distance from spline to query point at parameter t.
+
+        Args:
+            t: Parameter value in [0, 1]
+            query_point_local: Query point in spline's local coordinate system
+
+        Returns:
+            Squared distance from spline point to query point
+        """
+        t = np.clip(t, 0.0, 1.0)  # Ensure t is within valid range
+        spline_point = self._evaluate_normalized(t, derivative=0)
+        diff = spline_point - query_point_local
+        return np.dot(diff, diff)
+
+    def _calculate_lateral_offset(
+        self, query_point_local: np.ndarray, t_closest: float
+    ) -> float:
+        """
+        Calculate lateral offset from spline to query point.
+
+        Args:
+            query_point_local: Query point in spline's local coordinate system
+            t_closest: Parameter t of closest point on spline
+
+        Returns:
+            Lateral offset d (positive = left, negative = right)
+        """
         # Get the closest point on the spline
         closest_point_local = self._evaluate_normalized(t_closest, derivative=0)
 
@@ -748,7 +792,7 @@ class Splines:
         vec_to_query = query_point_local - closest_point_local
 
         # Calculate absolute distance in XY plane only
-        # (z-component should not affect lateral offset t)
+        # (z-component should not affect lateral offset)
         d_abs = np.linalg.norm(vec_to_query[:2])
 
         # Determine sign based on tangent direction (2D cross product in XY plane)
@@ -759,6 +803,4 @@ class Splines:
         cross_product = tangent_t[0] * vec_to_query[1] - tangent_t[1] * vec_to_query[0]
 
         # Assign sign: positive for left, negative for right
-        d = d_abs if cross_product >= 0 else -d_abs
-
-        return s, d
+        return d_abs if cross_product >= 0 else -d_abs

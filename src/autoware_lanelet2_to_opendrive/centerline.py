@@ -505,74 +505,19 @@ def estimate_lanelet_width_as_spline(
     right_points = extract_points_3d(right_bound)
 
     # Calculate cumulative arc lengths for both boundaries
-    left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
-    left_cumulative = np.concatenate(([0], np.cumsum(left_dists)))
-    left_total_length = left_cumulative[-1]
-
-    right_dists = np.linalg.norm(np.diff(right_points, axis=0), axis=1)
-    right_cumulative = np.concatenate(([0], np.cumsum(right_dists)))
-    right_total_length = right_cumulative[-1]
+    boundary_data = _compute_boundary_arc_lengths(left_points, right_points)
 
     # Sample points along normalized arc length (0 to 1)
     normalized_positions = np.linspace(0.0, 1.0, num_samples)
 
-    # Calculate widths at each normalized position
-    arc_lengths: List[float] = []
-    widths: List[float] = []
-
-    for t_norm in normalized_positions:
-        # Convert normalized position to actual arc length for each boundary
-        s_left = t_norm * left_total_length
-        s_right = t_norm * right_total_length
-
-        # Interpolate positions on boundaries using linear interpolation
-        left_pos = _interpolate_on_line_segments(left_points, left_cumulative, s_left)
-        right_pos = _interpolate_on_line_segments(
-            right_points, right_cumulative, s_right
-        )
-
-        # Calculate width based on reference type
-        if reference == "center_line":
-            # Calculate centerline position as midpoint
-            center_pos = (left_pos + right_pos) / 2.0
-
-            # Width is the total distance from center to both borders
-            left_dist = np.linalg.norm(center_pos - left_pos)
-            right_dist = np.linalg.norm(center_pos - right_pos)
-            width = left_dist + right_dist
-
-            # Arc length is based on centerline
-            # For first point, arc length is 0
-            if len(arc_lengths) == 0:
-                arc_length = 0.0
-            else:
-                # Calculate arc length increment from previous centerline position
-                prev_center_pos = (
-                    _interpolate_on_line_segments(
-                        left_points,
-                        left_cumulative,
-                        normalized_positions[len(arc_lengths) - 1] * left_total_length,
-                    )
-                    + _interpolate_on_line_segments(
-                        right_points,
-                        right_cumulative,
-                        normalized_positions[len(arc_lengths) - 1] * right_total_length,
-                    )
-                ) / 2.0
-                arc_length = arc_lengths[-1] + np.linalg.norm(
-                    center_pos - prev_center_pos
-                )
-        elif reference == "left_bound":
-            # Width is distance from left to right border
-            width = np.linalg.norm(left_pos - right_pos)
-            arc_length = s_left
-        elif reference == "right_bound":
-            # Width is distance from right to left border
-            width = np.linalg.norm(right_pos - left_pos)
-            arc_length = s_right
-
-        arc_lengths.append(arc_length)
-        widths.append(width)
+    # Calculate widths at each normalized position using reference-specific strategy
+    arc_lengths, widths = _calculate_widths_by_reference(
+        reference,
+        normalized_positions,
+        left_points,
+        right_points,
+        boundary_data,
+    )
 
     # Create a proper 1D cubic spline for width as a function of arc length
     arc_lengths_array = np.array(arc_lengths)
@@ -587,6 +532,223 @@ def estimate_lanelet_width_as_spline(
 
     # Create a wrapper that provides the same interface as the old WidthSplineWrapper
     return Width1DSplineAdapter(width_spline_1d)
+
+
+def _compute_boundary_arc_lengths(
+    left_points: np.ndarray, right_points: np.ndarray
+) -> dict:
+    """
+    Compute cumulative arc lengths for both boundaries.
+
+    Args:
+        left_points: Array of left boundary points
+        right_points: Array of right boundary points
+
+    Returns:
+        Dictionary with cumulative distances and total lengths for both boundaries
+    """
+    left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
+    left_cumulative = np.concatenate(([0], np.cumsum(left_dists)))
+    left_total_length = left_cumulative[-1]
+
+    right_dists = np.linalg.norm(np.diff(right_points, axis=0), axis=1)
+    right_cumulative = np.concatenate(([0], np.cumsum(right_dists)))
+    right_total_length = right_cumulative[-1]
+
+    return {
+        "left_cumulative": left_cumulative,
+        "left_total_length": left_total_length,
+        "right_cumulative": right_cumulative,
+        "right_total_length": right_total_length,
+    }
+
+
+def _calculate_widths_by_reference(
+    reference: str,
+    normalized_positions: np.ndarray,
+    left_points: np.ndarray,
+    right_points: np.ndarray,
+    boundary_data: dict,
+) -> Tuple[List[float], List[float]]:
+    """
+    Calculate widths at each normalized position based on reference type.
+
+    Args:
+        reference: Reference type ("center_line", "left_bound", or "right_bound")
+        normalized_positions: Normalized positions [0, 1] to sample
+        left_points: Array of left boundary points
+        right_points: Array of right boundary points
+        boundary_data: Dictionary with boundary arc length data
+
+    Returns:
+        Tuple of (arc_lengths, widths) lists
+    """
+    if reference == "center_line":
+        return _calculate_widths_centerline_reference(
+            normalized_positions, left_points, right_points, boundary_data
+        )
+    elif reference == "left_bound":
+        return _calculate_widths_left_bound_reference(
+            normalized_positions, left_points, right_points, boundary_data
+        )
+    elif reference == "right_bound":
+        return _calculate_widths_right_bound_reference(
+            normalized_positions, left_points, right_points, boundary_data
+        )
+    else:
+        raise ValueError(f"Unsupported reference type: {reference}")
+
+
+def _calculate_widths_centerline_reference(
+    normalized_positions: np.ndarray,
+    left_points: np.ndarray,
+    right_points: np.ndarray,
+    boundary_data: dict,
+) -> Tuple[List[float], List[float]]:
+    """
+    Calculate widths using centerline as reference.
+
+    Args:
+        normalized_positions: Normalized positions [0, 1] to sample
+        left_points: Array of left boundary points
+        right_points: Array of right boundary points
+        boundary_data: Dictionary with boundary arc length data
+
+    Returns:
+        Tuple of (arc_lengths, widths) lists
+    """
+    arc_lengths: List[float] = []
+    widths: List[float] = []
+
+    for t_norm in normalized_positions:
+        # Convert normalized position to actual arc length for each boundary
+        s_left = t_norm * boundary_data["left_total_length"]
+        s_right = t_norm * boundary_data["right_total_length"]
+
+        # Interpolate positions on boundaries
+        left_pos = _interpolate_on_line_segments(
+            left_points, boundary_data["left_cumulative"], s_left
+        )
+        right_pos = _interpolate_on_line_segments(
+            right_points, boundary_data["right_cumulative"], s_right
+        )
+
+        # Calculate centerline position as midpoint
+        center_pos = (left_pos + right_pos) / 2.0
+
+        # Width is the total distance from center to both borders
+        left_dist = np.linalg.norm(center_pos - left_pos)
+        right_dist = np.linalg.norm(center_pos - right_pos)
+        width = left_dist + right_dist
+
+        # Arc length is based on centerline
+        if len(arc_lengths) == 0:
+            arc_length = 0.0
+        else:
+            # Calculate arc length increment from previous centerline position
+            prev_t_norm = normalized_positions[len(arc_lengths) - 1]
+            prev_center_pos = (
+                _interpolate_on_line_segments(
+                    left_points,
+                    boundary_data["left_cumulative"],
+                    prev_t_norm * boundary_data["left_total_length"],
+                )
+                + _interpolate_on_line_segments(
+                    right_points,
+                    boundary_data["right_cumulative"],
+                    prev_t_norm * boundary_data["right_total_length"],
+                )
+            ) / 2.0
+            arc_length = arc_lengths[-1] + np.linalg.norm(center_pos - prev_center_pos)
+
+        arc_lengths.append(arc_length)
+        widths.append(width)
+
+    return arc_lengths, widths
+
+
+def _calculate_widths_left_bound_reference(
+    normalized_positions: np.ndarray,
+    left_points: np.ndarray,
+    right_points: np.ndarray,
+    boundary_data: dict,
+) -> Tuple[List[float], List[float]]:
+    """
+    Calculate widths using left boundary as reference.
+
+    Args:
+        normalized_positions: Normalized positions [0, 1] to sample
+        left_points: Array of left boundary points
+        right_points: Array of right boundary points
+        boundary_data: Dictionary with boundary arc length data
+
+    Returns:
+        Tuple of (arc_lengths, widths) lists
+    """
+    arc_lengths: List[float] = []
+    widths: List[float] = []
+
+    for t_norm in normalized_positions:
+        s_left = t_norm * boundary_data["left_total_length"]
+        s_right = t_norm * boundary_data["right_total_length"]
+
+        left_pos = _interpolate_on_line_segments(
+            left_points, boundary_data["left_cumulative"], s_left
+        )
+        right_pos = _interpolate_on_line_segments(
+            right_points, boundary_data["right_cumulative"], s_right
+        )
+
+        # Width is distance from left to right border
+        width = np.linalg.norm(left_pos - right_pos)
+        arc_length = s_left
+
+        arc_lengths.append(arc_length)
+        widths.append(width)
+
+    return arc_lengths, widths
+
+
+def _calculate_widths_right_bound_reference(
+    normalized_positions: np.ndarray,
+    left_points: np.ndarray,
+    right_points: np.ndarray,
+    boundary_data: dict,
+) -> Tuple[List[float], List[float]]:
+    """
+    Calculate widths using right boundary as reference.
+
+    Args:
+        normalized_positions: Normalized positions [0, 1] to sample
+        left_points: Array of left boundary points
+        right_points: Array of right boundary points
+        boundary_data: Dictionary with boundary arc length data
+
+    Returns:
+        Tuple of (arc_lengths, widths) lists
+    """
+    arc_lengths: List[float] = []
+    widths: List[float] = []
+
+    for t_norm in normalized_positions:
+        s_left = t_norm * boundary_data["left_total_length"]
+        s_right = t_norm * boundary_data["right_total_length"]
+
+        left_pos = _interpolate_on_line_segments(
+            left_points, boundary_data["left_cumulative"], s_left
+        )
+        right_pos = _interpolate_on_line_segments(
+            right_points, boundary_data["right_cumulative"], s_right
+        )
+
+        # Width is distance from right to left border
+        width = np.linalg.norm(right_pos - left_pos)
+        arc_length = s_right
+
+        arc_lengths.append(arc_length)
+        widths.append(width)
+
+    return arc_lengths, widths
 
 
 def extract_centerline_as_spline_from_two_lanelets(
