@@ -61,6 +61,7 @@ flowchart TD
 **Purpose:** Load the Lanelet2 map, apply coordinate transformations, and optionally execute preprocessing operations to clean or modify the map structure.
 
 **Input:**
+
 - Lanelet2 OSM file path
 - Origin specification (MGRS grid code OR lat/lon coordinates)
 - Optional coordinate offset (x, y, z)
@@ -152,6 +153,7 @@ Format: `+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m
 5. **Return**: `lanelet2.core.LaneletMap` object
 
 **Map Structure:**
+
 - `laneletLayer`: All lanelets (road segments)
 - `lineStringLayer`: Standalone linestrings (e.g., stop lines)
 - `regulatoryElementLayer`: Traffic signals, speed limits, right-of-way rules
@@ -191,6 +193,7 @@ The following table lists all preprocessing operations and their parameters:
 | **Remove Turn Direction** | `lanelet_ids` | List[int] | ✓ | - | List of lanelet IDs (empty = all lanelets) |
 
 **Key:**
+
 - ✓ = Required parameter
 - ✗ = Optional parameter
 - Default values from [config.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/config.py) and operation dataclasses
@@ -213,6 +216,7 @@ The following table lists all preprocessing operations and their parameters:
 **Execution Order:** Move Point → Delete Point → Validate → Replace → Merge → Remove → Remove Lanelet → Remove Turn Direction
 
 **Key:**
+
 - ✓ = Yes / Applies
 - ✗ = No / Does not apply
 
@@ -371,6 +375,7 @@ remove_turn_direction_operations:
 7. **Write Output**: Save OpenDRIVE XML file
 
 **Code Locations:**
+
 - Main flow: [main.py:741-852](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L741-L852)
 - Origin parsing: [main.py:597-738](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L597-L738)
 - Preprocessing execution: [preprocess_lanelet.py:931-987](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L931-L987)
@@ -391,6 +396,7 @@ remove_turn_direction_operations:
 **Purpose:** Separate lanelets into junction lanelets and regular road lanelets.
 
 **Criteria:**
+
 - **Junction lanelet:** Has `turn_direction` attribute (present in intersection lanelets)
 - **Regular road lanelet:** Does NOT have `turn_direction` attribute
 
@@ -401,6 +407,7 @@ road_lanelets = filter_lanelets_outside_junction(lanelet_map)
 ```
 
 **Output:**
+
 - List of junction lanelets
 - List of regular road lanelets
 
@@ -492,10 +499,12 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 4. Create `Signal` and `Controller` objects
 
 **Output:**
+
 - List of `Signal` objects with positions (s, t coordinates)
 - List of `Controller` objects grouping related signals
 
 **Code Location:**
+
 - Signal extraction: `src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py:75-249`
 - Type mapping: `src/autoware_lanelet2_to_opendrive/opendrive/signal.py:281-304`
 
@@ -592,6 +601,7 @@ verbose: false           # Enable debug logging
 ```
 
 **Behavior:**
+
 - `???` indicates **required** field - must be set via CLI or config file
 - `null` indicates **optional** field - has fallback behavior
 - `defaults` section specifies config group defaults
@@ -776,6 +786,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 ```
 
 **Configuration Result:**
+
 - Origin: MGRS `54SUE815501`
 - No preprocessing operations
 - Include all signals
@@ -801,6 +812,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 ```
 
 **Configuration Result:**
+
 - Origin: From `map/my_map.yaml`
 - `exclude_non_junction_signals=true` (CARLA requirement)
 - Auto-generated output path
@@ -829,6 +841,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 ```
 
 **Configuration Result:**
+
 - Origin: MGRS `54SUE` with offset
 - Merge operations: Combine lanelets 100, 101, 102
 - Coordinate offset applied: x=81655.73, y=50137.43, z=42.5
@@ -854,6 +867,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 ```
 
 **Configuration Result:**
+
 - `dry_run=true`: No output file written
 - `verbose=true`: Detailed logging enabled
 
@@ -880,6 +894,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 ```
 
 **Configuration Result:**
+
 - Traffic rule: Left-hand traffic
 - Lanelets 100, 101 forced to be regular roads (not junctions)
 - All signals included
@@ -1001,6 +1016,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 ```
 
 **Output Shows:**
+
 - Origin parsing details
 - Coordinate offset activation
 - Preprocessing operation execution
@@ -1190,10 +1206,12 @@ To ensure optimal conversion results:
 **Symptom:** Traffic signals missing from OpenDRIVE output
 
 **Cause:**
+
 - Regulatory elements not properly defined
 - Missing `type` or `subtype` on traffic light
 
 **Solution:**
+
 - Ensure traffic lights are added as regulatory elements
 - Add `type` or `subtype` attribute with standard values
 - Verify traffic lights reference the correct lanelets
