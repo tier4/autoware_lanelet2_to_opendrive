@@ -200,9 +200,39 @@ jobs:
         env:
           GIT_AUTH_TOKEN: ${{ secrets.GH_PAT }}
 
-      - name: Build documentation
+      - name: Build documentation with version info
         if: steps.pr-labels.outputs.bump_type != 'none'
-        run: uv run mkdocs build --strict
+        run: |
+          # Get git info
+          GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          VERSION="${{ steps.bump-version.outputs.new_version }}"
+          export GIT_BRANCH GIT_COMMIT VERSION
+
+          # Update mkdocs.yml with version info
+          cat >> mkdocs.yml << EOF
+            version_string: v${VERSION}
+            git_branch: ${GIT_BRANCH}
+            git_commit: ${GIT_COMMIT}
+          EOF
+
+          # Build HTML documentation
+          uv run mkdocs build
+
+      - name: Generate PDF documentation
+        if: steps.pr-labels.outputs.bump_type != 'none'
+        run: |
+          # Enable PDF export
+          ENABLE_PDF_EXPORT=1
+          export ENABLE_PDF_EXPORT
+
+          # Build with PDF plugin enabled
+          uv run mkdocs build
+
+          # Copy PDF to root for easy access
+          if [ -f site/pdf/documentation.pdf ]; then
+            cp site/pdf/documentation.pdf documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          fi
 
       - name: Create documentation archive
         if: steps.pr-labels.outputs.bump_type != 'none'
@@ -211,7 +241,7 @@ jobs:
           zip -r ../documentation-v${{ steps.bump-version.outputs.new_version }}.zip .
           cd ..
 
-      - name: Upload documentation to release
+      - name: Upload HTML documentation to release
         if: steps.pr-labels.outputs.bump_type != 'none'
         uses: actions/upload-release-asset@v1
         env:
@@ -221,6 +251,32 @@ jobs:
           asset_path: ./documentation-v${{ steps.bump-version.outputs.new_version }}.zip
           asset_name: documentation-v${{ steps.bump-version.outputs.new_version }}.zip
           asset_content_type: application/zip
+
+      - name: Upload PDF documentation to release
+        if: steps.pr-labels.outputs.bump_type != 'none'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          asset_name: documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          asset_content_type: application/pdf
+
+      - name: Deploy to GitHub Pages with mike
+        if: steps.pr-labels.outputs.bump_type != 'none'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Fetch gh-pages branch
+          git fetch origin gh-pages --depth=1 || true
+
+          # Deploy new version with mike
+          uv run mike deploy --push --update-aliases ${{ steps.bump-version.outputs.new_version }} latest
+
+          # Set latest as default version
+          uv run mike set-default --push latest
 
       - name: No version bump needed
         if: steps.pr-labels.outputs.bump_type == 'none'

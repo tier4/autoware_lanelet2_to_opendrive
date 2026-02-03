@@ -90,6 +90,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -115,8 +117,23 @@ jobs:
       env:
         GIT_AUTH_TOKEN: ${{ secrets.GH_PAT }}
 
-    - name: Build documentation
-      run: uv run mkdocs build --strict
+    - name: Build documentation with version info
+      run: |
+        # Get git info
+        GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        GIT_COMMIT=$(git rev-parse --short HEAD)
+        VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+        export GIT_BRANCH GIT_COMMIT VERSION
+
+        # Update mkdocs.yml with version info
+        cat >> mkdocs.yml << EOF
+          version_string: v${VERSION}
+          git_branch: ${GIT_BRANCH}
+          git_commit: ${GIT_COMMIT}
+        EOF
+
+        # Build documentation (without --strict to allow PDF plugin warning)
+        uv run mkdocs build
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v4

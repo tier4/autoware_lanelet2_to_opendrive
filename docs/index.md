@@ -25,6 +25,7 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 ## Project Information
 
 - **Repository**: [tier4/autoware_lanelet2_to_opendrive](https://github.com/tier4/autoware_lanelet2_to_opendrive)
+- **Release Notes**: [View all releases on GitHub](https://github.com/tier4/autoware_lanelet2_to_opendrive/releases)
 - **License**: Check the repository for license information
 - **Python Version**: 3.10 or higher required
 
