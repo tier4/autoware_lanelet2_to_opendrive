@@ -1,7 +1,7 @@
 """OpenDRIVE signal definitions."""
 
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Any, Optional, List
 import lxml.etree as ET
 
 from ..config import COORDINATE_OFFSET
@@ -198,7 +198,7 @@ class Signal:
 
     @staticmethod
     def construct_from_lanelet2_traffic_signal(
-        traffic_light,  # lanelet2.core.TrafficLight regulatory element
+        traffic_light: Any,  # lanelet2.core.TrafficLight regulatory element
         signal_id: int,
         s: float,
         t: float,
@@ -213,17 +213,17 @@ class Signal:
 
         Args:
             traffic_light: lanelet2 TrafficLight regulatory element containing
-                          traffic light geometry and attributes
+                traffic light geometry and attributes
             signal_id: Unique signal identifier for the OpenDRIVE signal
             s: Position along road reference line (m). This must be computed
-               by the caller based on the road's reference line.
+                by the caller based on the road's reference line.
             t: Lateral offset from road reference line (m). Negative values
-               indicate signals on the right side of the road.
+                indicate signals on the right side of the road.
             lane_ids: List of lane IDs this signal applies to. If None, applies
-                     to lane -1 (rightmost lane). Use negative IDs for right lanes.
+                to lane -1 (rightmost lane). Use negative IDs for right lanes.
             road_elevation_at_s: Elevation of the road surface at position s (m).
-                                If provided, used to calculate relative z_offset from
-                                signal's absolute height. If None, uses absolute height.
+                If provided, used to calculate relative z_offset from
+                signal's absolute height. If None, uses absolute height.
 
         Returns:
             Signal object constructed from the traffic light with OpenDRIVE format
