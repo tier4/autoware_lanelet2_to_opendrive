@@ -17,6 +17,7 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 
 - [Installation Guide](installation.md) - Get started with installing the package
 - [Usage Guide](usage.md) - Learn how to use the converter
+- [Known Limitations](limitations.md) - Important limitations and behavioral differences
 - [API Reference](api.md) - Detailed API documentation
 - [Development Guide](development.md) - Contributing and development setup
 - [Signals](signals.md) - Signal handling documentation
