@@ -13,15 +13,17 @@ CARLA UE5 uses a modular OpenDRIVE parser system located in [`LibCarla/source/ca
 This document focuses on which OpenDRIVE tags CARLA reads and how they are used internally, which is essential for understanding what needs to be generated when converting from Lanelet2 format.
 
 
-## OpenDRIVE Tag Reference: CARLA Usage and Lanelet2 Mapping
+## OpenDRIVE Tags in CARLA
 
-This section provides a comprehensive reference of OpenDRIVE tags, showing how they are used in CARLA's parser and how Lanelet2 elements map to these OpenDRIVE tags during conversion.
+This section provides a comprehensive reference of OpenDRIVE tags, showing how they are used in CARLA's parser and how Lanelet2 elements map to these tags during conversion.
 
-### Unified Tag Reference Table
-
-The table below combines:
-- **CARLA Parser Information**: Which parser module reads each tag and how it's used
-- **Lanelet2 Mapping**: How each OpenDRIVE tag is generated from Lanelet2 data during conversion
+**Table columns:**
+- **Parser Module**: CARLA parser component that reads the tag
+- **OpenDRIVE Tag/Attribute**: Tag name in OpenDRIVE format
+- **CARLA Purpose**: How CARLA uses this tag
+- **CARLA Code Location**: Link to source code
+- **Lanelet2 Mapping**: How this tag is generated from Lanelet2 data
+- **Conversion Notes**: Important considerations for conversion
 
 | Parser Module | OpenDRIVE Tag/Attribute | CARLA Purpose | CARLA Code Location | Lanelet2 Mapping | Conversion Notes |
 |---------------|-------------------------|---------------|---------------------|------------------|------------------|
@@ -103,36 +105,36 @@ The table below combines:
 - `onRamp`, `offRamp`, `rail`, `tram`, `roadWorks`
 - `special1`, `special2`, `special3`, `none`
 
-**Important Considerations:**
-
-- **Road Concept Challenge**: Lanelet2 doesn't have a "Road" concept; conversion must group Lanelets into Roads
-- **Lane Speed Override**: Lane speed limits override road speed limits (OpenDRIVE spec 11.7)
-- **Signal Priority**: Speed limits from signals always have preference over road/lane speed limits
+**Speed Limit Hierarchy:**
+- Lane speed limits override road speed limits (OpenDRIVE spec 11.7)
+- Signal speed limits have highest priority
+- See Conversion Challenges for road grouping from Lanelet2
 
 #### GeometryParser
-**Lanelet2 Conversion Notes:**
+**Supported Geometry Types:**
+- `<line>`: Straight segments (always supported)
+- `<arc>`: Circular arcs
+- `<spiral>`: Clothoid curves
+- `<poly3>`, `<paramPoly3>`: Polynomial curves
 
-- **Simple Case**: Lanelet2 centerlines can be converted to `<line>` geometries (straight segments)
-- **Advanced Case**: For smoother roads, consider using `<spiral>` or `<paramPoly3>` with B-spline fitting
+See Conversion Challenges for Lanelet2 centerline conversion approaches
 
 #### LaneParser
-**Width vs Border Conflict** (OpenDRIVE Spec 1.8c):
+**Width vs Border Specification** (OpenDRIVE Spec 1.8c):
 - `<width>` and `<border>` are mutually exclusive within the same lane group
-- If both exist, applications **must use** `<width>` elements
-- **Recommendation**: Use `<border>` for Lanelet2 conversion (more direct mapping)
-- CommonRoadScenarioDesigner uses `<width>`; this converter should choose based on requirements
+- If both exist, applications **must use** `<width>` elements per spec
+- See CARLA-Specific Considerations for Lanelet2 conversion recommendations
 
-**Lanelet2 Challenges:**
-
-- **No Width Concept**: Lanelet2 doesn't have lane width calculation functions
-- **Road+Lane ID Required**: Physical lane shape requires both Road ID and Lane ID
-- **Relative Positioning**: Lane IDs are relative within road sections
+**Additional Attributes:**
+- Road markings, material, speed limits, access rules parsed but usage in CARLA varies
+- Height and visibility attributes have limited CARLA support
 
 #### ProfilesParser
-**Important Notes:**
+**Parsing Details:**
 
-- **Optional but Critical**: While optional in OpenDRIVE spec, `<elevationProfile>` is essential for proper height representation in CARLA
-- **Lanelet2 Integration**: Lanelet2 has elevation data (z-coordinates); should be converted to elevation profile
+- Reads elevation, superelevation, and lateral shape profiles
+- Polynomial coefficients (a, b, c, d) define profile shape
+- See CARLA-Specific Considerations for elevation profile requirements
 
 #### JunctionParser
 **Related MapBuilder Functions:**
