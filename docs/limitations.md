@@ -239,39 +239,7 @@ When converting Lanelet2 maps with `priority` regulatory elements:
 
 If priority-based right-of-way control is needed in CARLA:
 
-#### Option 1: Signal Controller (Recommended)
-
-Use CARLA's traffic signal controller system:
-
-```xml
-<!-- In OpenDRIVE file -->
-<controller id="1" name="intersection_controller">
-  <control signalId="10" type="traffic_light"/>
-  <control signalId="11" type="traffic_light"/>
-</controller>
-```
-
-- Define signal groups with controllers
-- Use `sequence` attribute in signals to control timing
-- Manually adjust signal phases to simulate priority behavior
-
-**Reference**: [CARLA Signal Controller Documentation](https://carla.readthedocs.io/en/latest/core_map/#traffic-signs-and-lights)
-
-#### Option 2: Python API Manual Control
-
-Control traffic signals programmatically:
-
-```python
-# Get traffic light
-traffic_light = world.get_traffic_light(traffic_light_id)
-
-# Manually set state to implement priority logic
-traffic_light.set_state(carla.TrafficLightState.Green)
-```
-
-**Reference**: [CARLA Traffic Light API](https://carla.readthedocs.io/en/latest/python_api/#carla.TrafficLight)
-
-#### Option 3: Custom CARLA Source Modification
+#### Custom CARLA Source Modification
 
 <details>
 <summary><strong>Advanced: Modify CARLA source code</strong> (click to expand)</summary>
@@ -366,7 +334,7 @@ For maps spanning multiple grid zones:
 | Stop line position discrepancies | Medium | Manual adjustment in CARLA |
 | Lane width inconsistencies | Low | Validation with tolerances |
 | Special signals not supported | High | Community contribution needed |
-| Priority-based right-of-way not supported | Low | Signal controllers or Python API |
+| Priority-based right-of-way not supported | Low | CARLA source modification only |
 | Geometric approximation | Low | Use high-resolution input data |
 | MGRS projection limitations | Medium | Split large maps by grid zone |
 
