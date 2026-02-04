@@ -143,14 +143,23 @@ Format: `+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m
 **Function:** `load_lanelet2_map()` ([main.py:52-81](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L52-L81))
 
 **Steps:**
-1. **Create Projector**: Initialize `MGRSProjector` with origin
-2. **Load OSM File**: Call `lanelet2.io.load(path, projector)`
-3. **Validate**: Check file exists, handle errors
-4. **Report Statistics**:
+
+1. **Create Projector**
+   - Initialize `MGRSProjector` with origin
+
+2. **Load OSM File**
+   - Call `lanelet2.io.load(path, projector)`
+
+3. **Validate**
+   - Check file exists, handle errors
+
+4. **Report Statistics**
    - Number of lanelets loaded
    - Number of linestrings
    - Number of points
-5. **Return**: `lanelet2.core.LaneletMap` object
+
+5. **Return**
+   - `lanelet2.core.LaneletMap` object
 
 **Map Structure:**
 
@@ -411,7 +420,7 @@ road_lanelets = filter_lanelets_outside_junction(lanelet_map)
 - List of junction lanelets
 - List of regular road lanelets
 
-**Code Location:** `src/autoware_lanelet2_to_opendrive/junction.py:8-52`
+**Code Location:** [`junction.py:8-52`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L8-L52)
 
 ---
 
@@ -426,7 +435,7 @@ road_lanelets = filter_lanelets_outside_junction(lanelet_map)
 
 **Output:** List of road groups (each group = list of lanelets)
 
-**Code Location:** `src/autoware_lanelet2_to_opendrive/main.py`
+**Code Location:** [`main.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
 
 ---
 
@@ -455,7 +464,7 @@ road_type_definitions = Road._extract_road_types_from_lanelets(lanelets)
 
 **Output:** `RoadTypeDefinition` objects with speed and road type
 
-**Code Location:** `src/autoware_lanelet2_to_opendrive/opendrive/road.py:453-513`
+**Code Location:** [`road.py:453-513`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L453-L513)
 
 ---
 
@@ -477,7 +486,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** `Lane` objects with proper type and speed attributes
 
-**Code Location:** `src/autoware_lanelet2_to_opendrive/opendrive/lane.py:150-216`
+**Code Location:** [`lane.py:150-216`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L150-L216)
 
 ---
 
@@ -505,8 +514,8 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Code Location:**
 
-- Signal extraction: `src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py:75-249`
-- Type mapping: `src/autoware_lanelet2_to_opendrive/opendrive/signal.py:281-304`
+- Signal extraction: [`signals_and_controllers.py:75-249`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py#L75-L249)
+- Type mapping: [`signal.py:281-304`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signal.py#L281-L304)
 
 ---
 
@@ -522,7 +531,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** List of `Junction` objects with connections
 
-**Code Location:** `src/autoware_lanelet2_to_opendrive/junction.py:54-107`
+**Code Location:** [`junction.py:54-107`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L54-L107)
 
 ---
 
@@ -551,7 +560,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** OpenDRIVE XML file
 
-**Code Location:** `src/autoware_lanelet2_to_opendrive/main.py`
+**Code Location:** [`main.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
 
 ---
 
