@@ -163,6 +163,135 @@ If you require support for special traffic signals:
 
 ---
 
+## Priority-Based Right-of-Way Control Not Supported
+
+### Issue
+
+Priority tags (`priority` attribute in regulatory elements) for controlling intersection entry order are **not implemented** in the converter.
+
+### Cause
+
+While **technically feasible** to implement in the converter, this feature is not supported because **CARLA simulator does not recognize or utilize priority attributes** for traffic management at junctions.
+
+#### CARLA's Complete Ignorance of Priority Attributes
+
+CARLA simulator completely ignores priority information at every processing stage:
+
+| Processing Stage | Result |
+|------------------|--------|
+| **① Parsing** | ❌ Priority attributes are not read from OpenDRIVE files |
+| **② Data Storage** | ❌ No internal fields exist to store priority values |
+| **③ Traffic Control** | ❌ Uses FIFO queue only for junction management; priority values are never consulted |
+
+#### Technical Analysis with Code References
+
+**1. Parsing Stage: Priority Not Read**
+
+CARLA's OpenDRIVE parser does not extract `priority` attributes from regulatory elements:
+
+- **OpenDRIVE Parser**: [`LibCarla/source/carla/opendrive/parser/SignalParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp)
+  - Only parses signal `type`, `subtype`, `value`, `orientation`, and `position`
+  - **No code exists** to parse `priority` attributes from `<signal>` or `<controller>` elements
+
+**2. Data Storage: No Priority Field**
+
+CARLA's internal traffic signal representation lacks priority storage:
+
+- **Signal Class**: [`LibCarla/source/carla/road/element/RoadInfoSignal.h`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/element/RoadInfoSignal.h)
+  - Contains: `type`, `value`, `orientation`, `heading`, `pitch`, `roll`, `width`, `height`, `text`
+  - **Does not contain**: `priority` field
+
+- **Controller Class**: [`LibCarla/source/carla/road/SignalController.h`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/SignalController.h)
+  - Contains: `signal_ids`, `junction_id`
+  - **Does not contain**: `priority` field
+
+**3. Traffic Control: FIFO Queue Only**
+
+CARLA's Traffic Manager uses a simple FIFO (First-In-First-Out) queue for junction management:
+
+- **Traffic Manager Junction Logic**: [`LibCarla/source/carla/trafficmanager/`](https://github.com/carla-simulator/carla/tree/master/LibCarla/source/carla/trafficmanager)
+  - Junction entry order is determined **solely by arrival time**
+  - **No priority-based decision making** exists in the codebase
+  - All vehicles are treated equally regardless of any potential priority values
+
+### Impact
+
+When converting Lanelet2 maps with `priority` regulatory elements:
+
+- Priority information is **completely discarded** during conversion
+- Intersection right-of-way behavior will **not match** the original Lanelet2 specification
+- All vehicles will follow **FIFO queue behavior** in CARLA, regardless of intended priority
+
+### Workaround
+
+If priority-based right-of-way control is needed in CARLA:
+
+#### Option 1: Signal Controller (Recommended)
+
+Use CARLA's traffic signal controller system:
+
+```xml
+<!-- In OpenDRIVE file -->
+<controller id="1" name="intersection_controller">
+  <control signalId="10" type="traffic_light"/>
+  <control signalId="11" type="traffic_light"/>
+</controller>
+```
+
+- Define signal groups with controllers
+- Use `sequence` attribute in signals to control timing
+- Manually adjust signal phases to simulate priority behavior
+
+**Reference**: [CARLA Signal Controller Documentation](https://carla.readthedocs.io/en/latest/core_map/#traffic-signs-and-lights)
+
+#### Option 2: Python API Manual Control
+
+Control traffic signals programmatically:
+
+```python
+# Get traffic light
+traffic_light = world.get_traffic_light(traffic_light_id)
+
+# Manually set state to implement priority logic
+traffic_light.set_state(carla.TrafficLightState.Green)
+```
+
+**Reference**: [CARLA Traffic Light API](https://carla.readthedocs.io/en/latest/python_api/#carla.TrafficLight)
+
+#### Option 3: Custom CARLA Source Modification
+
+If priority support is critical:
+
+1. Fork CARLA repository
+2. Modify `SignalParser.cpp` to parse priority attributes
+3. Add `priority` field to `RoadInfoSignal` and `SignalController` classes
+4. Implement priority-based logic in Traffic Manager
+5. Rebuild CARLA from source
+
+**Reference**: [CARLA Build Documentation](https://carla.readthedocs.io/en/latest/build_linux/)
+
+!!! warning "CARLA Source Modification Required"
+    Implementing priority-based right-of-way control requires **modifying CARLA's C++ source code**. This is a non-trivial undertaking requiring deep understanding of CARLA's architecture.
+
+### Requesting Support
+
+If CARLA priority support is important for your use case:
+
+1. **Open a CARLA Issue**: [CARLA GitHub Issues](https://github.com/carla-simulator/carla/issues)
+2. **Describe the use case**:
+    - Why priority-based right-of-way is needed
+    - Expected behavior at intersections
+    - Real-world traffic scenarios requiring priority
+3. **Propose implementation**:
+    - Suggest changes to data structures
+    - Outline Traffic Manager modifications
+4. **Engage CARLA community**: Discuss with CARLA maintainers
+
+!!! info "Future Support"
+    If CARLA adds priority attribute support in the future, this converter can be updated to include priority information in the generated OpenDRIVE files.
+
+---
+
 ## Geometric Approximation Limitations
 
 ### Issue
@@ -216,6 +345,7 @@ For maps spanning multiple grid zones:
 | Stop line position discrepancies | Medium | Manual adjustment in CARLA |
 | Lane width inconsistencies | Low | Validation with tolerances |
 | Special signals not supported | High | Community contribution needed |
+| Priority-based right-of-way not supported | High | Signal controllers or Python API |
 | Geometric approximation | Low | Use high-resolution input data |
 | MGRS projection limitations | Medium | Split large maps by grid zone |
 
