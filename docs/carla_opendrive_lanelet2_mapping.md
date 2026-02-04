@@ -25,8 +25,6 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 - **Lanelet2 Mapping**: How this tag is generated from Lanelet2 data
 - **Conversion Notes**: Important considerations for conversion
 
-<div style="overflow-x: auto;" markdown="1">
-
 | Parser Module | OpenDRIVE Tag/Attribute | CARLA Purpose | CARLA Code Location | Lanelet2 Mapping | Conversion Notes |
 |---------------|-------------------------|---------------|---------------------|------------------|------------------|
 | GeoReferenceParser | `header/geoReference` | PROJ format georeference string - Geographic coordinate system definition | [`GeoReferenceParser.cpp` L62](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp#L62) | Lanelet2 origin (MGRS or lat/lon) | Convert MGRS to lat/lon, generate PROJ string |
@@ -95,8 +93,6 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 | JunctionParser | `junction/connection/laneLink@to` | Target lane ID - Lane-level connection target | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | L2 target lane | Lane connectivity through junction |
 | JunctionParser | `junction/controller@id` | Controller ID - Traffic signal reference | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | Enhancement required | L2 has controller concept but needs mapping |
 | JunctionParser | `junction/controller@type` | Controller type - Controller classification | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | Enhancement required | Controller type classification |
-
-</div>
 
 ### Parser-Specific Notes
 
