@@ -103,18 +103,21 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 
 #### RoadParser
 **Supported Lane Types** ([`RoadParser.cpp` L66-L110](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L66-L110)):
+
 - `driving`, `bidirectional`, `stop`, `shoulder`, `biking`, `sidewalk`
 - `parking`, `border`, `restricted`, `median`, `entry`, `exit`
 - `onRamp`, `offRamp`, `rail`, `tram`, `roadWorks`
 - `special1`, `special2`, `special3`, `none`
 
 **Speed Limit Hierarchy:**
+
 - Lane speed limits override road speed limits (OpenDRIVE spec 11.7)
 - Signal speed limits have highest priority
 - See Conversion Challenges for road grouping from Lanelet2
 
 #### GeometryParser
 **Supported Geometry Types:**
+
 - `<line>`: Straight segments (always supported)
 - `<arc>`: Circular arcs
 - `<spiral>`: Clothoid curves
@@ -124,11 +127,13 @@ See Conversion Challenges for Lanelet2 centerline conversion approaches
 
 #### LaneParser
 **Width vs Border Specification** (OpenDRIVE Spec 1.8c):
+
 - `<width>` and `<border>` are mutually exclusive within the same lane group
 - If both exist, applications **must use** `<width>` elements per spec
 - See CARLA-Specific Considerations for Lanelet2 conversion recommendations
 
 **Additional Attributes:**
+
 - Road markings, material, speed limits, access rules parsed but usage in CARLA varies
 - Height and visibility attributes have limited CARLA support
 
