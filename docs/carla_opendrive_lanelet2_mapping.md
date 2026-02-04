@@ -25,7 +25,7 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 - **Lanelet2 Mapping**: How this tag is generated from Lanelet2 data
 - **Conversion Notes**: Important considerations for conversion
 
-<div style="overflow-x: auto;" markdown>
+<div style="overflow-x: auto;" markdown="1">
 
 | Parser Module | OpenDRIVE Tag/Attribute | CARLA Purpose | CARLA Code Location | Lanelet2 Mapping | Conversion Notes |
 |---------------|-------------------------|---------------|---------------------|------------------|------------------|
