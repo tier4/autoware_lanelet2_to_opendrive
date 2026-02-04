@@ -19,46 +19,51 @@
     table-layout: fixed;
 }
 
-/* Set specific column widths for the unified tag reference table (8 columns) */
+/* Set specific column widths for the unified tag reference table (9 columns) */
 .md-typeset table:not([class]) th:nth-child(1),
 .md-typeset table:not([class]) td:nth-child(1) {
-    width: 10%; /* Parser Module */
+    width: 9%; /* Parser Module */
 }
 
 .md-typeset table:not([class]) th:nth-child(2),
 .md-typeset table:not([class]) td:nth-child(2) {
-    width: 15%; /* OpenDRIVE Tag/Attribute */
+    width: 13%; /* OpenDRIVE Tag/Attribute */
 }
 
 .md-typeset table:not([class]) th:nth-child(3),
 .md-typeset table:not([class]) td:nth-child(3) {
-    width: 16%; /* CARLA Purpose */
+    width: 14%; /* CARLA Purpose */
 }
 
 .md-typeset table:not([class]) th:nth-child(4),
 .md-typeset table:not([class]) td:nth-child(4) {
-    width: 12%; /* CARLA Code Location */
+    width: 11%; /* CARLA Code Location */
 }
 
 .md-typeset table:not([class]) th:nth-child(5),
 .md-typeset table:not([class]) td:nth-child(5) {
-    width: 15%; /* Lanelet2 Mapping */
+    width: 13%; /* Lanelet2 Mapping */
 }
 
 .md-typeset table:not([class]) th:nth-child(6),
 .md-typeset table:not([class]) td:nth-child(6) {
-    width: 5%; /* Status */
+    width: 4%; /* Status */
     text-align: center;
 }
 
 .md-typeset table:not([class]) th:nth-child(7),
 .md-typeset table:not([class]) td:nth-child(7) {
-    width: 14%; /* Conversion Notes */
+    width: 12%; /* Conversion Notes */
 }
 
 .md-typeset table:not([class]) th:nth-child(8),
 .md-typeset table:not([class]) td:nth-child(8) {
-    width: 13%; /* CARLA NPC Behavior Impact */
+    width: 12%; /* CARLA NPC Behavior Impact */
+}
+
+.md-typeset table:not([class]) th:nth-child(9),
+.md-typeset table:not([class]) td:nth-child(9) {
+    width: 12%; /* NPC Behavior Source */
 }
 
 /* Enable text wrapping in table cells */
