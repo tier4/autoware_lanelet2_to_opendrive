@@ -248,71 +248,56 @@ This section describes how Lanelet2 tags and attributes are converted to OpenDRI
 4. Generate road geometry in local coordinates
 5. Ensure elevation data is captured in `<elevationProfile>`
 
-## Conversion Process Details
+## CARLA-Specific Considerations
 
-### Current Converter Implementation
+??? info "CARLA Compatibility Requirements and Recommendations"
+    Based on the CARLA parser analysis, the following considerations are important for CARLA compatibility:
 
-The `autoware_lanelet2_to_opendrive` converter implements the following conversion pipeline:
+    ### Required Elements
 
-1. **Map Loading**: Load Lanelet2 OSM file with specified origin (MGRS or lat/lon)
-2. **Preprocessing** (optional): Merge, remove, or modify lanelets as configured
-3. **Classification**: Separate junction lanelets (with `turn_direction`) from road lanelets
-4. **Road Grouping**: Group connected road lanelets into OpenDRIVE Roads
-5. **Metadata Extraction**: Extract `location`, `speed_limit`, `subtype` tags
-6. **Lane Construction**: Build OpenDRIVE Lane objects from Lanelet boundaries
-7. **Signal Processing**: Extract traffic signals from regulatory elements
-8. **Junction Building**: Create Junction objects and connections
-9. **XML Generation**: Serialize to OpenDRIVE XML format
+    CARLA **requires** these elements for proper map loading:
 
-### CARLA-Specific Considerations
+    1. **Geographic Reference** (`header/geoReference`):
+       - Must include `+lat_0=` and `+lon_0=` parameters
+       - CARLA uses this for coordinate system initialization
 
-Based on the CARLA parser analysis, the following considerations are important for CARLA compatibility:
+    2. **Road Geometry** (`road/planView/geometry`):
+       - At least one geometry element per road
+       - `<line>` is the simplest and always supported
 
-#### Required Elements
+    3. **Lane Sections** (`road/lanes/laneSection`):
+       - At least one lane section per road
+       - Lane count changes require new lane sections
 
-CARLA **requires** these elements for proper map loading:
+    4. **Elevation Profile** (`road/elevationProfile`):
+       - Optional in OpenDRIVE spec but critical for CARLA
+       - Without this, roads may appear at incorrect heights
 
-1. **Geographic Reference** (`header/geoReference`):
-   - Must include `+lat_0=` and `+lon_0=` parameters
-   - CARLA uses this for coordinate system initialization
+    ### Optional but Recommended
 
-2. **Road Geometry** (`road/planView/geometry`):
-   - At least one geometry element per road
-   - `<line>` is the simplest and always supported
+    1. **Lane Borders** (`lane/border`):
+       - Preferred over `lane/width` for geometric accuracy
+       - More direct mapping from Lanelet2 boundaries
 
-3. **Lane Sections** (`road/lanes/laneSection`):
-   - At least one lane section per road
-   - Lane count changes require new lane sections
+    2. **Speed Limits**:
+       - Can be specified at road level (`road/type/speed`) or lane level (`lane/speed`)
+       - Signal speed limits override road/lane speeds
 
-4. **Elevation Profile** (`road/elevationProfile`):
-   - Optional in OpenDRIVE spec but critical for CARLA
-   - Without this, roads may appear at incorrect heights
+    3. **Junction Connections**:
+       - Required for intersection navigation
+       - Must include `laneLink` for lane-level routing
 
-#### Optional but Recommended
+    ### Elements Not Used by CARLA
 
-1. **Lane Borders** (`lane/border`):
-   - Preferred over `lane/width` for geometric accuracy
-   - More direct mapping from Lanelet2 boundaries
+    The following OpenDRIVE elements are **not** currently parsed by CARLA (based on parser code analysis):
 
-2. **Speed Limits**:
-   - Can be specified at road level (`road/type/speed`) or lane level (`lane/speed`)
-   - Signal speed limits override road/lane speeds
+    - `road/objects` (roadside objects) - Has ObjectParser but usage unclear
+    - `road/signals` (road-mounted signals) - Has SignalParser but only traffic lights confirmed
+    - `road/surface` (road surface properties)
+    - `lane/userData` (custom lane data)
+    - Complex geometry types beyond those listed (e.g., `<spiral>` support uncertain)
 
-3. **Junction Connections**:
-   - Required for intersection navigation
-   - Must include `laneLink` for lane-level routing
-
-#### Elements Not Used by CARLA
-
-The following OpenDRIVE elements are **not** currently parsed by CARLA (based on parser code analysis):
-
-- `road/objects` (roadside objects) - Has ObjectParser but usage unclear
-- `road/signals` (road-mounted signals) - Has SignalParser but only traffic lights confirmed
-- `road/surface` (road surface properties)
-- `lane/userData` (custom lane data)
-- Complex geometry types beyond those listed (e.g., `<spiral>` support uncertain)
-
-### Conversion Challenges and Solutions
+## Conversion Challenges and Solutions
 
 | Challenge | Description | Solution Approach | Implementation Status |
 |-----------|-------------|-------------------|----------------------|
