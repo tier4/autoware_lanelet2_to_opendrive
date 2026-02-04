@@ -18,6 +18,7 @@ This document focuses on which OpenDRIVE tags CARLA reads and how they are used 
 This section provides a comprehensive reference of OpenDRIVE tags, showing how they are used in CARLA's parser and how Lanelet2 elements map to these tags during conversion.
 
 **Table columns:**
+
 - **Parser Module**: CARLA parser component that reads the tag
 - **OpenDRIVE Tag/Attribute**: Tag name in OpenDRIVE format
 - **CARLA Purpose**: How CARLA uses this tag
