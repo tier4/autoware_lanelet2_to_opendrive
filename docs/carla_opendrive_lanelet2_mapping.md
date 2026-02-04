@@ -98,10 +98,15 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 ### Parser-Specific Notes
 
 #### GeoReferenceParser
+
+[`GeoReferenceParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp)
+
 - CARLA only reads latitude/longitude origins; UTM/MGRS zones are not directly supported
 - Geographic reference is optional in OpenDRIVE but recommended for proper geo-location
 
 #### RoadParser
+
+[`RoadParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp)
 
 ##### Supported Lane Types
 
@@ -119,6 +124,9 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 - See Conversion Challenges for road grouping from Lanelet2
 
 #### GeometryParser
+
+[`GeometryParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp)
+
 ##### Supported Geometry Types
 
 - `<line>`: Straight segments (always supported)
@@ -129,6 +137,8 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 See Conversion Challenges for Lanelet2 centerline conversion approaches
 
 #### LaneParser
+
+[`LaneParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp)
 
 ##### Width vs Border Specification
 
@@ -144,6 +154,9 @@ See Conversion Challenges for Lanelet2 centerline conversion approaches
 - Height and visibility attributes have limited CARLA support
 
 #### ProfilesParser
+
+[`ProfilesParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp)
+
 ##### Parsing Details
 
 - Reads elevation, superelevation, and lateral shape profiles
@@ -151,6 +164,9 @@ See Conversion Challenges for Lanelet2 centerline conversion approaches
 - See CARLA-Specific Considerations for elevation profile requirements
 
 #### JunctionParser
+
+[`JunctionParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp)
+
 ##### Related MapBuilder Functions
 
 - `AddJunction`: [`MapBuilder.cpp` L566](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L566)
