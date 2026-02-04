@@ -1,5 +1,17 @@
 /* Custom styles for CARLA OpenDRIVE documentation */
 
+/* Use full viewport width for content */
+.md-grid {
+    max-width: none;
+    margin-left: 1rem;
+    margin-right: 1rem;
+}
+
+/* Adjust main content container to use available space */
+.md-main__inner {
+    margin-top: 0;
+}
+
 /* Fix table width overflow issues */
 .md-typeset table:not([class]) {
     display: table;
