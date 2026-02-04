@@ -260,6 +260,12 @@ traffic_light.set_state(carla.TrafficLightState.Green)
 
 #### Option 3: Custom CARLA Source Modification
 
+<details>
+<summary><strong>Advanced: Modify CARLA source code</strong> (click to expand)</summary>
+
+!!! warning "Out of Scope"
+    The following information is provided for reference only. **Modifying CARLA's source code is not within the scope of this converter project**. This is a CARLA-side limitation that requires changes to the CARLA simulator itself.
+
 If priority support is critical:
 
 1. Fork CARLA repository
@@ -270,8 +276,10 @@ If priority support is critical:
 
 **Reference**: [CARLA Build Documentation](https://carla.readthedocs.io/en/latest/build_linux/)
 
-!!! warning "CARLA Source Modification Required"
+!!! danger "CARLA Source Modification Required"
     Implementing priority-based right-of-way control requires **modifying CARLA's C++ source code**. This is a non-trivial undertaking requiring deep understanding of CARLA's architecture.
+
+</details>
 
 ### Requesting Support
 
