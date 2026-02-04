@@ -78,7 +78,14 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
-  - Known Limitations: limitations.md
+  - Known Limitations:
+    - Overview: limitations/index.md
+    - Stop Line Position: limitations/stop-line-position.md
+    - Lane Width: limitations/lane-width.md
+    - Special Signals: limitations/special-signals.md
+    - Priority Right-of-Way: limitations/priority-right-of-way.md
+    - Geometric Approximation: limitations/geometric-approximation.md
+    - Coordinate System: limitations/coordinate-system.md
   - Signals: signals.md
   - Conversion Process: conversion-process.md
   - API Reference: api.md
