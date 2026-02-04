@@ -22,9 +22,9 @@ Handles geographic coordinate system definitions.
 
 | OpenDRIVE Tag/Attribute | Purpose | Used For | CARLA Code Location |
 |-------------------------|---------|----------|---------------------|
-| `header/geoReference` | PROJ format georeference string | Geographic coordinate system definition | `GeoReferenceParser.cpp` L62 |
-| `+lat_0=` | Latitude origin | Origin point for coordinate transformation | `GeoReferenceParser.cpp` L28-L50 |
-| `+lon_0=` | Longitude origin | Origin point for coordinate transformation | `GeoReferenceParser.cpp` L28-L50 |
+| `header/geoReference` | PROJ format georeference string | Geographic coordinate system definition | [`GeoReferenceParser.cpp` L62](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp#L62) |
+| `+lat_0=` | Latitude origin | Origin point for coordinate transformation | [`GeoReferenceParser.cpp` L28-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp#L28-L50) |
+| `+lon_0=` | Longitude origin | Origin point for coordinate transformation | [`GeoReferenceParser.cpp` L28-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp#L28-L50) |
 
 **Notes:**
 - CARLA only reads latitude/longitude origins; UTM/MGRS zones are not directly supported
@@ -36,25 +36,25 @@ Handles road network structure and attributes.
 
 | OpenDRIVE Tag/Attribute | Purpose | Used For | CARLA Code Location |
 |-------------------------|---------|----------|---------------------|
-| `road@id` | Road identifier | Unique road identification | `RoadParser.cpp` L113-L120 |
-| `road@name` | Road name | Road naming/labeling | `RoadParser.cpp` L113-L120 |
-| `road@length` | Road length (meters) | Road geometry calculation | `RoadParser.cpp` L113-L120 |
-| `road@junction` | Junction ID reference | Links road to junction | `RoadParser.cpp` L113-L120 |
-| `road/link/predecessor@elementId` | Previous road ID | Road connectivity | `RoadParser.cpp` L122-L130 |
-| `road/link/successor@elementId` | Next road ID | Road connectivity | `RoadParser.cpp` L122-L130 |
-| `road/type@s` | Start position | Road type section position | `RoadParser.cpp` L133-L145 |
-| `road/type@type` | Road type | Road classification (town, highway, etc.) | `RoadParser.cpp` L133-L145 |
-| `road/type/speed@max` | Maximum speed | Speed limit | `RoadParser.cpp` L133-L145 |
-| `road/type/speed@unit` | Speed unit | Speed unit (km/h, mph, etc.) | `RoadParser.cpp` L133-L145 |
-| `road/lanes/laneOffset@s,a,b,c,d` | Lane offset parameters | Lane lateral offset polynomial | `RoadParser.cpp` L147-L155 |
-| `road/lanes/laneSection@s` | Lane section start | Lane section definition | `RoadParser.cpp` L157-L180 |
-| `lane@id` | Lane identifier | Lane identification | `RoadParser.cpp` L157-L180 |
-| `lane@type` | Lane type | Lane classification | `RoadParser.cpp` L157-L180 |
-| `lane@level` | Lane level | Stacked lane handling | `RoadParser.cpp` L157-L180 |
-| `lane/link/predecessor` | Previous lane | Lane connectivity | `RoadParser.cpp` L157-L180 |
-| `lane/link/successor` | Next lane | Lane connectivity | `RoadParser.cpp` L157-L180 |
+| `road@id` | Road identifier | Unique road identification | [`RoadParser.cpp` L113-L120](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120) |
+| `road@name` | Road name | Road naming/labeling | [`RoadParser.cpp` L113-L120](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120) |
+| `road@length` | Road length (meters) | Road geometry calculation | [`RoadParser.cpp` L113-L120](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120) |
+| `road@junction` | Junction ID reference | Links road to junction | [`RoadParser.cpp` L113-L120](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120) |
+| `road/link/predecessor@elementId` | Previous road ID | Road connectivity | [`RoadParser.cpp` L122-L130](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L122-L130) |
+| `road/link/successor@elementId` | Next road ID | Road connectivity | [`RoadParser.cpp` L122-L130](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L122-L130) |
+| `road/type@s` | Start position | Road type section position | [`RoadParser.cpp` L133-L145](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145) |
+| `road/type@type` | Road type | Road classification (town, highway, etc.) | [`RoadParser.cpp` L133-L145](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145) |
+| `road/type/speed@max` | Maximum speed | Speed limit | [`RoadParser.cpp` L133-L145](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145) |
+| `road/type/speed@unit` | Speed unit | Speed unit (km/h, mph, etc.) | [`RoadParser.cpp` L133-L145](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145) |
+| `road/lanes/laneOffset@s,a,b,c,d` | Lane offset parameters | Lane lateral offset polynomial | [`RoadParser.cpp` L147-L155](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L147-L155) |
+| `road/lanes/laneSection@s` | Lane section start | Lane section definition | [`RoadParser.cpp` L157-L180](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180) |
+| `lane@id` | Lane identifier | Lane identification | [`RoadParser.cpp` L157-L180](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180) |
+| `lane@type` | Lane type | Lane classification | [`RoadParser.cpp` L157-L180](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180) |
+| `lane@level` | Lane level | Stacked lane handling | [`RoadParser.cpp` L157-L180](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180) |
+| `lane/link/predecessor` | Previous lane | Lane connectivity | [`RoadParser.cpp` L157-L180](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180) |
+| `lane/link/successor` | Next lane | Lane connectivity | [`RoadParser.cpp` L157-L180](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180) |
 
-**Supported Lane Types** (`RoadParser.cpp` L66-L110):
+**Supported Lane Types** ([`RoadParser.cpp` L66-L110](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L66-L110)):
 - `driving`, `bidirectional`, `stop`, `shoulder`, `biking`, `sidewalk`
 - `parking`, `border`, `restricted`, `median`, `entry`, `exit`
 - `onRamp`, `offRamp`, `rail`, `tram`, `roadWorks`
@@ -71,19 +71,19 @@ Handles road reference line geometry.
 
 | OpenDRIVE Tag/Attribute | Purpose | Used For | CARLA Code Location |
 |-------------------------|---------|----------|---------------------|
-| `geometry@s` | Start position along road | Geometry segment positioning | `GeometryParser.cpp` L77-L84 |
-| `geometry@x` | X coordinate | Geometry start point | `GeometryParser.cpp` L77-L84 |
-| `geometry@y` | Y coordinate | Geometry start point | `GeometryParser.cpp` L77-L84 |
-| `geometry@hdg` | Heading angle | Geometry orientation | `GeometryParser.cpp` L77-L84 |
-| `geometry@length` | Geometry length | Segment length | `GeometryParser.cpp` L77-L84 |
-| `geometry/line` | Straight line | Linear road segment | `GeometryParser.cpp` L89, L120 |
-| `geometry/arc@curvature` | Arc curvature | Curved road segment | `GeometryParser.cpp` L88-91, L122-123 |
-| `geometry/spiral@curvStart` | Spiral start curvature | Clothoid transition | `GeometryParser.cpp` L91-94, L124-131 |
-| `geometry/spiral@curvEnd` | Spiral end curvature | Clothoid transition | `GeometryParser.cpp` L91-94, L124-131 |
-| `geometry/poly3@a,b,c,d` | Cubic polynomial coefficients | Parametric road shape | `GeometryParser.cpp` L94-99, L133-144 |
-| `geometry/paramPoly3@aU,bU,cU,dU` | U-direction polynomial | Parametric curve U | `GeometryParser.cpp` L99-110, L144-159 |
-| `geometry/paramPoly3@aV,bV,cV,dV` | V-direction polynomial | Parametric curve V | `GeometryParser.cpp` L99-110, L144-159 |
-| `geometry/paramPoly3@pRange` | Parameter range | Parametric curve range | `GeometryParser.cpp` L99-110, L144-159 |
+| `geometry@s` | Start position along road | Geometry segment positioning | [`GeometryParser.cpp` L77-L84](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84) |
+| `geometry@x` | X coordinate | Geometry start point | [`GeometryParser.cpp` L77-L84](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84) |
+| `geometry@y` | Y coordinate | Geometry start point | [`GeometryParser.cpp` L77-L84](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84) |
+| `geometry@hdg` | Heading angle | Geometry orientation | [`GeometryParser.cpp` L77-L84](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84) |
+| `geometry@length` | Geometry length | Segment length | [`GeometryParser.cpp` L77-L84](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84) |
+| `geometry/line` | Straight line | Linear road segment | [`GeometryParser.cpp` L89, L120](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L89) |
+| `geometry/arc@curvature` | Arc curvature | Curved road segment | [`GeometryParser.cpp` L88-91, L122-123](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L88-L91) |
+| `geometry/spiral@curvStart` | Spiral start curvature | Clothoid transition | [`GeometryParser.cpp` L91-94, L124-131](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L91-L94) |
+| `geometry/spiral@curvEnd` | Spiral end curvature | Clothoid transition | [`GeometryParser.cpp` L91-94, L124-131](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L91-L94) |
+| `geometry/poly3@a,b,c,d` | Cubic polynomial coefficients | Parametric road shape | [`GeometryParser.cpp` L94-99, L133-144](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L94-L99) |
+| `geometry/paramPoly3@aU,bU,cU,dU` | U-direction polynomial | Parametric curve U | [`GeometryParser.cpp` L99-110, L144-159](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L99-L110) |
+| `geometry/paramPoly3@aV,bV,cV,dV` | V-direction polynomial | Parametric curve V | [`GeometryParser.cpp` L99-110, L144-159](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L99-L110) |
+| `geometry/paramPoly3@pRange` | Parameter range | Parametric curve range | [`GeometryParser.cpp` L99-110, L144-159](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L99-L110) |
 
 **Lanelet2 Conversion Notes:**
 - **Simple Case**: Lanelet2 centerlines can be converted to `<line>` geometries (straight segments)
@@ -95,22 +95,22 @@ Handles lane width, boundaries, and properties.
 
 | OpenDRIVE Tag/Attribute | Purpose | Used For | CARLA Code Location |
 |-------------------------|---------|----------|---------------------|
-| `lane/width@sOffset,a,b,c,d` | Lane width polynomial | Lane width calculation | `LaneParser.cpp` L17-L185 |
-| `lane/border@sOffset,a,b,c,d` | Lane border polynomial | Lane boundary definition | `LaneParser.cpp` L17-L185 |
-| `lane/roadMark@*` | Road marking attributes | Lane markings/striping | `LaneParser.cpp` L17-L185 |
-| `lane/roadMark/type/line@*` | Line marking details | Detailed marking geometry | `LaneParser.cpp` L17-L185 |
-| `lane/material@*` | Lane surface material | Surface properties | `LaneParser.cpp` L17-L185 |
-| `lane/speed@sOffset` | Speed limit start position | Lane-specific speed limit | `LaneParser.cpp` L17-L185 |
-| `lane/speed@max` | Maximum speed | Lane speed restriction | `LaneParser.cpp` L17-L185 |
-| `lane/speed@unit` | Speed unit | Speed unit specification | `LaneParser.cpp` L17-L185 |
-| `lane/access@sOffset` | Access rule start position | Lane access restrictions | `LaneParser.cpp` L17-L185 |
-| `lane/access@rule` | Access rule type | Access control | `LaneParser.cpp` L17-L185 |
-| `lane/access@restriction` | Restriction details | Detailed access rules | `LaneParser.cpp` L17-L185 |
-| `lane/height@sOffset` | Height change position | Vertical lane offset | `LaneParser.cpp` L17-L185 |
-| `lane/height@inner` | Inner edge height | Height at inner boundary | `LaneParser.cpp` L17-L185 |
-| `lane/height@outer` | Outer edge height | Height at outer boundary | `LaneParser.cpp` L17-L185 |
-| `lane/rule@sOffset,value` | Lane rule position/value | Lane-specific rules | `LaneParser.cpp` L17-L185 |
-| `lane/visibility@*` | Visibility attributes | Lane visibility properties | `LaneParser.cpp` L17-L185 |
+| `lane/width@sOffset,a,b,c,d` | Lane width polynomial | Lane width calculation | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/border@sOffset,a,b,c,d` | Lane border polynomial | Lane boundary definition | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/roadMark@*` | Road marking attributes | Lane markings/striping | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/roadMark/type/line@*` | Line marking details | Detailed marking geometry | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/material@*` | Lane surface material | Surface properties | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/speed@sOffset` | Speed limit start position | Lane-specific speed limit | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/speed@max` | Maximum speed | Lane speed restriction | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/speed@unit` | Speed unit | Speed unit specification | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/access@sOffset` | Access rule start position | Lane access restrictions | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/access@rule` | Access rule type | Access control | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/access@restriction` | Restriction details | Detailed access rules | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/height@sOffset` | Height change position | Vertical lane offset | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/height@inner` | Inner edge height | Height at inner boundary | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/height@outer` | Outer edge height | Height at outer boundary | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/rule@sOffset,value` | Lane rule position/value | Lane-specific rules | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
+| `lane/visibility@*` | Visibility attributes | Lane visibility properties | [`LaneParser.cpp` L17-L185](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185) |
 
 **Width vs Border Conflict** (OpenDRIVE Spec 1.8c):
 - `<width>` and `<border>` are mutually exclusive within the same lane group
@@ -129,13 +129,13 @@ Handles elevation and lateral profiles (road surface shape).
 
 | OpenDRIVE Tag/Attribute | Purpose | Used For | CARLA Code Location |
 |-------------------------|---------|----------|---------------------|
-| `elevationProfile/elevation@s` | Elevation start position | Vertical profile positioning | `ProfilesParser.cpp` L46-L80 |
-| `elevationProfile/elevation@a,b,c,d` | Elevation polynomial | Vertical road shape | `ProfilesParser.cpp` L46-L80 |
-| `lateralProfile/superelevation@s` | Superelevation start | Banking start position | `ProfilesParser.cpp` L46-L80 |
-| `lateralProfile/superelevation@a,b,c,d` | Superelevation polynomial | Road banking/tilt | `ProfilesParser.cpp` L46-L80 |
-| `lateralProfile/shape@s` | Shape change start | Lateral shape positioning | `ProfilesParser.cpp` L46-L80 |
-| `lateralProfile/shape@t` | Lateral offset | Transverse position | `ProfilesParser.cpp` L46-L80 |
-| `lateralProfile/shape@a,b,c,d` | Shape polynomial | Lateral profile shape | `ProfilesParser.cpp` L46-L80 |
+| `elevationProfile/elevation@s` | Elevation start position | Vertical profile positioning | [`ProfilesParser.cpp` L46-L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80) |
+| `elevationProfile/elevation@a,b,c,d` | Elevation polynomial | Vertical road shape | [`ProfilesParser.cpp` L46-L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80) |
+| `lateralProfile/superelevation@s` | Superelevation start | Banking start position | [`ProfilesParser.cpp` L46-L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80) |
+| `lateralProfile/superelevation@a,b,c,d` | Superelevation polynomial | Road banking/tilt | [`ProfilesParser.cpp` L46-L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80) |
+| `lateralProfile/shape@s` | Shape change start | Lateral shape positioning | [`ProfilesParser.cpp` L46-L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80) |
+| `lateralProfile/shape@t` | Lateral offset | Transverse position | [`ProfilesParser.cpp` L46-L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80) |
+| `lateralProfile/shape@a,b,c,d` | Shape polynomial | Lateral profile shape | [`ProfilesParser.cpp` L46-L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80) |
 
 **Important Notes:**
 - **Optional but Critical**: While optional in OpenDRIVE spec, `<elevationProfile>` is essential for proper height representation in CARLA
@@ -147,21 +147,21 @@ Handles junction (intersection) definitions and connections.
 
 | OpenDRIVE Tag/Attribute | Purpose | Used For | CARLA Code Location |
 |-------------------------|---------|----------|---------------------|
-| `junction@id` | Junction identifier | Unique junction identification | `JunctionParser.cpp` L17-L50 |
-| `junction@name` | Junction name | Junction naming/labeling | `JunctionParser.cpp` L17-L50 |
-| `junction/connection@id` | Connection identifier | Connection identification | `JunctionParser.cpp` L17-L50 |
-| `junction/connection@incomingRoad` | Incoming road ID | Junction entry point | `JunctionParser.cpp` L17-L50 |
-| `junction/connection@connectingRoad` | Connecting road ID | Junction internal path | `JunctionParser.cpp` L17-L50 |
-| `junction/connection@contactPoint` | Connection point type | Start/end specification | `JunctionParser.cpp` L17-L50 |
-| `junction/connection/laneLink@from` | Source lane ID | Lane-level connection source | `JunctionParser.cpp` L17-L50 |
-| `junction/connection/laneLink@to` | Target lane ID | Lane-level connection target | `JunctionParser.cpp` L17-L50 |
-| `junction/controller@id` | Controller ID | Traffic signal reference | `JunctionParser.cpp` L17-L50 |
-| `junction/controller@type` | Controller type | Controller classification | `JunctionParser.cpp` L17-L50 |
+| `junction@id` | Junction identifier | Unique junction identification | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction@name` | Junction name | Junction naming/labeling | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/connection@id` | Connection identifier | Connection identification | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/connection@incomingRoad` | Incoming road ID | Junction entry point | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/connection@connectingRoad` | Connecting road ID | Junction internal path | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/connection@contactPoint` | Connection point type | Start/end specification | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/connection/laneLink@from` | Source lane ID | Lane-level connection source | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/connection/laneLink@to` | Target lane ID | Lane-level connection target | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/controller@id` | Controller ID | Traffic signal reference | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
+| `junction/controller@type` | Controller type | Controller classification | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) |
 
 **Related MapBuilder Functions:**
-- `AddJunction`: `MapBuilder.cpp` L566
-- `AddConnection`: `MapBuilder.cpp` L570
-- `AddLaneLink`: `MapBuilder.cpp` L580
+- `AddJunction`: [`MapBuilder.cpp` L566](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L566)
+- `AddConnection`: [`MapBuilder.cpp` L570](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L570)
+- `AddLaneLink`: [`MapBuilder.cpp` L580](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L580)
 
 **Junction Semantics:**
 - **laneLink**: Defines lane-level connectivity within junction
