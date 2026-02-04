@@ -28,7 +28,7 @@ For a summary comparison, see the [Summary](#summary) table below.
 
 | Limitation | Severity | CARLA Source Modification Required | Workaround Available |
 |------------|----------|------------------------------------|---------------------|
-| [Stop line position discrepancies](stop-line-position.md) | Medium | No | Manual adjustment in CARLA |
+| [Stop line position discrepancies](stop-line-position.md) | Medium | Yes (for precise positioning) | Manual trigger volume adjustment |
 | [Lane width inconsistencies](lane-width.md) | Low | No | Validation with tolerances |
 | [Special signals not supported](special-signals.md) | High | Yes (for full support) | Community contribution needed |
 | [Priority-based right-of-way not supported](priority-right-of-way.md) | Low | Yes | CARLA source modification only |
