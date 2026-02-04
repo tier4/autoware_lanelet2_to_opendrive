@@ -345,7 +345,7 @@ For maps spanning multiple grid zones:
 | Stop line position discrepancies | Medium | Manual adjustment in CARLA |
 | Lane width inconsistencies | Low | Validation with tolerances |
 | Special signals not supported | High | Community contribution needed |
-| Priority-based right-of-way not supported | High | Signal controllers or Python API |
+| Priority-based right-of-way not supported | Low | Signal controllers or Python API |
 | Geometric approximation | Low | Use high-resolution input data |
 | MGRS projection limitations | Medium | Split large maps by grid zone |
 
