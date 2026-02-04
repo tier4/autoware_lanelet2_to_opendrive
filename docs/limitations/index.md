@@ -26,14 +26,14 @@ For a summary comparison, see the [Summary](#summary) table below.
 
 ## Summary
 
-| Limitation | Severity | Workaround Available |
-|------------|----------|---------------------|
-| [Stop line position discrepancies](stop-line-position.md) | Medium | Manual adjustment in CARLA |
-| [Lane width inconsistencies](lane-width.md) | Low | Validation with tolerances |
-| [Special signals not supported](special-signals.md) | High | Community contribution needed |
-| [Priority-based right-of-way not supported](priority-right-of-way.md) | Low | CARLA source modification only |
-| [Geometric approximation](geometric-approximation.md) | Low | Use high-resolution input data |
-| [MGRS projection limitations](coordinate-system.md) | Medium | Split large maps by grid zone |
+| Limitation | Severity | CARLA Source Modification Required | Workaround Available |
+|------------|----------|------------------------------------|---------------------|
+| [Stop line position discrepancies](stop-line-position.md) | Medium | No | Manual adjustment in CARLA |
+| [Lane width inconsistencies](lane-width.md) | Low | No | Validation with tolerances |
+| [Special signals not supported](special-signals.md) | High | Yes (for full support) | Community contribution needed |
+| [Priority-based right-of-way not supported](priority-right-of-way.md) | Low | Yes | CARLA source modification only |
+| [Geometric approximation](geometric-approximation.md) | Low | No | Use high-resolution input data |
+| [MGRS projection limitations](coordinate-system.md) | Medium | No | Split large maps by grid zone |
 
 !!! info "Feedback Welcome"
     If you encounter limitations not documented here, please [report them](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues) so we can improve this documentation.
