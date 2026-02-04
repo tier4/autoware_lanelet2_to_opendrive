@@ -438,10 +438,59 @@ If enabled, this would allow CARLA to simulate realistic traffic signal timing p
     - `userData/trafficGroup` (signal timing) - Parser exists but stubbed out
     - Complex geometry types (e.g., `<spiral>` support varies by CARLA version)
 
+## Preprocessing Requirements
+
+Before converting Lanelet2 maps to OpenDRIVE format, the following preprocessing steps are **required** to ensure data quality and compatibility with CARLA:
+
+### Lanelet Boundary Length Normalization
+
+**⚠️ Critical Requirement**: When adjacent lanelets have significantly different left and right boundary lengths, they must be preprocessed to equalize the lengths. Mismatched boundary lengths can cause:
+
+- Incorrect lane width calculations in OpenDRIVE
+- Geometry interpolation errors in CARLA
+- Visual artifacts and vehicle positioning issues
+
+**Required Operations**:
+
+To address boundary length mismatches, apply combinations of the following Lanelet2 preprocessing operations:
+
+1. **Merge Operations** (`merge`)
+   - Combine multiple short lanelets into longer segments to match adjacent lane lengths
+   - Reduces unnecessary segmentation and improves geometric consistency
+
+2. **Split Operations** (`split`)
+   - Divide long lanelets into smaller segments to align with shorter adjacent lanes
+   - Ensures proper correspondence between lane boundaries
+
+3. **Delete Operations** (`delete`)
+   - Remove redundant or problematic lanelet segments that cannot be normalized
+   - Use cautiously and only when other operations are insufficient
+
+**Implementation Guidelines**:
+
+- **Threshold**: Define acceptable boundary length difference ratio (e.g., max 10% deviation)
+- **Priority**: Prefer merge operations over split operations to minimize segmentation
+- **Validation**: Verify that preprocessing maintains lane connectivity and topology
+- **Documentation**: Record all preprocessing operations for reproducibility
+
+**Example Scenario**:
+
+```
+Before preprocessing:
+  Lane A: left boundary = 50m, right boundary = 50m
+  Lane B: left boundary = 100m, right boundary = 25m  ← Mismatch!
+
+After preprocessing (merge Lane B with adjacent segments):
+  Lane A: left boundary = 50m, right boundary = 50m
+  Lane B: left boundary = 50m, right boundary = 50m  ✓ Normalized
+```
+
+---
+
 ## Conversion Challenges and Solutions
 
 | Challenge | Description | Solution Approach | Implementation Status |
-|-----------|-------------|-------------------|----------------------|
+|-----------|-------------|---|----------------------|
 | Road Grouping | Lanelet2 has no "Road" concept | Group connected lanelets by connectivity | ✅ Implemented |
 | Lane Width | Lanelet2 lacks width calculation | Compute from boundary separation | ✅ Implemented |
 | Smooth Geometry | Line segments vs. curves | B-spline fitting to centerline | ✅ Implemented (optional) |
