@@ -4,7 +4,7 @@ This document describes how OpenDRIVE tags are used within CARLA and how Lanelet
 
 ## Overview
 
-CARLA UE5 uses a modular OpenDRIVE parser system located in `LibCarla/source/carla/opendrive/` directory. The parser consists of specialized components that handle different aspects of the OpenDRIVE specification:
+CARLA UE5 uses a modular OpenDRIVE parser system located in [`LibCarla/source/carla/opendrive/`](https://github.com/carla-simulator/carla/tree/master/LibCarla/source/carla/opendrive) directory. The parser consists of specialized components that handle different aspects of the OpenDRIVE specification:
 
 - **XML Parsing**: Uses the `pugixml` library for XML processing
 - **Modular Architecture**: Separate parser classes for different OpenDRIVE elements
@@ -106,6 +106,7 @@ CARLA's OpenDRIVE parser reads the following tags and attributes. All tags are o
 
 #### GeometryParser
 **Lanelet2 Conversion Notes:**
+
 - **Simple Case**: Lanelet2 centerlines can be converted to `<line>` geometries (straight segments)
 - **Advanced Case**: For smoother roads, consider using `<spiral>` or `<paramPoly3>` with B-spline fitting
 
@@ -117,22 +118,26 @@ CARLA's OpenDRIVE parser reads the following tags and attributes. All tags are o
 - CommonRoadScenarioDesigner uses `<width>`; this converter should choose based on requirements
 
 **Lanelet2 Challenges:**
+
 - **No Width Concept**: Lanelet2 doesn't have lane width calculation functions
 - **Road+Lane ID Required**: Physical lane shape requires both Road ID and Lane ID
 - **Relative Positioning**: Lane IDs are relative within road sections
 
 #### ProfilesParser
 **Important Notes:**
+
 - **Optional but Critical**: While optional in OpenDRIVE spec, `<elevationProfile>` is essential for proper height representation in CARLA
 - **Lanelet2 Integration**: Lanelet2 has elevation data (z-coordinates); should be converted to elevation profile
 
 #### JunctionParser
 **Related MapBuilder Functions:**
+
 - `AddJunction`: [`MapBuilder.cpp` L566](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L566)
 - `AddConnection`: [`MapBuilder.cpp` L570](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L570)
 - `AddLaneLink`: [`MapBuilder.cpp` L580](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L580)
 
 **Junction Semantics:**
+
 - **laneLink**: Defines lane-level connectivity within junction
 - **connection**: Defines road-level connectivity (which roads connect to junction)
 - **Road Assignment**: Roads must specify which junction they belong to via `road@junction` attribute
@@ -182,6 +187,7 @@ This section describes how Lanelet2 tags and attributes are converted to OpenDRI
 | (centerline) | LineString3d | `geometry/line` | points | Lanelet centerline → road geometry |
 
 **Lane Width Considerations:**
+
 - Lanelet2 has no built-in lane width concept
 - Width must be computed from left/right boundary distances
 - Converter uses `lane/border` for more direct geometric mapping
@@ -196,6 +202,7 @@ This section describes how Lanelet2 tags and attributes are converted to OpenDRI
 | Lanelet elevation (z-coordinates) | `road/elevationProfile/elevation` | Z-value extraction and fitting | Critical for 3D road representation |
 
 **Geometry Conversion Approach:**
+
 - **Phase 1**: Use `<line>` elements for straightforward conversion
 - **Phase 2** (optional): Implement B-spline fitting for smoother geometry using `<paramPoly3>` or `<spiral>`
 
@@ -209,6 +216,7 @@ This section describes how Lanelet2 tags and attributes are converted to OpenDRI
 | lane ID (junction lanelet) | `junction/connection/laneLink` | Lane-level connections | Maps specific lane connections through junction |
 
 **Junction Conversion Process:**
+
 1. Identify all lanelets with `turn_direction` tag
 2. Group spatially overlapping junction lanelets
 3. Create `<junction>` element for each group
@@ -228,6 +236,7 @@ This section describes how Lanelet2 tags and attributes are converted to OpenDRI
 | Regulatory element → lanelet | `signal@orientation` | Affected lane determination | Which lanes signal controls |
 
 **Signal Positioning:**
+
 - Extract 3D position from traffic light LineString geometry
 - Convert to road-relative (s, t) coordinates
 - `s`: distance along road reference line
@@ -243,6 +252,7 @@ This section describes how Lanelet2 tags and attributes are converted to OpenDRI
 | Point z-coordinate (`ele`) | `elevationProfile/elevation` | Polynomial fitting | Extract elevation profile from 3D points |
 
 **Coordinate Transformation Workflow:**
+
 1. Parse origin specification (MGRS or lat/lon)
 2. Create PROJ string for `<geoReference>`
 3. Apply coordinate offset (if specified)
@@ -311,6 +321,7 @@ This section describes how Lanelet2 tags and attributes are converted to OpenDRI
 | Lane Connectivity | OpenDRIVE uses Road+Lane IDs | Map Lanelet IDs to Road+Lane pairs | ✅ Implemented |
 
 **Legend:**
+
 - ✅ Fully implemented
 - ⚠️ Partially implemented or basic support
 - ❌ Not implemented
