@@ -99,6 +99,7 @@ CARLA's OpenDRIVE parser reads the following tags and attributes. All tags are o
 - `special1`, `special2`, `special3`, `none`
 
 **Important Considerations:**
+
 - **Road Concept Challenge**: Lanelet2 doesn't have a "Road" concept; conversion must group Lanelets into Roads
 - **Lane Speed Override**: Lane speed limits override road speed limits (OpenDRIVE spec 11.7)
 - **Signal Priority**: Speed limits from signals always have preference over road/lane speed limits
