@@ -1,0 +1,71 @@
+# Lychee Link Checker Configuration
+# Documentation: https://lychee.cli.rs/usage/config/
+
+# Cache configuration
+cache = true
+max_cache_age = "1d"
+
+# Request configuration
+max_redirects = 10
+max_retries = 3
+timeout = 20
+
+# User agent string
+user_agent = "Mozilla/5.0 (compatible; Lychee/0.21.0; +https://github.com/lycheeverse/lychee)"
+
+# HTTP method to use for checking links
+method = "get"
+
+# Accept invalid SSL certificates (use with caution)
+insecure = false
+
+# Check links inside HTML comments
+include_verbatim = false
+
+# Exclude URLs matching these patterns (in addition to .lycheeignore)
+exclude = [
+    # Local file links
+    "^file://",
+]
+
+# Include only these schemes
+scheme = [
+    "https",
+    "http",
+]
+
+# Include only these file types
+include = [
+    "**/*.md",
+    "**/*.py",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.toml",
+    "**/*.html",
+    "**/*.rst",
+    "**/*.txt",
+]
+
+# Exclude these paths from checking
+exclude_path = [
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+]
+
+# GitHub token (set via environment variable GITHUB_TOKEN)
+# This is automatically available in GitHub Actions
+# github_token = ""
+
+# Verbose output
+verbose = "info"
+
+# Don't show progress bar (better for CI)
+no_progress = true
