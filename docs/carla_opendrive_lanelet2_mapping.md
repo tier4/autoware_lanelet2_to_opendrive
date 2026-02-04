@@ -99,6 +99,63 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 | [JunctionParser](#junctionparser) | `junction/connection@contactPoint` | Connection point type, Start/end specification | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | Generated | ⚠️ | Determined from junction geometry |
 | [JunctionParser](#junctionparser) | `junction/connection/laneLink@from` | Source lane ID, Lane-level connection source | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | Lanelet2 source lane | ✅ | Lane connectivity through junction |
 | [JunctionParser](#junctionparser) | `junction/connection/laneLink@to` | Target lane ID, Lane-level connection target | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | Lanelet2 target lane | ✅ | Lane connectivity through junction |
+| [SignalParser](#signalparser) | `road/signals/signal@s` | Signal S-coordinate position, Longitudinal position along road | [`SignalParser.cpp` L47](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L47) | Lanelet2 regulatory_element position | ✅ | Calculate from regulatory_element refers |
+| [SignalParser](#signalparser) | `road/signals/signal@t` | Signal T-coordinate position, Lateral offset from reference line | [`SignalParser.cpp` L48](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L48) | Generated | ⚠️ | Default lateral offset for signal placement |
+| [SignalParser](#signalparser) | `road/signals/signal@id` | Signal identifier, Unique signal identification | [`SignalParser.cpp` L49](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L49) | Lanelet2 regulatory_element ID | ✅ | Use regulatory_element ID directly |
+| [SignalParser](#signalparser) | `road/signals/signal@name` | Signal name, Signal naming/labeling | [`SignalParser.cpp` L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L50) | Optional | ⚠️ | Can use regulatory_element subtype |
+| [SignalParser](#signalparser) | `road/signals/signal@dynamic` | Dynamic signal flag, Indicates if signal state changes | [`SignalParser.cpp` L51](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L51) | Lanelet2 traffic_light type | ✅ | yes for traffic_light, no for traffic_sign |
+| [SignalParser](#signalparser) | `road/signals/signal@orientation` | Signal orientation, Signal facing direction (+/- for lane direction) | [`SignalParser.cpp` L52](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L52) | Generated | ⚠️ | Determine from lane direction |
+| [SignalParser](#signalparser) | `road/signals/signal@zOffset` | Signal Z-offset, Vertical position above road surface | [`SignalParser.cpp` L53](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L53) | Default height | ⚠️ | Use standard signal height (e.g., 5m) |
+| [SignalParser](#signalparser) | `road/signals/signal@country` | Country code, Signal standard specification (e.g., OpenDRIVE) | [`SignalParser.cpp` L54](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L54) | Default OpenDRIVE | ⚠️ | Use OpenDRIVE standard codes |
+| [SignalParser](#signalparser) | `road/signals/signal@type` | Signal type code, Signal classification (1000003=red/yellow/green) | [`SignalParser.cpp` L55](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L55) | Lanelet2 subtype mapping | ✅ | Map L2 subtypes to OpenDRIVE codes |
+| [SignalParser](#signalparser) | `road/signals/signal@subtype` | Signal subtype, Detailed signal classification | [`SignalParser.cpp` L56](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L56) | Lanelet2 subtype details | ✅ | Detailed type from regulatory_element |
+| [SignalParser](#signalparser) | `road/signals/signal@value` | Signal value, Numeric value (e.g., speed limit number) | [`SignalParser.cpp` L57](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L57) | Lanelet2 speed_limit or other values | ✅ | Extract value from regulatory_element |
+| [SignalParser](#signalparser) | `road/signals/signal@unit` | Signal unit, Unit of measurement for value | [`SignalParser.cpp` L58](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L58) | Default unit | ⚠️ | km/h for speed, m for distance |
+| [SignalParser](#signalparser) | `road/signals/signal@height` | Signal height, Physical signal height | [`SignalParser.cpp` L59](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L59) | Default dimensions | ⚠️ | Standard signal dimensions |
+| [SignalParser](#signalparser) | `road/signals/signal@width` | Signal width, Physical signal width | [`SignalParser.cpp` L60](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L60) | Default dimensions | ⚠️ | Standard signal dimensions |
+| [SignalParser](#signalparser) | `road/signals/signal@text` | Signal text, Displayed text on signal | [`SignalParser.cpp` L61](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L61) | Optional | ⚠️ | Textual signal information if available |
+| [SignalParser](#signalparser) | `road/signals/signal@hOffset` | Signal horizontal offset, Additional horizontal displacement | [`SignalParser.cpp` L62](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L62) | Default 0 | ⚠️ | Typically 0 unless specific placement needed |
+| [SignalParser](#signalparser) | `road/signals/signal@pitch` | Signal pitch angle, Vertical tilt angle | [`SignalParser.cpp` L63](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L63) | Default 0 | ⚠️ | Default vertical orientation |
+| [SignalParser](#signalparser) | `road/signals/signal@roll` | Signal roll angle, Horizontal tilt angle | [`SignalParser.cpp` L64](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L64) | Default 0 | ⚠️ | Default roll orientation |
+| [SignalParser](#signalparser) | `signal/validity@fromLane` | Validity start lane, Signal applies from this lane ID | [`SignalParser.cpp` L25](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L25) | Lanelet2 refers lanelets | ✅ | Map referenced lanelets to lane IDs |
+| [SignalParser](#signalparser) | `signal/validity@toLane` | Validity end lane, Signal applies up to this lane ID | [`SignalParser.cpp` L26](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L26) | Lanelet2 refers lanelets | ✅ | Map referenced lanelets to lane IDs |
+| [SignalParser](#signalparser) | `signal/dependency@id` | Dependency signal ID, References another signal | [`SignalParser.cpp` L110](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L110) | Enhancement required | ❌ | Lanelet2 has no signal dependency concept |
+| [SignalParser](#signalparser) | `signal/dependency@type` | Dependency type, Type of signal dependency | [`SignalParser.cpp` L111](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L111) | Enhancement required | ❌ | Lanelet2 has no dependency types |
+| [SignalParser](#signalparser) | `signal/positionInertial@x` | Inertial X position, Absolute X coordinate | [`SignalParser.cpp` L116](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L116) | Calculate from road coordinates | ⚠️ | Transform from s,t to absolute X,Y |
+| [SignalParser](#signalparser) | `signal/positionInertial@y` | Inertial Y position, Absolute Y coordinate | [`SignalParser.cpp` L117](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L117) | Calculate from road coordinates | ⚠️ | Transform from s,t to absolute X,Y |
+| [SignalParser](#signalparser) | `signal/positionInertial@z` | Inertial Z position, Absolute Z coordinate | [`SignalParser.cpp` L118](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L118) | Calculate from elevation + zOffset | ⚠️ | Road elevation + signal zOffset |
+| [SignalParser](#signalparser) | `signal/positionInertial@hdg` | Inertial heading, Absolute heading angle | [`SignalParser.cpp` L119](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L119) | Calculate from road heading | ⚠️ | Road heading at signal position |
+| [SignalParser](#signalparser) | `signal/positionInertial@pitch` | Inertial pitch, Absolute pitch angle | [`SignalParser.cpp` L120](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L120) | Default 0 | ⚠️ | Combined with signal pitch |
+| [SignalParser](#signalparser) | `signal/positionInertial@roll` | Inertial roll, Absolute roll angle | [`SignalParser.cpp` L121](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L121) | Default 0 | ⚠️ | Combined with signal roll |
+| [SignalParser](#signalparser) | `road/signals/signalReference@s` | Signal reference S position, Reference to signal at position | [`SignalParser.cpp` L129](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L129) | Same as signal@s | ⚠️ | Cross-reference to signal definition |
+| [SignalParser](#signalparser) | `road/signals/signalReference@t` | Signal reference T position, Lateral reference position | [`SignalParser.cpp` L130](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L130) | Same as signal@t | ⚠️ | Cross-reference lateral offset |
+| [SignalParser](#signalparser) | `road/signals/signalReference@id` | Signal reference ID, References signal by ID | [`SignalParser.cpp` L131](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L131) | Lanelet2 regulatory_element ref | ✅ | Links road to signal definition |
+| [SignalParser](#signalparser) | `road/signals/signalReference@orientation` | Signal reference orientation, Reference direction | [`SignalParser.cpp` L133](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L133) | Generated | ⚠️ | Match signal orientation |
+| [ControllerParser](#controllerparser) | `controller@id` | Controller identifier, Unique controller identification | [`ControllerParser.cpp` L27](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L27) | Generated from traffic_light groups | ⚠️ | Group related traffic_lights |
+| [ControllerParser](#controllerparser) | `controller@name` | Controller name, Controller naming/labeling | [`ControllerParser.cpp` L28](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L28) | Optional | ⚠️ | Can use intersection name |
+| [ControllerParser](#controllerparser) | `controller@sequence` | Controller sequence, Signal phase sequence number | [`ControllerParser.cpp` L29](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L29) | Enhancement required | ❌ | Lanelet2 has no phase sequence data |
+| [ControllerParser](#controllerparser) | `controller/control@signalId` | Controlled signal ID, References signal under control | [`ControllerParser.cpp` L39](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L39) | Lanelet2 traffic_light IDs in group | ✅ | Map traffic_light refs to signal IDs |
+| [ControllerParser](#controllerparser) | `controller/control@type` | Control type, Type of controller (not yet used in CARLA) | [`ControllerParser.cpp` L41](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L41) | Optional | ⚠️ | Currently not used by CARLA |
+| [ObjectParser](#objectparser) | `road/objects/object@type` | Object type classification, Type of road object (crosswalk, etc.) | [`ObjectParser.cpp` L34](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L34) | Lanelet2 area/polygon type | ✅ | crosswalk, speed sign, stop line |
+| [ObjectParser](#objectparser) | `road/objects/object@name` | Object name, Object identification name | [`ObjectParser.cpp` L35](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L35) | Lanelet2 area/polygon ID or name | ✅ | Speed_*, Stencil_STOP patterns |
+| [ObjectParser](#objectparser) | `road/objects/object@id` | Object identifier, Unique object identification | [`ObjectParser.cpp` L78](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L78) | Lanelet2 area/polygon ID | ✅ | Direct ID mapping |
+| [ObjectParser](#objectparser) | `road/objects/object@s` | Object S position, Longitudinal position along road | [`ObjectParser.cpp` L79](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L79) | Calculate from area center | ⚠️ | Project area center to road reference |
+| [ObjectParser](#objectparser) | `road/objects/object@t` | Object T position, Lateral offset from reference line | [`ObjectParser.cpp` L80](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L80) | Calculate from area center | ⚠️ | Lateral offset calculation |
+| [ObjectParser](#objectparser) | `road/objects/object@zOffset` | Object Z offset, Vertical position above road | [`ObjectParser.cpp` L84](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L84) | Default 0 | ⚠️ | Road surface level |
+| [ObjectParser](#objectparser) | `road/objects/object@hdg` | Object heading, Orientation angle | [`ObjectParser.cpp` L93](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L93) | Calculate from area orientation | ⚠️ | Area principal axis direction |
+| [ObjectParser](#objectparser) | `road/objects/object@pitch` | Object pitch, Vertical tilt angle | [`ObjectParser.cpp` L94](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L94) | Default 0 | ⚠️ | Flat orientation |
+| [ObjectParser](#objectparser) | `road/objects/object@roll` | Object roll, Horizontal tilt angle | [`ObjectParser.cpp` L95](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L95) | Default 0 | ⚠️ | Flat orientation |
+| [ObjectParser](#objectparser) | `road/objects/object@orientation` | Object orientation, Direction relative to road (+/-/none) | [`ObjectParser.cpp` L83](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L83) | Generated | ⚠️ | Determine from area position |
+| [ObjectParser](#objectparser) | `road/objects/object@width` | Object width, Physical width dimension | [`ObjectParser.cpp` L91](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L91) | Calculate from area bounds | ⚠️ | Bounding box width |
+| [ObjectParser](#objectparser) | `road/objects/object@length` | Object length, Physical length dimension | [`ObjectParser.cpp` L63](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L63) | Calculate from area bounds | ⚠️ | Bounding box length |
+| [ObjectParser](#objectparser) | `road/objects/object@height` | Object height, Physical height dimension | [`ObjectParser.cpp` L90](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L90) | Default height | ⚠️ | Standard object height |
+| [ObjectParser](#objectparser) | `object/outline/cornerLocal@u` | Corner U coordinate, Local U coordinate of outline point | [`ObjectParser.cpp` L43](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L43) | Lanelet2 area vertices | ✅ | Transform area vertices to local U,V |
+| [ObjectParser](#objectparser) | `object/outline/cornerLocal@v` | Corner V coordinate, Local V coordinate of outline point | [`ObjectParser.cpp` L44](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L44) | Lanelet2 area vertices | ✅ | Transform area vertices to local U,V |
+| [ObjectParser](#objectparser) | `object/outline/cornerLocal@z` | Corner Z coordinate, Local Z coordinate of outline point | [`ObjectParser.cpp` L45](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L45) | Lanelet2 area vertex Z | ⚠️ | Use Z from vertices if 3D |
+| [TrafficGroupParser](#trafficgroupparser) | `userData/trafficGroup@id` | Traffic group identifier, Signal group identification (STUBBED) | [`TrafficGroupParser.cpp` L37](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L37) | Enhancement required | ❌ | Feature currently stubbed in CARLA |
+| [TrafficGroupParser](#trafficgroupparser) | `userData/trafficGroup@redTime` | Red signal duration, Red phase timing in seconds (STUBBED) | [`TrafficGroupParser.cpp` L38](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L38) | Enhancement required | ❌ | Timing data not in Lanelet2 |
+| [TrafficGroupParser](#trafficgroupparser) | `userData/trafficGroup@yellowTime` | Yellow signal duration, Yellow phase timing in seconds (STUBBED) | [`TrafficGroupParser.cpp` L39](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L39) | Enhancement required | ❌ | Timing data not in Lanelet2 |
+| [TrafficGroupParser](#trafficgroupparser) | `userData/trafficGroup@greenTime` | Green signal duration, Green phase timing in seconds (STUBBED) | [`TrafficGroupParser.cpp` L40](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L40) | Enhancement required | ❌ | Timing data not in Lanelet2 |
 | [JunctionParser](#junctionparser) | `junction/controller@id` | Controller ID, Traffic signal reference | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | Enhancement required | ❌ | Lanelet2 has controller concept but needs mapping |
 | [JunctionParser](#junctionparser) | `junction/controller@type` | Controller type, Controller classification | [`JunctionParser.cpp` L17-L50](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50) | Enhancement required | ❌ | Controller type classification |
 
@@ -186,6 +243,130 @@ See Conversion Challenges for Lanelet2 centerline conversion approaches
 - **connection**: Defines road-level connectivity (which roads connect to junction)
 - **Road Assignment**: Roads must specify which junction they belong to via `road@junction` attribute
 
+#### SignalParser
+
+[`SignalParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp)
+
+##### Supported Signal Types
+
+- **Traffic Signals**: Dynamic signals (traffic lights with changing states)
+- **Traffic Signs**: Static signals (speed limits, stop signs, etc.)
+- **Signal Validity**: Lane-specific signal applicability via `fromLane`/`toLane`
+- **Signal Dependencies**: Cross-referencing between related signals
+
+##### Position Specification
+
+Signals can be positioned using two methods:
+
+- **Road coordinates** (`s`, `t`, `zOffset`): Position relative to road reference line
+- **Inertial coordinates** (`x`, `y`, `z`, `hdg`, `pitch`, `roll`): Absolute world position
+
+##### Signal References
+
+- **`<signal>`**: Full signal definition with all attributes
+- **`<signalReference>`**: Lightweight reference to existing signal by ID
+- References allow multiple roads to share the same signal definition
+
+##### Lanelet2 Mapping
+
+- `regulatory_element` with `traffic_light` or `traffic_sign` subtypes map to signals
+- Signal ID: Use regulatory_element ID
+- Signal type: Map Lanelet2 subtype to OpenDRIVE type codes (e.g., 1000003 for red/yellow/green)
+- Signal position: Calculate s-coordinate from regulatory_element refers
+- Signal validity: Map refers lanelets to fromLane/toLane range
+
+#### ControllerParser
+
+[`ControllerParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp)
+
+##### Purpose
+
+Controllers manage groups of traffic signals, coordinating their states and sequencing (e.g., traffic light phases at an intersection).
+
+##### Key Elements
+
+- **Controller ID**: Unique identifier for signal group
+- **Sequence**: Phase sequence number (order of signal state changes)
+- **Control**: List of signal IDs managed by this controller
+
+##### Lanelet2 Mapping
+
+- Lanelet2 has no built-in signal controller concept
+- Controllers can be generated from traffic_light groups at intersections
+- Group all traffic_lights affecting the same junction into one controller
+- Sequence number requires external phase timing data (not in Lanelet2)
+
+##### Current Status
+
+Controllers are parsed but signal phase timing logic is not fully integrated in CARLA's map builder.
+
+#### ObjectParser
+
+[`ObjectParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp)
+
+##### Supported Object Types
+
+CARLA recognizes specific object types for autonomous driving scenarios:
+
+- **`crosswalk`**: Pedestrian crossing areas with detailed outline geometry
+- **Speed signs**: Objects named `Speed_*` (e.g., `Speed_30`, `Speed_50`)
+- **Stop lines**: Objects named `Stencil_STOP` for stop sign markings
+
+##### Object Geometry
+
+- **Simple objects**: Defined by position, dimensions (width, length, height), and orientation
+- **Outline objects**: Defined by polygon vertices using `<outline>/<cornerLocal>` with U,V,Z coordinates
+
+##### Lanelet2 Mapping
+
+- **Crosswalks**: Map from Lanelet2 `area` with `subtype=crosswalk`
+- **Speed signs**: Generate from `speed_limit` regulatory_elements
+- **Stop lines**: Map from `stop_line` regulatory_elements
+- Object position: Project area/element center onto road to get s,t coordinates
+- Object outline: Transform area polygon vertices to local U,V coordinates
+
+##### RoadRunner Integration
+
+This parser is designed to work with RoadRunner-generated OpenDRIVE files, which use object naming patterns like `Speed_*` and `Stencil_STOP` for signal-like elements.
+
+#### TrafficGroupParser
+
+[`TrafficGroupParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp)
+
+##### Current Status: STUBBED
+
+**Important**: This parser exists in CARLA's codebase but is **currently disabled** (all parsing code is commented out).
+
+##### Intended Purpose
+
+Parse traffic signal timing groups with phase durations:
+
+- **Red time**: Duration of red signal phase (seconds)
+- **Yellow time**: Duration of yellow signal phase (seconds)
+- **Green time**: Duration of green signal phase (seconds)
+
+##### XML Structure
+
+Located in `<userData>` section as custom extension:
+
+```xml
+<userData>
+  <trafficGroup id="group1" redTime="30" yellowTime="5" greenTime="25"/>
+</userData>
+```
+
+##### Lanelet2 Mapping
+
+Not applicable - Lanelet2 has no signal timing data. This would require external timing configuration or simulation-specific data.
+
+##### Future Implementation
+
+If enabled, this would allow CARLA to simulate realistic traffic signal timing patterns, but requires:
+
+1. Uncommenting parser code in TrafficGroupParser.cpp
+2. Integrating timing data into MapBuilder's signal management
+3. External timing configuration source (Lanelet2 doesn't provide this)
+
 ## CARLA-Specific Considerations
 
 ??? info "CARLA Compatibility Requirements and Recommendations"
@@ -225,15 +406,34 @@ See Conversion Challenges for Lanelet2 centerline conversion approaches
        - Required for intersection navigation
        - Must include `laneLink` for lane-level routing
 
+    ### Signal and Object Support
+
+    CARLA **does support** the following elements:
+
+    1. **Traffic Signals** (`road/signals/signal`):
+       - Fully parsed via SignalParser
+       - Supports both static signs and dynamic traffic lights
+       - Includes signal validity ranges, dependencies, and positioning
+       - See SignalParser section for detailed mapping
+
+    2. **Road Objects** (`road/objects/object`):
+       - Parsed via ObjectParser for specific types
+       - Supported: crosswalks, speed signs (Speed_*), stop lines (Stencil_STOP)
+       - Objects can have outline geometry for precise boundaries
+
+    3. **Traffic Controllers** (`controller`):
+       - Parsed via ControllerParser
+       - Manages signal groups and sequencing
+       - Phase timing integration is partial
+
     ### Elements Not Used by CARLA
 
-    The following OpenDRIVE elements are **not** currently parsed by CARLA (based on parser code analysis):
+    The following OpenDRIVE elements are **not** currently parsed or have limited support:
 
-    - `road/objects` (roadside objects) - Has ObjectParser but usage unclear
-    - `road/signals` (road-mounted signals) - Has SignalParser but only traffic lights confirmed
-    - `road/surface` (road surface properties)
-    - `lane/userData` (custom lane data)
-    - Complex geometry types beyond those listed (e.g., `<spiral>` support uncertain)
+    - `road/surface` (road surface properties) - Not parsed
+    - `lane/userData` (custom lane data) - Not parsed
+    - `userData/trafficGroup` (signal timing) - Parser exists but stubbed out
+    - Complex geometry types (e.g., `<spiral>` support varies by CARLA version)
 
 ## Conversion Challenges and Solutions
 
