@@ -9,6 +9,19 @@ This page documents implementation limitations and behavioral differences when c
 
 The conversion from Lanelet2 to OpenDRIVE involves transforming between two fundamentally different map representation formats. Due to architectural differences between the formats and target platform constraints, some behavioral differences are expected and unavoidable.
 
+### Quick Navigation
+
+Jump to specific limitations:
+
+1. [Stop Line Position Discrepancies](#stop-line-position-discrepancies) - CARLA trigger volume-based detection causes position shifts
+2. [Lane Width Inconsistencies](#lane-width-inconsistencies) - Mathematical interpolation between different geometric representations
+3. [Special Traffic Signals Not Supported](#special-traffic-signals-not-supported) - Arrow signals, pedestrian signals, and directional signals
+4. [Priority-Based Right-of-Way Control Not Supported](#priority-based-right-of-way-control-not-supported) - CARLA does not support priority attributes
+5. [Geometric Approximation Limitations](#geometric-approximation-limitations) - Parametric curve fitting to discrete points
+6. [Coordinate System Considerations](#coordinate-system-considerations) - MGRS projection constraints
+
+For a summary comparison, see the [Summary](#summary) table at the bottom of this page.
+
 ---
 
 ## Stop Line Position Discrepancies
