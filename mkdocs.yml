@@ -78,6 +78,7 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
+  - CARLA OpenDRIVE Mapping: carla_opendrive_lanelet2_mapping.md
   - Known Limitations:
     - Overview: limitations/index.md
     - Stop Line Position: limitations/stop-line-position.md
