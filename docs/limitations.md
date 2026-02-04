@@ -9,6 +9,19 @@ This page documents implementation limitations and behavioral differences when c
 
 The conversion from Lanelet2 to OpenDRIVE involves transforming between two fundamentally different map representation formats. Due to architectural differences between the formats and target platform constraints, some behavioral differences are expected and unavoidable.
 
+### Quick Navigation
+
+Jump to specific limitations:
+
+1. [Stop Line Position Discrepancies](#stop-line-position-discrepancies) - CARLA trigger volume-based detection causes position shifts
+2. [Lane Width Inconsistencies](#lane-width-inconsistencies) - Mathematical interpolation between different geometric representations
+3. [Special Traffic Signals Not Supported](#special-traffic-signals-not-supported) - Arrow signals, pedestrian signals, and directional signals
+4. [Priority-Based Right-of-Way Control Not Supported](#priority-based-right-of-way-control-not-supported) - CARLA does not support priority attributes
+5. [Geometric Approximation Limitations](#geometric-approximation-limitations) - Parametric curve fitting to discrete points
+6. [Coordinate System Considerations](#coordinate-system-considerations) - MGRS projection constraints
+
+For a summary comparison, see the [Summary](#summary) table at the bottom of this page.
+
 ---
 
 ## Stop Line Position Discrepancies
@@ -163,6 +176,111 @@ If you require support for special traffic signals:
 
 ---
 
+## Priority-Based Right-of-Way Control Not Supported
+
+### Issue
+
+Priority tags (`priority` attribute in regulatory elements) for controlling intersection entry order are **not implemented** in the converter.
+
+### Cause
+
+While **technically feasible** to implement in the converter, this feature is not supported because **CARLA simulator does not recognize or utilize priority attributes** for traffic management at junctions.
+
+#### CARLA's Complete Ignorance of Priority Attributes
+
+CARLA simulator completely ignores priority information at every processing stage:
+
+| Processing Stage | Result |
+|------------------|--------|
+| **① Parsing** | ❌ Priority attributes are not read from OpenDRIVE files |
+| **② Data Storage** | ❌ No internal fields exist to store priority values |
+| **③ Traffic Control** | ❌ Uses FIFO queue only for junction management; priority values are never consulted |
+
+#### Technical Analysis with Code References
+
+**1. Parsing Stage: Priority Not Read**
+
+CARLA's OpenDRIVE parser does not extract `priority` attributes from regulatory elements:
+
+- **OpenDRIVE Parser**: [`LibCarla/source/carla/opendrive/parser/SignalParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp)
+  - Only parses signal `type`, `subtype`, `value`, `orientation`, and `position`
+  - **No code exists** to parse `priority` attributes from `<signal>` or `<controller>` elements
+
+**2. Data Storage: No Priority Field**
+
+CARLA's internal traffic signal representation lacks priority storage:
+
+- **Signal Class**: [`LibCarla/source/carla/road/element/RoadInfoSignal.h`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/element/RoadInfoSignal.h)
+  - Contains: `type`, `value`, `orientation`, `heading`, `pitch`, `roll`, `width`, `height`, `text`
+  - **Does not contain**: `priority` field
+
+- **Controller Class**: [`LibCarla/source/carla/road/SignalController.h`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/SignalController.h)
+  - Contains: `signal_ids`, `junction_id`
+  - **Does not contain**: `priority` field
+
+**3. Traffic Control: FIFO Queue Only**
+
+CARLA's Traffic Manager uses a simple FIFO (First-In-First-Out) queue for junction management:
+
+- **Traffic Manager Junction Logic**: [`LibCarla/source/carla/trafficmanager/`](https://github.com/carla-simulator/carla/tree/master/LibCarla/source/carla/trafficmanager)
+  - Junction entry order is determined **solely by arrival time**
+  - **No priority-based decision making** exists in the codebase
+  - All vehicles are treated equally regardless of any potential priority values
+
+### Impact
+
+When converting Lanelet2 maps with `priority` regulatory elements:
+
+- Priority information is **completely discarded** during conversion
+- Intersection right-of-way behavior will **not match** the original Lanelet2 specification
+- All vehicles will follow **FIFO queue behavior** in CARLA, regardless of intended priority
+
+### Workaround
+
+If priority-based right-of-way control is needed in CARLA:
+
+#### Custom CARLA Source Modification
+
+<details>
+<summary><strong>Advanced: Modify CARLA source code</strong> (click to expand)</summary>
+
+!!! warning "Out of Scope"
+    The following information is provided for reference only. **Modifying CARLA's source code is not within the scope of this converter project**. This is a CARLA-side limitation that requires changes to the CARLA simulator itself.
+
+If priority support is critical:
+
+1. Fork CARLA repository
+2. Modify `SignalParser.cpp` to parse priority attributes
+3. Add `priority` field to `RoadInfoSignal` and `SignalController` classes
+4. Implement priority-based logic in Traffic Manager
+5. Rebuild CARLA from source
+
+**Reference**: [CARLA Build Documentation](https://carla.readthedocs.io/en/latest/build_linux/)
+
+!!! danger "CARLA Source Modification Required"
+    Implementing priority-based right-of-way control requires **modifying CARLA's C++ source code**. This is a non-trivial undertaking requiring deep understanding of CARLA's architecture.
+
+</details>
+
+### Requesting Support
+
+If CARLA priority support is important for your use case:
+
+1. **Open a CARLA Issue**: [CARLA GitHub Issues](https://github.com/carla-simulator/carla/issues)
+2. **Describe the use case**:
+    - Why priority-based right-of-way is needed
+    - Expected behavior at intersections
+    - Real-world traffic scenarios requiring priority
+3. **Propose implementation**:
+    - Suggest changes to data structures
+    - Outline Traffic Manager modifications
+4. **Engage CARLA community**: Discuss with CARLA maintainers
+
+!!! info "Future Support"
+    If CARLA adds priority attribute support in the future, this converter can be updated to include priority information in the generated OpenDRIVE files.
+
+---
+
 ## Geometric Approximation Limitations
 
 ### Issue
@@ -216,6 +334,7 @@ For maps spanning multiple grid zones:
 | Stop line position discrepancies | Medium | Manual adjustment in CARLA |
 | Lane width inconsistencies | Low | Validation with tolerances |
 | Special signals not supported | High | Community contribution needed |
+| Priority-based right-of-way not supported | Low | CARLA source modification only |
 | Geometric approximation | Low | Use high-resolution input data |
 | MGRS projection limitations | Medium | Split large maps by grid zone |
 
