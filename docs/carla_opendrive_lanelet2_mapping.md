@@ -102,21 +102,24 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 - Geographic reference is optional in OpenDRIVE but recommended for proper geo-location
 
 #### RoadParser
-**Supported Lane Types** ([`RoadParser.cpp` L66-L110](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L66-L110)):
+
+##### Supported Lane Types
+
+([`RoadParser.cpp` L66-L110](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L66-L110))
 
 - `driving`, `bidirectional`, `stop`, `shoulder`, `biking`, `sidewalk`
 - `parking`, `border`, `restricted`, `median`, `entry`, `exit`
 - `onRamp`, `offRamp`, `rail`, `tram`, `roadWorks`
 - `special1`, `special2`, `special3`, `none`
 
-**Speed Limit Hierarchy:**
+##### Speed Limit Hierarchy
 
 - Lane speed limits override road speed limits (OpenDRIVE spec 11.7)
 - Signal speed limits have highest priority
 - See Conversion Challenges for road grouping from Lanelet2
 
 #### GeometryParser
-**Supported Geometry Types:**
+##### Supported Geometry Types
 
 - `<line>`: Straight segments (always supported)
 - `<arc>`: Circular arcs
@@ -126,32 +129,35 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 See Conversion Challenges for Lanelet2 centerline conversion approaches
 
 #### LaneParser
-**Width vs Border Specification** (OpenDRIVE Spec 1.8c):
+
+##### Width vs Border Specification
+
+(OpenDRIVE Spec 1.8c)
 
 - `<width>` and `<border>` are mutually exclusive within the same lane group
 - If both exist, applications **must use** `<width>` elements per spec
 - See CARLA-Specific Considerations for Lanelet2 conversion recommendations
 
-**Additional Attributes:**
+##### Additional Attributes
 
 - Road markings, material, speed limits, access rules parsed but usage in CARLA varies
 - Height and visibility attributes have limited CARLA support
 
 #### ProfilesParser
-**Parsing Details:**
+##### Parsing Details
 
 - Reads elevation, superelevation, and lateral shape profiles
 - Polynomial coefficients (a, b, c, d) define profile shape
 - See CARLA-Specific Considerations for elevation profile requirements
 
 #### JunctionParser
-**Related MapBuilder Functions:**
+##### Related MapBuilder Functions
 
 - `AddJunction`: [`MapBuilder.cpp` L566](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L566)
 - `AddConnection`: [`MapBuilder.cpp` L570](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L570)
 - `AddLaneLink`: [`MapBuilder.cpp` L580](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L580)
 
-**Junction Semantics:**
+##### Junction Semantics
 
 - **laneLink**: Defines lane-level connectivity within junction
 - **connection**: Defines road-level connectivity (which roads connect to junction)
