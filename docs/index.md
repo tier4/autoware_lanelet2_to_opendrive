@@ -17,10 +17,12 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 
 - [Installation Guide](installation.md) - Get started with installing the package
 - [Usage Guide](usage.md) - Learn how to use the converter
+- [CARLA OpenDRIVE Mapping](carla_opendrive_lanelet2_mapping.md) - OpenDRIVE tags used by CARLA and Lanelet2 conversion mapping
+- [Conversion Process](conversion-process.md) - Detailed conversion pipeline and tag usage
 - [Known Limitations](limitations.md) - Important limitations and behavioral differences
+- [Signals](signals.md) - Signal handling documentation
 - [API Reference](api.md) - Detailed API documentation
 - [Development Guide](development.md) - Contributing and development setup
-- [Signals](signals.md) - Signal handling documentation
 
 ## Project Information
 
