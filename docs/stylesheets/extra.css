@@ -1,0 +1,52 @@
+/* Custom styles for CARLA OpenDRIVE documentation */
+
+/* Fix table width overflow issues */
+.md-typeset table:not([class]) {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+/* Set specific column widths for the unified tag reference table */
+.md-typeset table:not([class]) th:nth-child(1),
+.md-typeset table:not([class]) td:nth-child(1) {
+    width: 12%; /* Parser Module */
+}
+
+.md-typeset table:not([class]) th:nth-child(2),
+.md-typeset table:not([class]) td:nth-child(2) {
+    width: 18%; /* OpenDRIVE Tag/Attribute */
+}
+
+.md-typeset table:not([class]) th:nth-child(3),
+.md-typeset table:not([class]) td:nth-child(3) {
+    width: 20%; /* CARLA Purpose */
+}
+
+.md-typeset table:not([class]) th:nth-child(4),
+.md-typeset table:not([class]) td:nth-child(4) {
+    width: 15%; /* CARLA Code Location */
+}
+
+.md-typeset table:not([class]) th:nth-child(5),
+.md-typeset table:not([class]) td:nth-child(5) {
+    width: 18%; /* Lanelet2 Mapping */
+}
+
+.md-typeset table:not([class]) th:nth-child(6),
+.md-typeset table:not([class]) td:nth-child(6) {
+    width: 17%; /* Conversion Notes */
+}
+
+/* Enable text wrapping in table cells */
+.md-typeset table:not([class]) td {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+}
+
+/* Ensure code elements in tables also wrap */
+.md-typeset table:not([class]) td code {
+    white-space: normal;
+    word-break: break-all;
+}
