@@ -249,12 +249,12 @@ move_point_operations:
 
 **Before (diagonal boundaries):**
 
-![Before 1](image/112.png)
-![Before 2](image/114.png)
+![Before 1](image/before_merge_operation_1.png)
+![Before 2](image/before_merge_operation_2.png)
 
 **After (aligned boundaries with MovePointOperation):**
 
-![After](image/merged.png)
+![After](image/after_merge_operation.png)
 
 **B. Delete Point Operations** ([geometry.py:208-308](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L208-L308))
 ```yaml
@@ -305,12 +305,12 @@ merge_operations:
 
 **Before merge:**
 
-![Before 1](image/112.png)
-![Before 2](image/114.png)
+![Before 1](image/before_merge_operation_1.png)
+![Before 2](image/before_merge_operation_2.png)
 
 **After merge:**
 
-![After](image/merged.png)
+![After](image/after_merge_operation.png)
 
 
 
