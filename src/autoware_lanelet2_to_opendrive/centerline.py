@@ -914,6 +914,11 @@ def _calculate_widths_left_bound_reference(
             arc_lengths.append(arc_length)
             widths.append(width)
 
+    # Final pass: ensure strict monotonicity across entire array
+    for i in range(1, len(arc_lengths)):
+        if arc_lengths[i] <= arc_lengths[i - 1]:
+            arc_lengths[i] = arc_lengths[i - 1] + DEFAULT_CONFIG.geometry.epsilon
+
     return arc_lengths, widths
 
 
@@ -1004,6 +1009,11 @@ def _calculate_widths_right_bound_reference(
 
             arc_lengths.append(arc_length)
             widths.append(width)
+
+    # Final pass: ensure strict monotonicity across entire array
+    for i in range(1, len(arc_lengths)):
+        if arc_lengths[i] <= arc_lengths[i - 1]:
+            arc_lengths[i] = arc_lengths[i - 1] + DEFAULT_CONFIG.geometry.epsilon
 
     return arc_lengths, widths
 
