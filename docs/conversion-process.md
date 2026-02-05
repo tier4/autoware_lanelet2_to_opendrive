@@ -702,6 +702,9 @@ exclude_non_junction_signals: true   # CARLA compatibility
 traffic_rule: "RHT"                  # Can be overridden
 ```
 
+!!! info "CARLA-Specific Information"
+    For detailed information about how OpenDRIVE tags are used in CARLA and how Lanelet2 tags map to them, see [CARLA OpenDRIVE and Lanelet2 Tag Mapping](carla_opendrive_lanelet2_mapping.md).
+
 **Behavior Impact:**
 
 | Setting | `false` Behavior | `true` Behavior |
@@ -1270,3 +1273,4 @@ Potential improvements to tag handling:
 - [Usage Guide](usage.md) - Command-line usage and examples
 - [Signals](signals.md) - Detailed signal conversion documentation
 - [Known Limitations](limitations.md) - Current converter limitations
+- [CARLA OpenDRIVE and Lanelet2 Tag Mapping](carla_opendrive_lanelet2_mapping.md) - CARLA-specific tag usage and mapping details

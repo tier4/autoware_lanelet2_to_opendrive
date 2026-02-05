@@ -58,6 +58,7 @@ plugins:
 
 markdown_extensions:
   - admonition
+  - md_in_html
   - pymdownx.details
   - pymdownx.superfences:
       custom_fences:
@@ -78,6 +79,7 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
+  - CARLA OpenDRIVE Mapping: carla_opendrive_lanelet2_mapping.md
   - Known Limitations:
     - Overview: limitations/index.md
     - Stop Line Position: limitations/stop-line-position.md
@@ -93,6 +95,9 @@ nav:
 
 extra_javascript:
   - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+
+extra_css:
+  - stylesheets/extra.css
 
 extra:
   version:

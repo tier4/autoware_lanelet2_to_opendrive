@@ -489,6 +489,107 @@ When Claude Code runs in GitHub Actions:
 3. **No manual fixes needed**: Users don't need to manually fix formatting issues in PRs created by Claude Code
 4. **Clean history**: Formatting commits are clearly marked and attributed
 
+## Link Checker
+
+**IMPORTANT**: This project uses automated link checking to ensure all URLs in documentation and code remain valid.
+
+### Workflow Configuration
+
+The link checker workflow is configured in `.github/workflows/link-checker.yml` and runs:
+
+1. **On pull requests**: Checks links in all modified files
+2. **Weekly schedule**: Runs every Sunday at 00:00 UTC to catch external link rot
+3. **Manual trigger**: Can be triggered manually via workflow_dispatch
+
+### How It Works
+
+The workflow uses [lychee](https://github.com/lycheeverse/lychee), a fast Rust-based link checker:
+
+- **Scans multiple file types**: Markdown (.md), Python (.py), YAML (.yml, .yaml), TOML (.toml), HTML (.html)
+- **Caches results**: Uses GitHub Actions cache to avoid rate-limiting (1-day TTL)
+- **Creates issues**: Automatically creates GitHub issues when broken links are found (scheduled runs only)
+- **Generates reports**: Uploads detailed reports as workflow artifacts (30-day retention)
+
+### Configuration Files
+
+#### `.lycheeignore`
+Contains regex patterns for URLs to exclude from checking:
+- Localhost and local development URLs
+- Example/placeholder domains (example.com, example.org, etc.)
+- Authentication-required pages (GitHub settings, notifications, etc.)
+- Rate-limited APIs
+- Social media platforms with unstable link checking
+
+#### `lychee.toml`
+Main configuration file with settings:
+- **Cache**: Enabled with 1-day max age
+- **Retries**: Max 3 retries with 20s timeout
+- **Redirects**: Follows up to 10 redirects
+- **User Agent**: Identifies as Lychee link checker
+- **Schemes**: Only checks http and https URLs
+- **Excluded paths**: Ignores .git, node_modules, __pycache__, etc.
+
+### Local Usage
+
+You can run link checking locally before committing:
+
+```bash
+# Install lychee (if not installed)
+# On macOS
+brew install lychee
+
+# On Linux
+cargo install lychee-cli
+
+# Run link checker on all files
+lychee --config lychee.toml .
+
+# Run on specific files or directories
+lychee docs/
+lychee README.md
+
+# Use verbose mode for debugging
+lychee --verbose .
+```
+
+### Adding Exclusions
+
+If you encounter false positives or need to exclude specific URLs:
+
+1. **Add to `.lycheeignore`**: For regex patterns (e.g., all LinkedIn URLs)
+   ```
+   https?://(www\.)?linkedin\.com/.*
+   ```
+
+2. **Add to `lychee.toml`**: For exact URLs or path exclusions
+   ```toml
+   exclude = [
+       "https://example.com/api/endpoint",
+   ]
+   ```
+
+### Troubleshooting
+
+#### Link checker reports false positives
+
+**Solution**: Add the URL pattern to `.lycheeignore` or `lychee.toml` exclusions
+
+#### Rate limiting errors
+
+**Solution**: The workflow uses caching to mitigate rate limiting. For local runs, wait and retry later.
+
+#### Authentication-required URLs
+
+**Solution**: Links that require authentication should be excluded in `.lycheeignore`
+
+### Rationale
+
+- **Prevents broken links**: Catches link rot before it affects users
+- **Improves documentation quality**: Ensures all references remain accessible
+- **Saves time**: Automated checking is faster than manual verification
+- **Professional standards**: Maintains high-quality documentation and references
+- **Early detection**: Weekly scans catch external link changes proactively
+
 ## Git Operation Restrictions
 
 **IMPORTANT**: The following dangerous git operations are STRICTLY PROHIBITED for safety:

@@ -1,0 +1,38 @@
+# Lychee Link Checker Ignore File
+# This file contains regex patterns for URLs that should be excluded from link checking
+
+# Localhost and local development URLs
+http://localhost:*
+http://127.0.0.1:*
+http://0.0.0.0:*
+
+# Example/placeholder domains (as per RFC 2606)
+https?://example\.com.*
+https?://example\.org.*
+https?://example\.net.*
+
+# Common authentication-required pages
+https://github.com/settings/*
+https://github.com/notifications
+https://github.com/*/settings/*
+
+# Rate-limited or authentication-required APIs
+https://api.github.com/*
+
+# LinkedIn (requires authentication)
+https?://(www\.)?linkedin\.com/.*
+
+# Twitter/X (unstable link checking)
+https?://(www\.)?(twitter|x)\.com/.*
+
+# Private/internal documentation (add your own)
+# https://internal.company.com/*
+
+# CI/CD temporary URLs
+file://.*
+
+# Anchors in same document (handled separately by lychee)
+#.*
+
+# Add project-specific exclusions below this line
+# ------------------------------------------------

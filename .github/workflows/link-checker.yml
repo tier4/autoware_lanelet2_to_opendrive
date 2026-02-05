@@ -1,0 +1,97 @@
+name: Link Checker
+
+on:
+  # Run on pull requests
+  pull_request:
+    branches: [master, main, develop]
+  # Run weekly on Sundays at 00:00 UTC
+  schedule:
+    - cron: '0 0 * * 0'
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  link-checker:
+    name: Check Links
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Restore lychee cache
+        uses: actions/cache@v4
+        with:
+          path: .lycheecache
+          key: cache-lychee-${{ github.sha }}
+          restore-keys: cache-lychee-
+
+      - name: Run lychee link checker
+        id: lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # Check all markdown, Python, YAML, TOML, and HTML files
+          args: >
+            --cache
+            --max-cache-age 1d
+            --verbose
+            --no-progress
+            --exclude-path '.git'
+            --exclude-path '.github/workflows'
+            --exclude 'file://'
+            '**/*.md'
+            '**/*.py'
+            '**/*.yml'
+            '**/*.yaml'
+            '**/*.toml'
+            '**/*.html'
+          # Don't fail the workflow, just report issues
+          fail: false
+          # Use markdown format for better readability
+          format: markdown
+          # Generate job summary
+          jobSummary: true
+          # Output results to file
+          output: lychee-report.md
+
+      - name: Display link checker results
+        if: always()
+        run: |
+          echo "Link checker completed with exit code: ${{ steps.lychee.outputs.exit_code }}"
+          if [ -f lychee-report.md ]; then
+            echo "Link checker report:"
+            cat lychee-report.md
+          fi
+
+      - name: Create issue for broken links (scheduled runs only)
+        if: |
+          github.event_name == 'schedule' &&
+          steps.lychee.outputs.exit_code != 0
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: 'Link Checker Report: Broken Links Found'
+          content-filepath: lychee-report.md
+          labels: bug, documentation, automated issue
+
+      - name: Upload link checker report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lychee-report
+          path: lychee-report.md
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          EXIT_CODE="${{ steps.lychee.outputs.exit_code }}"
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "✅ All links are valid!"
+          else
+            echo "⚠️ Some links may be broken. Please check the report above."
+            echo "Exit code: $EXIT_CODE"
+          fi
