@@ -338,6 +338,16 @@ remove_lanelet_operations:
 ```
 - Completely removes lanelets from map
 - Creates new map without specified lanelets
+
+**Use case**: Remove lanelets that are not needed for conversion, such as isolated lanelets without predecessors or successors. In this case, the map was converted to OpenDRIVE for CARLA simulation purposes, where isolated lanelets without connectivity are unnecessary and can be removed.
+
+**Before (with isolated lanelet):**
+
+![Before](image/before_remove_operation.png)
+
+**After (isolated lanelet removed):**
+
+![After](image/after_remove_operation.png)
 - Reports successful and missing lanelet IDs
 
 **H. Remove Turn Direction Operations** ([preprocess_lanelet.py:874-929](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L874-L929))
