@@ -189,7 +189,14 @@ class Lane:
         groups = find_adjacent_groups(lanelet_map, {lanelet})
 
         if len(groups) == 1 and len(groups[0]) == 1:
-            config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
+            # For single lane, use appropriate boundary based on traffic rule
+            # RHT: Reference line is left boundary (use LEFT_BOUND)
+            # LHT: Reference line is right boundary (use RIGHT_BOUND)
+            rule_normalized = (rule or "RHT").upper()
+            if rule_normalized == "LHT":
+                config = WidthEstimationConfig(reference=WidthReference.RIGHT_BOUND)
+            else:
+                config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
             width_spline = estimate_lanelet_width_as_spline(lanelet, config)
         else:
             # Calculate lane width using spline curve from estimate_lanelet_width_as_spline
