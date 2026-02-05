@@ -245,6 +245,16 @@ move_point_operations:
 - Updates all lanelets containing the point
 - Updates `local_x`, `local_y`, `ele` attributes
 
+**Use case**: When parallel lanelets need to be bundled as the same Road in OpenDRIVE, which requires equal lengths. If consecutive lanelets are divided at diagonal boundaries, using MergeOperation would cause length misalignment and prevent lane changes. In such cases, use MovePointOperation to align the boundaries instead.
+
+**Before (diagonal boundaries):**
+
+![Before](image/before_move_point_operation.png)
+
+**After (aligned boundaries with MovePointOperation):**
+
+![After](image/after_move_point_operation.png)
+
 **B. Delete Point Operations** ([geometry.py:208-308](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L208-L308))
 ```yaml
 delete_point_operations:
@@ -253,6 +263,16 @@ delete_point_operations:
 - Removes points from linestrings
 - Validates minimum 2 points remain per linestring
 - Reports missing points
+
+**Use case**: Use this operation to remove unnecessary points from lanelet boundaries, simplifying the geometry while maintaining the shape.
+
+**Before (with unnecessary points):**
+
+![Before](image/before_delete_point_operation.png)
+
+**After (points removed):**
+
+![After](image/after_delete_point_operation.png)
 
 **C. Validate Operations** ([lanelet.py:93-131](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L93-L131))
 ```yaml
@@ -290,6 +310,19 @@ merge_operations:
 - Merged lanelet ID: `base_id + 3` (or auto-generated)
 - Connects left/right boundaries sequentially
 
+**Use case**: When consecutive lanelets are divided at diagonal boundaries, use MergeOperation to combine them into a single continuous lanelet.
+
+**Before merge:**
+
+![Before 1](image/before_merge_operation_1.png)
+![Before 2](image/before_merge_operation_2.png)
+
+**After merge:**
+
+![After](image/after_merge_operation.png)
+
+
+
 **F. Remove Operations (Old Style)** ([preprocess_lanelet.py:661-682](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L661-L682))
 ```yaml
 remove_operations:
@@ -305,6 +338,16 @@ remove_lanelet_operations:
 ```
 - Completely removes lanelets from map
 - Creates new map without specified lanelets
+
+**Use case**: Remove lanelets that are not needed for conversion, such as isolated lanelets without predecessors or successors. In this case, the map was converted to OpenDRIVE for CARLA simulation purposes, where isolated lanelets without connectivity are unnecessary and can be removed.
+
+**Before (with isolated lanelet):**
+
+![Before](image/before_remove_operation.png)
+
+**After (isolated lanelet removed):**
+
+![After](image/after_remove_operation.png)
 - Reports successful and missing lanelet IDs
 
 **H. Remove Turn Direction Operations** ([preprocess_lanelet.py:874-929](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L874-L929))
@@ -317,6 +360,16 @@ remove_turn_direction_operations:
 - Removes `turn_direction` attribute from lanelets
 - Empty list applies to **all** lanelets
 - Converts junction lanelets to regular road lanelets
+
+**Use case**: This operation removes the Lanelet2 turn_direction attribute, which is the flag that determines whether a lanelet is classified as a Junction in OpenDRIVE. Use this when you need to convert junction lanelets to regular road lanelets.
+
+**Before (with turn_direction attribute):**
+
+![Before](image/before_remove_turn_direction_operation.png)
+
+**After (turn_direction attribute removed):**
+
+![After](image/after_remove_turn_direction_operation.png)
 
 ---
 
