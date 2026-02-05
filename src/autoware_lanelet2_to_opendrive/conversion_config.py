@@ -7,7 +7,7 @@ with many parameters, improving type safety and API clarity.
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 from lanelet2.routing import RoutingGraph
 
 
@@ -45,8 +45,6 @@ class ConversionConfig:
         origin: Origin specification for coordinate system
         exclude_non_junction_signals: If True, exclude traffic signals not
             associated with junction lanelets (required for CARLA compatibility)
-        no_junction_lanelet_ids: List of lanelet IDs to exclude from junction
-            detection, treating them as regular roads
         junction_id_offset: Offset added to junction IDs to avoid conflicts
             with road IDs (default: 1000)
         traffic_rule: Traffic rule for lanes (RHT: Right-Hand Traffic,
@@ -56,7 +54,6 @@ class ConversionConfig:
     output_path: Optional[Path] = None
     origin: OriginSpec = field(default_factory=OriginSpec)
     exclude_non_junction_signals: bool = False
-    no_junction_lanelet_ids: List[int] = field(default_factory=list)
     junction_id_offset: int = 1000
     traffic_rule: Optional[str] = "RHT"
 
