@@ -777,9 +777,11 @@ def _calculate_widths_centerline_reference(
                         prev_t_norm * boundary_data["right_total_length"],
                     )
                 ) / 2.0
-                arc_length = arc_lengths[-1] + np.linalg.norm(
-                    center_pos - prev_center_pos
-                )
+                increment = np.linalg.norm(center_pos - prev_center_pos)
+                arc_length = arc_lengths[-1] + increment
+                # Enforce strict monotonicity
+                if arc_length <= arc_lengths[-1]:
+                    arc_length = arc_lengths[-1] + DEFAULT_CONFIG.geometry.epsilon
 
             arc_lengths.append(arc_length)
             widths.append(width)
@@ -811,9 +813,11 @@ def _calculate_widths_centerline_reference(
             if i == 0:
                 arc_length = 0.0
             else:
-                arc_length = arc_lengths[-1] + np.linalg.norm(
-                    center_pos - prev_center_pos
-                )
+                increment = np.linalg.norm(center_pos - prev_center_pos)
+                arc_length = arc_lengths[-1] + increment
+                # Enforce strict monotonicity: ensure arc_length always increases
+                if arc_length <= arc_lengths[-1]:
+                    arc_length = arc_lengths[-1] + DEFAULT_CONFIG.geometry.epsilon
 
             arc_lengths.append(arc_length)
             widths.append(width)
