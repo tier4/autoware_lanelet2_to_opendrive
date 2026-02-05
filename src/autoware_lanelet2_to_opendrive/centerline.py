@@ -779,9 +779,9 @@ def _calculate_widths_centerline_reference(
                 ) / 2.0
                 increment = np.linalg.norm(center_pos - prev_center_pos)
                 arc_length = arc_lengths[-1] + increment
-                # Enforce strict monotonicity
+                # Enforce strict monotonicity (1 micrometer minimum increment)
                 if arc_length <= arc_lengths[-1]:
-                    arc_length = arc_lengths[-1] + DEFAULT_CONFIG.geometry.epsilon
+                    arc_length = arc_lengths[-1] + 1e-6
 
             arc_lengths.append(arc_length)
             widths.append(width)
@@ -817,16 +817,18 @@ def _calculate_widths_centerline_reference(
                 arc_length = arc_lengths[-1] + increment
                 # Enforce strict monotonicity: ensure arc_length always increases
                 if arc_length <= arc_lengths[-1]:
-                    arc_length = arc_lengths[-1] + DEFAULT_CONFIG.geometry.epsilon
+                    arc_length = arc_lengths[-1] + 1e-6
 
             arc_lengths.append(arc_length)
             widths.append(width)
             prev_center_pos = center_pos
 
     # Final pass: ensure strict monotonicity across entire array
+    # Use a larger minimum increment (1 micrometer) to avoid floating point precision issues
+    min_increment = 1e-6  # 1 micrometer in meters
     for i in range(1, len(arc_lengths)):
         if arc_lengths[i] <= arc_lengths[i - 1]:
-            arc_lengths[i] = arc_lengths[i - 1] + DEFAULT_CONFIG.geometry.epsilon
+            arc_lengths[i] = arc_lengths[i - 1] + min_increment
 
     return arc_lengths, widths
 
@@ -920,9 +922,11 @@ def _calculate_widths_left_bound_reference(
             widths.append(width)
 
     # Final pass: ensure strict monotonicity across entire array
+    # Use a larger minimum increment (1 micrometer) to avoid floating point precision issues
+    min_increment = 1e-6  # 1 micrometer in meters
     for i in range(1, len(arc_lengths)):
         if arc_lengths[i] <= arc_lengths[i - 1]:
-            arc_lengths[i] = arc_lengths[i - 1] + DEFAULT_CONFIG.geometry.epsilon
+            arc_lengths[i] = arc_lengths[i - 1] + min_increment
 
     return arc_lengths, widths
 
@@ -1016,9 +1020,11 @@ def _calculate_widths_right_bound_reference(
             widths.append(width)
 
     # Final pass: ensure strict monotonicity across entire array
+    # Use a larger minimum increment (1 micrometer) to avoid floating point precision issues
+    min_increment = 1e-6  # 1 micrometer in meters
     for i in range(1, len(arc_lengths)):
         if arc_lengths[i] <= arc_lengths[i - 1]:
-            arc_lengths[i] = arc_lengths[i - 1] + DEFAULT_CONFIG.geometry.epsilon
+            arc_lengths[i] = arc_lengths[i - 1] + min_increment
 
     return arc_lengths, widths
 
