@@ -541,7 +541,7 @@ class Road:
         lanelet_list = to_lanelet_list(lanelet_group)
 
         reference_line = ReferenceLine.construct_from_lanelet_groups(
-            lanelet_map, lanelet_list
+            lanelet_map, lanelet_list, traffic_rule=traffic_rule
         )
         centerline_2d = reference_line.centerline_2d
 

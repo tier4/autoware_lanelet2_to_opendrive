@@ -107,3 +107,61 @@ def test_elevation_profile_xml_output(lanelet_map):
     assert (
         "d" in first_elevation_elem.attrib
     ), "Elevation element should have 'd' attribute"
+
+
+def test_road_construction_rht(lanelet_map):
+    """Test Road construction with RHT creates correct lane structure."""
+    lanelet_group = [
+        lanelet_map.laneletLayer.get(3002094),
+        lanelet_map.laneletLayer.get(3002093),
+    ]
+
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map, lanelet_group, road_id=0, s_offset=0.0, traffic_rule="RHT"
+    )
+
+    # Verify road was created
+    assert road is not None
+    assert road.id == 0
+
+    # Verify road has lanes object
+    assert road.lanes is not None
+    assert len(road.lanes.lane_sections) > 0
+
+    # Check first lane section has correct structure for RHT
+    lane_section = road.lanes.lane_sections[0]
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 2
+
+    # Check lane IDs are negative for RHT
+    assert -1 in lane_section.right_lanes
+    assert -2 in lane_section.right_lanes
+
+
+def test_road_construction_lht(lanelet_map):
+    """Test Road construction with LHT creates correct lane structure."""
+    lanelet_group = [
+        lanelet_map.laneletLayer.get(3002094),
+        lanelet_map.laneletLayer.get(3002093),
+    ]
+
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map, lanelet_group, road_id=0, s_offset=0.0, traffic_rule="LHT"
+    )
+
+    # Verify road was created
+    assert road is not None
+    assert road.id == 0
+
+    # Verify road has lanes object
+    assert road.lanes is not None
+    assert len(road.lanes.lane_sections) > 0
+
+    # Check first lane section has correct structure for LHT
+    lane_section = road.lanes.lane_sections[0]
+    assert len(lane_section.left_lanes) == 2
+    assert len(lane_section.right_lanes) == 0
+
+    # Check lane IDs are positive for LHT
+    assert 1 in lane_section.left_lanes
+    assert 2 in lane_section.left_lanes
