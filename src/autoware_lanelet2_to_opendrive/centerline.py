@@ -716,10 +716,12 @@ def _calculate_widths_centerline_reference(
     Returns:
         Tuple of (arc_lengths, widths) lists
     """
+    import warnings
+
     arc_lengths: List[float] = []
     widths: List[float] = []
 
-    # Use geometric correspondence instead of normalized arc length mapping
+    # Try geometric correspondence first
     left_s_samples, right_s_samples, quality = _find_corresponding_points_geometric(
         left_points,
         right_points,
@@ -728,47 +730,94 @@ def _calculate_widths_centerline_reference(
         num_samples=len(normalized_positions),
     )
 
-    # Warn if correspondence quality is low
-    min_quality = np.min(quality)
-    if min_quality < DEFAULT_CONFIG.geometry.correspondence_quality_threshold:
-        import warnings
+    # Check if correspondence is monotonic
+    left_monotonic = np.all(np.diff(left_s_samples) >= 0)
+    right_monotonic = np.all(np.diff(right_s_samples) >= 0)
 
+    use_fallback = False
+    if not left_monotonic or not right_monotonic:
         warnings.warn(
-            f"Low geometric correspondence quality detected: {min_quality:.2f} "
-            f"(threshold: {DEFAULT_CONFIG.geometry.correspondence_quality_threshold}). "
-            f"Lane width calculations may be inaccurate.",
+            "Geometric correspondence produced non-monotonic results. "
+            "Falling back to normalized arc length mapping.",
             UserWarning,
         )
+        use_fallback = True
 
-    # Calculate widths using geometrically corresponding points
-    prev_center_pos = None
-    for i, (s_left, s_right) in enumerate(zip(left_s_samples, right_s_samples)):
-        # Interpolate positions on boundaries
-        left_pos = _interpolate_on_line_segments(
-            left_points, boundary_data["left_cumulative"], s_left
-        )
-        right_pos = _interpolate_on_line_segments(
-            right_points, boundary_data["right_cumulative"], s_right
-        )
+    # Fallback to normalized mapping if geometric correspondence failed
+    if use_fallback:
+        for t_norm in normalized_positions:
+            s_left = t_norm * boundary_data["left_total_length"]
+            s_right = t_norm * boundary_data["right_total_length"]
 
-        # Calculate centerline position as midpoint
-        center_pos = (left_pos + right_pos) / 2.0
+            left_pos = _interpolate_on_line_segments(
+                left_points, boundary_data["left_cumulative"], s_left
+            )
+            right_pos = _interpolate_on_line_segments(
+                right_points, boundary_data["right_cumulative"], s_right
+            )
 
-        # Width is the total distance from center to both borders
-        left_dist = np.linalg.norm(center_pos - left_pos)
-        right_dist = np.linalg.norm(center_pos - right_pos)
-        width = left_dist + right_dist
+            center_pos = (left_pos + right_pos) / 2.0
+            left_dist = np.linalg.norm(center_pos - left_pos)
+            right_dist = np.linalg.norm(center_pos - right_pos)
+            width = left_dist + right_dist
 
-        # Arc length is based on centerline
-        if i == 0:
-            arc_length = 0.0
-        else:
-            # Calculate arc length increment from previous centerline position
-            arc_length = arc_lengths[-1] + np.linalg.norm(center_pos - prev_center_pos)
+            if len(arc_lengths) == 0:
+                arc_length = 0.0
+            else:
+                prev_t_norm = normalized_positions[len(arc_lengths) - 1]
+                prev_center_pos = (
+                    _interpolate_on_line_segments(
+                        left_points,
+                        boundary_data["left_cumulative"],
+                        prev_t_norm * boundary_data["left_total_length"],
+                    )
+                    + _interpolate_on_line_segments(
+                        right_points,
+                        boundary_data["right_cumulative"],
+                        prev_t_norm * boundary_data["right_total_length"],
+                    )
+                ) / 2.0
+                arc_length = arc_lengths[-1] + np.linalg.norm(
+                    center_pos - prev_center_pos
+                )
 
-        arc_lengths.append(arc_length)
-        widths.append(width)
-        prev_center_pos = center_pos
+            arc_lengths.append(arc_length)
+            widths.append(width)
+    else:
+        # Use geometric correspondence
+        min_quality = np.min(quality)
+        if min_quality < DEFAULT_CONFIG.geometry.correspondence_quality_threshold:
+            warnings.warn(
+                f"Low geometric correspondence quality detected: {min_quality:.2f} "
+                f"(threshold: {DEFAULT_CONFIG.geometry.correspondence_quality_threshold}). "
+                f"Lane width calculations may be inaccurate.",
+                UserWarning,
+            )
+
+        prev_center_pos = None
+        for i, (s_left, s_right) in enumerate(zip(left_s_samples, right_s_samples)):
+            left_pos = _interpolate_on_line_segments(
+                left_points, boundary_data["left_cumulative"], s_left
+            )
+            right_pos = _interpolate_on_line_segments(
+                right_points, boundary_data["right_cumulative"], s_right
+            )
+
+            center_pos = (left_pos + right_pos) / 2.0
+            left_dist = np.linalg.norm(center_pos - left_pos)
+            right_dist = np.linalg.norm(center_pos - right_pos)
+            width = left_dist + right_dist
+
+            if i == 0:
+                arc_length = 0.0
+            else:
+                arc_length = arc_lengths[-1] + np.linalg.norm(
+                    center_pos - prev_center_pos
+                )
+
+            arc_lengths.append(arc_length)
+            widths.append(width)
+            prev_center_pos = center_pos
 
     return arc_lengths, widths
 
@@ -791,10 +840,12 @@ def _calculate_widths_left_bound_reference(
     Returns:
         Tuple of (arc_lengths, widths) lists
     """
+    import warnings
+
     arc_lengths: List[float] = []
     widths: List[float] = []
 
-    # Use geometric correspondence instead of normalized arc length mapping
+    # Try geometric correspondence first
     left_s_samples, right_s_samples, quality = _find_corresponding_points_geometric(
         left_points,
         right_points,
@@ -803,33 +854,61 @@ def _calculate_widths_left_bound_reference(
         num_samples=len(normalized_positions),
     )
 
-    # Warn if correspondence quality is low
-    min_quality = np.min(quality)
-    if min_quality < DEFAULT_CONFIG.geometry.correspondence_quality_threshold:
-        import warnings
+    # Check if correspondence is monotonic
+    left_monotonic = np.all(np.diff(left_s_samples) >= 0)
+    right_monotonic = np.all(np.diff(right_s_samples) >= 0)
 
+    use_fallback = False
+    if not left_monotonic or not right_monotonic:
         warnings.warn(
-            f"Low geometric correspondence quality detected: {min_quality:.2f} "
-            f"(threshold: {DEFAULT_CONFIG.geometry.correspondence_quality_threshold}). "
-            f"Lane width calculations may be inaccurate.",
+            "Geometric correspondence produced non-monotonic results. "
+            "Falling back to normalized arc length mapping.",
             UserWarning,
         )
+        use_fallback = True
 
-    # Calculate widths using geometrically corresponding points
-    for s_left, s_right in zip(left_s_samples, right_s_samples):
-        left_pos = _interpolate_on_line_segments(
-            left_points, boundary_data["left_cumulative"], s_left
-        )
-        right_pos = _interpolate_on_line_segments(
-            right_points, boundary_data["right_cumulative"], s_right
-        )
+    if use_fallback:
+        # Fallback to normalized mapping
+        for t_norm in normalized_positions:
+            s_left = t_norm * boundary_data["left_total_length"]
+            s_right = t_norm * boundary_data["right_total_length"]
 
-        # Width is distance from left to right border
-        width = np.linalg.norm(left_pos - right_pos)
-        arc_length = s_left
+            left_pos = _interpolate_on_line_segments(
+                left_points, boundary_data["left_cumulative"], s_left
+            )
+            right_pos = _interpolate_on_line_segments(
+                right_points, boundary_data["right_cumulative"], s_right
+            )
 
-        arc_lengths.append(arc_length)
-        widths.append(width)
+            width = np.linalg.norm(left_pos - right_pos)
+            arc_length = s_left
+
+            arc_lengths.append(arc_length)
+            widths.append(width)
+    else:
+        # Use geometric correspondence
+        min_quality = np.min(quality)
+        if min_quality < DEFAULT_CONFIG.geometry.correspondence_quality_threshold:
+            warnings.warn(
+                f"Low geometric correspondence quality detected: {min_quality:.2f} "
+                f"(threshold: {DEFAULT_CONFIG.geometry.correspondence_quality_threshold}). "
+                f"Lane width calculations may be inaccurate.",
+                UserWarning,
+            )
+
+        for s_left, s_right in zip(left_s_samples, right_s_samples):
+            left_pos = _interpolate_on_line_segments(
+                left_points, boundary_data["left_cumulative"], s_left
+            )
+            right_pos = _interpolate_on_line_segments(
+                right_points, boundary_data["right_cumulative"], s_right
+            )
+
+            width = np.linalg.norm(left_pos - right_pos)
+            arc_length = s_left
+
+            arc_lengths.append(arc_length)
+            widths.append(width)
 
     return arc_lengths, widths
 
@@ -852,10 +931,12 @@ def _calculate_widths_right_bound_reference(
     Returns:
         Tuple of (arc_lengths, widths) lists
     """
+    import warnings
+
     arc_lengths: List[float] = []
     widths: List[float] = []
 
-    # Use geometric correspondence instead of normalized arc length mapping
+    # Try geometric correspondence first
     left_s_samples, right_s_samples, quality = _find_corresponding_points_geometric(
         left_points,
         right_points,
@@ -864,33 +945,61 @@ def _calculate_widths_right_bound_reference(
         num_samples=len(normalized_positions),
     )
 
-    # Warn if correspondence quality is low
-    min_quality = np.min(quality)
-    if min_quality < DEFAULT_CONFIG.geometry.correspondence_quality_threshold:
-        import warnings
+    # Check if correspondence is monotonic
+    left_monotonic = np.all(np.diff(left_s_samples) >= 0)
+    right_monotonic = np.all(np.diff(right_s_samples) >= 0)
 
+    use_fallback = False
+    if not left_monotonic or not right_monotonic:
         warnings.warn(
-            f"Low geometric correspondence quality detected: {min_quality:.2f} "
-            f"(threshold: {DEFAULT_CONFIG.geometry.correspondence_quality_threshold}). "
-            f"Lane width calculations may be inaccurate.",
+            "Geometric correspondence produced non-monotonic results. "
+            "Falling back to normalized arc length mapping.",
             UserWarning,
         )
+        use_fallback = True
 
-    # Calculate widths using geometrically corresponding points
-    for s_left, s_right in zip(left_s_samples, right_s_samples):
-        left_pos = _interpolate_on_line_segments(
-            left_points, boundary_data["left_cumulative"], s_left
-        )
-        right_pos = _interpolate_on_line_segments(
-            right_points, boundary_data["right_cumulative"], s_right
-        )
+    if use_fallback:
+        # Fallback to normalized mapping
+        for t_norm in normalized_positions:
+            s_left = t_norm * boundary_data["left_total_length"]
+            s_right = t_norm * boundary_data["right_total_length"]
 
-        # Width is distance from right to left border
-        width = np.linalg.norm(right_pos - left_pos)
-        arc_length = s_right
+            left_pos = _interpolate_on_line_segments(
+                left_points, boundary_data["left_cumulative"], s_left
+            )
+            right_pos = _interpolate_on_line_segments(
+                right_points, boundary_data["right_cumulative"], s_right
+            )
 
-        arc_lengths.append(arc_length)
-        widths.append(width)
+            width = np.linalg.norm(right_pos - left_pos)
+            arc_length = s_right
+
+            arc_lengths.append(arc_length)
+            widths.append(width)
+    else:
+        # Use geometric correspondence
+        min_quality = np.min(quality)
+        if min_quality < DEFAULT_CONFIG.geometry.correspondence_quality_threshold:
+            warnings.warn(
+                f"Low geometric correspondence quality detected: {min_quality:.2f} "
+                f"(threshold: {DEFAULT_CONFIG.geometry.correspondence_quality_threshold}). "
+                f"Lane width calculations may be inaccurate.",
+                UserWarning,
+            )
+
+        for s_left, s_right in zip(left_s_samples, right_s_samples):
+            left_pos = _interpolate_on_line_segments(
+                left_points, boundary_data["left_cumulative"], s_left
+            )
+            right_pos = _interpolate_on_line_segments(
+                right_points, boundary_data["right_cumulative"], s_right
+            )
+
+            width = np.linalg.norm(right_pos - left_pos)
+            arc_length = s_right
+
+            arc_lengths.append(arc_length)
+            widths.append(width)
 
     return arc_lengths, widths
 
