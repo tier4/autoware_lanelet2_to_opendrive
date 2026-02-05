@@ -265,6 +265,16 @@ delete_point_operations:
 - Validates minimum 2 points remain per linestring
 - Reports missing points
 
+**Use case**: Use this operation to remove unnecessary points from lanelet boundaries, simplifying the geometry while maintaining the shape.
+
+**Before (with unnecessary points):**
+
+![Before](image/before_delete_point_operation.png)
+
+**After (points removed):**
+
+![After](image/after_delete_point_operation.png)
+
 **C. Validate Operations** ([lanelet.py:93-131](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L93-L131))
 ```yaml
 validate_operations:
