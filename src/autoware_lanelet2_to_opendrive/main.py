@@ -178,9 +178,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         # Get junction groups
         print("\n=== Finding junctions ===")
         all_lanelets = list(self.lanelet_map.laneletLayer)
-        junction_lanelets = filter_lanelets_inside_junction(
-            all_lanelets, exclude_lanelet_ids=self.config.no_junction_lanelet_ids
-        )
+        junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
         junction_groups = find_junction_groups(junction_lanelets)
         print(f"Found {len(junction_groups)} junctions")
 
@@ -771,11 +769,6 @@ def preprocess_and_convert_with_hydra(
     # Priority: map config > target config > default (RHT)
     traffic_rule = cfg.map.get("traffic_rule") or cfg.target.get("traffic_rule", "RHT")
 
-    # Get no-junction lanelet IDs from map config
-    no_junction_lanelet_ids = cfg.map.get("no_junction_lanelet_ids", [])
-    if no_junction_lanelet_ids:
-        logger.info(f"No-junction lanelet IDs configured: {no_junction_lanelet_ids}")
-
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
 
@@ -834,7 +827,6 @@ def preprocess_and_convert_with_hydra(
             lon=origin_lon,
         ),
         exclude_non_junction_signals=exclude_non_junction_signals,
-        no_junction_lanelet_ids=no_junction_lanelet_ids,
         traffic_rule=traffic_rule,
     )
 
