@@ -245,6 +245,17 @@ move_point_operations:
 - Updates all lanelets containing the point
 - Updates `local_x`, `local_y`, `ele` attributes
 
+**Use case**: When parallel lanelets need to be bundled as the same Road in OpenDRIVE, which requires equal lengths. If consecutive lanelets are divided at diagonal boundaries, using MergeOperation would cause length misalignment and prevent lane changes. In such cases, use MovePointOperation to align the boundaries instead.
+
+**Before (diagonal boundaries):**
+
+![Before 1](image/112.png)
+![Before 2](image/114.png)
+
+**After (aligned boundaries with MovePointOperation):**
+
+![After](image/merged.png)
+
 **B. Delete Point Operations** ([geometry.py:208-308](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L208-L308))
 ```yaml
 delete_point_operations:
