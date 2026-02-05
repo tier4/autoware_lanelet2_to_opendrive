@@ -823,6 +823,11 @@ def _calculate_widths_centerline_reference(
             widths.append(width)
             prev_center_pos = center_pos
 
+    # Final pass: ensure strict monotonicity across entire array
+    for i in range(1, len(arc_lengths)):
+        if arc_lengths[i] <= arc_lengths[i - 1]:
+            arc_lengths[i] = arc_lengths[i - 1] + DEFAULT_CONFIG.geometry.epsilon
+
     return arc_lengths, widths
 
 
