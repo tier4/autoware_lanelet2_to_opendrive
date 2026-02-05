@@ -290,6 +290,19 @@ merge_operations:
 - Merged lanelet ID: `base_id + 3` (or auto-generated)
 - Connects left/right boundaries sequentially
 
+**Use case**: When consecutive lanelets are divided at diagonal boundaries, use MergeOperation to combine them into a single continuous lanelet.
+
+**Before merge:**
+
+![Before 1](image/112.png)
+![Before 2](image/114.png)
+
+**After merge:**
+
+![After](image/merged.png)
+
+
+
 **F. Remove Operations (Old Style)** ([preprocess_lanelet.py:661-682](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L661-L682))
 ```yaml
 remove_operations:
