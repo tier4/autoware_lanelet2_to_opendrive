@@ -687,9 +687,6 @@ merge_operations:
 
 remove_lanelet_operations:
   - lanelet_ids: [300, 301]
-
-# Special handling
-no_junction_lanelet_ids: []
 ```
 
 **Behavior Impact:**
@@ -699,7 +696,6 @@ no_junction_lanelet_ids: []
 | `mgrs_grid` | Sets coordinate system origin | Required (one of 3 methods) |
 | `merge_operations` | Combines lanelets before conversion | Empty (no merging) |
 | `remove_lanelet_operations` | Removes lanelets from map | Empty (no removal) |
-| `no_junction_lanelet_ids` | Forces lanelets to be regular roads | Empty (auto-detect junctions) |
 
 **Alternative Origin Methods:**
 
@@ -821,17 +817,12 @@ verbose=true dry_run=false traffic_rule=LHT
 offset.x=100.5 offset.y=200.3 offset.z=10.0
 ```
 
-**4. Override List Items:**
-```bash
-no_junction_lanelet_ids=[100,101,102]
-```
-
-**5. Add Preprocessing Operations:**
+**4. Add Preprocessing Operations:**
 ```bash
 +merge_operations='[{lanelet_ids: [100,101], validate: true}]'
 ```
 
-**6. Null Out Optional Values:**
+**5. Null Out Optional Values:**
 ```bash
 output_map_path=null
 ```
@@ -943,35 +934,6 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 4. Log detailed information
 5. **Skip** writing output file
 6. Report validation results
-
----
-
-#### **Example 5: Left-Hand Traffic + Custom Filtering**
-
-**Command:**
-```bash
-uv run python -m autoware_lanelet2_to_opendrive.main \
-    map=example \
-    input_map_path=input.osm \
-    traffic_rule=LHT \
-    no_junction_lanelet_ids=[100,101] \
-    exclude_non_junction_signals=false
-```
-
-**Configuration Result:**
-
-- Traffic rule: Left-hand traffic
-- Lanelets 100, 101 forced to be regular roads (not junctions)
-- All signals included
-
-**Behavior:**
-1. Load map
-2. **Classify lanelets:** 100, 101 treated as roads (ignore `turn_direction`)
-3. **Lane ID assignment:** Positive IDs on left side (LHT)
-4. Include all traffic signals
-5. Write output
-
----
 
 ### Configuration Validation
 

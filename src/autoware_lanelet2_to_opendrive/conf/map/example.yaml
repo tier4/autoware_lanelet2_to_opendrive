@@ -75,9 +75,3 @@ remove_lanelet_operations:
 remove_turn_direction_operations:
   # - lanelet_ids: []  # Empty list = remove from ALL lanelets
   # - lanelet_ids: [1000, 1001]  # Remove from specific lanelets only
-
-# No-junction lanelet IDs - lanelets to exclude from junction detection
-# These lanelets will be treated as regular roads even if they have turn_direction attribute
-no_junction_lanelet_ids: []
-  # - 1100  # Example: exclude specific lanelet from junction detection
-  # - 1101
