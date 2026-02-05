@@ -104,18 +104,38 @@ class LaneSection:
 
         # Create and set the reference line
         reference_line = ReferenceLine.construct_from_lanelet_groups(
-            lanelet_map, lanelet_group
+            lanelet_map, lanelet_group, traffic_rule=traffic_rule
         )
         lane_section._set_center_lane(reference_line)
 
-        # All lanes are treated as right lanes (negative IDs) since reference line
-        # is the left boundary of the leftmost lanelet
-        # Lane IDs: -1, -2, -3, ... from left to right
-        for i, lanelet in enumerate(sorted_lanelets):
-            lane_id = -(i + 1)  # -1, -2, -3, ...
-            lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule=traffic_rule)
-            lane.lane_id = lane_id
-            lane_section._add_right_lane(lane)
+        # Normalize traffic_rule to uppercase, default to RHT
+        traffic_rule_normalized = (traffic_rule or "RHT").upper()
+
+        # Validate traffic_rule
+        if traffic_rule_normalized not in ("RHT", "LHT"):
+            raise ValueError(
+                f"Invalid traffic_rule: '{traffic_rule}'. Must be 'RHT' or 'LHT'."
+            )
+
+        # Create lanes based on traffic rule
+        if traffic_rule_normalized == "RHT":
+            # RHT: Right lanes with negative IDs (-1, -2, -3, ...) from left to right
+            for i, lanelet in enumerate(sorted_lanelets):
+                lane_id = -(i + 1)  # -1, -2, -3, ...
+                lane = Lane.construct_from_lanelet(
+                    lanelet_map, lanelet, rule=traffic_rule
+                )
+                lane.lane_id = lane_id
+                lane_section._add_right_lane(lane)
+        else:  # LHT
+            # LHT: Left lanes with positive IDs (+1, +2, +3, ...) from right to left
+            for i, lanelet in enumerate(reversed(sorted_lanelets)):
+                lane_id = i + 1  # +1, +2, +3, ...
+                lane = Lane.construct_from_lanelet(
+                    lanelet_map, lanelet, rule=traffic_rule
+                )
+                lane.lane_id = lane_id
+                lane_section._add_left_lane(lane)
 
         return lane_section
 

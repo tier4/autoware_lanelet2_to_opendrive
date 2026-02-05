@@ -103,3 +103,90 @@ def test_single_lane_section_with_lane_offset(lanelet_map):
     xml_element = lane_section.to_xml()
     offset_element = xml_element.find("laneOffset")
     assert offset_element is None
+
+
+def test_lane_section_rht_explicit(lanelet_map):
+    """Test LaneSection construction with explicit RHT produces right lanes with negative IDs."""
+    lanelet_group = [
+        lanelet_map.laneletLayer.get(3002094),
+        lanelet_map.laneletLayer.get(3002093),
+    ]
+
+    lane_section = LaneSection.construct_from_lanelet_groups(
+        lanelet_map, lanelet_group, s_offset=0.0, traffic_rule="RHT"
+    )
+
+    # RHT should produce right lanes with negative IDs
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 2
+
+    # Check lane IDs are negative (-1, -2 from left to right)
+    assert -1 in lane_section.right_lanes
+    assert -2 in lane_section.right_lanes
+
+    # Verify lanes are ordered correctly
+    all_lanes = lane_section.get_all_lanes()
+    lane_ids = [lane.lane_id for lane in all_lanes]
+    assert lane_ids == [0, -1, -2]
+
+
+def test_lane_section_lht(lanelet_map):
+    """Test LaneSection construction with LHT produces left lanes with positive IDs."""
+    lanelet_group = [
+        lanelet_map.laneletLayer.get(3002094),
+        lanelet_map.laneletLayer.get(3002093),
+    ]
+
+    lane_section = LaneSection.construct_from_lanelet_groups(
+        lanelet_map, lanelet_group, s_offset=0.0, traffic_rule="LHT"
+    )
+
+    # LHT should produce left lanes with positive IDs
+    assert len(lane_section.left_lanes) == 2
+    assert len(lane_section.right_lanes) == 0
+
+    # Check lane IDs are positive (+1, +2 from right to left)
+    assert 1 in lane_section.left_lanes
+    assert 2 in lane_section.left_lanes
+
+    # Verify lanes are ordered correctly
+    all_lanes = lane_section.get_all_lanes()
+    lane_ids = [lane.lane_id for lane in all_lanes]
+    assert lane_ids == [1, 2, 0]
+
+
+def test_lane_section_traffic_rule_default(lanelet_map):
+    """Test LaneSection construction without traffic_rule defaults to RHT."""
+    lanelet_group = [
+        lanelet_map.laneletLayer.get(3002094),
+        lanelet_map.laneletLayer.get(3002093),
+    ]
+
+    # Omit traffic_rule parameter
+    lane_section = LaneSection.construct_from_lanelet_groups(
+        lanelet_map, lanelet_group, s_offset=0.0
+    )
+
+    # Should default to RHT behavior (right lanes with negative IDs)
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 2
+    assert -1 in lane_section.right_lanes
+    assert -2 in lane_section.right_lanes
+
+
+def test_lane_section_invalid_traffic_rule(lanelet_map):
+    """Test LaneSection construction with invalid traffic_rule raises ValueError."""
+    import pytest
+
+    lanelet_group = [
+        lanelet_map.laneletLayer.get(3002094),
+        lanelet_map.laneletLayer.get(3002093),
+    ]
+
+    # Test invalid traffic_rule
+    with pytest.raises(
+        ValueError, match="Invalid traffic_rule.*Must be 'RHT' or 'LHT'"
+    ):
+        LaneSection.construct_from_lanelet_groups(
+            lanelet_map, lanelet_group, s_offset=0.0, traffic_rule="INVALID"
+        )

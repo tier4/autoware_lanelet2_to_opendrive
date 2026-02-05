@@ -1,6 +1,6 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
-from typing import TYPE_CHECKING, List, Set, Union
+from typing import TYPE_CHECKING, List, Optional, Set, Union
 
 import lanelet2
 import lxml.etree as ET
@@ -67,6 +67,7 @@ class ReferenceLine:
             List[lanelet2.core.Lanelet],
             lanelet2.core.LaneletLayer,
         ],
+        traffic_rule: Optional[str] = None,
     ) -> "ReferenceLine":
         """
         Construct a ReferenceLine from a group of Lanelet2 lanelets.
@@ -74,6 +75,10 @@ class ReferenceLine:
         Args:
             lanelet_map: The Lanelet2 map containing the lanelets
             lanelet_group: List of lanelets representing lanes in a road
+            traffic_rule: Traffic handedness - "RHT" (Right-Hand Traffic) or "LHT" (Left-Hand Traffic).
+                         Defaults to "RHT" if not specified.
+                         - RHT: Uses leftmost lanelet's left boundary as reference line
+                         - LHT: Uses rightmost lanelet's right boundary as reference line
 
         Returns:
             ReferenceLine instance constructed from the center of the lanelet group
@@ -86,14 +91,31 @@ class ReferenceLine:
 
         sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_group)
 
-        # Always use the left boundary of the leftmost lanelet as reference line
-        leftmost_lanelet = sorted_lanelets[0]
+        # Normalize traffic_rule to uppercase, default to RHT
+        traffic_rule_normalized = (traffic_rule or "RHT").upper()
+
+        # Validate traffic_rule
+        if traffic_rule_normalized not in ("RHT", "LHT"):
+            raise ValueError(
+                f"Invalid traffic_rule: '{traffic_rule}'. Must be 'RHT' or 'LHT'."
+            )
+
+        # Select reference lanelet and boundary based on traffic rule
+        if traffic_rule_normalized == "RHT":
+            # RHT: Use leftmost lanelet's left boundary
+            reference_lanelet = sorted_lanelets[0]
+            border = "left"
+            boundary = reference_lanelet.leftBound
+        else:  # LHT
+            # LHT: Use rightmost lanelet's right boundary
+            reference_lanelet = sorted_lanelets[-1]
+            border = "right"
+            boundary = reference_lanelet.rightBound
 
         from ..centerline import extract_border_from_spline
 
-        # Extract 3D points directly from the left boundary (no 3D spline needed)
+        # Extract 3D points directly from the selected boundary (no 3D spline needed)
         # This avoids the 3D-to-2D arc length mapping issues on steep slopes
-        boundary = leftmost_lanelet.leftBound
         from ..util import extract_points_3d
 
         points_3d = extract_points_3d(boundary)
@@ -105,9 +127,9 @@ class ReferenceLine:
         # Get elevation offset (absolute Z at s=0)
         elevation_offset = points_3d[0, 2]
 
-        # Extract the left boundary as 2D spline (XY only) for reference line geometry
+        # Extract the selected boundary as 2D spline (XY only) for reference line geometry
         centerline_2d = extract_border_from_spline(
-            leftmost_lanelet, border="left", dimensions=2
+            reference_lanelet, border=border, dimensions=2
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)
