@@ -361,6 +361,16 @@ remove_turn_direction_operations:
 - Empty list applies to **all** lanelets
 - Converts junction lanelets to regular road lanelets
 
+**Use case**: This operation removes the Lanelet2 turn_direction attribute, which is the flag that determines whether a lanelet is classified as a Junction in OpenDRIVE. Use this when you need to convert junction lanelets to regular road lanelets.
+
+**Before (with turn_direction attribute):**
+
+![Before](image/before_remove_turn_direction_operation.png)
+
+**After (turn_direction attribute removed):**
+
+![After](image/after_remove_turn_direction_operation.png)
+
 ---
 
 #### **1.5: Merge Operation Details**
