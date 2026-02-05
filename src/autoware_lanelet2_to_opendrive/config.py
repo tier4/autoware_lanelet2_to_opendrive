@@ -15,10 +15,18 @@ class GeometryConstants:
     Attributes:
         epsilon: Tolerance for numerical stability in geometry calculations
         point_distance_threshold: Minimum distance between distinct points
+        boundary_length_ratio_threshold: Threshold for asymmetric boundary warning
+        correspondence_quality_threshold: Minimum quality for geometric correspondence
+        perpendicular_search_radius: Maximum distance for correspondence search
     """
 
     epsilon: float = 1e-10
     point_distance_threshold: float = 0.001
+    boundary_length_ratio_threshold: float = 1.5  # Warn if left/right differ by >50%
+    correspondence_quality_threshold: float = 0.7  # Quality must be >0.7
+    perpendicular_search_radius: float = (
+        10.0  # Max distance for correspondence search in meters
+    )
 
 
 @dataclass(frozen=True)
