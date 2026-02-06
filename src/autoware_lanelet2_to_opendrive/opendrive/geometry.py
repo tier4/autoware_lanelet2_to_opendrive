@@ -119,6 +119,9 @@ class ParamPoly3(GeometryBase):
         # Divide the spline into segments
         segment_length = total_length / num_segments
 
+        # Track previous heading at segment END for continuity (unwrap)
+        prev_end_hdg = None
+
         for i in range(num_segments):
             # Arc length bounds for this segment
             s_start = i * segment_length
@@ -140,7 +143,38 @@ class ParamPoly3(GeometryBase):
             x0, y0 = start_pos[0], start_pos[1]
 
             # Calculate heading from tangent vector
-            hdg = np.arctan2(start_tangent[1], start_tangent[0])
+            hdg_raw = np.arctan2(start_tangent[1], start_tangent[0])
+
+            # Unwrap heading to ensure continuity with previous segment's END
+            if prev_end_hdg is not None:
+                # Calculate the difference and find the smallest equivalent angle
+                # This ensures continuity by choosing the angle closest to prev segment's end
+                diff = hdg_raw - prev_end_hdg
+
+                # Wrap diff to [-π, π] range
+                diff = np.arctan2(np.sin(diff), np.cos(diff))
+
+                # Cumulative heading: add the wrapped difference to previous end heading
+                hdg = prev_end_hdg + diff
+            else:
+                # First segment: use raw heading
+                hdg = hdg_raw
+
+            # Calculate heading at segment END for next iteration
+            # Use end tangent to determine where this segment ends up
+            end_hdg_raw = np.arctan2(end_tangent[1], end_tangent[0])
+
+            if prev_end_hdg is not None:
+                # Unwrap end heading relative to start heading of this segment
+                diff_end = end_hdg_raw - hdg
+                diff_end = np.arctan2(np.sin(diff_end), np.cos(diff_end))
+                end_hdg = hdg + diff_end
+            else:
+                # First segment: use raw end heading
+                end_hdg = end_hdg_raw
+
+            # Update previous end heading for next iteration
+            prev_end_hdg = end_hdg
 
             # Transform to local coordinate system
             # Local u-axis is along the tangent, v-axis is perpendicular
