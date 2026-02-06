@@ -42,6 +42,7 @@ from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
 from autoware_lanelet2_to_opendrive.conversion_config import (
     ConversionConfig,
     OriginSpec,
+    ParamPoly3Config,
 )
 
 # Set up logging
@@ -821,6 +822,25 @@ def preprocess_and_convert_with_hydra(
     # Convert to OpenDRIVE
     logger.info("Converting to OpenDRIVE format...")
 
+    # Build ParamPoly3Config from Hydra config
+    # Priority: map config > target config > default
+    parampoly3_dict = cfg.map.get("parampoly3") or cfg.target.get("parampoly3", {})
+    if parampoly3_dict:
+        parampoly3_config = ParamPoly3Config(
+            min_segment_length=parampoly3_dict.get("min_segment_length", 0.5),
+            default_segment_length=parampoly3_dict.get("default_segment_length", 1.0),
+            max_segments=parampoly3_dict.get("max_segments", 100),
+            min_segments=parampoly3_dict.get("min_segments", 1),
+            coefficient_epsilon=parampoly3_dict.get("coefficient_epsilon", 1e-8),
+            enabled=parampoly3_dict.get("enabled", True),
+        )
+        logger.info(
+            f"ParamPoly3 config: default_length={parampoly3_config.default_segment_length}m, "
+            f"max_segments={parampoly3_config.max_segments}"
+        )
+    else:
+        parampoly3_config = ParamPoly3Config()
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -831,6 +851,7 @@ def preprocess_and_convert_with_hydra(
         ),
         exclude_non_junction_signals=exclude_non_junction_signals,
         traffic_rule=traffic_rule,
+        parampoly3=parampoly3_config,
     )
 
     opendrive, mapping = convert_lanelet2_to_opendrive(
