@@ -127,7 +127,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         print("\n=== Building regular roads ===")
         regular_roads = Road.construct_from_lanelet_map(
-            self.lanelet_map, traffic_rule=self.config.traffic_rule
+            self.lanelet_map,
+            traffic_rule=self.config.traffic_rule,
+            parampoly3_config=self.config.parampoly3,
         )
 
         # Build lanelet-to-road mapping for regular roads
@@ -197,6 +199,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             starting_road_id=starting_junction_road_id,
             junction_id_offset=junction_id_offset,
             traffic_rule=self.config.traffic_rule,
+            parampoly3_config=self.config.parampoly3,
         )
 
         # Merge lanelet-to-road mappings

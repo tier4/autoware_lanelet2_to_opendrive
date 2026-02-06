@@ -34,6 +34,38 @@ class OriginSpec:
 
 
 @dataclass
+class ParamPoly3Config:
+    """Configuration for ParamPoly3 segment generation.
+
+    Controls how B-splines are converted to ParamPoly3 segments for OpenDRIVE
+    output. These settings prevent issues like zero-length segments that cause
+    CARLA crashes.
+
+    Attributes:
+        min_segment_length: Minimum allowed segment length in meters (0.5m default)
+                           Segments shorter than this will be rejected.
+                           CARLA requirement: segments must be >= 0.5m
+        default_segment_length: Target segment length for dynamic calculation (1.0m)
+                               Used when num_segments is not explicitly specified
+        max_segments: Maximum number of segments per road (100 default)
+                     Prevents excessive segmentation of very long roads
+        min_segments: Minimum number of segments per road (1 default)
+                     Ensures at least one segment is created
+        coefficient_epsilon: Threshold for rounding small coefficients to zero (1e-8)
+                            Prevents numerical instability in paramPoly3
+        enabled: Enable dynamic segment calculation (True by default)
+                If False, uses fixed segment count (legacy behavior)
+    """
+
+    min_segment_length: float = 0.5
+    default_segment_length: float = 1.0
+    max_segments: int = 100
+    min_segments: int = 1
+    coefficient_epsilon: float = 1e-8
+    enabled: bool = True
+
+
+@dataclass
 class ConversionConfig:
     """Configuration for Lanelet2 to OpenDRIVE conversion.
 
@@ -49,6 +81,7 @@ class ConversionConfig:
             with road IDs (default: 1000)
         traffic_rule: Traffic rule for lanes (RHT: Right-Hand Traffic,
             LHT: Left-Hand Traffic). Defaults to "RHT"
+        parampoly3: Configuration for ParamPoly3 segment generation
     """
 
     output_path: Optional[Path] = None
@@ -56,6 +89,7 @@ class ConversionConfig:
     exclude_non_junction_signals: bool = False
     junction_id_offset: int = 1000
     traffic_rule: Optional[str] = "RHT"
+    parampoly3: ParamPoly3Config = field(default_factory=ParamPoly3Config)
 
     def __post_init__(self):
         """Validate configuration after initialization."""

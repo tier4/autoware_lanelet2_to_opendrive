@@ -9,6 +9,7 @@ from .enums import GeometryType
 
 if TYPE_CHECKING:
     from ..spline import Splines
+    from ..conversion_config import ParamPoly3Config
 
 
 @dataclass
@@ -202,12 +203,15 @@ class ParamPoly3(GeometryBase):
         )
 
     @staticmethod
-    def _validate_segment(segment: "ParamPoly3") -> tuple:
+    def _validate_segment(
+        segment: "ParamPoly3", min_segment_length: Optional[float] = None
+    ) -> tuple:
         """
         Validate a ParamPoly3 segment for numerical stability and correctness.
 
         Args:
             segment: ParamPoly3 segment to validate
+            min_segment_length: Minimum allowed segment length (default from config)
 
         Returns:
             Tuple of (is_valid, error_message)
@@ -220,10 +224,14 @@ class ParamPoly3(GeometryBase):
             3. Heading is within valid range [-2π, 2π]
             4. Position coordinates are finite
         """
-        from ..config import DEFAULT_CONFIG
+        # Load default config if not provided
+        if min_segment_length is None:
+            from ..config import DEFAULT_CONFIG
+
+            min_segment_length = DEFAULT_CONFIG.parampoly3.min_segment_length
 
         # Check length
-        min_length = DEFAULT_CONFIG.parampoly3.min_segment_length
+        min_length = min_segment_length
         if segment.length < min_length:
             return (
                 False,
@@ -265,7 +273,10 @@ class ParamPoly3(GeometryBase):
 
     @classmethod
     def from_spline(
-        cls, spline: "Splines", num_segments: Optional[int] = None
+        cls,
+        spline: "Splines",
+        num_segments: Optional[int] = None,
+        config: Optional["ParamPoly3Config"] = None,
     ) -> List["ParamPoly3"]:
         """
         Convert a B-spline to a list of ParamPoly3 segments.
@@ -280,15 +291,18 @@ class ParamPoly3(GeometryBase):
                           If None (default), automatically calculated to ensure
                           segments are >= min_segment_length (0.5m).
                           If specified, uses the provided value (backward compatible).
+            config: ParamPoly3Config for customizing segment generation parameters.
+                   If None, uses defaults from config.py.
 
         Returns:
             List of ParamPoly3 objects representing the spline
 
         Configuration:
-            Uses ParamPoly3Constants from config.py:
+            Uses ParamPoly3Config (from YAML or defaults):
             - min_segment_length: 0.5m (CARLA requirement)
             - default_segment_length: 1.0m (target length)
             - max_segments: 100 (prevents excessive segmentation)
+            - enabled: True (use dynamic calculation)
         """
         segments = []
         total_length = spline.total_length
@@ -297,9 +311,24 @@ class ParamPoly3(GeometryBase):
             # Handle degenerate case
             return []
 
-        # Calculate optimal num_segments if not provided
-        if num_segments is None:
-            num_segments = cls._calculate_optimal_num_segments(total_length)
+        # Load config if not provided
+        if config is None:
+            from ..conversion_config import ParamPoly3Config
+
+            config = ParamPoly3Config()
+
+        # Calculate optimal num_segments if not provided and dynamic mode is enabled
+        if num_segments is None and config.enabled:
+            num_segments = cls._calculate_optimal_num_segments(
+                total_length,
+                min_segment_length=config.min_segment_length,
+                default_segment_length=config.default_segment_length,
+                max_segments=config.max_segments,
+                min_segments=config.min_segments,
+            )
+        elif num_segments is None:
+            # Legacy behavior: fixed 10 segments if dynamic mode is disabled
+            num_segments = 10
 
         # Divide the spline into segments
         segment_length = total_length / num_segments
@@ -314,10 +343,9 @@ class ParamPoly3(GeometryBase):
                 continue
 
             # Skip segments that are too short
-            from ..config import DEFAULT_CONFIG
             import warnings
 
-            min_length = DEFAULT_CONFIG.parampoly3.min_segment_length
+            min_length = config.min_segment_length
 
             if actual_segment_length < min_length:
                 # Log warning for debugging
@@ -389,7 +417,7 @@ class ParamPoly3(GeometryBase):
 
             # Normalize coefficients to prevent numerical instability
             aU, bU, cU, dU, aV, bV, cV, dV = cls._normalize_coefficients(
-                aU, bU, cU, dU, aV, bV, cV, dV
+                aU, bU, cU, dU, aV, bV, cV, dV, epsilon=config.coefficient_epsilon
             )
 
             # Create ParamPoly3 segment
@@ -411,7 +439,9 @@ class ParamPoly3(GeometryBase):
             )
 
             # Validate segment before adding
-            is_valid, error_msg = cls._validate_segment(segment)
+            is_valid, error_msg = cls._validate_segment(
+                segment, min_segment_length=config.min_segment_length
+            )
             if not is_valid:
                 warnings.warn(
                     f"Skipping invalid segment at s={s_start:.3f}: {error_msg}",
