@@ -10,6 +10,101 @@ from scipy.optimize import minimize_scalar
 from .config import DEFAULT_CONFIG
 
 
+def compute_dynamic_control_points(points: np.ndarray) -> int:
+    """
+    Compute the optimal number of control points based on input geometry.
+
+    This function analyzes the input points to determine an appropriate number
+    of control points for spline fitting, considering:
+    1. Total number of input points
+    2. Local curvature characteristics
+    3. Geometric complexity
+
+    Args:
+        points: (N, 2) or (N, 3) Array of input points
+
+    Returns:
+        Optimal number of control points (clamped to min/max bounds)
+
+    Algorithm:
+        1. Base calculation: num_points * control_points_ratio
+        2. Curvature adjustment: Increase control points in high-curvature regions
+        3. Clamp to [min_control_points, max_control_points] range
+    """
+    points = np.asarray(points)
+    n_points = len(points)
+
+    # Step 1: Base calculation from input points
+    base_control_points = int(n_points * DEFAULT_CONFIG.spline.control_points_ratio)
+
+    # Step 2: Analyze curvature to adjust control points
+    if n_points >= 3:
+        curvature_factor = _analyze_curvature_complexity(points)
+        adjusted_control_points = int(base_control_points * curvature_factor)
+    else:
+        adjusted_control_points = base_control_points
+
+    # Step 3: Clamp to valid range
+    final_control_points = np.clip(
+        adjusted_control_points,
+        DEFAULT_CONFIG.spline.min_control_points,
+        DEFAULT_CONFIG.spline.max_control_points,
+    )
+
+    return final_control_points
+
+
+def _analyze_curvature_complexity(points: np.ndarray) -> float:
+    """
+    Analyze curvature complexity to determine control point multiplier.
+
+    Calculates angles between adjacent tangent vectors to estimate curvature.
+    High-curvature regions require more control points for accurate fitting.
+
+    Args:
+        points: (N, 2) or (N, 3) Array of input points (N >= 3)
+
+    Returns:
+        Curvature factor in range [1.0, curvature_multiplier]
+        - 1.0 for low curvature (straight lines)
+        - curvature_multiplier for high curvature (sharp turns)
+    """
+    # Calculate tangent vectors for each segment
+    diffs = np.diff(points, axis=0)
+    norms = np.linalg.norm(diffs, axis=1)
+
+    # Avoid division by zero
+    norms[norms == 0] = 1.0
+    tangents = diffs / norms[:, None]
+
+    # Calculate angles between adjacent tangents (approximation of curvature)
+    if len(tangents) < 2:
+        return 1.0
+
+    dot_products = np.sum(tangents[:-1] * tangents[1:], axis=1)
+    dot_products = np.clip(dot_products, -1.0, 1.0)
+    angles = np.arccos(dot_products)
+
+    # Calculate statistics of curvature distribution
+    mean_angle = np.mean(angles)
+    max_angle = np.max(angles)
+
+    # Determine curvature factor based on thresholds
+    threshold = DEFAULT_CONFIG.spline.curvature_threshold
+    multiplier = DEFAULT_CONFIG.spline.curvature_multiplier
+
+    # If mean curvature is high, increase control points significantly
+    if mean_angle > threshold:
+        return multiplier
+
+    # If max curvature is high, increase control points moderately
+    if max_angle > threshold * 2:
+        return (multiplier + 1.0) / 2.0
+
+    # Otherwise, use base control points
+    return 1.0
+
+
 @dataclass
 class DesignMatrices:
     """Design matrices for constrained spline fitting.
@@ -47,7 +142,7 @@ class Splines:
         points: np.ndarray,
         start_vel: Optional[np.ndarray] = None,
         end_vel: Optional[np.ndarray] = None,
-        num_control_points: int = 10,
+        num_control_points: Optional[int] = None,
         k: int = 3,
     ):
         """
@@ -57,7 +152,8 @@ class Splines:
             points: (N, 2) or (N, 3) Array of 2D or 3D points to fit
             start_vel: (2,) or (3,) Tangent vector at the start. If None, estimated from points.
             end_vel: (2,) or (3,) Tangent vector at the end. If None, estimated from points.
-            num_control_points: Number of control points (higher = closer fit, lower = smoother)
+            num_control_points: Number of control points (higher = closer fit, lower = smoother).
+                               If None, automatically computed based on input geometry.
             k: Degree of the spline (usually 3 for cubic)
 
         Raises:
@@ -82,7 +178,12 @@ class Splines:
         self.points = self.points - self._origin_offset
 
         self.k = k
-        self.num_control_points = num_control_points
+
+        # Automatically compute control points if not specified
+        if num_control_points is None:
+            self.num_control_points = compute_dynamic_control_points(self.points)
+        else:
+            self.num_control_points = num_control_points
 
         # Estimate tangent vectors if not provided
         if start_vel is None:

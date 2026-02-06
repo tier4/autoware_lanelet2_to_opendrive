@@ -197,7 +197,8 @@ class TestSplinesConstraints:
         )
 
         # Create spline without specifying tangents
-        spline = Splines(points)
+        # Use fixed control points to ensure high accuracy for this test
+        spline = Splines(points, num_control_points=10)
 
         # Check that tangents are automatically estimated and reasonable
         start_tangent = spline.evaluate(0.0, derivative=1)
@@ -800,3 +801,119 @@ class TestSplinesNumericalStability:
         for s in [0.0, total_length * 0.5, total_length]:
             pos = spline.evaluate(s)
             assert np.all(np.isfinite(pos))
+
+
+class TestDynamicControlPoints:
+    """Tests for dynamic control points calculation."""
+
+    def test_compute_dynamic_control_points_straight_line(self):
+        """Test dynamic control points for a straight line (low curvature)."""
+        from autoware_lanelet2_to_opendrive.spline import compute_dynamic_control_points
+
+        # Straight line with 20 points
+        points = np.array([[float(i), 0.0, 0.0] for i in range(20)])
+        num_control_points = compute_dynamic_control_points(points)
+
+        # Should be in valid range
+        assert 5 <= num_control_points <= 50
+        # For straight line, should use base calculation without curvature multiplier
+        # Expected: 20 * 0.4 = 8 control points
+        assert num_control_points == pytest.approx(8, abs=2)
+
+    def test_compute_dynamic_control_points_high_curvature(self):
+        """Test dynamic control points for high-curvature path."""
+        from autoware_lanelet2_to_opendrive.spline import compute_dynamic_control_points
+
+        # Create a sharp zigzag path with high curvature
+        points = []
+        for i in range(20):
+            x = float(i)
+            y = 2.0 if i % 2 == 0 else -2.0  # Sharp zigzag
+            points.append([x, y, 0.0])
+        points = np.array(points)
+
+        num_control_points = compute_dynamic_control_points(points)
+
+        # Should be in valid range
+        assert 5 <= num_control_points <= 50
+        # For high curvature, should use more control points
+        # Expected: 20 * 0.4 * 1.5 = 12 control points
+        assert num_control_points >= 10
+
+    def test_compute_dynamic_control_points_circular_arc(self):
+        """Test dynamic control points for a circular arc."""
+        from autoware_lanelet2_to_opendrive.spline import compute_dynamic_control_points
+
+        # Create a quarter circle with 30 points
+        angles = np.linspace(0, np.pi / 2, 30)
+        radius = 10.0
+        points = np.column_stack(
+            [radius * np.cos(angles), radius * np.sin(angles), np.zeros(30)]
+        )
+
+        num_control_points = compute_dynamic_control_points(points)
+
+        # Should be in valid range
+        assert 5 <= num_control_points <= 50
+        # Circular arc has moderate curvature
+        # Expected: around 12-15 control points
+        assert num_control_points >= 10
+
+    def test_spline_with_automatic_control_points(self):
+        """Test Splines class with automatic control point calculation."""
+        # Create a path with varying curvature
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [2.0, 1.0, 0.0],
+                [3.0, 2.0, 0.0],
+                [4.0, 2.0, 0.0],
+                [5.0, 1.0, 0.0],
+                [6.0, 0.0, 0.0],
+            ]
+        )
+
+        # Create spline without specifying num_control_points (should use automatic)
+        spline = Splines(points)
+
+        assert spline is not None
+        assert spline.total_length > 0
+        assert 5 <= spline.num_control_points <= 50
+
+        # Verify spline is valid by evaluating at multiple points
+        for s in np.linspace(0, spline.total_length, 10):
+            pos = spline.evaluate(s)
+            assert np.all(np.isfinite(pos))
+
+    def test_spline_with_manual_control_points_override(self):
+        """Test that manual control points override automatic calculation."""
+        points = np.array([[float(i), 0.0, 0.0] for i in range(20)])
+
+        # Create spline with manual control points
+        manual_control_points = 15
+        spline = Splines(points, num_control_points=manual_control_points)
+
+        assert spline.num_control_points == manual_control_points
+
+    def test_compute_dynamic_control_points_minimum_points(self):
+        """Test dynamic control points with minimum input points."""
+        from autoware_lanelet2_to_opendrive.spline import compute_dynamic_control_points
+
+        # Very few points should give minimum control points
+        points = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+        num_control_points = compute_dynamic_control_points(points)
+
+        # Should be at least minimum (5)
+        assert num_control_points >= 5
+
+    def test_compute_dynamic_control_points_many_points(self):
+        """Test dynamic control points with many input points."""
+        from autoware_lanelet2_to_opendrive.spline import compute_dynamic_control_points
+
+        # Many points should be capped at maximum
+        points = np.array([[float(i), 0.0, 0.0] for i in range(200)])
+        num_control_points = compute_dynamic_control_points(points)
+
+        # Should be capped at maximum (50)
+        assert num_control_points <= 50

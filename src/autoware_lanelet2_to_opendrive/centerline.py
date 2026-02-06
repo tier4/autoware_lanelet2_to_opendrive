@@ -1,6 +1,6 @@
 import numpy as np
 import lanelet2
-from typing import List, Set, Tuple
+from typing import List, Optional, Set, Tuple
 from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
@@ -301,7 +301,7 @@ def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
 
 
 def extract_centerline_as_spline(
-    lanelet: lanelet2.core.Lanelet, num_control_points: int = 10
+    lanelet: lanelet2.core.Lanelet, num_control_points: Optional[int] = None
 ) -> Splines:
     """
     Extract centerline from a Lanelet using midpoints between left and right borders.
@@ -311,7 +311,8 @@ def extract_centerline_as_spline(
 
     Args:
         lanelet: A Lanelet2 lanelet object
-        num_control_points: Number of control points for B-spline interpolation
+        num_control_points: Number of control points for B-spline interpolation.
+                           If None, automatically computed based on geometry complexity.
 
     Returns:
         Splines object that can be evaluated using arc length
@@ -337,10 +338,18 @@ def extract_centerline_as_spline(
     right_total_length = right_cumulative[-1]
 
     # Number of sample points for centerline
-    num_samples = max(
-        DEFAULT_CONFIG.centerline.min_sample_points_for_centerline,
-        num_control_points * DEFAULT_CONFIG.centerline.sample_point_multiplier,
-    )
+    # If num_control_points is None, estimate from input points
+    if num_control_points is None:
+        estimated_samples = max(len(left_points), len(right_points))
+        num_samples = max(
+            DEFAULT_CONFIG.centerline.min_sample_points_for_centerline,
+            estimated_samples,
+        )
+    else:
+        num_samples = max(
+            DEFAULT_CONFIG.centerline.min_sample_points_for_centerline,
+            num_control_points * DEFAULT_CONFIG.centerline.sample_point_multiplier,
+        )
 
     centerline_points = []
     for i in range(num_samples):
@@ -415,7 +424,7 @@ def _interpolate_on_line_segments(
 def extract_border_from_spline(
     lanelet: lanelet2.core.Lanelet,
     border: str,
-    num_control_points: int = 10,
+    num_control_points: Optional[int] = None,
     dimensions: int = 2,
 ) -> Splines:
     """
@@ -424,7 +433,8 @@ def extract_border_from_spline(
     Args:
         lanelet: A Lanelet2 lanelet object
         border: Border specification - "left" or "right"
-        num_control_points: Number of control points for B-spline interpolation
+        num_control_points: Number of control points for B-spline interpolation.
+                           If None, automatically computed based on geometry complexity.
         dimensions: Number of dimensions (2 for XY only)
 
     Returns:
@@ -756,7 +766,7 @@ def _calculate_widths_right_bound_reference(
 def extract_centerline_as_spline_from_two_lanelets(
     lanelet_map: lanelet2.core.LaneletMap,
     two_lanelets: Set[lanelet2.core.Lanelet],
-    num_control_points: int = 10,
+    num_control_points: Optional[int] = None,
 ) -> Splines:
     """
     Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
@@ -764,7 +774,8 @@ def extract_centerline_as_spline_from_two_lanelets(
     Args:
         lanelet_map: The lanelet2 map containing the lanelets
         two_lanelets: Set containing exactly two lanelets
-        num_control_points: Number of control points for B-spline interpolation
+        num_control_points: Number of control points for B-spline interpolation.
+                           If None, automatically computed based on geometry complexity.
 
     Returns:
         Splines object representing the right bound of the left lanelet
