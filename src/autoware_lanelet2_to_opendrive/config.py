@@ -60,11 +60,18 @@ class CenterlineConstants:
         min_sample_points_for_centerline: Minimum number of sample points for centerline extraction
         sample_point_multiplier: Multiplier for calculating sample points based on control points
         boundary_condition_default: Default boundary condition for cubic spline interpolation
+        width_spline_type: Type of spline interpolation for width estimation
+                          ("monotone" for PCHIP, "cubic" for standard cubic spline)
+                          Default "monotone" prevents overshoot and guarantees positive widths
+        width_min_threshold: Minimum valid width value in meters for validation
+                            Default 0.1m (10cm) ensures physically reasonable lane widths
     """
 
     min_sample_points_for_centerline: int = 20
     sample_point_multiplier: int = 2
     boundary_condition_default: str = "not-a-knot"
+    width_spline_type: str = "monotone"
+    width_min_threshold: float = 0.1
 
 
 @dataclass(frozen=True)

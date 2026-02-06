@@ -4,6 +4,7 @@ from typing import List, Set, Tuple
 from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
+from .spline_1d_base import Spline1DBase
 from .cubic_spline_1d import CubicSpline1D
 from .conversion_config import WidthEstimationConfig
 
@@ -16,15 +17,15 @@ class AsymmetryLaneletException(Exception):
 
 class Width1DSplineAdapter:
     """
-    Adapter class that wraps CubicSpline1D to provide compatibility with existing interface.
+    Adapter class that wraps any Spline1DBase implementation to provide compatibility with existing interface.
     """
 
-    def __init__(self, width_spline_1d: CubicSpline1D):
+    def __init__(self, width_spline_1d: Spline1DBase):
         """
         Initialize the adapter.
 
         Args:
-            width_spline_1d: The 1D width spline object
+            width_spline_1d: The 1D width spline object (can be any Spline1DBase subclass)
         """
         self.spline_1d = width_spline_1d
         self.total_length = width_spline_1d.total_arc_length
@@ -473,6 +474,37 @@ def extract_border_from_spline(
     )
 
 
+def _validate_width_spline_positivity(
+    spline: Spline1DBase, arc_lengths: np.ndarray
+) -> None:
+    """
+    Validate that spline produces positive widths throughout its entire range.
+
+    This function samples the spline at high resolution to catch any overshoot
+    that might produce negative width values.
+
+    Args:
+        spline: The width spline to validate
+        arc_lengths: Array of arc lengths used to create the spline
+
+    Raises:
+        ValueError: If the spline produces width values below the threshold
+    """
+    # Sample at 10x resolution to catch overshoots between input points
+    num_samples = len(arc_lengths) * 10
+    s_samples = np.linspace(0, spline.total_arc_length, num_samples)
+
+    # Find minimum width across all samples
+    min_width = min(spline.evaluate(s) for s in s_samples)
+
+    threshold = DEFAULT_CONFIG.centerline.width_min_threshold
+    if min_width < threshold:
+        raise ValueError(
+            f"Width validation failed: min={min_width:.3f}m < {threshold}m. "
+            f"Spline overshoot detected. Try 'monotone' spline type."
+        )
+
+
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     config: WidthEstimationConfig,
@@ -521,16 +553,37 @@ def estimate_lanelet_width_as_spline(
         boundary_data,
     )
 
-    # Create a proper 1D cubic spline for width as a function of arc length
+    # Create a proper 1D spline for width as a function of arc length
     arc_lengths_array = np.array(arc_lengths)
     widths_array = np.array(widths)
 
-    # Use not-a-knot boundary conditions for smoother interpolation with less oscillation
-    width_spline_1d = CubicSpline1D(
-        arc_lengths_array,
-        widths_array,
-        bc_type=DEFAULT_CONFIG.centerline.boundary_condition_default,
-    )
+    # 1. Validate input widths are positive
+    min_width = np.min(widths_array)
+    threshold = DEFAULT_CONFIG.centerline.width_min_threshold
+    if min_width < threshold:
+        raise ValueError(
+            f"Invalid width values: min={min_width:.3f}m, threshold={threshold}m"
+        )
+
+    # 2. Create spline based on configured type
+    spline_type = DEFAULT_CONFIG.centerline.width_spline_type
+
+    width_spline_1d: Spline1DBase
+    if spline_type == "monotone":
+        from .monotone_spline_1d import MonotoneSpline1D
+
+        width_spline_1d = MonotoneSpline1D(arc_lengths_array, widths_array)
+    elif spline_type == "cubic":
+        width_spline_1d = CubicSpline1D(
+            arc_lengths_array,
+            widths_array,
+            bc_type=DEFAULT_CONFIG.centerline.boundary_condition_default,
+        )
+    else:
+        raise ValueError(f"Invalid width_spline_type: {spline_type}")
+
+    # 3. Validate spline produces positive widths
+    _validate_width_spline_positivity(width_spline_1d, arc_lengths_array)
 
     # Create a wrapper that provides the same interface as the old WidthSplineWrapper
     return Width1DSplineAdapter(width_spline_1d)

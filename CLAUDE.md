@@ -828,3 +828,128 @@ from .config import DEFAULT_CONFIG
 - **Documents intent**: Clear names explain what values control
 - **Type safety**: Dataclasses catch errors at development time
 - **Professional code**: Industry best practice for configuration management
+
+## Width Spline Configuration
+
+**IMPORTANT**: Width interpolation for lane boundaries uses configurable spline types to prevent negative width values and polygon inversion issues.
+
+### Problem Background
+
+Lane width is interpolated using spline functions to generate smooth OpenDRIVE width profiles. However, standard cubic splines can produce **overshoot/undershoot**, causing negative width values that result in:
+- Polygon inversion in OpenDRIVE viewers
+- Visual artifacts in CARLA and other simulators
+- Invalid geometry that violates physical constraints
+
+### Solution: Monotone Spline (PCHIP)
+
+The project supports two spline interpolation methods:
+
+1. **Monotone Spline (PCHIP) - Default**
+   - Uses `scipy.interpolate.PchipInterpolator`
+   - **Guarantees**: No overshoot, shape preservation, positive widths
+   - **C1 continuous**: Function and first derivative are continuous
+   - **Trade-off**: Slightly less smooth than cubic spline
+
+2. **Cubic Spline - Optional**
+   - Uses `scipy.interpolate.CubicSpline`
+   - **Guarantees**: Maximum smoothness (C2 continuous)
+   - **Trade-off**: May produce overshoot and negative widths
+
+### Configuration
+
+Width spline type is configured in `config.py`:
+
+```python
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
+# Default configuration (monotone spline - safe)
+DEFAULT_CONFIG.centerline.width_spline_type  # "monotone"
+DEFAULT_CONFIG.centerline.width_min_threshold  # 0.1 (meters)
+
+# To use cubic spline instead (requires custom configuration)
+from autoware_lanelet2_to_opendrive.config import CenterlineConstants, ConversionConfig
+
+custom_config = ConversionConfig(
+    centerline=CenterlineConstants(
+        width_spline_type="cubic",
+        width_min_threshold=0.1
+    )
+)
+```
+
+### Validation
+
+Width values are automatically validated at two stages:
+
+1. **Input validation**: Ensures sampled width values are above threshold
+2. **Output validation**: Samples spline at 10x resolution to catch overshoot
+
+If validation fails, a `ValueError` is raised with diagnostic information.
+
+### When to Use Each Type
+
+**Use Monotone Spline (default)** when:
+- Lane width must always be positive
+- Preventing polygon inversion is critical
+- Working with complex lane geometries
+- Default behavior is sufficient
+
+**Use Cubic Spline** when:
+- Maximum smoothness is required
+- Lane width data is well-behaved (no rapid changes)
+- You have verified no negative widths occur
+- Visual smoothness is more important than geometric guarantees
+
+### Technical Details
+
+**Monotone Spline (PCHIP)**:
+- Algorithm: Piecewise Cubic Hermite Interpolating Polynomial
+- Properties: Shape-preserving, monotonicity-preserving
+- Continuity: C1 (continuous first derivative)
+- Performance: Similar to cubic spline
+
+**Cubic Spline**:
+- Algorithm: Standard cubic spline with configurable boundary conditions
+- Properties: Maximum smoothness
+- Continuity: C2 (continuous second derivative)
+- Boundary conditions: "not-a-knot" (default), "natural", "clamped"
+
+### Example: Detecting and Fixing Negative Widths
+
+If you encounter negative width errors:
+
+```python
+# Error message example:
+# ValueError: Width validation failed: min=-0.234m < 0.1m.
+# Spline overshoot detected. Try 'monotone' spline type.
+
+# Solution 1: Use monotone spline (default)
+# No code changes needed - monotone is the default
+
+# Solution 2: Increase sampling density
+config = WidthEstimationConfig(
+    num_samples=100,  # Increase from default 50
+    reference=WidthReference.CENTER_LINE
+)
+
+# Solution 3: Adjust validation threshold (not recommended)
+# Only if lane widths are genuinely very small
+custom_config = ConversionConfig(
+    centerline=CenterlineConstants(
+        width_min_threshold=0.05  # Reduce from 0.1m
+    )
+)
+```
+
+### Implementation Files
+
+- **Core**: `src/autoware_lanelet2_to_opendrive/monotone_spline_1d.py`
+- **Base class**: `src/autoware_lanelet2_to_opendrive/spline_1d_base.py`
+- **Integration**: `src/autoware_lanelet2_to_opendrive/centerline.py`
+- **Tests**: `test/test_monotone_spline.py`, `test/test_width_estimation.py`
+
+### References
+
+- PR #XXX: Implementation of monotone spline for width interpolation
+- PCHIP: Fritsch, F. N., & Carlson, R. E. (1980). "Monotone Piecewise Cubic Interpolation"
+- OpenDRIVE Standard: Width specification using polynomial functions

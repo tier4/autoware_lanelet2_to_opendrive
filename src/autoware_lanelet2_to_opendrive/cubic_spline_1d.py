@@ -1,52 +1,45 @@
 """1D cubic spline for width as a function of arc length."""
 
+from typing import Tuple
+
 import numpy as np
 from scipy.interpolate import CubicSpline
-from typing import Tuple, List
+
+from .spline_1d_base import Spline1DBase
 
 
-class CubicSpline1D:
+class CubicSpline1D(Spline1DBase):
     """
     Generic 1D cubic spline that maps one variable to another.
 
     This class creates a proper 1D cubic spline interpolation for any 1D values
     (e.g., width, height, superelevation) and provides methods to get polynomial
     coefficients for each segment.
+
+    Features C2 continuity (continuous second derivative) for maximum smoothness,
+    but may produce overshoot/undershoot in some cases.
     """
 
     def __init__(
-        self, arc_lengths: np.ndarray, widths: np.ndarray, bc_type: str = "not-a-knot"
+        self, arc_lengths: np.ndarray, values: np.ndarray, bc_type: str = "not-a-knot"
     ):
         """
-        Initialize a 1D width spline.
+        Initialize a 1D cubic spline.
 
         Args:
             arc_lengths: Array of arc length values (must be monotonically increasing)
-            widths: Array of width values corresponding to arc_lengths
+            values: Array of values corresponding to arc_lengths
             bc_type: Boundary condition type for spline ('not-a-knot', 'natural', 'clamped')
                     'not-a-knot' (default) provides smoother interpolation with less oscillation
         """
-        if len(arc_lengths) != len(widths):
-            raise ValueError("arc_lengths and widths must have the same length")
+        # Call parent class constructor (handles validation)
+        super().__init__(arc_lengths, values)
 
-        if len(arc_lengths) < 2:
-            raise ValueError("At least 2 points are required for spline interpolation")
-
-        # Ensure arc_lengths are monotonically increasing
-        if not np.all(np.diff(arc_lengths) > 0):
-            raise ValueError("arc_lengths must be monotonically increasing")
-
-        self.arc_lengths = np.asarray(arc_lengths)
-        self.widths = np.asarray(widths)
-        self.total_length = self.arc_lengths[-1]
+        # Store boundary condition type (unique to cubic splines)
+        self.bc_type = bc_type
 
         # Create cubic spline interpolation
-        self.spline = CubicSpline(self.arc_lengths, self.widths, bc_type=bc_type)
-
-        # Store segment boundaries for efficient lookup
-        self.segment_starts = self.arc_lengths[:-1]
-        self.segment_ends = self.arc_lengths[1:]
-        self.num_segments = len(self.segment_starts)
+        self.spline = CubicSpline(self.arc_lengths, self.values, bc_type=bc_type)
 
     def evaluate(self, s: float, derivative: int = 0) -> float:
         """
@@ -109,41 +102,3 @@ class CubicSpline1D:
                 a = c_matrix[3, segment_index]  # Constant term
 
         return float(a), float(b), float(c), float(d)
-
-    def get_segments(self) -> List[Tuple[float, float, float, float, float]]:
-        """
-        Get all segment data for OpenDRIVE width elements.
-
-        Returns:
-            List of tuples (sOffset, a, b, c, d) for each segment
-        """
-        segments = []
-        for i in range(self.num_segments):
-            s_offset = self.segment_starts[i]
-            a, b, c, d = self.get_polynomial_coefficients(i)
-            segments.append((s_offset, a, b, c, d))
-        return segments
-
-    def evaluate_with_3d_compatibility(
-        self, s: float, derivative: int = 0
-    ) -> np.ndarray:
-        """
-        Evaluate width and return in 3D format for compatibility with existing code.
-
-        Args:
-            s: Arc length value
-            derivative: Derivative order (only 0 supported)
-
-        Returns:
-            3D array [s, width, 0] for compatibility
-        """
-        if derivative != 0:
-            raise NotImplementedError("Derivatives not supported in compatibility mode")
-
-        width = self.evaluate(s, derivative=0)
-        return np.array([s, width, 0.0])
-
-    @property
-    def total_arc_length(self) -> float:
-        """Get total arc length of the reference line."""
-        return self.total_length
