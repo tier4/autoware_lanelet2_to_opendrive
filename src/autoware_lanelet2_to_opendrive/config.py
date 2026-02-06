@@ -37,6 +37,11 @@ class SplineConstants:
         max_point_error: Maximum acceptable single-point fitting error
         warn_percentile: Percentile for error reporting in warnings
         arc_length_table_samples: Number of samples for arc length lookup table
+        min_control_points: Minimum number of control points for spline fitting
+        max_control_points: Maximum number of control points for spline fitting
+        control_points_ratio: Ratio of control points to input points (base calculation)
+        curvature_threshold: Threshold for high curvature detection (radians)
+        curvature_multiplier: Multiplier for control points in high curvature regions
     """
 
     speed_epsilon: float = 1e-12
@@ -50,6 +55,11 @@ class SplineConstants:
     max_point_error: float = 8.0
     warn_percentile: float = 95.0
     arc_length_table_samples: int = 1000
+    min_control_points: int = 5
+    max_control_points: int = 50
+    control_points_ratio: float = 0.4
+    curvature_threshold: float = 0.2
+    curvature_multiplier: float = 1.5
 
 
 @dataclass(frozen=True)
