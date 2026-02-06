@@ -49,12 +49,13 @@ remove_lanelet_operations:
 remove_turn_direction_operations:
   - lanelet_ids: [472, 554, 124435, 301028, 3001150, 3001220, 3001225]
 
-# ParamPoly3 segment generation configuration (optional map-specific override)
-# Uncomment to override target-level settings for this map
-# parampoly3:
-#   enabled: true
-#   min_segment_length: 0.5  # meters
-#   default_segment_length: 1.0  # meters
-#   max_segments: 100
-#   min_segments: 1
-#   coefficient_epsilon: 1.0e-8
+# ParamPoly3 segment generation configuration
+# Optimized for Nishishinjuku to reduce memory usage in CARLA
+# Coarser segmentation to prevent memory overflow in large maps
+parampoly3:
+  enabled: true
+  min_segment_length: 0.5  # meters (CARLA minimum requirement)
+  default_segment_length: 3.0  # meters (increased from 1.0m to reduce segment count)
+  max_segments: 50  # reduced from 100 to prevent memory overflow
+  min_segments: 1
+  coefficient_epsilon: 1.0e-8
