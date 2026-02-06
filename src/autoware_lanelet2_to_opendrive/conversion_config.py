@@ -66,6 +66,35 @@ class ParamPoly3Config:
 
 
 @dataclass
+class WidthEstimationConfig:
+    """Configuration for lanelet width estimation.
+
+    This dataclass specifies how to calculate lane width as a function of
+    arc length along a reference line.
+
+    Attributes:
+        num_samples: Number of points to sample along the lanelet for width
+            estimation (default: 20). Ignored if adaptive_sampling is enabled.
+        num_control_points: Number of control points for width spline
+            interpolation (currently unused, kept for compatibility)
+        reference: Reference line to use for width measurement
+        adaptive_sampling: Enable adaptive sampling based on road length (default: False)
+        min_samples: Minimum number of samples per road (default: 5)
+        max_samples: Maximum number of samples per road (default: 50)
+        default_sample_interval: Target interval between samples in meters (default: 5.0m)
+            Used when adaptive_sampling is True
+    """
+
+    num_samples: int = 20
+    num_control_points: int = 10
+    reference: WidthReference = WidthReference.CENTER_LINE
+    adaptive_sampling: bool = False
+    min_samples: int = 5
+    max_samples: int = 50
+    default_sample_interval: float = 5.0
+
+
+@dataclass
 class ConversionConfig:
     """Configuration for Lanelet2 to OpenDRIVE conversion.
 
@@ -82,6 +111,7 @@ class ConversionConfig:
         traffic_rule: Traffic rule for lanes (RHT: Right-Hand Traffic,
             LHT: Left-Hand Traffic). Defaults to "RHT"
         parampoly3: Configuration for ParamPoly3 segment generation
+        width_estimation: Configuration for width spline sampling
     """
 
     output_path: Optional[Path] = None
@@ -90,6 +120,9 @@ class ConversionConfig:
     junction_id_offset: int = 1000
     traffic_rule: Optional[str] = "RHT"
     parampoly3: ParamPoly3Config = field(default_factory=ParamPoly3Config)
+    width_estimation: WidthEstimationConfig = field(
+        default_factory=WidthEstimationConfig
+    )
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -121,23 +154,3 @@ class LaneLinksContext:
     routing_graph: Optional[RoutingGraph] = None
     road_lane_ids: Optional[Dict[int, Set[int]]] = None
     road_id_to_road: Optional[Dict[int, Any]] = None  # Dict[int, Road]
-
-
-@dataclass
-class WidthEstimationConfig:
-    """Configuration for lanelet width estimation.
-
-    This dataclass specifies how to calculate lane width as a function of
-    arc length along a reference line.
-
-    Attributes:
-        num_samples: Number of points to sample along the lanelet for width
-            estimation (default: 20)
-        num_control_points: Number of control points for width spline
-            interpolation (currently unused, kept for compatibility)
-        reference: Reference line to use for width measurement
-    """
-
-    num_samples: int = 20
-    num_control_points: int = 10
-    reference: WidthReference = WidthReference.CENTER_LINE

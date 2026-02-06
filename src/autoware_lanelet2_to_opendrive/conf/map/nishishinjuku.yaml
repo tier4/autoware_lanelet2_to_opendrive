@@ -59,3 +59,11 @@ parampoly3:
   max_segments: 50  # reduced from 100 to prevent memory overflow
   min_segments: 1
   coefficient_epsilon: 1.0e-8
+
+# Width spline sampling configuration
+# Coarser sampling to further reduce memory usage
+width_estimation:
+  adaptive_sampling: true
+  min_samples: 5
+  max_samples: 20  # reduced from 50 to save memory
+  default_sample_interval: 10.0  # 10m intervals (coarser than default 5m)

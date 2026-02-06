@@ -16,7 +16,11 @@ from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUni
 from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype, to_lanelet_list, LaneletInput
-from ..conversion_config import LaneLinksContext, ParamPoly3Config
+from ..conversion_config import (
+    LaneLinksContext,
+    ParamPoly3Config,
+    WidthEstimationConfig,
+)
 
 # Import for type hints only
 from typing import TYPE_CHECKING
@@ -520,6 +524,7 @@ class Road:
         s_offset: float = 0.0,
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -529,6 +534,7 @@ class Road:
             s_offset: Starting s-coordinate offset for the road
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
+            width_config: Configuration for width spline sampling
 
         Returns:
             Road object constructed from the lanelet group
@@ -567,7 +573,11 @@ class Road:
             from .lane_section import LaneSection
 
             lane_section = LaneSection.construct_from_lanelet_groups(
-                lanelet_map, lanelet_list, s_offset=s_offset, traffic_rule=traffic_rule
+                lanelet_map,
+                lanelet_list,
+                s_offset=s_offset,
+                traffic_rule=traffic_rule,
+                width_config=width_config,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -606,6 +616,7 @@ class Road:
         lanelet_map: lanelet2.core.LaneletMap,
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
     ) -> List["Road"]:
         """Construct Roads from a lanelet map.
 
@@ -613,6 +624,7 @@ class Road:
             lanelet_map: The lanelet2 map containing all lanelets
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
+            width_config: Configuration for width spline sampling
 
         Returns:
             List of Road objects constructed from non-junction lanelets grouped by adjacency
@@ -680,6 +692,7 @@ class Road:
                     s_offset=0.0,
                     traffic_rule=traffic_rule,
                     parampoly3_config=parampoly3_config,
+                    width_config=width_config,
                 )
                 roads.append(road)
 
@@ -794,6 +807,7 @@ class Road:
         junction_id_offset: int = 0,
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
     ) -> Tuple[List["Road"], Dict[int, List[int]], Dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -808,6 +822,7 @@ class Road:
                                with road IDs (default: 0). Issue #132 fix.
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
+            width_config: Configuration for width spline sampling
 
         Returns:
             Tuple of:
@@ -859,6 +874,7 @@ class Road:
                         s_offset=0.0,
                         traffic_rule=traffic_rule,
                         parampoly3_config=parampoly3_config,
+                        width_config=width_config,
                     )
 
                     # Set the junction field to mark this as a connecting road

@@ -43,6 +43,7 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     ConversionConfig,
     OriginSpec,
     ParamPoly3Config,
+    WidthEstimationConfig,
 )
 
 # Set up logging
@@ -131,6 +132,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             self.lanelet_map,
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
+            width_config=self.config.width_estimation,
         )
 
         # Build lanelet-to-road mapping for regular roads
@@ -201,6 +203,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_id_offset=junction_id_offset,
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
+            width_config=self.config.width_estimation,
         )
 
         # Merge lanelet-to-road mappings
@@ -841,6 +844,26 @@ def preprocess_and_convert_with_hydra(
     else:
         parampoly3_config = ParamPoly3Config()
 
+    # Build WidthEstimationConfig from Hydra config
+    # Priority: map config > target config > default
+    width_dict = cfg.map.get("width_estimation") or cfg.target.get(
+        "width_estimation", {}
+    )
+    if width_dict:
+        width_config = WidthEstimationConfig(
+            adaptive_sampling=width_dict.get("adaptive_sampling", False),
+            min_samples=width_dict.get("min_samples", 5),
+            max_samples=width_dict.get("max_samples", 50),
+            default_sample_interval=width_dict.get("default_sample_interval", 5.0),
+        )
+        logger.info(
+            f"Width sampling config: adaptive={width_config.adaptive_sampling}, "
+            f"interval={width_config.default_sample_interval}m, "
+            f"max_samples={width_config.max_samples}"
+        )
+    else:
+        width_config = WidthEstimationConfig()
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -852,6 +875,7 @@ def preprocess_and_convert_with_hydra(
         exclude_non_junction_signals=exclude_non_junction_signals,
         traffic_rule=traffic_rule,
         parampoly3=parampoly3_config,
+        width_estimation=width_config,
     )
 
     opendrive, mapping = convert_lanelet2_to_opendrive(

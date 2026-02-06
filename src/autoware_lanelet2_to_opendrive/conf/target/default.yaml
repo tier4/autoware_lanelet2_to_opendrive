@@ -26,3 +26,17 @@ parampoly3:
 
   # Threshold for rounding small coefficients to zero
   coefficient_epsilon: 1.0e-8
+
+# Width spline sampling configuration
+width_estimation:
+  # Enable adaptive sampling based on road length (recommended)
+  adaptive_sampling: true
+
+  # Minimum number of width samples per road
+  min_samples: 5
+
+  # Maximum number of width samples per road
+  max_samples: 50
+
+  # Target interval between width samples (meters)
+  default_sample_interval: 5.0  # 5m intervals
