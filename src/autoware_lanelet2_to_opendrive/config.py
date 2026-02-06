@@ -15,10 +15,14 @@ class GeometryConstants:
     Attributes:
         epsilon: Tolerance for numerical stability in geometry calculations
         point_distance_threshold: Minimum distance between distinct points
+        param_poly3_num_segments: Number of ParamPoly3 segments to create from spline.
+                                  Higher values create smoother curves with less heading
+                                  discontinuity but increase file size. Recommended: 20-50.
     """
 
     epsilon: float = 1e-10
     point_distance_threshold: float = 0.001
+    param_poly3_num_segments: int = 30
 
 
 @dataclass(frozen=True)
@@ -205,3 +209,45 @@ DEFAULT_CONFIG = ConversionConfig()
 # Global runtime coordinate offset
 # Set this before conversion to apply coordinate offset to all outputs
 COORDINATE_OFFSET = CoordinateOffset()
+
+# Runtime override for param_poly3_num_segments
+# If not None, this value overrides DEFAULT_CONFIG.geometry.param_poly3_num_segments
+# Set this from command-line arguments or config files before conversion
+_runtime_param_poly3_num_segments: int | None = None
+
+
+def set_param_poly3_num_segments(num_segments: int) -> None:
+    """Set runtime override for ParamPoly3 num_segments parameter.
+
+    This function allows dynamic configuration of the number of ParamPoly3 segments
+    used during conversion, typically from Hydra configuration or command-line arguments.
+
+    Args:
+        num_segments: Number of ParamPoly3 segments to use (must be positive)
+
+    Raises:
+        ValueError: If num_segments is not positive
+    """
+    global _runtime_param_poly3_num_segments
+    if num_segments <= 0:
+        raise ValueError(f"num_segments must be positive, got {num_segments}")
+    _runtime_param_poly3_num_segments = num_segments
+
+
+def get_param_poly3_num_segments() -> int:
+    """Get the effective ParamPoly3 num_segments value.
+
+    Returns runtime override if set, otherwise returns default from config.
+
+    Returns:
+        Number of ParamPoly3 segments to use
+    """
+    if _runtime_param_poly3_num_segments is not None:
+        return _runtime_param_poly3_num_segments
+    return DEFAULT_CONFIG.geometry.param_poly3_num_segments
+
+
+def reset_param_poly3_num_segments() -> None:
+    """Reset runtime override to use default config value."""
+    global _runtime_param_poly3_num_segments
+    _runtime_param_poly3_num_segments = None

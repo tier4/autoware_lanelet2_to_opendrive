@@ -751,6 +751,19 @@ def preprocess_and_convert_with_hydra(
     """
     input_map_path = lanelet2_file
 
+    # Set runtime ParamPoly3 num_segments from Hydra config
+    # Priority: map config > global config > DEFAULT_CONFIG
+    from .config import set_param_poly3_num_segments
+
+    if "param_poly3_num_segments" in cfg.map:
+        num_segments = cfg.map.param_poly3_num_segments
+        logger.info(f"Using param_poly3_num_segments={num_segments} from map config")
+        set_param_poly3_num_segments(num_segments)
+    elif "param_poly3_num_segments" in cfg:
+        num_segments = cfg.param_poly3_num_segments
+        logger.info(f"Using param_poly3_num_segments={num_segments} from global config")
+        set_param_poly3_num_segments(num_segments)
+
     # Parse origin from config (with mutual exclusion validation)
     origin, mgrs_code, origin_lat, origin_lon, offset_x, offset_y, offset_z = (
         parse_origin_from_config(cfg)

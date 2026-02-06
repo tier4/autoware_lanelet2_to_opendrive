@@ -547,6 +547,7 @@ class Road:
 
         # Create paramPoly3 geometries from 2D spline using from_spline method
         # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate
+        # num_segments defaults to DEFAULT_CONFIG.geometry.param_poly3_num_segments
         geometries: List[GeometryBase] = cast(
             List[GeometryBase], ParamPoly3.from_spline(centerline_2d)
         )

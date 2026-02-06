@@ -1,11 +1,12 @@
 """OpenDRIVE geometry definitions."""
 
 from dataclasses import dataclass
-from typing import List, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 import lxml.etree as ET
 import numpy as np
 
 from .enums import GeometryType
+from ..config import get_param_poly3_num_segments
 
 if TYPE_CHECKING:
     from ..spline import Splines
@@ -94,7 +95,7 @@ class ParamPoly3(GeometryBase):
 
     @classmethod
     def from_spline(
-        cls, spline: "Splines", num_segments: int = 10
+        cls, spline: "Splines", num_segments: Optional[int] = None
     ) -> List["ParamPoly3"]:
         """
         Convert a B-spline to a list of ParamPoly3 segments.
@@ -104,11 +105,18 @@ class ParamPoly3(GeometryBase):
 
         Args:
             spline: The Splines object to convert
-            num_segments: Number of ParamPoly3 segments to create
+            num_segments: Number of ParamPoly3 segments to create. If None, uses
+                         DEFAULT_CONFIG.geometry.param_poly3_num_segments
 
         Returns:
             List of ParamPoly3 objects representing the spline
         """
+        # Use config default if not specified
+        # get_param_poly3_num_segments() returns runtime override if set,
+        # otherwise returns DEFAULT_CONFIG.geometry.param_poly3_num_segments
+        if num_segments is None:
+            num_segments = get_param_poly3_num_segments()
+
         segments = []
         total_length = spline.total_length
 

@@ -13,3 +13,6 @@ output_map_path: null  # Optional: output file path
 # Global settings
 dry_run: false    # If true, only validate without saving output
 verbose: false    # Enable detailed logging
+
+# Geometry settings
+param_poly3_num_segments: 30  # Number of ParamPoly3 segments per road (default: 30, higher = smoother but larger file)

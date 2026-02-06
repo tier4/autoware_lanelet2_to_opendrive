@@ -11,6 +11,9 @@ offset:
 # Traffic rule for Japan (Left-Hand Traffic)
 traffic_rule: "LHT"
 
+# Geometry settings - use 50 segments for smoother curves in complex urban environment
+param_poly3_num_segments: 50
+
 # Merge operations - merge multiple lanelets into one
 # The merged lanelet is added to the map (originals are kept)
 merge_operations:
