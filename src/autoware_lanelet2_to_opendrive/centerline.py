@@ -458,9 +458,11 @@ def extract_border_from_spline(
     # Coordinate offset is applied automatically
     points = extract_points_2d(boundary)
 
-    # Get velocity vectors (XY components only)
-    start_vel = _get_boundary_start_vel(boundary)[:2]
-    end_vel = _get_boundary_end_vel(boundary)[:2]
+    # Get velocity vectors perpendicular to the line connecting left and right boundaries
+    # This ensures both left and right boundaries have consistent tangent directions at endpoints,
+    # preventing gaps in OpenDRIVE lane geometry
+    start_vel = _calculate_centerline_velocity_vector(lanelet, at_start=True)[:2]
+    end_vel = _calculate_centerline_velocity_vector(lanelet, at_start=False)[:2]
 
     # Create B-spline with constrained fitting
     return Splines(
