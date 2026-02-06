@@ -751,10 +751,16 @@ def preprocess_and_convert_with_hydra(
     """
     input_map_path = lanelet2_file
 
-    # Set runtime ParamPoly3 num_segments from Hydra config
+    # Set runtime ParamPoly3 parameters from Hydra config
     # Priority: map config > global config > DEFAULT_CONFIG
-    from .config import set_param_poly3_num_segments
+    from .config import (
+        set_param_poly3_num_segments,
+        set_adaptive_subdivision_enabled,
+        set_max_heading_change_deg,
+        set_max_subdivision_iterations,
+    )
 
+    # Configure num_segments
     if "param_poly3_num_segments" in cfg.map:
         num_segments = cfg.map.param_poly3_num_segments
         logger.info(f"Using param_poly3_num_segments={num_segments} from map config")
@@ -763,6 +769,36 @@ def preprocess_and_convert_with_hydra(
         num_segments = cfg.param_poly3_num_segments
         logger.info(f"Using param_poly3_num_segments={num_segments} from global config")
         set_param_poly3_num_segments(num_segments)
+
+    # Configure adaptive subdivision
+    if "enable_adaptive_subdivision" in cfg.map:
+        enabled = cfg.map.enable_adaptive_subdivision
+        logger.info(f"Using enable_adaptive_subdivision={enabled} from map config")
+        set_adaptive_subdivision_enabled(enabled)
+    elif "enable_adaptive_subdivision" in cfg:
+        enabled = cfg.enable_adaptive_subdivision
+        logger.info(f"Using enable_adaptive_subdivision={enabled} from global config")
+        set_adaptive_subdivision_enabled(enabled)
+
+    # Configure max_heading_change_deg
+    if "max_heading_change_deg" in cfg.map:
+        max_change = cfg.map.max_heading_change_deg
+        logger.info(f"Using max_heading_change_deg={max_change} from map config")
+        set_max_heading_change_deg(max_change)
+    elif "max_heading_change_deg" in cfg:
+        max_change = cfg.max_heading_change_deg
+        logger.info(f"Using max_heading_change_deg={max_change} from global config")
+        set_max_heading_change_deg(max_change)
+
+    # Configure max_subdivision_iterations
+    if "max_subdivision_iterations" in cfg.map:
+        max_iter = cfg.map.max_subdivision_iterations
+        logger.info(f"Using max_subdivision_iterations={max_iter} from map config")
+        set_max_subdivision_iterations(max_iter)
+    elif "max_subdivision_iterations" in cfg:
+        max_iter = cfg.max_subdivision_iterations
+        logger.info(f"Using max_subdivision_iterations={max_iter} from global config")
+        set_max_subdivision_iterations(max_iter)
 
     # Parse origin from config (with mutual exclusion validation)
     origin, mgrs_code, origin_lat, origin_lon, offset_x, offset_y, offset_z = (

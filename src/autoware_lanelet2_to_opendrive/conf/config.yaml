@@ -16,3 +16,8 @@ verbose: false    # Enable detailed logging
 
 # Geometry settings
 param_poly3_num_segments: 30  # Number of ParamPoly3 segments per road (default: 30, higher = smoother but larger file)
+
+# Adaptive subdivision settings - automatically detect and handle large heading changes
+enable_adaptive_subdivision: false  # Enable adaptive ParamPoly3 segment subdivision
+max_heading_change_deg: 30.0  # Maximum allowed heading change per segment (degrees)
+max_subdivision_iterations: 3  # Maximum number of subdivision iterations

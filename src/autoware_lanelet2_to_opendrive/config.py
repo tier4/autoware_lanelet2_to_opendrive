@@ -18,11 +18,20 @@ class GeometryConstants:
         param_poly3_num_segments: Number of ParamPoly3 segments to create from spline.
                                   Higher values create smoother curves with less heading
                                   discontinuity but increase file size. Recommended: 20-50.
+        enable_adaptive_subdivision: Enable adaptive ParamPoly3 segment subdivision
+                                    based on heading change detection
+        max_heading_change_deg: Maximum allowed heading change per segment (degrees)
+                               for adaptive subdivision. Segments exceeding this will be
+                               subdivided automatically.
+        max_subdivision_iterations: Maximum number of adaptive subdivision iterations
     """
 
     epsilon: float = 1e-10
     point_distance_threshold: float = 0.001
     param_poly3_num_segments: int = 30
+    enable_adaptive_subdivision: bool = False
+    max_heading_change_deg: float = 30.0
+    max_subdivision_iterations: int = 3
 
 
 @dataclass(frozen=True)
@@ -210,10 +219,12 @@ DEFAULT_CONFIG = ConversionConfig()
 # Set this before conversion to apply coordinate offset to all outputs
 COORDINATE_OFFSET = CoordinateOffset()
 
-# Runtime override for param_poly3_num_segments
-# If not None, this value overrides DEFAULT_CONFIG.geometry.param_poly3_num_segments
-# Set this from command-line arguments or config files before conversion
+# Runtime overrides for geometry parameters
+# These override DEFAULT_CONFIG values when set
 _runtime_param_poly3_num_segments: int | None = None
+_runtime_enable_adaptive_subdivision: bool | None = None
+_runtime_max_heading_change_deg: float | None = None
+_runtime_max_subdivision_iterations: int | None = None
 
 
 def set_param_poly3_num_segments(num_segments: int) -> None:
@@ -251,3 +262,94 @@ def reset_param_poly3_num_segments() -> None:
     """Reset runtime override to use default config value."""
     global _runtime_param_poly3_num_segments
     _runtime_param_poly3_num_segments = None
+
+
+def set_adaptive_subdivision_enabled(enabled: bool) -> None:
+    """Set runtime override for adaptive subdivision enabled flag.
+
+    Args:
+        enabled: Whether to enable adaptive subdivision
+    """
+    global _runtime_enable_adaptive_subdivision
+    _runtime_enable_adaptive_subdivision = enabled
+
+
+def get_adaptive_subdivision_enabled() -> bool:
+    """Get the effective adaptive subdivision enabled value.
+
+    Returns runtime override if set, otherwise returns default from config.
+
+    Returns:
+        Whether adaptive subdivision is enabled
+    """
+    if _runtime_enable_adaptive_subdivision is not None:
+        return _runtime_enable_adaptive_subdivision
+    return DEFAULT_CONFIG.geometry.enable_adaptive_subdivision
+
+
+def set_max_heading_change_deg(degrees: float) -> None:
+    """Set runtime override for max heading change threshold.
+
+    Args:
+        degrees: Maximum heading change in degrees (must be positive)
+
+    Raises:
+        ValueError: If degrees is not positive
+    """
+    global _runtime_max_heading_change_deg
+    if degrees <= 0:
+        raise ValueError(f"max_heading_change_deg must be positive, got {degrees}")
+    _runtime_max_heading_change_deg = degrees
+
+
+def get_max_heading_change_deg() -> float:
+    """Get the effective max heading change threshold.
+
+    Returns runtime override if set, otherwise returns default from config.
+
+    Returns:
+        Maximum heading change in degrees
+    """
+    if _runtime_max_heading_change_deg is not None:
+        return _runtime_max_heading_change_deg
+    return DEFAULT_CONFIG.geometry.max_heading_change_deg
+
+
+def set_max_subdivision_iterations(iterations: int) -> None:
+    """Set runtime override for max subdivision iterations.
+
+    Args:
+        iterations: Maximum number of subdivision iterations (must be positive)
+
+    Raises:
+        ValueError: If iterations is not positive
+    """
+    global _runtime_max_subdivision_iterations
+    if iterations <= 0:
+        raise ValueError(
+            f"max_subdivision_iterations must be positive, got {iterations}"
+        )
+    _runtime_max_subdivision_iterations = iterations
+
+
+def get_max_subdivision_iterations() -> int:
+    """Get the effective max subdivision iterations value.
+
+    Returns runtime override if set, otherwise returns default from config.
+
+    Returns:
+        Maximum number of subdivision iterations
+    """
+    if _runtime_max_subdivision_iterations is not None:
+        return _runtime_max_subdivision_iterations
+    return DEFAULT_CONFIG.geometry.max_subdivision_iterations
+
+
+def reset_adaptive_subdivision_config() -> None:
+    """Reset all adaptive subdivision runtime overrides to use default config values."""
+    global _runtime_enable_adaptive_subdivision
+    global _runtime_max_heading_change_deg
+    global _runtime_max_subdivision_iterations
+    _runtime_enable_adaptive_subdivision = None
+    _runtime_max_heading_change_deg = None
+    _runtime_max_subdivision_iterations = None
