@@ -40,3 +40,27 @@ width_estimation:
 
   # Target interval between width samples (meters)
   default_sample_interval: 5.0  # 5m intervals
+
+# Geometry simplification (optional, disabled by default)
+geometry_simplification:
+  # Enable simplification (disabled by default for backward compatibility)
+  enabled: false
+
+  # Feature toggles
+  convert_to_line: true
+  convert_to_arc: true
+  consolidate_segments: true
+
+  # Line conversion thresholds
+  line_cu_threshold: 0.001
+  line_du_threshold: 0.0001
+  line_cv_threshold: 0.001
+  line_dv_threshold: 0.0001
+
+  # Arc conversion thresholds
+  arc_curvature_error_threshold: 0.01
+  arc_position_error_threshold: 0.05  # meters
+
+  # Consolidation thresholds
+  min_segment_length: 5.0  # meters
+  max_heading_diff_degrees: 5.0  # degrees

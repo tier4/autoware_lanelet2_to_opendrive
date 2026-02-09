@@ -44,6 +44,7 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     OriginSpec,
     ParamPoly3Config,
     WidthEstimationConfig,
+    GeometrySimplificationConfig,
 )
 
 # Set up logging
@@ -133,6 +134,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
             width_config=self.config.width_estimation,
+            simplification_config=self.config.geometry_simplification,
         )
 
         # Build lanelet-to-road mapping for regular roads
@@ -204,6 +206,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
             width_config=self.config.width_estimation,
+            simplification_config=self.config.geometry_simplification,
         )
 
         # Merge lanelet-to-road mappings
@@ -864,6 +867,36 @@ def preprocess_and_convert_with_hydra(
     else:
         width_config = WidthEstimationConfig()
 
+    # Build GeometrySimplificationConfig from Hydra config
+    # Priority: map config > target config > default
+    simplification_dict = cfg.map.get("geometry_simplification") or cfg.target.get(
+        "geometry_simplification", {}
+    )
+    if simplification_dict:
+        simplification_config = GeometrySimplificationConfig(
+            enabled=simplification_dict.get("enabled", False),
+            convert_to_line=simplification_dict.get("convert_to_line", True),
+            convert_to_arc=simplification_dict.get("convert_to_arc", True),
+            consolidate_segments=simplification_dict.get("consolidate_segments", True),
+            line_cu_threshold=simplification_dict.get("line_cu_threshold", 0.001),
+            line_du_threshold=simplification_dict.get("line_du_threshold", 0.0001),
+            line_cv_threshold=simplification_dict.get("line_cv_threshold", 0.001),
+            line_dv_threshold=simplification_dict.get("line_dv_threshold", 0.0001),
+            arc_curvature_error_threshold=simplification_dict.get(
+                "arc_curvature_error_threshold", 0.01
+            ),
+            arc_position_error_threshold=simplification_dict.get(
+                "arc_position_error_threshold", 0.05
+            ),
+            min_segment_length=simplification_dict.get("min_segment_length", 5.0),
+            max_heading_diff_degrees=simplification_dict.get(
+                "max_heading_diff_degrees", 5.0
+            ),
+        )
+        logger.info(f"Geometry simplification: enabled={simplification_config.enabled}")
+    else:
+        simplification_config = GeometrySimplificationConfig()
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -876,6 +909,7 @@ def preprocess_and_convert_with_hydra(
         traffic_rule=traffic_rule,
         parampoly3=parampoly3_config,
         width_estimation=width_config,
+        geometry_simplification=simplification_config,
     )
 
     opendrive, mapping = convert_lanelet2_to_opendrive(

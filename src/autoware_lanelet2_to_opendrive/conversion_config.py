@@ -95,6 +95,48 @@ class WidthEstimationConfig:
 
 
 @dataclass
+class GeometrySimplificationConfig:
+    """Configuration for geometry simplification after ParamPoly3 generation.
+
+    Simplifies OpenDRIVE geometry by converting trivial ParamPoly3 segments to
+    simpler geometry types (Line/Arc) and consolidating short consecutive segments.
+
+    Attributes:
+        enabled: Enable geometry simplification (default: False for backward compatibility)
+        convert_to_line: Enable conversion of straight ParamPoly3 to Line geometry
+        convert_to_arc: Enable conversion of circular ParamPoly3 to Arc geometry
+        consolidate_segments: Enable merging of short consecutive segments
+        line_cu_threshold: Threshold for |cU| coefficient to consider as line
+        line_du_threshold: Threshold for |dU| coefficient to consider as line
+        line_cv_threshold: Threshold for |cV| coefficient to consider as line
+        line_dv_threshold: Threshold for |dV| coefficient to consider as line
+        arc_curvature_error_threshold: Maximum curvature error for Arc fitting
+        arc_position_error_threshold: Maximum position error for Arc fitting (meters)
+        min_segment_length: Minimum segment length for consolidation (meters)
+        max_heading_diff_degrees: Maximum heading difference for merging (degrees)
+    """
+
+    enabled: bool = False  # Disabled by default for backward compatibility
+    convert_to_line: bool = True
+    convert_to_arc: bool = True
+    consolidate_segments: bool = True
+
+    # Line conversion thresholds
+    line_cu_threshold: float = 0.001
+    line_du_threshold: float = 0.0001
+    line_cv_threshold: float = 0.001
+    line_dv_threshold: float = 0.0001
+
+    # Arc conversion thresholds
+    arc_curvature_error_threshold: float = 0.01
+    arc_position_error_threshold: float = 0.05
+
+    # Consolidation thresholds
+    min_segment_length: float = 5.0
+    max_heading_diff_degrees: float = 5.0
+
+
+@dataclass
 class ConversionConfig:
     """Configuration for Lanelet2 to OpenDRIVE conversion.
 
@@ -112,6 +154,7 @@ class ConversionConfig:
             LHT: Left-Hand Traffic). Defaults to "RHT"
         parampoly3: Configuration for ParamPoly3 segment generation
         width_estimation: Configuration for width spline sampling
+        geometry_simplification: Configuration for geometry simplification
     """
 
     output_path: Optional[Path] = None
@@ -122,6 +165,9 @@ class ConversionConfig:
     parampoly3: ParamPoly3Config = field(default_factory=ParamPoly3Config)
     width_estimation: WidthEstimationConfig = field(
         default_factory=WidthEstimationConfig
+    )
+    geometry_simplification: GeometrySimplificationConfig = field(
+        default_factory=GeometrySimplificationConfig
     )
 
     def __post_init__(self):

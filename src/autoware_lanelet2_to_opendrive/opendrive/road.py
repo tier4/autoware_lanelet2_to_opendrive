@@ -20,6 +20,7 @@ from ..conversion_config import (
     LaneLinksContext,
     ParamPoly3Config,
     WidthEstimationConfig,
+    GeometrySimplificationConfig,
 )
 
 # Import for type hints only
@@ -525,6 +526,7 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        simplification_config: Optional[GeometrySimplificationConfig] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -535,6 +537,7 @@ class Road:
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
             width_config: Configuration for width spline sampling
+            simplification_config: Configuration for geometry simplification
 
         Returns:
             Road object constructed from the lanelet group
@@ -553,14 +556,25 @@ class Road:
         )
         centerline_2d = reference_line.centerline_2d
 
-        # Create paramPoly3 geometries from 2D spline using from_spline method
-        # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate
-        geometries: List[GeometryBase] = cast(
-            List[GeometryBase],
-            ParamPoly3.from_spline(centerline_2d, config=parampoly3_config),
+        # Create paramPoly3 geometries from 2D spline
+        parampoly3_geometries: List[ParamPoly3] = ParamPoly3.from_spline(
+            centerline_2d, config=parampoly3_config
         )
 
-        # Create plan view with the paramPoly3 geometries
+        # Apply geometry simplification if configured
+        geometries: List[GeometryBase]
+        if simplification_config is not None and simplification_config.enabled:
+            from .geometry_simplifier import GeometrySimplifier
+
+            simplifier = GeometrySimplifier(simplification_config)
+            # Cast to List[GeometryBase] for type checker (ParamPoly3 is a subtype)
+            geometries = simplifier.simplify(
+                cast(List[GeometryBase], parampoly3_geometries)
+            )
+        else:
+            geometries = cast(List[GeometryBase], parampoly3_geometries)
+
+        # Create plan view with the geometries
         plan_view = PlanView(geometries=geometries)
 
         # Calculate total road length from ParamPoly3 geometries (XY projection)
@@ -617,6 +631,7 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        simplification_config: Optional[GeometrySimplificationConfig] = None,
     ) -> List["Road"]:
         """Construct Roads from a lanelet map.
 
@@ -625,6 +640,7 @@ class Road:
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
             width_config: Configuration for width spline sampling
+            simplification_config: Configuration for geometry simplification
 
         Returns:
             List of Road objects constructed from non-junction lanelets grouped by adjacency
@@ -693,6 +709,7 @@ class Road:
                     traffic_rule=traffic_rule,
                     parampoly3_config=parampoly3_config,
                     width_config=width_config,
+                    simplification_config=simplification_config,
                 )
                 roads.append(road)
 
@@ -808,6 +825,7 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        simplification_config: Optional[GeometrySimplificationConfig] = None,
     ) -> Tuple[List["Road"], Dict[int, List[int]], Dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -823,6 +841,7 @@ class Road:
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
             width_config: Configuration for width spline sampling
+            simplification_config: Configuration for geometry simplification
 
         Returns:
             Tuple of:
@@ -875,6 +894,7 @@ class Road:
                         traffic_rule=traffic_rule,
                         parampoly3_config=parampoly3_config,
                         width_config=width_config,
+                        simplification_config=simplification_config,
                     )
 
                     # Set the junction field to mark this as a connecting road
