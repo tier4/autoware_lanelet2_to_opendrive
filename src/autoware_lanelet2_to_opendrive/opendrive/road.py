@@ -265,27 +265,15 @@ class Road:
                     # Only set predecessor if it's in a different road
                     # (same road connections would be within lane sections)
                     if pred_road_id != self.id:
-                        # Check consistency with road link
+                        # Issue #202 fix: Check consistency with road link
                         # For connecting roads, skip road link validation
+                        # For regular roads, require road link to exist before creating lane link
                         if road_link_predecessor is None:
                             if not is_connecting_road:
-                                # Road link is None - check if predecessor is a connecting road
-                                # This allows lane branching scenarios (e.g., lane -2 comes from junction)
-                                if road_id_to_road is not None:
-                                    pred_road = road_id_to_road.get(pred_road_id)
-                                    # If predecessor is a connecting road (junction member), allow lane link
-                                    if (
-                                        pred_road is None
-                                        or pred_road.junction is None
-                                        or pred_road.junction < 0
-                                    ):
-                                        # Predecessor is a regular road but no road link - skip
-                                        continue
-                                    # Predecessor is a connecting road - proceed with lane link creation
-                                else:
-                                    # Cannot validate - skip for safety
-                                    continue
-                            # For connecting roads, proceed with lane link creation
+                                # Regular road without road link predecessor - skip lane link creation
+                                # This prevents invalid lane connections that cause CARLA crashes
+                                continue
+                            # For connecting roads, proceed with lane link creation even without road link
 
                         # Check if road link predecessor is a junction
                         if road_link_predecessor is not None:
@@ -365,27 +353,15 @@ class Road:
                     succ_road_id, succ_lane_id = lanelet_to_road_and_lane[next_ll.id]
                     # Only set successor if it's in a different road
                     if succ_road_id != self.id:
-                        # Check consistency with road link
+                        # Issue #202 fix: Check consistency with road link
                         # For connecting roads, skip road link validation
+                        # For regular roads, require road link to exist before creating lane link
                         if road_link_successor is None:
                             if not is_connecting_road:
-                                # Road link is None - check if successor is a connecting road
-                                # This allows lane branching scenarios (e.g., lane -2 turns into junction)
-                                if road_id_to_road is not None:
-                                    succ_road = road_id_to_road.get(succ_road_id)
-                                    # If successor is a connecting road (junction member), allow lane link
-                                    if (
-                                        succ_road is None
-                                        or succ_road.junction is None
-                                        or succ_road.junction < 0
-                                    ):
-                                        # Successor is a regular road but no road link - skip
-                                        continue
-                                    # Successor is a connecting road - proceed with lane link creation
-                                else:
-                                    # Cannot validate - skip for safety
-                                    continue
-                            # For connecting roads, proceed with lane link creation
+                                # Regular road without road link successor - skip lane link creation
+                                # This prevents invalid lane connections that cause CARLA crashes
+                                continue
+                            # For connecting roads, proceed with lane link creation even without road link
 
                         # Check if road link successor is a junction
                         if road_link_successor is not None:
