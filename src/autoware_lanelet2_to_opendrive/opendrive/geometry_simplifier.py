@@ -113,6 +113,10 @@ class GeometrySimplifier:
                 f"Converted {line_count} ParamPoly3 to Line, {arc_count} to Arc"
             )
 
+        # CRITICAL: After conversion, recalculate s-coordinates to ensure continuity
+        # This is needed because conversion doesn't change s-coordinates
+        result = self._recalculate_s_coordinates(result)
+
         return result
 
     def _try_convert_to_line(self, pp3: ParamPoly3) -> Optional[Line]:
@@ -334,27 +338,29 @@ class GeometrySimplifier:
 
         while i < len(geometries):
             current = geometries[i]
+            num_merged = 0  # Track how many segments were merged
 
             # Try to merge with next segment(s)
-            merged = False
-            for j in range(i + 1, len(geometries)):
+            j = i + 1
+            while j < len(geometries):
                 next_geom = geometries[j]
 
                 if self._can_merge(current, next_geom):
                     # Merge: extend current segment length
                     current = self._merge_geometries(current, next_geom)
-                    merged = True
+                    num_merged += 1
+                    j += 1
                 else:
-                    # Cannot merge: commit current and move to next
+                    # Cannot merge: stop here
                     break
 
             result.append(current)
 
-            # Skip merged segments
-            if merged:
-                i = j + 1
-            else:
-                i += 1
+            # Skip merged segments (i+1 to skip current, +num_merged for merged ones)
+            i += 1 + num_merged
+
+        # CRITICAL: Recalculate s-coordinates to ensure continuity
+        result = self._recalculate_s_coordinates(result)
 
         return result
 
@@ -470,3 +476,94 @@ class GeometrySimplifier:
             return geom.hdg + local_heading
         else:
             return geom.hdg
+
+    def _compute_end_position(self, geom: GeometryBase) -> Tuple[float, float]:
+        """Compute the (x, y) position at the end of a geometry segment.
+
+        Args:
+            geom: Geometry segment
+
+        Returns:
+            (x, y) coordinates at the end of the segment
+        """
+        if isinstance(geom, Line):
+            # Line: straight projection
+            end_x = geom.x + geom.length * math.cos(geom.hdg)
+            end_y = geom.y + geom.length * math.sin(geom.hdg)
+            return end_x, end_y
+        elif isinstance(geom, Arc):
+            # Arc: circular arc projection
+            if abs(geom.curvature) < 1e-10:
+                # Nearly straight (curvature ~ 0)
+                end_x = geom.x + geom.length * math.cos(geom.hdg)
+                end_y = geom.y + geom.length * math.sin(geom.hdg)
+            else:
+                radius = 1.0 / geom.curvature
+                # Center of circle
+                cx = geom.x - radius * math.sin(geom.hdg)
+                cy = geom.y + radius * math.cos(geom.hdg)
+                # Angle swept by arc
+                angle = geom.curvature * geom.length
+                # End position
+                end_x = cx + radius * math.sin(geom.hdg + angle)
+                end_y = cy - radius * math.cos(geom.hdg + angle)
+            return end_x, end_y
+        elif isinstance(geom, ParamPoly3):
+            # ParamPoly3: evaluate at end
+            p = geom.length if geom.pRange == "arcLength" else 1.0
+            u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
+            v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
+            # Transform to global coordinates
+            cos_hdg = math.cos(geom.hdg)
+            sin_hdg = math.sin(geom.hdg)
+            end_x = geom.x + u * cos_hdg - v * sin_hdg
+            end_y = geom.y + u * sin_hdg + v * cos_hdg
+            return end_x, end_y
+        else:
+            # Unknown type: assume straight
+            end_x = geom.x + geom.length * math.cos(geom.hdg)
+            end_y = geom.y + geom.length * math.sin(geom.hdg)
+            return end_x, end_y
+
+    def _recalculate_s_coordinates(
+        self, geometries: List[GeometryBase]
+    ) -> List[GeometryBase]:
+        """Recalculate s-coordinates and fix position/heading continuity.
+
+        CRITICAL: This function ensures:
+        1. s-coordinates are continuous (no gaps)
+        2. Each segment starts where the previous one ended (x, y)
+        3. Each segment's heading matches the previous segment's end heading
+
+        Args:
+            geometries: List of geometry segments (possibly with gaps)
+
+        Returns:
+            List with corrected s-coordinates and continuity
+        """
+        if len(geometries) <= 1:
+            return geometries
+
+        result: List[GeometryBase] = []
+        current_s = 0.0
+
+        for i, geom in enumerate(geometries):
+            # Update s-coordinate to ensure continuity
+            geom.s = current_s
+
+            if i > 0:
+                prev_geom = result[-1]
+
+                # Fix position continuity: start where previous segment ended
+                end_x, end_y = self._compute_end_position(prev_geom)
+                geom.x = end_x
+                geom.y = end_y
+
+                # Fix heading continuity: start with previous segment's end heading
+                end_heading = self._compute_end_heading(prev_geom)
+                geom.hdg = end_heading
+
+            result.append(geom)
+            current_s += geom.length
+
+        return result

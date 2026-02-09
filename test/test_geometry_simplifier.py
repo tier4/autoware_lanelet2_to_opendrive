@@ -448,3 +448,104 @@ class TestGeometrySimplifier:
 
         # Should not merge (different curvature)
         assert len(result) == 2
+
+    def test_s_coordinate_continuity_after_consolidation(self):
+        """CRITICAL: s-coordinates must be continuous after consolidation."""
+        config = GeometrySimplificationConfig(
+            enabled=True,
+            convert_to_line=False,
+            convert_to_arc=False,
+            consolidate_segments=True,
+            min_segment_length=5.0,
+        )
+        simplifier = GeometrySimplifier(config)
+
+        # Create segments with gaps in s-coordinates
+        lines = [
+            Line(s=0, x=0, y=0, hdg=0, length=2),
+            Line(s=2, x=2, y=0, hdg=0, length=2),
+            Line(s=10, x=4, y=0, hdg=0, length=2),  # Gap: s=4→10
+            Line(s=20, x=6, y=0, hdg=0, length=2),  # Gap: s=12→20
+        ]
+
+        result = simplifier.simplify(lines)
+
+        # Check s-coordinate continuity (no gaps)
+        for i in range(len(result) - 1):
+            current = result[i]
+            next_seg = result[i + 1]
+            expected_next_s = current.s + current.length
+            assert (
+                next_seg.s == pytest.approx(expected_next_s, abs=1e-6)
+            ), f"Gap detected: segment {i} ends at s={expected_next_s}, but segment {i+1} starts at s={next_seg.s}"
+
+    def test_position_continuity_after_consolidation(self):
+        """CRITICAL: x,y positions must be continuous after consolidation."""
+        config = GeometrySimplificationConfig(
+            enabled=True,
+            convert_to_line=False,
+            convert_to_arc=False,
+            consolidate_segments=True,
+            min_segment_length=5.0,
+        )
+        simplifier = GeometrySimplifier(config)
+
+        # Create segments with position discontinuities
+        lines = [
+            Line(s=0, x=0, y=0, hdg=0, length=2),
+            Line(s=2, x=10, y=5, hdg=0, length=2),  # Wrong position
+        ]
+
+        result = simplifier.simplify(lines)
+
+        # Check position continuity
+        for i in range(len(result) - 1):
+            current = result[i]
+            next_seg = result[i + 1]
+
+            # Calculate expected end position
+            end_x = current.x + current.length * math.cos(current.hdg)
+            end_y = current.y + current.length * math.sin(current.hdg)
+
+            assert (
+                next_seg.x == pytest.approx(end_x, abs=1e-3)
+            ), f"Position discontinuity: segment {i} ends at x={end_x}, but segment {i+1} starts at x={next_seg.x}"
+            assert (
+                next_seg.y == pytest.approx(end_y, abs=1e-3)
+            ), f"Position discontinuity: segment {i} ends at y={end_y}, but segment {i+1} starts at y={next_seg.y}"
+
+    def test_no_segment_skipping_during_consolidation(self):
+        """CRITICAL: No segments should be skipped during consolidation."""
+        config = GeometrySimplificationConfig(
+            enabled=True,
+            convert_to_line=False,
+            convert_to_arc=False,
+            consolidate_segments=True,
+            min_segment_length=5.0,
+        )
+        simplifier = GeometrySimplifier(config)
+
+        # Pattern: [merge, merge, no-merge, merge, merge]
+        # A(2m) + B(2m) + C(2m) → merge to 6m
+        # D(10m) → cannot merge (too long)
+        # E(2m) + F(2m) → merge to 4m
+        # Result should have 3 segments, not skip D
+        lines = [
+            Line(s=0, x=0, y=0, hdg=0, length=2),  # A
+            Line(s=2, x=2, y=0, hdg=0, length=2),  # B
+            Line(s=4, x=4, y=0, hdg=0, length=2),  # C
+            Line(s=6, x=6, y=0, hdg=0, length=10),  # D (too long)
+            Line(s=16, x=16, y=0, hdg=0, length=2),  # E
+            Line(s=18, x=18, y=0, hdg=0, length=2),  # F
+        ]
+
+        result = simplifier.simplify(lines)
+
+        # Should have 3 segments: [A+B+C(6m), D(10m), E+F(4m)]
+        assert len(result) == 3
+        assert result[0].length == pytest.approx(6.0)
+        assert result[1].length == pytest.approx(10.0)
+        assert result[2].length == pytest.approx(4.0)
+
+        # Verify D was not skipped
+        assert result[1].s == pytest.approx(6.0)
