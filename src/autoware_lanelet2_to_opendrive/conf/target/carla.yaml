@@ -43,3 +43,28 @@ width_estimation:
 
   # Target interval between width samples (meters)
   default_sample_interval: 5.0  # 5m intervals
+
+# Geometry simplification (recommended for CARLA)
+# Improves NPC navigation accuracy and reduces file complexity
+geometry_simplification:
+  # Enable simplification to improve CARLA compatibility
+  enabled: true
+
+  # Feature toggles
+  convert_to_line: true
+  convert_to_arc: true
+  consolidate_segments: true
+
+  # Line conversion thresholds
+  line_cu_threshold: 0.001
+  line_du_threshold: 0.0001
+  line_cv_threshold: 0.001
+  line_dv_threshold: 0.0001
+
+  # Arc conversion thresholds
+  arc_curvature_error_threshold: 0.01
+  arc_position_error_threshold: 0.05  # meters
+
+  # Consolidation thresholds (CARLA min_segment_length compatibility)
+  min_segment_length: 5.0  # meters (must be >= 0.5m for CARLA)
+  max_heading_diff_degrees: 5.0  # degrees
