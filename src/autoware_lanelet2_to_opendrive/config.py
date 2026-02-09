@@ -115,6 +115,34 @@ class OpenDriveConstants:
 
 
 @dataclass(frozen=True)
+class ParamPoly3Constants:
+    """Constants for ParamPoly3 geometry generation.
+
+    Controls how B-splines are converted to ParamPoly3 segments for OpenDRIVE
+    output, preventing issues like zero-length segments that cause CARLA crashes.
+
+    Attributes:
+        min_segment_length: Minimum allowed segment length in meters (0.5m default)
+                           Segments shorter than this will be rejected.
+                           CARLA requirement: segments must be >= 0.5m
+        default_segment_length: Target segment length for dynamic calculation (1.0m)
+                               Used when num_segments is not explicitly specified
+        max_segments: Maximum number of segments per road (100 default)
+                     Prevents excessive segmentation of very long roads
+        min_segments: Minimum number of segments per road (1 default)
+                     Ensures at least one segment is created
+        coefficient_epsilon: Threshold for rounding small coefficients to zero (1e-8)
+                            Prevents numerical instability in paramPoly3
+    """
+
+    min_segment_length: float = 0.5
+    default_segment_length: float = 1.0
+    max_segments: int = 100
+    min_segments: int = 1
+    coefficient_epsilon: float = 1e-8
+
+
+@dataclass(frozen=True)
 class ConversionConfig:
     """Main configuration container for all conversion constants.
 
@@ -160,6 +188,7 @@ class ConversionConfig:
     centerline: CenterlineConstants = CenterlineConstants()
     preprocessing: PreprocessingConstants = PreprocessingConstants()
     opendrive: OpenDriveConstants = OpenDriveConstants()
+    parampoly3: ParamPoly3Constants = ParamPoly3Constants()
 
 
 @dataclass

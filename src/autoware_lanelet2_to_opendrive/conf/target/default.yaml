@@ -6,3 +6,37 @@ exclude_non_junction_signals: false
 
 # Traffic rule (RHT: Right-Hand Traffic, LHT: Left-Hand Traffic)
 traffic_rule: "RHT"
+
+# ParamPoly3 segment generation configuration
+parampoly3:
+  # Enable dynamic segment calculation (recommended)
+  enabled: true
+
+  # Minimum allowed segment length (good default for most simulators)
+  min_segment_length: 0.5  # meters
+
+  # Target segment length for dynamic calculation
+  default_segment_length: 1.0  # meters
+
+  # Maximum number of segments per road
+  max_segments: 100
+
+  # Minimum number of segments per road
+  min_segments: 1
+
+  # Threshold for rounding small coefficients to zero
+  coefficient_epsilon: 1.0e-8
+
+# Width spline sampling configuration
+width_estimation:
+  # Enable adaptive sampling based on road length (recommended)
+  adaptive_sampling: true
+
+  # Minimum number of width samples per road
+  min_samples: 5
+
+  # Maximum number of width samples per road
+  max_samples: 50
+
+  # Target interval between width samples (meters)
+  default_sample_interval: 5.0  # 5m intervals

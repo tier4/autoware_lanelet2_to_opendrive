@@ -16,7 +16,11 @@ from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUni
 from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
 from ..util import filter_lanelets_by_subtype, to_lanelet_list, LaneletInput
-from ..conversion_config import LaneLinksContext
+from ..conversion_config import (
+    LaneLinksContext,
+    ParamPoly3Config,
+    WidthEstimationConfig,
+)
 
 # Import for type hints only
 from typing import TYPE_CHECKING
@@ -261,27 +265,13 @@ class Road:
                     # Only set predecessor if it's in a different road
                     # (same road connections would be within lane sections)
                     if pred_road_id != self.id:
-                        # Check consistency with road link
-                        # For connecting roads, skip road link validation
+                        # Issue #202 fix: Check consistency with road link
+                        # Lane links must only exist when corresponding road link exists
+                        # This applies to both regular roads and connecting roads
                         if road_link_predecessor is None:
-                            if not is_connecting_road:
-                                # Road link is None - check if predecessor is a connecting road
-                                # This allows lane branching scenarios (e.g., lane -2 comes from junction)
-                                if road_id_to_road is not None:
-                                    pred_road = road_id_to_road.get(pred_road_id)
-                                    # If predecessor is a connecting road (junction member), allow lane link
-                                    if (
-                                        pred_road is None
-                                        or pred_road.junction is None
-                                        or pred_road.junction < 0
-                                    ):
-                                        # Predecessor is a regular road but no road link - skip
-                                        continue
-                                    # Predecessor is a connecting road - proceed with lane link creation
-                                else:
-                                    # Cannot validate - skip for safety
-                                    continue
-                            # For connecting roads, proceed with lane link creation
+                            # Road has no predecessor link - skip lane link creation
+                            # This prevents invalid lane connections that cause CARLA crashes
+                            continue
 
                         # Check if road link predecessor is a junction
                         if road_link_predecessor is not None:
@@ -361,27 +351,13 @@ class Road:
                     succ_road_id, succ_lane_id = lanelet_to_road_and_lane[next_ll.id]
                     # Only set successor if it's in a different road
                     if succ_road_id != self.id:
-                        # Check consistency with road link
-                        # For connecting roads, skip road link validation
+                        # Issue #202 fix: Check consistency with road link
+                        # Lane links must only exist when corresponding road link exists
+                        # This applies to both regular roads and connecting roads
                         if road_link_successor is None:
-                            if not is_connecting_road:
-                                # Road link is None - check if successor is a connecting road
-                                # This allows lane branching scenarios (e.g., lane -2 turns into junction)
-                                if road_id_to_road is not None:
-                                    succ_road = road_id_to_road.get(succ_road_id)
-                                    # If successor is a connecting road (junction member), allow lane link
-                                    if (
-                                        succ_road is None
-                                        or succ_road.junction is None
-                                        or succ_road.junction < 0
-                                    ):
-                                        # Successor is a regular road but no road link - skip
-                                        continue
-                                    # Successor is a connecting road - proceed with lane link creation
-                                else:
-                                    # Cannot validate - skip for safety
-                                    continue
-                            # For connecting roads, proceed with lane link creation
+                            # Road has no successor link - skip lane link creation
+                            # This prevents invalid lane connections that cause CARLA crashes
+                            continue
 
                         # Check if road link successor is a junction
                         if road_link_successor is not None:
@@ -519,6 +495,8 @@ class Road:
         road_id: int,
         s_offset: float = 0.0,
         traffic_rule: Optional[str] = None,
+        parampoly3_config: Optional[ParamPoly3Config] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -527,6 +505,8 @@ class Road:
             lanelet_group: Group of lanelets to convert to a road
             s_offset: Starting s-coordinate offset for the road
             traffic_rule: Traffic rule for lanes (RHT or LHT)
+            parampoly3_config: Configuration for ParamPoly3 segment generation
+            width_config: Configuration for width spline sampling
 
         Returns:
             Road object constructed from the lanelet group
@@ -548,7 +528,8 @@ class Road:
         # Create paramPoly3 geometries from 2D spline using from_spline method
         # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate
         geometries: List[GeometryBase] = cast(
-            List[GeometryBase], ParamPoly3.from_spline(centerline_2d)
+            List[GeometryBase],
+            ParamPoly3.from_spline(centerline_2d, config=parampoly3_config),
         )
 
         # Create plan view with the paramPoly3 geometries
@@ -564,7 +545,11 @@ class Road:
             from .lane_section import LaneSection
 
             lane_section = LaneSection.construct_from_lanelet_groups(
-                lanelet_map, lanelet_list, s_offset=s_offset, traffic_rule=traffic_rule
+                lanelet_map,
+                lanelet_list,
+                s_offset=s_offset,
+                traffic_rule=traffic_rule,
+                width_config=width_config,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -602,12 +587,16 @@ class Road:
     def construct_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
         traffic_rule: Optional[str] = None,
+        parampoly3_config: Optional[ParamPoly3Config] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
     ) -> List["Road"]:
         """Construct Roads from a lanelet map.
 
         Args:
             lanelet_map: The lanelet2 map containing all lanelets
             traffic_rule: Traffic rule for lanes (RHT or LHT)
+            parampoly3_config: Configuration for ParamPoly3 segment generation
+            width_config: Configuration for width spline sampling
 
         Returns:
             List of Road objects constructed from non-junction lanelets grouped by adjacency
@@ -674,6 +663,8 @@ class Road:
                     road_id=road_id,
                     s_offset=0.0,
                     traffic_rule=traffic_rule,
+                    parampoly3_config=parampoly3_config,
+                    width_config=width_config,
                 )
                 roads.append(road)
 
@@ -787,6 +778,8 @@ class Road:
         starting_road_id: int = 0,
         junction_id_offset: int = 0,
         traffic_rule: Optional[str] = None,
+        parampoly3_config: Optional[ParamPoly3Config] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
     ) -> Tuple[List["Road"], Dict[int, List[int]], Dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -800,6 +793,8 @@ class Road:
             junction_id_offset: Offset to add to junction IDs to avoid conflicts
                                with road IDs (default: 0). Issue #132 fix.
             traffic_rule: Traffic rule for lanes (RHT or LHT)
+            parampoly3_config: Configuration for ParamPoly3 segment generation
+            width_config: Configuration for width spline sampling
 
         Returns:
             Tuple of:
@@ -850,6 +845,8 @@ class Road:
                         road_id=current_road_id,
                         s_offset=0.0,
                         traffic_rule=traffic_rule,
+                        parampoly3_config=parampoly3_config,
+                        width_config=width_config,
                     )
 
                     # Set the junction field to mark this as a connecting road

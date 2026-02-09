@@ -7,6 +7,7 @@ import lxml.etree as ET
 if TYPE_CHECKING:
     from .lane import Lane
 from .reference_line import ReferenceLine
+from ..conversion_config import WidthEstimationConfig
 
 
 class LaneSection:
@@ -67,6 +68,7 @@ class LaneSection:
         ],
         s_offset: float = 0.0,
         traffic_rule: Optional[str] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -76,6 +78,7 @@ class LaneSection:
             lanelet_group: Group of lanelets representing lanes in a road section
             s_offset: Start position of the lane section
             traffic_rule: Traffic rule for lanes (RHT or LHT)
+            width_config: Configuration for width spline sampling
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -123,7 +126,7 @@ class LaneSection:
             for i, lanelet in enumerate(sorted_lanelets):
                 lane_id = -(i + 1)  # -1, -2, -3, ...
                 lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, rule=traffic_rule
+                    lanelet_map, lanelet, rule=traffic_rule, width_config=width_config
                 )
                 lane.lane_id = lane_id
                 lane_section._add_right_lane(lane)
@@ -132,7 +135,7 @@ class LaneSection:
             for i, lanelet in enumerate(reversed(sorted_lanelets)):
                 lane_id = i + 1  # +1, +2, +3, ...
                 lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, rule=traffic_rule
+                    lanelet_map, lanelet, rule=traffic_rule, width_config=width_config
                 )
                 lane.lane_id = lane_id
                 lane_section._add_left_lane(lane)

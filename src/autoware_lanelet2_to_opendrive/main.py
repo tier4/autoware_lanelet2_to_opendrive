@@ -42,6 +42,8 @@ from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
 from autoware_lanelet2_to_opendrive.conversion_config import (
     ConversionConfig,
     OriginSpec,
+    ParamPoly3Config,
+    WidthEstimationConfig,
 )
 
 # Set up logging
@@ -127,7 +129,10 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         print("\n=== Building regular roads ===")
         regular_roads = Road.construct_from_lanelet_map(
-            self.lanelet_map, traffic_rule=self.config.traffic_rule
+            self.lanelet_map,
+            traffic_rule=self.config.traffic_rule,
+            parampoly3_config=self.config.parampoly3,
+            width_config=self.config.width_estimation,
         )
 
         # Build lanelet-to-road mapping for regular roads
@@ -197,6 +202,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             starting_road_id=starting_junction_road_id,
             junction_id_offset=junction_id_offset,
             traffic_rule=self.config.traffic_rule,
+            parampoly3_config=self.config.parampoly3,
+            width_config=self.config.width_estimation,
         )
 
         # Merge lanelet-to-road mappings
@@ -818,6 +825,45 @@ def preprocess_and_convert_with_hydra(
     # Convert to OpenDRIVE
     logger.info("Converting to OpenDRIVE format...")
 
+    # Build ParamPoly3Config from Hydra config
+    # Priority: map config > target config > default
+    parampoly3_dict = cfg.map.get("parampoly3") or cfg.target.get("parampoly3", {})
+    if parampoly3_dict:
+        parampoly3_config = ParamPoly3Config(
+            min_segment_length=parampoly3_dict.get("min_segment_length", 0.5),
+            default_segment_length=parampoly3_dict.get("default_segment_length", 1.0),
+            max_segments=parampoly3_dict.get("max_segments", 100),
+            min_segments=parampoly3_dict.get("min_segments", 1),
+            coefficient_epsilon=parampoly3_dict.get("coefficient_epsilon", 1e-8),
+            enabled=parampoly3_dict.get("enabled", True),
+        )
+        logger.info(
+            f"ParamPoly3 config: default_length={parampoly3_config.default_segment_length}m, "
+            f"max_segments={parampoly3_config.max_segments}"
+        )
+    else:
+        parampoly3_config = ParamPoly3Config()
+
+    # Build WidthEstimationConfig from Hydra config
+    # Priority: map config > target config > default
+    width_dict = cfg.map.get("width_estimation") or cfg.target.get(
+        "width_estimation", {}
+    )
+    if width_dict:
+        width_config = WidthEstimationConfig(
+            adaptive_sampling=width_dict.get("adaptive_sampling", False),
+            min_samples=width_dict.get("min_samples", 5),
+            max_samples=width_dict.get("max_samples", 50),
+            default_sample_interval=width_dict.get("default_sample_interval", 5.0),
+        )
+        logger.info(
+            f"Width sampling config: adaptive={width_config.adaptive_sampling}, "
+            f"interval={width_config.default_sample_interval}m, "
+            f"max_samples={width_config.max_samples}"
+        )
+    else:
+        width_config = WidthEstimationConfig()
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -828,6 +874,8 @@ def preprocess_and_convert_with_hydra(
         ),
         exclude_non_junction_signals=exclude_non_junction_signals,
         traffic_rule=traffic_rule,
+        parampoly3=parampoly3_config,
+        width_estimation=width_config,
     )
 
     opendrive, mapping = convert_lanelet2_to_opendrive(

@@ -1,7 +1,7 @@
 """OpenDRIVE geometry definitions."""
 
 from dataclasses import dataclass
-from typing import List, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 import lxml.etree as ET
 import numpy as np
 
@@ -9,6 +9,7 @@ from .enums import GeometryType
 
 if TYPE_CHECKING:
     from ..spline import Splines
+    from ..conversion_config import ParamPoly3Config
 
 
 @dataclass
@@ -92,22 +93,216 @@ class ParamPoly3(GeometryBase):
     pRange: str = "arcLength"  # range of parameter p (arcLength or normalized)
     geometry_type = GeometryType.PARAMPOLY3
 
+    @staticmethod
+    def _calculate_optimal_num_segments(
+        total_length: float,
+        min_segment_length: Optional[float] = None,
+        default_segment_length: Optional[float] = None,
+        max_segments: Optional[int] = None,
+        min_segments: Optional[int] = None,
+    ) -> int:
+        """
+        Calculate optimal number of segments based on road length.
+
+        Ensures segments are never shorter than min_segment_length by
+        dynamically adjusting the number of segments.
+
+        Args:
+            total_length: Total arc length of the spline
+            min_segment_length: Minimum allowed segment length (default from config)
+            default_segment_length: Target segment length (default from config)
+            max_segments: Maximum allowed segments (default from config)
+            min_segments: Minimum required segments (default from config)
+
+        Returns:
+            Optimal number of segments (clamped to [min_segments, max_segments])
+
+        Examples:
+            >>> _calculate_optimal_num_segments(10.0)
+            10  # 10 segments of 1.0m each
+
+            >>> _calculate_optimal_num_segments(0.53)  # Problematic case
+            1  # 1 segment of 0.53m (above 0.5m minimum)
+
+            >>> _calculate_optimal_num_segments(150.0)
+            100  # Capped at max_segments
+        """
+        from ..config import DEFAULT_CONFIG
+
+        # Use config defaults if not provided
+        if min_segment_length is None:
+            min_segment_length = DEFAULT_CONFIG.parampoly3.min_segment_length
+        if default_segment_length is None:
+            default_segment_length = DEFAULT_CONFIG.parampoly3.default_segment_length
+        if max_segments is None:
+            max_segments = DEFAULT_CONFIG.parampoly3.max_segments
+        if min_segments is None:
+            min_segments = DEFAULT_CONFIG.parampoly3.min_segments
+
+        # Edge case: zero or negative length
+        if total_length <= 0:
+            return min_segments
+
+        # Calculate based on target segment length
+        num_segments_by_target = int(np.ceil(total_length / default_segment_length))
+
+        # Calculate maximum segments that maintain minimum length
+        max_segments_by_min_length = int(np.floor(total_length / min_segment_length))
+
+        # Take the minimum of the two constraints
+        num_segments = min(num_segments_by_target, max_segments_by_min_length)
+
+        # Clamp to valid range
+        num_segments = max(min_segments, min(num_segments, max_segments))
+
+        return num_segments
+
+    @staticmethod
+    def _normalize_coefficients(
+        aU: float,
+        bU: float,
+        cU: float,
+        dU: float,
+        aV: float,
+        bV: float,
+        cV: float,
+        dV: float,
+        epsilon: Optional[float] = None,
+    ) -> tuple:
+        """
+        Normalize paramPoly3 coefficients by rounding very small values to zero.
+
+        Prevents numerical instability and improves output quality by eliminating
+        coefficients that are effectively zero due to floating-point precision.
+
+        Args:
+            aU, bU, cU, dU: U-coordinate polynomial coefficients
+            aV, bV, cV, dV: V-coordinate polynomial coefficients
+            epsilon: Threshold below which coefficients are set to zero
+
+        Returns:
+            Tuple of normalized coefficients (aU, bU, cU, dU, aV, bV, cV, dV)
+        """
+        from ..config import DEFAULT_CONFIG
+
+        if epsilon is None:
+            epsilon = DEFAULT_CONFIG.parampoly3.coefficient_epsilon
+
+        def normalize(val: float) -> float:
+            return 0.0 if abs(val) < epsilon else val
+
+        return (
+            normalize(aU),
+            normalize(bU),
+            normalize(cU),
+            normalize(dU),
+            normalize(aV),
+            normalize(bV),
+            normalize(cV),
+            normalize(dV),
+        )
+
+    @staticmethod
+    def _validate_segment(
+        segment: "ParamPoly3", min_segment_length: Optional[float] = None
+    ) -> tuple:
+        """
+        Validate a ParamPoly3 segment for numerical stability and correctness.
+
+        Args:
+            segment: ParamPoly3 segment to validate
+            min_segment_length: Minimum allowed segment length (default from config)
+
+        Returns:
+            Tuple of (is_valid, error_message)
+            - is_valid: True if segment passes all checks
+            - error_message: Description of failure (empty if valid)
+
+        Validation checks:
+            1. Length is positive and above minimum threshold
+            2. All coefficients are finite (not NaN or Inf)
+            3. Heading is within valid range [-2π, 2π]
+            4. Position coordinates are finite
+        """
+        # Load default config if not provided
+        if min_segment_length is None:
+            from ..config import DEFAULT_CONFIG
+
+            min_segment_length = DEFAULT_CONFIG.parampoly3.min_segment_length
+
+        # Check length
+        min_length = min_segment_length
+        if segment.length < min_length:
+            return (
+                False,
+                f"Segment length {segment.length:.6f}m below minimum {min_length}m",
+            )
+
+        if not np.isfinite(segment.length):
+            return False, f"Segment length is not finite: {segment.length}"
+
+        # Check coefficients are finite
+        coeffs = [
+            segment.aU,
+            segment.bU,
+            segment.cU,
+            segment.dU,
+            segment.aV,
+            segment.bV,
+            segment.cV,
+            segment.dV,
+        ]
+        if not all(np.isfinite(c) for c in coeffs):
+            return False, "One or more coefficients are not finite (NaN or Inf)"
+
+        # Check heading is reasonable
+        if not np.isfinite(segment.hdg):
+            return False, f"Heading is not finite: {segment.hdg}"
+
+        if abs(segment.hdg) > 2 * np.pi:
+            return (
+                False,
+                f"Heading {segment.hdg:.3f} outside valid range [-2π, 2π]",
+            )
+
+        # Check position is finite
+        if not (np.isfinite(segment.x) and np.isfinite(segment.y)):
+            return False, f"Position ({segment.x}, {segment.y}) is not finite"
+
+        return True, ""
+
     @classmethod
     def from_spline(
-        cls, spline: "Splines", num_segments: int = 10
+        cls,
+        spline: "Splines",
+        num_segments: Optional[int] = None,
+        config: Optional["ParamPoly3Config"] = None,
     ) -> List["ParamPoly3"]:
         """
         Convert a B-spline to a list of ParamPoly3 segments.
 
         This method divides the spline into segments and fits a cubic polynomial
-        to each segment using local coordinate systems.
+        to each segment. The number of segments is automatically calculated based
+        on road length to ensure no segment is shorter than minimum threshold.
 
         Args:
             spline: The Splines object to convert
-            num_segments: Number of ParamPoly3 segments to create
+            num_segments: Number of ParamPoly3 segments to create.
+                          If None (default), automatically calculated to ensure
+                          segments are >= min_segment_length (0.5m).
+                          If specified, uses the provided value (backward compatible).
+            config: ParamPoly3Config for customizing segment generation parameters.
+                   If None, uses defaults from config.py.
 
         Returns:
             List of ParamPoly3 objects representing the spline
+
+        Configuration:
+            Uses ParamPoly3Config (from YAML or defaults):
+            - min_segment_length: 0.5m (CARLA requirement)
+            - default_segment_length: 1.0m (target length)
+            - max_segments: 100 (prevents excessive segmentation)
+            - enabled: True (use dynamic calculation)
         """
         segments = []
         total_length = spline.total_length
@@ -115,6 +310,25 @@ class ParamPoly3(GeometryBase):
         if total_length <= 0:
             # Handle degenerate case
             return []
+
+        # Load config if not provided
+        if config is None:
+            from ..conversion_config import ParamPoly3Config
+
+            config = ParamPoly3Config()
+
+        # Calculate optimal num_segments if not provided and dynamic mode is enabled
+        if num_segments is None and config.enabled:
+            num_segments = cls._calculate_optimal_num_segments(
+                total_length,
+                min_segment_length=config.min_segment_length,
+                default_segment_length=config.default_segment_length,
+                max_segments=config.max_segments,
+                min_segments=config.min_segments,
+            )
+        elif num_segments is None:
+            # Legacy behavior: fixed 10 segments if dynamic mode is disabled
+            num_segments = 10
 
         # Divide the spline into segments
         segment_length = total_length / num_segments
@@ -126,6 +340,20 @@ class ParamPoly3(GeometryBase):
             actual_segment_length = s_end - s_start
 
             if actual_segment_length <= 0:
+                continue
+
+            # Skip segments that are too short
+            import warnings
+
+            min_length = config.min_segment_length
+
+            if actual_segment_length < min_length:
+                # Log warning for debugging
+                warnings.warn(
+                    f"Skipping segment with length {actual_segment_length:.6f}m "
+                    f"(below minimum {min_length}m) at s={s_start:.3f}",
+                    UserWarning,
+                )
                 continue
 
             # Get position and derivatives at segment start
@@ -187,6 +415,11 @@ class ParamPoly3(GeometryBase):
             cV = (3 * v_end - 2 * dv_start * L - dv_end * L) / (L * L)
             dV = (-2 * v_end + (dv_start + dv_end) * L) / (L * L * L)
 
+            # Normalize coefficients to prevent numerical instability
+            aU, bU, cU, dU, aV, bV, cV, dV = cls._normalize_coefficients(
+                aU, bU, cU, dU, aV, bV, cV, dV, epsilon=config.coefficient_epsilon
+            )
+
             # Create ParamPoly3 segment
             segment = cls(
                 s=s_start,
@@ -204,6 +437,17 @@ class ParamPoly3(GeometryBase):
                 dV=dV,
                 pRange="arcLength",
             )
+
+            # Validate segment before adding
+            is_valid, error_msg = cls._validate_segment(
+                segment, min_segment_length=config.min_segment_length
+            )
+            if not is_valid:
+                warnings.warn(
+                    f"Skipping invalid segment at s={s_start:.3f}: {error_msg}",
+                    UserWarning,
+                )
+                continue
 
             segments.append(segment)
 

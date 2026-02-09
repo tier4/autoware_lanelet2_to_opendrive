@@ -106,3 +106,155 @@ class TestParamPoly3FromSpline:
             poly3_elem = xml_elem.find("paramPoly3")
             assert poly3_elem is not None
             assert poly3_elem.get("pRange") == "arcLength"
+
+
+class TestParamPoly3DynamicSegments:
+    """Tests for dynamic segment calculation in ParamPoly3.from_spline."""
+
+    def test_dynamic_segments_short_road(self):
+        """Test that short roads get appropriate segment count."""
+        # Create a very short road (0.53m - the problematic case from issue)
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.53, 0.0, 0.0],
+            ]
+        )
+
+        spline = Splines(points, num_control_points=4)
+
+        # Use dynamic calculation (num_segments=None is default)
+        param_polys = ParamPoly3.from_spline(spline)
+
+        # Should create only 1 segment (0.53m > 0.5m minimum)
+        assert len(param_polys) == 1
+        assert param_polys[0].length >= 0.5
+        assert param_polys[0].length == pytest.approx(spline.total_length, rel=1e-3)
+
+    def test_dynamic_segments_medium_road(self):
+        """Test that medium roads get appropriate segment count."""
+        # Create a medium-length road (10m)
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [5.0, 0.0, 0.0],
+                [10.0, 0.0, 0.0],
+            ]
+        )
+
+        spline = Splines(points, num_control_points=6)
+        param_polys = ParamPoly3.from_spline(spline)
+
+        # Should create ~10 segments (10m / 1m target = 10)
+        assert 8 <= len(param_polys) <= 12  # Allow some tolerance
+
+        # All segments should be above minimum length
+        for poly in param_polys:
+            assert poly.length >= 0.5
+
+    def test_dynamic_segments_long_road(self):
+        """Test that long roads don't create excessive segments."""
+        # Create a long road (200m)
+        points = np.linspace([0, 0, 0], [200, 0, 0], 100)
+
+        spline = Splines(points, num_control_points=20)
+        param_polys = ParamPoly3.from_spline(spline)
+
+        # Should be capped at max_segments (100)
+        assert len(param_polys) <= 100
+
+    def test_manual_override_still_works(self):
+        """Test that manual num_segments still works (backward compatibility)."""
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [10.0, 0.0, 0.0],
+            ]
+        )
+
+        spline = Splines(points, num_control_points=6)
+
+        # Manually specify 5 segments
+        param_polys = ParamPoly3.from_spline(spline, num_segments=5)
+
+        # Should respect manual override
+        assert len(param_polys) == 5
+
+    def test_segment_length_never_below_minimum(self):
+        """Test that no segment is ever below minimum length."""
+        # Create various road lengths
+        test_lengths = [0.53, 1.0, 5.0, 10.0, 50.0, 150.0]
+
+        for length in test_lengths:
+            points = np.array(
+                [
+                    [0.0, 0.0, 0.0],
+                    [length, 0.0, 0.0],
+                ]
+            )
+
+            spline = Splines(points, num_control_points=4)
+            param_polys = ParamPoly3.from_spline(spline)
+
+            # Verify all segments meet minimum length
+            for poly in param_polys:
+                assert (
+                    poly.length >= 0.5
+                ), f"Segment length {poly.length:.6f}m below 0.5m for road length {length}m"
+
+    def test_coefficient_normalization(self):
+        """Test that very small coefficients are normalized to zero."""
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],  # Straight line
+            ]
+        )
+
+        spline = Splines(points, num_control_points=4)
+        param_polys = ParamPoly3.from_spline(spline)
+
+        # For a straight horizontal line, V coefficients should be very small
+        for poly in param_polys:
+            # After normalization, small values should be exactly zero
+            assert abs(poly.aV) < 1e-6
+            assert abs(poly.bV) < 1e-6
+
+    def test_validation_rejects_invalid_segments(self):
+        """Test that validation catches invalid segments."""
+        # Create an invalid segment (length too short)
+        invalid_segment = ParamPoly3(
+            s=0.0,
+            x=0.0,
+            y=0.0,
+            hdg=0.0,
+            length=0.01,  # Below 0.5m minimum
+            aU=0,
+            bU=1,
+            cU=0,
+            dU=0,
+            aV=0,
+            bV=0,
+            cV=0,
+            dV=0,
+        )
+
+        is_valid, error_msg = ParamPoly3._validate_segment(invalid_segment)
+
+        assert not is_valid
+        assert "below minimum" in error_msg.lower()
+
+    def test_calculate_optimal_num_segments(self):
+        """Test the _calculate_optimal_num_segments helper method."""
+        # Short road: should return 1
+        assert ParamPoly3._calculate_optimal_num_segments(0.53) == 1
+
+        # Medium road: should return ~10
+        result = ParamPoly3._calculate_optimal_num_segments(10.0)
+        assert 8 <= result <= 12
+
+        # Long road: should be capped at 100
+        assert ParamPoly3._calculate_optimal_num_segments(200.0) == 100
+
+        # Zero length: should return min_segments
+        assert ParamPoly3._calculate_optimal_num_segments(0.0) == 1

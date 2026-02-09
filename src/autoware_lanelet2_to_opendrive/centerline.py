@@ -483,6 +483,43 @@ def extract_border_from_spline(
     )
 
 
+def _calculate_optimal_num_samples(
+    total_length: float,
+    config: WidthEstimationConfig,
+) -> int:
+    """
+    Calculate optimal number of samples based on road length.
+
+    Args:
+        total_length: Total length of the road/lanelet
+        config: WidthEstimationConfig containing sampling parameters
+
+    Returns:
+        Optimal number of samples (clamped to [min_samples, max_samples])
+
+    Examples:
+        >>> _calculate_optimal_num_samples(50.0, config)  # 50m road
+        10  # 10 samples at 5m intervals
+
+        >>> _calculate_optimal_num_samples(10.0, config)  # 10m road
+        5  # min_samples (clamped)
+    """
+    if not config.adaptive_sampling:
+        # Use fixed sampling
+        return config.num_samples
+
+    if total_length <= 0:
+        return config.min_samples
+
+    # Calculate based on target interval
+    num_by_interval = int(np.ceil(total_length / config.default_sample_interval))
+
+    # Clamp to valid range
+    num_samples = max(config.min_samples, min(num_by_interval, config.max_samples))
+
+    return num_samples
+
+
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     config: WidthEstimationConfig,
@@ -502,7 +539,6 @@ def estimate_lanelet_width_as_spline(
         ValueError: If lanelet has insufficient points
     """
     # Extract parameters from config
-    num_samples = config.num_samples
     reference = config.reference.value  # Get string value from enum
 
     # Get raw boundary points directly from lanelet
@@ -518,6 +554,13 @@ def estimate_lanelet_width_as_spline(
 
     # Calculate cumulative arc lengths for both boundaries
     boundary_data = _compute_boundary_arc_lengths(left_points, right_points)
+
+    # Calculate optimal number of samples (adaptive or fixed)
+    # Use the maximum of left/right boundary lengths as total length
+    total_length = max(
+        boundary_data["left_total_length"], boundary_data["right_total_length"]
+    )
+    num_samples = _calculate_optimal_num_samples(total_length, config)
 
     # Sample points along normalized arc length (0 to 1)
     normalized_positions = np.linspace(0.0, 1.0, num_samples)
