@@ -55,7 +55,7 @@ class GeometrySimplifier:
         # Step 1: Convert trivial paramPoly3 to Line/Arc
         if self.config.convert_to_line or self.config.convert_to_arc:
             result = self._convert_trivial_parampoly3(result)
-            logger.info(
+            logger.debug(
                 f"Geometry conversion: {len(geometries)} -> {len(result)} segments"
             )
 
@@ -63,7 +63,7 @@ class GeometrySimplifier:
         if self.config.consolidate_segments:
             pre_consolidation = len(result)
             result = self._consolidate_segments(result)
-            logger.info(
+            logger.debug(
                 f"Segment consolidation: {pre_consolidation} -> {len(result)} segments"
             )
 
