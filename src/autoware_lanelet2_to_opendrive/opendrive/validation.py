@@ -113,41 +113,31 @@ def validate_lane_road_link_consistency(
                 # Check lane predecessor
                 if lane.predecessor is not None:
                     if not has_road_predecessor:
-                        # Exception: Allow for connecting roads (junction members)
-                        is_connecting_road = (
-                            road.junction is not None and road.junction >= 0
-                        )
-                        if not is_connecting_road:
-                            errors.append(
-                                LaneConnectionError(
-                                    road_id=road.id,
-                                    lane_id=lane.lane_id,
-                                    connection_type="predecessor",
-                                    message=(
-                                        "Lane has predecessor but road does not have "
-                                        "predecessor link"
-                                    ),
-                                )
+                        errors.append(
+                            LaneConnectionError(
+                                road_id=road.id,
+                                lane_id=lane.lane_id,
+                                connection_type="predecessor",
+                                message=(
+                                    "Lane has predecessor but road does not have "
+                                    "predecessor link"
+                                ),
                             )
+                        )
 
                 # Check lane successor
                 if lane.successor is not None:
                     if not has_road_successor:
-                        # Exception: Allow for connecting roads (junction members)
-                        is_connecting_road = (
-                            road.junction is not None and road.junction >= 0
-                        )
-                        if not is_connecting_road:
-                            errors.append(
-                                LaneConnectionError(
-                                    road_id=road.id,
-                                    lane_id=lane.lane_id,
-                                    connection_type="successor",
-                                    message=(
-                                        "Lane has successor but road does not have "
-                                        "successor link"
-                                    ),
-                                )
+                        errors.append(
+                            LaneConnectionError(
+                                road_id=road.id,
+                                lane_id=lane.lane_id,
+                                connection_type="successor",
+                                message=(
+                                    "Lane has successor but road does not have "
+                                    "successor link"
+                                ),
                             )
+                        )
 
     return ValidationResult(is_valid=(len(errors) == 0), errors=errors)

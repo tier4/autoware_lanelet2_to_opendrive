@@ -174,8 +174,13 @@ class TestLaneRoadLinkConsistency:
         assert not result.is_valid
         assert result.error_count == 3  # lane1 pred, lane1 succ, lane2 pred
 
-    def test_connecting_road_allows_lane_links_without_road_links(self):
-        """Test that connecting roads (junction members) can have lane links without road links."""
+    def test_connecting_road_requires_road_links_for_lane_links(self):
+        """Test that connecting roads also require road links before lane links.
+
+        Previous behavior allowed connecting roads to have lane links without road links,
+        but this violated OpenDRIVE specification and caused issues. Connecting roads
+        must also have road-level links before lane-level links can be created.
+        """
         # Create connecting road (junction member)
         road = create_test_road(
             road_id=1,
@@ -184,14 +189,15 @@ class TestLaneRoadLinkConsistency:
             junction=100,  # Member of junction 100
         )
 
-        # Add lane with connections (should be allowed for connecting roads)
+        # Add lane with connections (should NOT be allowed even for connecting roads)
         lane = create_test_lane(lane_id=-1, has_predecessor=True, has_successor=True)
         road.lanes.lane_sections[0].right_lanes = {-1: lane}
 
         result = validate_lane_road_link_consistency([road])
 
-        assert result.is_valid
-        assert result.error_count == 0
+        # Connecting roads must also have consistent road/lane links
+        assert not result.is_valid
+        assert result.error_count == 2  # predecessor and successor both invalid
 
     def test_validation_result_error_summary(self):
         """Test that ValidationResult provides useful error summary."""
