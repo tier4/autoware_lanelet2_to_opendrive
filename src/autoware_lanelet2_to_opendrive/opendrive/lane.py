@@ -188,36 +188,24 @@ class Lane:
         )
 
         # Use appropriate boundary based on traffic rule for both single and multi-lane
-        # RHT: Reference line is left boundary (use LEFT_BOUND)
-        # LHT: Reference line is right boundary (use RIGHT_BOUND)
-        rule_normalized = (rule or "RHT").upper()
+        # Both RHT and LHT now use LEFT_BOUND to match reference line selection
+        # RHT: Reference line is leftmost lanelet's left boundary (use LEFT_BOUND)
+        # LHT: Reference line is rightmost lanelet's left boundary (use LEFT_BOUND)
 
         # Use provided width_config or create default based on traffic rule
         if width_config is None:
-            if rule_normalized == "LHT":
-                config = WidthEstimationConfig(reference=WidthReference.RIGHT_BOUND)
-            else:
-                config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
+            # Both RHT and LHT use LEFT_BOUND for consistency with reference_line.py
+            config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
         else:
-            # Copy config and override reference based on traffic rule
-            if rule_normalized == "LHT":
-                config = WidthEstimationConfig(
-                    num_samples=width_config.num_samples,
-                    reference=WidthReference.RIGHT_BOUND,
-                    adaptive_sampling=width_config.adaptive_sampling,
-                    min_samples=width_config.min_samples,
-                    max_samples=width_config.max_samples,
-                    default_sample_interval=width_config.default_sample_interval,
-                )
-            else:
-                config = WidthEstimationConfig(
-                    num_samples=width_config.num_samples,
-                    reference=WidthReference.LEFT_BOUND,
-                    adaptive_sampling=width_config.adaptive_sampling,
-                    min_samples=width_config.min_samples,
-                    max_samples=width_config.max_samples,
-                    default_sample_interval=width_config.default_sample_interval,
-                )
+            # Copy config and use LEFT_BOUND for both traffic rules
+            config = WidthEstimationConfig(
+                num_samples=width_config.num_samples,
+                reference=WidthReference.LEFT_BOUND,
+                adaptive_sampling=width_config.adaptive_sampling,
+                min_samples=width_config.min_samples,
+                max_samples=width_config.max_samples,
+                default_sample_interval=width_config.default_sample_interval,
+            )
 
         width_spline = estimate_lanelet_width_as_spline(lanelet, config)
 
