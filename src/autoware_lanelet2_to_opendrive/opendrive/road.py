@@ -525,12 +525,31 @@ class Road:
         )
         centerline_2d = reference_line.centerline_2d
 
-        # Create paramPoly3 geometries from 2D spline using from_spline method
+        # Load default config if not provided
+        if parampoly3_config is None:
+            from ..conversion_config import ParamPoly3Config
+
+            parampoly3_config = ParamPoly3Config()
+
+        # Create paramPoly3 geometries from 2D spline
+        # Use adaptive subdivision if enabled, otherwise use standard from_spline
         # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate
-        geometries: List[GeometryBase] = cast(
-            List[GeometryBase],
-            ParamPoly3.from_spline(centerline_2d, config=parampoly3_config),
-        )
+        geometries: List[GeometryBase]
+        if parampoly3_config.enable_adaptive_subdivision:
+            geometries = cast(
+                List[GeometryBase],
+                ParamPoly3.from_spline_adaptive(
+                    centerline_2d,
+                    max_heading_change_deg=parampoly3_config.max_heading_change_deg,
+                    max_iterations=parampoly3_config.max_iterations,
+                    config=parampoly3_config,
+                ),
+            )
+        else:
+            geometries = cast(
+                List[GeometryBase],
+                ParamPoly3.from_spline(centerline_2d, config=parampoly3_config),
+            )
 
         # Create plan view with the paramPoly3 geometries
         plan_view = PlanView(geometries=geometries)

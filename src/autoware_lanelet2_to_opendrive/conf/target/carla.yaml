@@ -29,6 +29,17 @@ parampoly3:
   # Threshold for rounding small coefficients to zero
   coefficient_epsilon: 1.0e-8
 
+  # Adaptive subdivision based on heading change
+  # Helps prevent waypoint direction issues in CARLA (see issue #209)
+  enable_adaptive_subdivision: false  # disabled by default, enable if needed
+
+  # Maximum heading change per segment (degrees)
+  # Lower values create smoother roads but more segments
+  max_heading_change_deg: 30.0
+
+  # Maximum number of subdivision iterations
+  max_iterations: 10
+
 # Width spline sampling configuration
 # Adaptive sampling reduces memory usage for large maps
 width_estimation:

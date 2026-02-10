@@ -27,6 +27,17 @@ parampoly3:
   # Threshold for rounding small coefficients to zero
   coefficient_epsilon: 1.0e-8
 
+  # Adaptive subdivision based on heading change
+  # Recommended for curved roads in simulators like CARLA
+  enable_adaptive_subdivision: false  # disabled by default
+
+  # Maximum heading change per segment (degrees)
+  # Segments exceeding this will be subdivided
+  max_heading_change_deg: 30.0
+
+  # Maximum number of subdivision iterations
+  max_iterations: 10
+
 # Width spline sampling configuration
 width_estimation:
   # Enable adaptive sampling based on road length (recommended)

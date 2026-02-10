@@ -453,6 +453,230 @@ class ParamPoly3(GeometryBase):
 
         return segments
 
+    @staticmethod
+    def _calculate_heading_change(segment: "ParamPoly3") -> float:
+        """
+        Calculate the heading change across a ParamPoly3 segment.
+
+        This method computes the change in heading (in radians) from the start
+        to the end of a segment by evaluating the tangent vectors at both endpoints.
+
+        Args:
+            segment: ParamPoly3 segment to analyze
+
+        Returns:
+            Heading change in radians (positive = counterclockwise)
+        """
+        # Derivatives at start (p=0)
+        du_start = segment.bU
+        dv_start = segment.bV
+
+        # Derivatives at end (p=L)
+        L = segment.length
+        du_end = segment.bU + 2 * segment.cU * L + 3 * segment.dU * L * L
+        dv_end = segment.bV + 2 * segment.cV * L + 3 * segment.dV * L * L
+
+        # Calculate heading change in local frame
+        heading_start = np.arctan2(dv_start, du_start)
+        heading_end = np.arctan2(dv_end, du_end)
+
+        return heading_end - heading_start
+
+    @classmethod
+    def subdivide_spline_range(
+        cls,
+        spline: "Splines",
+        s_start: float,
+        s_end: float,
+        num_subsegments: int = 2,
+        config: Optional["ParamPoly3Config"] = None,
+    ) -> List["ParamPoly3"]:
+        """
+        Subdivide a spline range into multiple ParamPoly3 segments.
+
+        This method creates subsegments within a specified arc length range,
+        with proper boundary checking to prevent floating-point errors.
+
+        Args:
+            spline: The source spline
+            s_start: Start arc length
+            s_end: End arc length
+            num_subsegments: Number of subsegments to create
+            config: ParamPoly3Config for segment generation parameters
+
+        Returns:
+            List of ParamPoly3 segments covering [s_start, s_end]
+
+        Note:
+            Includes boundary clamping to fix issue #209 (reverse direction bug)
+        """
+        # Load config if not provided
+        if config is None:
+            from ..conversion_config import ParamPoly3Config
+
+            config = ParamPoly3Config()
+
+        subsegments = []
+        segment_length = (s_end - s_start) / num_subsegments
+
+        for i in range(num_subsegments):
+            sub_s_start = s_start + i * segment_length
+            # FIX for issue #209: Clamp sub_s_end to prevent exceeding s_end
+            sub_s_end = min(sub_s_start + segment_length, s_end)
+            actual_segment_length = sub_s_end - sub_s_start
+
+            # Skip zero-length segments
+            if actual_segment_length <= 0:
+                continue
+
+            # Get positions and tangents at sub-segment boundaries
+            start_pos = spline.evaluate(sub_s_start, derivative=0)
+            start_tangent = spline.evaluate(sub_s_start, derivative=1)
+            end_pos = spline.evaluate(sub_s_end, derivative=0)
+            end_tangent = spline.evaluate(sub_s_end, derivative=1)
+
+            # Extract 2D coordinates
+            x0, y0 = start_pos[0], start_pos[1]
+
+            # Calculate heading from tangent vector
+            hdg = np.arctan2(start_tangent[1], start_tangent[0])
+
+            # Transform to local coordinate system
+            cos_hdg = np.cos(hdg)
+            sin_hdg = np.sin(hdg)
+
+            # Transform end position to local coordinates
+            dx = end_pos[0] - x0
+            dy = end_pos[1] - y0
+            u_end = dx * cos_hdg + dy * sin_hdg
+            v_end = -dx * sin_hdg + dy * cos_hdg
+
+            # Transform tangent vectors to local coordinates
+            du_start = start_tangent[0] * cos_hdg + start_tangent[1] * sin_hdg
+            dv_start = -start_tangent[0] * sin_hdg + start_tangent[1] * cos_hdg
+
+            du_end = end_tangent[0] * cos_hdg + end_tangent[1] * sin_hdg
+            dv_end = -end_tangent[0] * sin_hdg + end_tangent[1] * cos_hdg
+
+            # Fit cubic polynomials using boundary conditions
+            # Use actual_segment_length instead of segment_length
+            L = actual_segment_length
+
+            aU = 0.0
+            bU = du_start
+            cU = (3 * u_end - 2 * du_start * L - du_end * L) / (L * L)
+            dU = (-2 * u_end + (du_start + du_end) * L) / (L * L * L)
+
+            aV = 0.0
+            bV = dv_start
+            cV = (3 * v_end - 2 * dv_start * L - dv_end * L) / (L * L)
+            dV = (-2 * v_end + (dv_start + dv_end) * L) / (L * L * L)
+
+            # Normalize coefficients
+            aU, bU, cU, dU, aV, bV, cV, dV = cls._normalize_coefficients(
+                aU, bU, cU, dU, aV, bV, cV, dV, epsilon=config.coefficient_epsilon
+            )
+
+            segment = cls(
+                s=sub_s_start,
+                x=x0,
+                y=y0,
+                hdg=hdg,
+                length=actual_segment_length,
+                aU=aU,
+                bU=bU,
+                cU=cU,
+                dU=dU,
+                aV=aV,
+                bV=bV,
+                cV=cV,
+                dV=dV,
+                pRange="arcLength",
+            )
+
+            subsegments.append(segment)
+
+        return subsegments
+
+    @classmethod
+    def from_spline_adaptive(
+        cls,
+        spline: "Splines",
+        initial_num_segments: Optional[int] = None,
+        max_heading_change_deg: float = 30.0,
+        max_iterations: int = 10,
+        config: Optional["ParamPoly3Config"] = None,
+    ) -> List["ParamPoly3"]:
+        """
+        Convert a B-spline to ParamPoly3 segments with adaptive subdivision.
+
+        This method iteratively subdivides segments that exceed a maximum heading
+        change threshold, ensuring smoother road geometry for simulators like CARLA.
+
+        Args:
+            spline: The Splines object to convert
+            initial_num_segments: Initial number of segments (None = auto-calculate)
+            max_heading_change_deg: Maximum heading change per segment (degrees)
+            max_iterations: Maximum refinement iterations
+            config: ParamPoly3Config for segment generation parameters
+
+        Returns:
+            List of adaptively subdivided ParamPoly3 segments
+
+        Example:
+            >>> spline = Splines(points, num_control_points=10)
+            >>> segments = ParamPoly3.from_spline_adaptive(
+            ...     spline, max_heading_change_deg=30.0
+            ... )
+        """
+        # Load config if not provided
+        if config is None:
+            from ..conversion_config import ParamPoly3Config
+
+            config = ParamPoly3Config()
+
+        # Generate initial segments
+        segments = cls.from_spline(
+            spline, num_segments=initial_num_segments, config=config
+        )
+
+        max_heading_change_rad = np.deg2rad(max_heading_change_deg)
+
+        for iteration in range(max_iterations):
+            # Find segments with excessive heading changes
+            problematic_indices = []
+            for i, segment in enumerate(segments):
+                heading_change = abs(cls._calculate_heading_change(segment))
+                if heading_change > max_heading_change_rad:
+                    problematic_indices.append(i)
+
+            # If no problematic segments, we're done
+            if not problematic_indices:
+                break
+
+            # Subdivide problematic segments
+            new_segments = []
+            problematic_set = set(problematic_indices)
+
+            for i, segment in enumerate(segments):
+                if i in problematic_set:
+                    # Subdivide this segment into 2 sub-segments
+                    sub_segments = cls.subdivide_spline_range(
+                        spline,
+                        segment.s,
+                        segment.s + segment.length,
+                        num_subsegments=2,
+                        config=config,
+                    )
+                    new_segments.extend(sub_segments)
+                else:
+                    # Keep the segment as-is
+                    new_segments.append(segment)
+
+            segments = new_segments
+
+        return segments
+
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
         elem = super().to_xml()

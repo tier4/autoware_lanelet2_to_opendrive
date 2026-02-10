@@ -55,6 +55,13 @@ class ParamPoly3Config:
                             Prevents numerical instability in paramPoly3
         enabled: Enable dynamic segment calculation (True by default)
                 If False, uses fixed segment count (legacy behavior)
+        enable_adaptive_subdivision: Enable adaptive subdivision based on heading change
+                                    (False by default). When enabled, segments with
+                                    excessive heading changes are automatically subdivided.
+        max_heading_change_deg: Maximum heading change per segment in degrees (30.0 default)
+                               Used when enable_adaptive_subdivision is True.
+        max_iterations: Maximum number of adaptive subdivision iterations (10 default)
+                       Prevents infinite loops in subdivision process.
     """
 
     min_segment_length: float = 0.5
@@ -63,6 +70,9 @@ class ParamPoly3Config:
     min_segments: int = 1
     coefficient_epsilon: float = 1e-8
     enabled: bool = True
+    enable_adaptive_subdivision: bool = False
+    max_heading_change_deg: float = 30.0
+    max_iterations: int = 10
 
 
 @dataclass
