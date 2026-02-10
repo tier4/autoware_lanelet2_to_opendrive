@@ -107,10 +107,10 @@ class ReferenceLine:
             border = "left"
             boundary = reference_lanelet.leftBound
         else:  # LHT
-            # LHT: Use rightmost lanelet's left boundary (inner edge)
+            # LHT: Use rightmost lanelet's right boundary
             reference_lanelet = sorted_lanelets[-1]
-            border = "left"
-            boundary = reference_lanelet.leftBound
+            border = "right"
+            boundary = reference_lanelet.rightBound
 
         from ..centerline import extract_border_from_spline
 
