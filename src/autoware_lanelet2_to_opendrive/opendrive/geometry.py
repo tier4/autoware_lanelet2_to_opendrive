@@ -490,7 +490,8 @@ class ParamPoly3(GeometryBase):
         s_end: float,
         num_subsegments: int = 2,
         config: Optional["ParamPoly3Config"] = None,
-    ) -> List["ParamPoly3"]:
+        prev_end_hdg: Optional[float] = None,
+    ) -> tuple[List["ParamPoly3"], float]:
         """
         Subdivide a spline range into multiple ParamPoly3 segments.
 
@@ -503,12 +504,14 @@ class ParamPoly3(GeometryBase):
             s_end: End arc length
             num_subsegments: Number of subsegments to create
             config: ParamPoly3Config for segment generation parameters
+            prev_end_hdg: Previous segment's end heading for continuity (radians)
 
         Returns:
-            List of ParamPoly3 segments covering [s_start, s_end]
+            Tuple of (segments list, final_end_hdg) for heading continuity
 
         Note:
             Includes boundary clamping to fix issue #209 (reverse direction bug)
+            Implements heading unwrapping to maintain continuity across segments
         """
         # Load config if not provided
         if config is None:
@@ -538,8 +541,28 @@ class ParamPoly3(GeometryBase):
             # Extract 2D coordinates
             x0, y0 = start_pos[0], start_pos[1]
 
-            # Calculate heading from tangent vector
-            hdg = np.arctan2(start_tangent[1], start_tangent[0])
+            # Calculate raw heading from tangent vector
+            hdg_raw = np.arctan2(start_tangent[1], start_tangent[0])
+
+            # Unwrap heading to ensure continuity
+            if prev_end_hdg is not None:
+                diff = hdg_raw - prev_end_hdg
+                diff = np.arctan2(np.sin(diff), np.cos(diff))
+                hdg = prev_end_hdg + diff
+            else:
+                hdg = hdg_raw
+
+            # Calculate end heading for next iteration
+            end_hdg_raw = np.arctan2(end_tangent[1], end_tangent[0])
+            if prev_end_hdg is not None:
+                diff_end = end_hdg_raw - hdg
+                diff_end = np.arctan2(np.sin(diff_end), np.cos(diff_end))
+                end_hdg = hdg + diff_end
+            else:
+                end_hdg = end_hdg_raw
+
+            # Update prev_end_hdg for next iteration
+            prev_end_hdg = end_hdg
 
             # Transform to local coordinate system
             cos_hdg = np.cos(hdg)
@@ -596,7 +619,9 @@ class ParamPoly3(GeometryBase):
 
             subsegments.append(segment)
 
-        return subsegments
+        # Return final heading (default to 0.0 if no segments were created)
+        final_hdg = prev_end_hdg if prev_end_hdg is not None else 0.0
+        return subsegments, final_hdg
 
     @classmethod
     def from_spline_adaptive(
@@ -655,18 +680,28 @@ class ParamPoly3(GeometryBase):
                 break
 
             # Subdivide problematic segments
-            new_segments = []
+            new_segments: List["ParamPoly3"] = []
             problematic_set = set(problematic_indices)
 
             for i, segment in enumerate(segments):
                 if i in problematic_set:
+                    # Get prev_end_hdg from the previous segment
+                    prev_end_hdg = new_segments[-1].hdg if new_segments else None
+                    if prev_end_hdg is not None and new_segments:
+                        # Calculate end heading of previous segment
+                        prev_seg = new_segments[-1]
+                        prev_end_hdg = prev_seg.hdg + cls._calculate_heading_change(
+                            prev_seg
+                        )
+
                     # Subdivide this segment into 2 sub-segments
-                    sub_segments = cls.subdivide_spline_range(
+                    sub_segments, _ = cls.subdivide_spline_range(
                         spline,
                         segment.s,
                         segment.s + segment.length,
                         num_subsegments=2,
                         config=config,
+                        prev_end_hdg=prev_end_hdg,
                     )
                     new_segments.extend(sub_segments)
                 else:
