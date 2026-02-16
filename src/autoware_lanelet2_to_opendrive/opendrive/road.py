@@ -11,7 +11,7 @@ from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
-from .enums import ContactPoint, ElementType, RoadType
+from .enums import ContactPoint, ElementType, RoadType, TrafficRule
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
@@ -39,6 +39,7 @@ class Road:
     name: Optional[str] = None
     length: float = 0.0
     junction: int = -1
+    rule: Optional[TrafficRule] = None
     plan_view: Optional[PlanView] = None
     elevation_profile: Optional[ElevationProfile] = None
     lanes: Optional[Lanes] = None
@@ -56,6 +57,9 @@ class Road:
 
         if self.name:
             elem.set("name", self.name)
+
+        if self.rule:
+            elem.set("rule", self.rule.value)
 
         if self.link:
             elem.append(self.link.to_xml())
