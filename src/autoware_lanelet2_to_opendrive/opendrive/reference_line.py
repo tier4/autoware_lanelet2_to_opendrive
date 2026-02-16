@@ -118,9 +118,9 @@ class ReferenceLine:
         from ..centerline import extract_border_from_spline
 
         # Log reference line selection
-        logger.info(f"Traffic rule: {traffic_rule_normalized}")
-        logger.info(f"Reference lanelet ID: {reference_lanelet.id}")
-        logger.info(f"Using boundary: {border}")
+        logger.debug(f"Traffic rule: {traffic_rule_normalized}")
+        logger.debug(f"Reference lanelet ID: {reference_lanelet.id}")
+        logger.debug(f"Using boundary: {border}")
         logger.debug(f"Number of sorted lanelets: {len(sorted_lanelets)}")
 
         # Extract 3D points directly from the selected boundary (no 3D spline needed)
