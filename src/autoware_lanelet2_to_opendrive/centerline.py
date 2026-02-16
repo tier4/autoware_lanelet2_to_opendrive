@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import lanelet2
 from typing import List, Optional, Set, Tuple
@@ -6,6 +7,8 @@ from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
 from .conversion_config import WidthEstimationConfig, WidthReference
+
+logger = logging.getLogger(__name__)
 
 
 class AsymmetryLaneletException(Exception):
@@ -577,6 +580,15 @@ def estimate_lanelet_width_with_reference_line(
     other_cumulative = np.concatenate(([0], np.cumsum(other_dists)))
     other_total_length = other_cumulative[-1]
 
+    # Log boundary length information
+    logger.debug(
+        f"Width calculation for lanelet {lanelet.id}: "
+        f"road_length={road_length:.3f}m, "
+        f"anchor_length={anchor_total_length:.3f}m, "
+        f"other_length={other_total_length:.3f}m, "
+        f"reference={config.reference}"
+    )
+
     # Determine number of samples using same logic as existing function
     num_samples = _calculate_optimal_num_samples(road_length, config)
     normalized_positions = np.linspace(0, 1, num_samples)
@@ -607,10 +619,25 @@ def estimate_lanelet_width_with_reference_line(
         arc_lengths.append(s_road)
         widths.append(width)
 
-    # Create 1D cubic spline from (s_road, width) pairs
-    spline = CubicSpline1D(
-        np.array(arc_lengths), np.array(widths), bc_type="not-a-knot"
+    # Log width statistics
+    widths_array = np.array(widths)
+    logger.debug(
+        f"Width statistics for lanelet {lanelet.id}: "
+        f"min={widths_array.min():.3f}m, "
+        f"max={widths_array.max():.3f}m, "
+        f"mean={widths_array.mean():.3f}m, "
+        f"std={widths_array.std():.3f}m"
     )
+
+    # Validate s-coordinates are monotonically increasing
+    arc_lengths_array = np.array(arc_lengths)
+    if not np.all(np.diff(arc_lengths_array) >= 0):
+        logger.error(
+            f"s-coordinates are not monotonic for lanelet {lanelet.id} - width calculation may be incorrect"
+        )
+
+    # Create 1D cubic spline from (s_road, width) pairs
+    spline = CubicSpline1D(arc_lengths_array, widths_array, bc_type="not-a-knot")
 
     return Width1DSplineAdapter(spline)
 

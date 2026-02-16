@@ -1,5 +1,6 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
+import logging
 from typing import TYPE_CHECKING, List, Optional, Set, Union
 
 import lanelet2
@@ -9,13 +10,15 @@ import numpy as np
 from ..cubic_spline_1d import CubicSpline1D
 from ..spline import Splines
 
-if TYPE_CHECKING:
-    pass
-
 # Import enums directly to avoid circular import
+from .elevation import Elevation, ElevationProfile
 from .enums import LaneType
 from .lane_elements import LaneWidth
-from .elevation import ElevationProfile, Elevation
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    pass
 
 
 class ReferenceLine:
@@ -114,11 +117,24 @@ class ReferenceLine:
 
         from ..centerline import extract_border_from_spline
 
+        # Log reference line selection
+        logger.info(f"Traffic rule: {traffic_rule_normalized}")
+        logger.info(f"Reference lanelet ID: {reference_lanelet.id}")
+        logger.info(f"Using boundary: {border}")
+        logger.debug(f"Number of sorted lanelets: {len(sorted_lanelets)}")
+
         # Extract 3D points directly from the selected boundary (no 3D spline needed)
         # This avoids the 3D-to-2D arc length mapping issues on steep slopes
         from ..util import extract_points_3d
 
         points_3d = extract_points_3d(boundary)
+        logger.debug(f"Boundary points count: {len(points_3d)}")
+        logger.debug(
+            f"First point: [{points_3d[0, 0]:.3f}, {points_3d[0, 1]:.3f}, {points_3d[0, 2]:.3f}]"
+        )
+        logger.debug(
+            f"Last point: [{points_3d[-1, 0]:.3f}, {points_3d[-1, 1]:.3f}, {points_3d[-1, 2]:.3f}]"
+        )
 
         # Calculate XY cumulative distances (2D arc length) directly from points
         xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
