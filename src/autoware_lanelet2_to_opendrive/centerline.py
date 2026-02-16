@@ -600,6 +600,84 @@ def estimate_lanelet_width_as_spline(
     return Width1DSplineAdapter(width_spline_1d)
 
 
+def estimate_multi_lane_width_as_spline(
+    lanelet: lanelet2.core.Lanelet,
+    config: WidthEstimationConfig,
+    previous_lanelet: Optional[lanelet2.core.Lanelet] = None,
+) -> Width1DSplineAdapter:
+    """
+    Estimate lane width for multi-lane roads using the previous lane's outer boundary.
+
+    For multi-lane roads in OpenDRIVE, each lane's width is measured from the
+    previous lane's outer boundary (not from its own inner boundary).
+
+    Args:
+        lanelet: Current lanelet for which to calculate width
+        config: WidthEstimationConfig specifying width calculation parameters
+        previous_lanelet: Previous lanelet (inner lane). If None, uses lanelet's
+                         left boundary as reference (for Lane -1)
+
+    Returns:
+        Width1DSplineAdapter object representing width as a function of arc length
+
+    Example:
+        Lane -1 (first): width from road reference line to L1's right boundary
+        Lane -2: width from L1's right boundary to L2's right boundary
+        Lane -3: width from L2's right boundary to L3's right boundary
+    """
+    # Get current lanelet's boundaries
+    right_bound = lanelet.rightBound
+
+    # Determine reference boundary based on whether there's a previous lanelet
+    if previous_lanelet is None:
+        # Lane -1: Use current lanelet's left boundary as reference
+        left_bound = lanelet.leftBound
+    else:
+        # Lane -2+: Use previous lanelet's right boundary as reference
+        left_bound = previous_lanelet.rightBound
+
+    if len(left_bound) < 2 or len(right_bound) < 2:
+        raise ValueError("Both boundaries must have at least 2 points")
+
+    # Convert to numpy arrays
+    left_points = extract_points_3d(left_bound)
+    right_points = extract_points_3d(right_bound)
+
+    # Calculate cumulative arc lengths for both boundaries
+    boundary_data = _compute_boundary_arc_lengths(left_points, right_points)
+
+    # Calculate optimal number of samples
+    total_length = max(
+        boundary_data["left_total_length"], boundary_data["right_total_length"]
+    )
+    num_samples = _calculate_optimal_num_samples(total_length, config)
+
+    # Sample points along normalized arc length
+    normalized_positions = np.linspace(0.0, 1.0, num_samples)
+
+    # Calculate widths using left boundary as reference
+    # (which is either the current lanelet's left or previous lanelet's right)
+    arc_lengths, widths = _calculate_widths_by_reference(
+        "left_bound",  # Always use left boundary of the reference pair
+        normalized_positions,
+        left_points,
+        right_points,
+        boundary_data,
+    )
+
+    # Create width spline
+    arc_lengths_array = np.array(arc_lengths)
+    widths_array = np.array(widths)
+
+    width_spline_1d = CubicSpline1D(
+        arc_lengths_array,
+        widths_array,
+        bc_type=DEFAULT_CONFIG.centerline.boundary_condition_default,
+    )
+
+    return Width1DSplineAdapter(width_spline_1d)
+
+
 def _compute_boundary_arc_lengths(
     left_points: np.ndarray, right_points: np.ndarray
 ) -> dict:

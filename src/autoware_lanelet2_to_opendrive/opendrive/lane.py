@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 import lanelet2
 import lxml.etree as ET
 
-from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
+from ..centerline import Width1DSplineAdapter
 from ..spline import Splines
 from ..conversion_config import WidthEstimationConfig, WidthReference
 
@@ -141,6 +141,7 @@ class Lane:
         lanelet: lanelet2.core.Lanelet,
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        previous_lanelet: Optional[lanelet2.core.Lanelet] = None,
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -150,6 +151,8 @@ class Lane:
             lanelet: The lanelet to convert to Lane
             rule: Traffic rule for the lane (RHT or LHT)
             width_config: Configuration for width spline sampling
+            previous_lanelet: Previous lanelet (inner lane) for multi-lane width calculation.
+                             If None, this is the first lane (Lane -1)
 
         Returns:
             Lane instance constructed from the lanelet
@@ -187,10 +190,9 @@ class Lane:
             rule=rule,
         )
 
-        # Use left boundary as reference for width calculation
-        # Both RHT and LHT use LEFT_BOUND since the road reference line is always
-        # the leftmost lanelet's left boundary (ensures coordinate system continuity)
-        # Width is measured from left boundary to right boundary (lane width)
+        # Width calculation for multi-lane roads
+        # For Lane -1: width from reference line (left boundary) to right boundary
+        # For Lane -2+: width from previous lane's right boundary to current right boundary
         if width_config is None:
             config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
         else:
@@ -204,7 +206,13 @@ class Lane:
                 default_sample_interval=width_config.default_sample_interval,
             )
 
-        width_spline = estimate_lanelet_width_as_spline(lanelet, config)
+        # Import the multi-lane width estimation function
+        from ..centerline import estimate_multi_lane_width_as_spline
+
+        # Use multi-lane aware width calculation
+        width_spline = estimate_multi_lane_width_as_spline(
+            lanelet, config, previous_lanelet
+        )
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)
