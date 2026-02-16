@@ -100,17 +100,13 @@ class ReferenceLine:
                 f"Invalid traffic_rule: '{traffic_rule}'. Must be 'RHT' or 'LHT'."
             )
 
-        # Select reference lanelet and boundary based on traffic rule
-        if traffic_rule_normalized == "RHT":
-            # RHT: Use leftmost lanelet's left boundary
-            reference_lanelet = sorted_lanelets[0]
-            border = "left"
-            boundary = reference_lanelet.leftBound
-        else:  # LHT
-            # LHT: Use rightmost lanelet's right boundary
-            reference_lanelet = sorted_lanelets[-1]
-            border = "right"
-            boundary = reference_lanelet.rightBound
+        # Select reference lanelet and boundary
+        # Both RHT and LHT use the leftmost lanelet's left boundary as reference
+        # This ensures coordinate system continuity across roads
+        # The traffic rule affects lane placement (right section) and reference line direction
+        reference_lanelet = sorted_lanelets[0]
+        border = "left"
+        boundary = reference_lanelet.leftBound
 
         from ..centerline import extract_border_from_spline
 

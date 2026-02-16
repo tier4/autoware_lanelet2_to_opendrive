@@ -120,26 +120,17 @@ class LaneSection:
                 f"Invalid traffic_rule: '{traffic_rule}'. Must be 'RHT' or 'LHT'."
             )
 
-        # Create lanes based on traffic rule
-        if traffic_rule_normalized == "RHT":
-            # RHT: Right lanes with negative IDs (-1, -2, -3, ...) from left to right
-            for i, lanelet in enumerate(sorted_lanelets):
-                lane_id = -(i + 1)  # -1, -2, -3, ...
-                lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, width_config=width_config
-                )
-                lane.lane_id = lane_id
-                lane_section._add_right_lane(lane)
-        else:  # LHT
-            # LHT: Right lanes with negative IDs (-1, -2, -3, ...) from right to left
-            # Note: In OpenDRIVE, right lanes travel opposite to reference line direction
-            for i, lanelet in enumerate(reversed(sorted_lanelets)):
-                lane_id = -(i + 1)  # -1, -2, -3, ...
-                lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, width_config=width_config
-                )
-                lane.lane_id = lane_id
-                lane_section._add_right_lane(lane)
+        # Create lanes for both traffic rules
+        # Both RHT and LHT use the same lane assignment order (left to right)
+        # to ensure physical continuity across roads
+        # Traffic rule is passed to Lane.construct_from_lanelet for proper processing
+        for i, lanelet in enumerate(sorted_lanelets):
+            lane_id = -(i + 1)  # -1, -2, -3, ...
+            lane = Lane.construct_from_lanelet(
+                lanelet_map, lanelet, width_config=width_config, rule=traffic_rule
+            )
+            lane.lane_id = lane_id
+            lane_section._add_right_lane(lane)
 
         return lane_section
 
