@@ -752,6 +752,59 @@ traffic_rule: "RHT"                  # Can be overridden
 | `"RHT"` | Right-hand traffic (positive IDs on right) | US, Europe, China |
 | `"LHT"` | Left-hand traffic (positive IDs on left) | UK, Japan, Australia |
 
+#### OpenDRIVE Coordinate System and Lane Placement
+
+**Road Coordinate System (s-t coordinate system)**:
+- **s-axis**: Along the reference line (travel direction, always increasing)
+- **t-axis**: Lateral to the reference line (right is positive, left is negative)
+
+**Lane Coordinate System**:
+- Each lane's s-coordinate corresponds to the road coordinate system's s-coordinate
+- Lane width is defined as the lateral distance from the reference line
+
+**Implementation Details**:
+
+| Traffic Rule | Reference Line Position | Lane Position | Lane ID | Lane Group | Lane Coordinate Direction | t-coordinate Sign | Compliant |
+|--------------|------------------------|---------------|---------|------------|---------------------------|-------------------|-----------|
+| RHT | Left edge (leftBound) | Right side | Negative (-1, -2, -3) | Right lanes | **Same as road coordinate (forward)** | t > 0 | ✓ |
+| LHT | Right edge (rightBound) | Left side | Positive (+1, +2, +3) | Left lanes | **Same as road coordinate (forward)** | t < 0 | ✓ |
+
+**Key Points**:
+
+1. **All lanes have s-axis aligned with road coordinate system**
+   - For both RHT and LHT, s-coordinate increases in the travel direction
+   - No need to reverse lane coordinate systems
+
+2. **Lane ID sign determines width definition direction**
+   - Positive IDs (left lanes): from reference line to the left (t < 0)
+   - Negative IDs (right lanes): from reference line to the right (t > 0)
+
+3. **Traffic rule impact**
+   - RHT: Lanes placed on the right side → negative IDs → right lanes
+   - LHT: Lanes placed on the left side → positive IDs → left lanes
+
+**Visual Representation**:
+
+RHT (Right-Hand Traffic):
+```
+Reference Line (s-axis →)
+[s=0] ━━━━━━━━━━━━━━━━━━━━━━━━━━━→ [s=L]
+         ↓ (t > 0, right direction)
+    [Lane -1]  s-axis → (same as road coordinate)
+    [Lane -2]  s-axis → (same as road coordinate)
+    [Lane -3]  s-axis → (same as road coordinate)
+```
+
+LHT (Left-Hand Traffic):
+```
+    [Lane +3]  s-axis → (same as road coordinate)
+    [Lane +2]  s-axis → (same as road coordinate)
+    [Lane +1]  s-axis → (same as road coordinate)
+         ↑ (t < 0, left direction)
+Reference Line (s-axis →)
+[s=0] ━━━━━━━━━━━━━━━━━━━━━━━━━━━→ [s=L]
+```
+
 ---
 
 ### Configuration Composition and Merging
