@@ -11,7 +11,7 @@ from .geometry import PlanView, ParamPoly3, GeometryBase
 from .elevation import ElevationProfile
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
-from .enums import ContactPoint, ElementType, RoadType
+from .enums import ContactPoint, ElementType, RoadType, TrafficRule
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
@@ -39,6 +39,7 @@ class Road:
     name: Optional[str] = None
     length: float = 0.0
     junction: int = -1
+    rule: Optional[TrafficRule] = None
     plan_view: Optional[PlanView] = None
     elevation_profile: Optional[ElevationProfile] = None
     lanes: Optional[Lanes] = None
@@ -56,6 +57,9 @@ class Road:
 
         if self.name:
             elem.set("name", self.name)
+
+        if self.rule:
+            elem.set("rule", self.rule.value)
 
         if self.link:
             elem.append(self.link.to_xml())
@@ -564,6 +568,15 @@ class Road:
         # Extract speed limit and road type from lanelets
         road_types_list = Road._extract_road_types_from_lanelets(lanelet_list)
 
+        # Convert traffic_rule string to TrafficRule enum
+        rule_enum = None
+        if traffic_rule:
+            traffic_rule_normalized = traffic_rule.upper()
+            if traffic_rule_normalized == "RHT":
+                rule_enum = TrafficRule.RHT
+            elif traffic_rule_normalized == "LHT":
+                rule_enum = TrafficRule.LHT
+
         # Create a basic road with the extracted information
         # Note: This is a simplified implementation
         # A complete implementation would also need to:
@@ -574,6 +587,7 @@ class Road:
             name=f"Road_{road_id}",
             length=road_length,
             junction=-1,  # Not in a junction by default
+            rule=rule_enum,  # Set traffic rule for the road
             plan_view=plan_view,
             elevation_profile=elevation_profile,
             lanes=get_lanes(),

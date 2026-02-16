@@ -94,3 +94,10 @@ class SpeedUnit(Enum):
     MS = "m/s"  # meters per second
     MPH = "mph"  # miles per hour
     KMH = "km/h"  # kilometers per hour
+
+
+class TrafficRule(Enum):
+    """Traffic rule according to OpenDRIVE standard (e_trafficRule)."""
+
+    RHT = "RHT"  # Right-hand traffic
+    LHT = "LHT"  # Left-hand traffic

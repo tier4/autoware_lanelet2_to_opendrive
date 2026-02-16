@@ -126,7 +126,7 @@ class LaneSection:
             for i, lanelet in enumerate(sorted_lanelets):
                 lane_id = -(i + 1)  # -1, -2, -3, ...
                 lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, rule=traffic_rule, width_config=width_config
+                    lanelet_map, lanelet, width_config=width_config
                 )
                 lane.lane_id = lane_id
                 lane_section._add_right_lane(lane)
@@ -135,7 +135,7 @@ class LaneSection:
             for i, lanelet in enumerate(reversed(sorted_lanelets)):
                 lane_id = i + 1  # +1, +2, +3, ...
                 lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, rule=traffic_rule, width_config=width_config
+                    lanelet_map, lanelet, width_config=width_config
                 )
                 lane.lane_id = lane_id
                 lane_section._add_left_lane(lane)
