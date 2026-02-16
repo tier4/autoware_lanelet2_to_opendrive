@@ -568,6 +568,15 @@ class Road:
         # Extract speed limit and road type from lanelets
         road_types_list = Road._extract_road_types_from_lanelets(lanelet_list)
 
+        # Convert traffic_rule string to TrafficRule enum
+        rule_enum = None
+        if traffic_rule:
+            traffic_rule_normalized = traffic_rule.upper()
+            if traffic_rule_normalized == "RHT":
+                rule_enum = TrafficRule.RHT
+            elif traffic_rule_normalized == "LHT":
+                rule_enum = TrafficRule.LHT
+
         # Create a basic road with the extracted information
         # Note: This is a simplified implementation
         # A complete implementation would also need to:
@@ -578,6 +587,7 @@ class Road:
             name=f"Road_{road_id}",
             length=road_length,
             junction=-1,  # Not in a junction by default
+            rule=rule_enum,  # Set traffic rule for the road
             plan_view=plan_view,
             elevation_profile=elevation_profile,
             lanes=get_lanes(),
