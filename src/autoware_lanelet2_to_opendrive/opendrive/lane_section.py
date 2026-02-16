@@ -120,13 +120,20 @@ class LaneSection:
                 f"Invalid traffic_rule: '{traffic_rule}'. Must be 'RHT' or 'LHT'."
             )
 
+        # Extract reference line spline for width calculation
+        reference_line_spline = reference_line.centerline_2d
+
         # Create lanes based on traffic rule
         if traffic_rule_normalized == "RHT":
             # RHT: Right lanes with negative IDs (-1, -2, -3, ...) from left to right
             for i, lanelet in enumerate(sorted_lanelets):
                 lane_id = -(i + 1)  # -1, -2, -3, ...
                 lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, width_config=width_config
+                    lanelet_map,
+                    lanelet,
+                    rule=traffic_rule_normalized,
+                    width_config=width_config,
+                    reference_line_spline=reference_line_spline,
                 )
                 lane.lane_id = lane_id
                 lane_section._add_right_lane(lane)
@@ -135,7 +142,11 @@ class LaneSection:
             for i, lanelet in enumerate(reversed(sorted_lanelets)):
                 lane_id = i + 1  # +1, +2, +3, ...
                 lane = Lane.construct_from_lanelet(
-                    lanelet_map, lanelet, width_config=width_config
+                    lanelet_map,
+                    lanelet,
+                    rule=traffic_rule_normalized,
+                    width_config=width_config,
+                    reference_line_spline=reference_line_spline,
                 )
                 lane.lane_id = lane_id
                 lane_section._add_left_lane(lane)

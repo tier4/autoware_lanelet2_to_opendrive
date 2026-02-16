@@ -141,6 +141,7 @@ class Lane:
         lanelet: lanelet2.core.Lanelet,
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        reference_line_spline: Optional["Splines"] = None,
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -150,6 +151,9 @@ class Lane:
             lanelet: The lanelet to convert to Lane
             rule: Traffic rule for the lane (RHT or LHT)
             width_config: Configuration for width spline sampling
+            reference_line_spline: Road reference line spline for s-coordinate alignment.
+                                  If provided, width s-coordinates will be aligned to
+                                  the road reference line instead of lanelet boundaries.
 
         Returns:
             Lane instance constructed from the lanelet
@@ -219,7 +223,16 @@ class Lane:
                     default_sample_interval=width_config.default_sample_interval,
                 )
 
-        width_spline = estimate_lanelet_width_as_spline(lanelet, config)
+        # Use reference line-based width calculation if reference line is provided
+        if reference_line_spline is not None:
+            from ..centerline import estimate_lanelet_width_with_reference_line
+
+            width_spline = estimate_lanelet_width_with_reference_line(
+                lanelet, reference_line_spline, config
+            )
+        else:
+            # Fallback to old behavior (for backward compatibility)
+            width_spline = estimate_lanelet_width_as_spline(lanelet, config)
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)
