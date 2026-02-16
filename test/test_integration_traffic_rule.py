@@ -80,23 +80,23 @@ def test_full_conversion_lht(lanelet_map):
     # Check first lane section
     first_section = lane_section_elems[0]
 
-    # LHT should have left lanes only
-    left_elem = first_section.find("left")
-    assert left_elem is not None
-    left_lane_elems = left_elem.findall("lane")
-    assert len(left_lane_elems) == 2
-
-    # Check lane IDs are positive
-    left_lane_ids = [int(lane.get("id")) for lane in left_lane_elems]
-    assert all(lane_id > 0 for lane_id in left_lane_ids)
-    assert 1 in left_lane_ids
-    assert 2 in left_lane_ids
-
-    # LHT should have no right lanes
+    # LHT should have right lanes only
     right_elem = first_section.find("right")
-    if right_elem is not None:
-        right_lane_elems = right_elem.findall("lane")
-        assert len(right_lane_elems) == 0
+    assert right_elem is not None
+    right_lane_elems = right_elem.findall("lane")
+    assert len(right_lane_elems) == 2
+
+    # Check lane IDs are negative
+    right_lane_ids = [int(lane.get("id")) for lane in right_lane_elems]
+    assert all(lane_id < 0 for lane_id in right_lane_ids)
+    assert -1 in right_lane_ids
+    assert -2 in right_lane_ids
+
+    # LHT should have no left lanes
+    left_elem = first_section.find("left")
+    if left_elem is not None:
+        left_lane_elems = left_elem.findall("lane")
+        assert len(left_lane_elems) == 0
 
 
 def test_reference_line_geometry_rht(lanelet_map):

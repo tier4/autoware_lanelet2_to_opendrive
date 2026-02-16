@@ -131,14 +131,15 @@ class LaneSection:
                 lane.lane_id = lane_id
                 lane_section._add_right_lane(lane)
         else:  # LHT
-            # LHT: Left lanes with positive IDs (+1, +2, +3, ...) from right to left
+            # LHT: Right lanes with negative IDs (-1, -2, -3, ...) from right to left
+            # Note: In OpenDRIVE, right lanes travel opposite to reference line direction
             for i, lanelet in enumerate(reversed(sorted_lanelets)):
-                lane_id = i + 1  # +1, +2, +3, ...
+                lane_id = -(i + 1)  # -1, -2, -3, ...
                 lane = Lane.construct_from_lanelet(
                     lanelet_map, lanelet, width_config=width_config
                 )
                 lane.lane_id = lane_id
-                lane_section._add_left_lane(lane)
+                lane_section._add_right_lane(lane)
 
         return lane_section
 
