@@ -426,6 +426,7 @@ def extract_border_from_spline(
     border: str,
     num_control_points: Optional[int] = None,
     dimensions: int = 2,
+    reverse: bool = False,
 ) -> Splines:
     """
     Extract border line from a Lanelet and return as B-spline with arc length parameterization.
@@ -436,6 +437,7 @@ def extract_border_from_spline(
         num_control_points: Number of control points for B-spline interpolation.
                            If None, automatically computed based on geometry complexity.
         dimensions: Number of dimensions (2 for XY only)
+        reverse: If True, reverse the point order to flip the reference line direction
 
     Returns:
         Splines object that can be evaluated using arc length
@@ -468,11 +470,20 @@ def extract_border_from_spline(
     # Coordinate offset is applied automatically
     points = extract_points_2d(boundary)
 
+    # Reverse point order if requested (for LHT reference line direction)
+    if reverse:
+        points = points[::-1]
+
     # Get velocity vectors perpendicular to the line connecting left and right boundaries
     # This ensures both left and right boundaries have consistent tangent directions at endpoints,
     # preventing gaps in OpenDRIVE lane geometry
-    start_vel = _calculate_centerline_velocity_vector(lanelet, at_start=True)[:2]
-    end_vel = _calculate_centerline_velocity_vector(lanelet, at_start=False)[:2]
+    # When reversing, swap and negate the velocity vectors
+    if reverse:
+        start_vel = -_calculate_centerline_velocity_vector(lanelet, at_start=False)[:2]
+        end_vel = -_calculate_centerline_velocity_vector(lanelet, at_start=True)[:2]
+    else:
+        start_vel = _calculate_centerline_velocity_vector(lanelet, at_start=True)[:2]
+        end_vel = _calculate_centerline_velocity_vector(lanelet, at_start=False)[:2]
 
     # Create B-spline with constrained fitting
     return Splines(

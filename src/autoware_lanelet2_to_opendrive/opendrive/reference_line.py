@@ -116,6 +116,10 @@ class ReferenceLine:
 
         points_3d = extract_points_3d(boundary)
 
+        # Reverse point order for LHT to flip reference line direction
+        if traffic_rule_normalized == "LHT":
+            points_3d = points_3d[::-1]
+
         # Calculate XY cumulative distances (2D arc length) directly from points
         xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
         xy_arc_lengths = np.concatenate(([0], np.cumsum(xy_distances)))
@@ -124,8 +128,12 @@ class ReferenceLine:
         elevation_offset = points_3d[0, 2]
 
         # Extract the selected boundary as 2D spline (XY only) for reference line geometry
+        # Reverse for LHT to match the flipped reference line direction
         centerline_2d = extract_border_from_spline(
-            reference_lanelet, border=border, dimensions=2
+            reference_lanelet,
+            border=border,
+            dimensions=2,
+            reverse=(traffic_rule_normalized == "LHT"),
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)
