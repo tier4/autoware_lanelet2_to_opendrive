@@ -123,18 +123,14 @@ class LaneSection:
         # Create lanes for both traffic rules
         # Both RHT and LHT use the same lane assignment order (left to right)
         # to ensure physical continuity across roads
-        # For multi-lane roads, each lane's width is calculated from the previous lane's
-        # outer boundary (OpenDRIVE specification)
+        # Each lane's width is calculated as the lanelet's own width (left to right boundary)
         for i, lanelet in enumerate(sorted_lanelets):
             lane_id = -(i + 1)  # -1, -2, -3, ...
-            # Get previous lanelet for multi-lane width calculation
-            previous_lanelet = sorted_lanelets[i - 1] if i > 0 else None
             lane = Lane.construct_from_lanelet(
                 lanelet_map,
                 lanelet,
                 width_config=width_config,
                 rule=traffic_rule,
-                previous_lanelet=previous_lanelet,
             )
             lane.lane_id = lane_id
             lane_section._add_right_lane(lane)
