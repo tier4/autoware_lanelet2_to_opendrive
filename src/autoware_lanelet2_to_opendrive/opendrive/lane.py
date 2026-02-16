@@ -187,26 +187,44 @@ class Lane:
             rule=rule,
         )
 
-        # Use left boundary as reference line for both traffic rules
-        # Both RHT and LHT use LEFT_BOUND since lanes are assigned to right section
-        # Width is calculated from left boundary to right boundary (lane width)
+        # Select width calculation reference based on traffic rule
+        # The reference must match the road reference line for correct width calculation
+        #
+        # RHT: Road reference line is leftmost lanelet's left boundary
+        #      -> Use LEFT_BOUND as width reference for all lanes
+        #      -> Width is measured from left boundary (reference line) to right boundary
+        #
+        # LHT: Road reference line is rightmost lanelet's right boundary
+        #      -> Use RIGHT_BOUND as width reference for all lanes
+        #      -> Width is measured from right boundary (reference line) to left boundary
+        #      -> This ensures width is measured from the road reference line inward
+        rule_normalized = (rule or "RHT").upper()
 
-        # Use provided width_config or create default
-        # Both RHT and LHT use LEFT_BOUND as reference line
-        # RHT: Left boundary is reference line (road center/left edge)
-        # LHT: Left boundary is reference line (road left edge for right section lanes)
         if width_config is None:
-            config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
+            if rule_normalized == "LHT":
+                config = WidthEstimationConfig(reference=WidthReference.RIGHT_BOUND)
+            else:
+                config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
         else:
-            # Copy config and use LEFT_BOUND for both traffic rules
-            config = WidthEstimationConfig(
-                num_samples=width_config.num_samples,
-                reference=WidthReference.LEFT_BOUND,
-                adaptive_sampling=width_config.adaptive_sampling,
-                min_samples=width_config.min_samples,
-                max_samples=width_config.max_samples,
-                default_sample_interval=width_config.default_sample_interval,
-            )
+            # Copy config and override reference based on traffic rule
+            if rule_normalized == "LHT":
+                config = WidthEstimationConfig(
+                    num_samples=width_config.num_samples,
+                    reference=WidthReference.RIGHT_BOUND,
+                    adaptive_sampling=width_config.adaptive_sampling,
+                    min_samples=width_config.min_samples,
+                    max_samples=width_config.max_samples,
+                    default_sample_interval=width_config.default_sample_interval,
+                )
+            else:
+                config = WidthEstimationConfig(
+                    num_samples=width_config.num_samples,
+                    reference=WidthReference.LEFT_BOUND,
+                    adaptive_sampling=width_config.adaptive_sampling,
+                    min_samples=width_config.min_samples,
+                    max_samples=width_config.max_samples,
+                    default_sample_interval=width_config.default_sample_interval,
+                )
 
         width_spline = estimate_lanelet_width_as_spline(lanelet, config)
 
