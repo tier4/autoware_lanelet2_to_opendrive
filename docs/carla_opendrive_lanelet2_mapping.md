@@ -475,6 +475,16 @@ To address boundary length mismatches, apply combinations of the following Lanel
 
 **Example Scenario**:
 
+**Real-World Example: Curved Road with Boundary Length Mismatch**
+
+In areas with high curvature (tight curves, intersections), the inner and outer boundaries naturally have different arc lengths. This geometric property can cause significant boundary length mismatches between adjacent lanelets.
+
+![Boundary Length Mismatch in Curved Roads](image/polygon_flip.png)
+
+*Figure: Lanelet2 map showing curved roads and intersections where inner boundaries (shorter arc) and outer boundaries (longer arc) have significantly different lengths due to road curvature.*
+
+**Numeric Example**:
+
 ```
 Before preprocessing:
   Lane A: left boundary = 50m, right boundary = 50m
