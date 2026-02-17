@@ -726,6 +726,16 @@ def main() -> int:
             # Use command-line MGRS code
             mgrs_code = args.mgrs_code
 
+        # Set coordinate offset if provided
+        # This offset will be applied when extracting Lanelet2 boundaries
+        if offset:
+            from .config import COORDINATE_OFFSET
+
+            COORDINATE_OFFSET.set(offset[0], offset[1], offset[2])
+            logger.info(
+                f"Set coordinate offset: x={offset[0]:.2f}, y={offset[1]:.2f}, z={offset[2]:.2f}"
+            )
+
         # Create origin
         if mgrs_code and offset:
             from .util import mgrs_grid_with_offset_to_lanelet2_origin
@@ -833,6 +843,13 @@ def main() -> int:
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
         return 1
+    finally:
+        # Reset coordinate offset to avoid affecting other code
+        from .config import COORDINATE_OFFSET
+
+        if COORDINATE_OFFSET.is_active:
+            COORDINATE_OFFSET.reset()
+            logger.debug("Reset coordinate offset")
 
 
 if __name__ == "__main__":
