@@ -31,6 +31,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml  # type: ignore[import-untyped]
+
 # Import autoware extensions before loading maps to ensure proper registration
 # The order matters: projection module must be imported to register extensions
 from autoware_lanelet2_extension_python.projection import MGRSProjector
@@ -479,6 +481,66 @@ def save_figure_pickle(fig: plt.Figure, output_path: Path) -> None:
     logger.info(f"Saved figure pickle to {output_path}")
 
 
+def load_origin_from_yaml(
+    config_path: Path,
+) -> tuple[Optional[str], Optional[tuple[float, float, float]]]:
+    """Load origin configuration from YAML file.
+
+    Args:
+        config_path: Path to YAML configuration file
+
+    Returns:
+        Tuple of (mgrs_code, offset) where:
+        - mgrs_code: MGRS grid code (e.g., "54SUE")
+        - offset: Tuple of (x, y, z) offset values, or None if not specified
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        ValueError: If config format is invalid
+    """
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+
+        # Try to extract origin from different config formats
+        mgrs_code = None
+        offset = None
+
+        # Format 1: Hydra config with map.mgrs_grid and map.offset
+        if "map" in config:
+            mgrs_code = config["map"].get("mgrs_grid")
+            if "offset" in config["map"]:
+                offset_dict = config["map"]["offset"]
+                offset = (
+                    float(offset_dict.get("x", 0)),
+                    float(offset_dict.get("y", 0)),
+                    float(offset_dict.get("z", 0)),
+                )
+
+        # Format 2: Simple config with mgrs_code
+        elif "mgrs_code" in config:
+            mgrs_code = config["mgrs_code"]
+
+        # Format 3: Direct mgrs_grid key
+        elif "mgrs_grid" in config:
+            mgrs_code = config["mgrs_grid"]
+
+        if mgrs_code:
+            logger.info(f"Loaded MGRS code from config: {mgrs_code}")
+        if offset:
+            logger.info(
+                f"Loaded offset from config: x={offset[0]}, y={offset[1]}, z={offset[2]}"
+            )
+
+        return mgrs_code, offset
+
+    except Exception as e:
+        raise ValueError(f"Failed to parse config file: {e}") from e
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments.
 
@@ -562,6 +624,12 @@ Examples:
         metavar="CODE",
         help="MGRS code for Lanelet2 projection (e.g., 54SUE)",
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="YAML config file with origin settings (mgrs_grid, offset)",
+    )
 
     return parser.parse_args()
 
@@ -595,12 +663,33 @@ def main() -> int:
         # Load Lanelet2 file
         logger.info("Step 2/4: Loading Lanelet2 file...")
 
-        # Determine origin based on MGRS code if provided
-        if args.mgrs_code:
+        # Determine origin based on config file or MGRS code
+        mgrs_code = None
+        offset = None
+
+        if args.config:
+            # Load from config file
+            mgrs_code, offset = load_origin_from_yaml(args.config)
+        elif args.mgrs_code:
+            # Use command-line MGRS code
+            mgrs_code = args.mgrs_code
+
+        # Create origin
+        if mgrs_code and offset:
+            from .util import mgrs_grid_with_offset_to_lanelet2_origin
+
+            origin = mgrs_grid_with_offset_to_lanelet2_origin(
+                mgrs_code, offset[0], offset[1], offset[2]
+            )
+            logger.info(
+                f"Using MGRS origin: {mgrs_code} with offset "
+                f"({offset[0]:.2f}, {offset[1]:.2f}, {offset[2]:.2f})"
+            )
+        elif mgrs_code:
             from .util import mgrs_to_lanelet2_origin
 
-            origin = mgrs_to_lanelet2_origin(args.mgrs_code)
-            logger.info(f"Using MGRS origin: {args.mgrs_code}")
+            origin = mgrs_to_lanelet2_origin(mgrs_code)
+            logger.info(f"Using MGRS origin: {mgrs_code}")
         else:
             origin = lanelet2.io.Origin(0, 0)
             logger.info("Using default origin (0, 0)")

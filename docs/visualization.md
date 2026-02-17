@@ -95,6 +95,18 @@ uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
     --mgrs-code 54SUE
 ```
 
+### Use Configuration File
+
+```bash
+# Load origin settings from YAML config (recommended)
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
+    --config outputs/2026-02-09/22-17-16/.hydra/config.yaml
+
+# The config file can specify:
+# - mgrs_grid: MGRS code (e.g., 54SUE)
+# - offset: x, y, z offset values
+```
+
 ## Command-Line Options
 
 ### Required Arguments
@@ -115,6 +127,7 @@ uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
 | `--colormap NAME` | Matplotlib colormap name | `coolwarm` |
 | `--no-show` | Do not show interactive plot window | Shows plot |
 | `--mgrs-code CODE` | MGRS code for Lanelet2 projection | No projection |
+| `--config PATH` | YAML config file with origin settings | None |
 
 ## Output Formats
 

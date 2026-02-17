@@ -47,6 +47,7 @@ dev = [
     "pytest>=9.0.1",
     "pytest-testmon>=2.2.0",
     "pytest-xdist>=3.8.0",
+    "types-pyyaml>=6.0.12.20250915",
     "weasyprint>=68.0",
 ]
 
