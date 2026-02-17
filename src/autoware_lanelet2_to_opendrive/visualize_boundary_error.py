@@ -90,145 +90,50 @@ def extract_opendrive_lane_boundaries(
 
         boundaries = []
 
-        for road in network.roads:
+        for road in network.get_roads():
             logger.debug(f"Processing road ID {road.id}")
-
-            # Sample reference line at regular intervals
-            s_step = 0.5  # Sample every 0.5m
-            s_vals = np.arange(0, road.length, s_step)
-
-            # Add the end point
-            if s_vals[-1] < road.length:
-                s_vals = np.append(s_vals, road.length)
-
-            # Get reference line points
-            ref_line_points = []
-            for s in s_vals:
-                try:
-                    x, y, hdg = road.get_geometry(s)
-                    # For now, assume z=0 (2D)
-                    ref_line_points.append([x, y, 0.0])
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to get geometry at s={s} for road {road.id}: {e}"
-                    )
-                    continue
-
-            ref_line_points = np.array(ref_line_points)
 
             # Extract lane boundaries for each lane section
             for lane_section in road.lane_sections:
                 # Process left lanes
                 for lane in lane_section.left_lanes:
                     try:
-                        boundary_points = []
+                        # Get boundary line (outer edge of lane)
+                        boundary_xy = lane.boundary_line  # Shape: (N, 2)
 
-                        # Get s values within this lane section
-                        s_start = lane_section.s_offset
-                        s_end = (
-                            lane_section.s_offset + lane_section.length
-                            if hasattr(lane_section, "length")
-                            else road.length
+                        # Convert to 3D by adding z=0
+                        boundary_xyz = np.column_stack(
+                            [boundary_xy, np.zeros(len(boundary_xy))]
                         )
 
-                        for s in s_vals:
-                            if s < s_start or s > s_end:
-                                continue
-
-                            try:
-                                # Get reference line position and heading
-                                x_ref, y_ref, hdg = road.get_geometry(s)
-
-                                # Get lane width at this s position
-                                # Calculate offset for outer boundary
-                                offset = 0.0
-                                for i in range(abs(lane.id)):
-                                    other_lane = next(
-                                        (
-                                            ln
-                                            for ln in lane_section.left_lanes
-                                            if ln.id == i + 1
-                                        ),
-                                        None,
-                                    )
-                                    if other_lane:
-                                        # Get width at relative s position
-                                        s_relative = s - s_start
-                                        width = other_lane.get_width(s_relative)
-                                        offset += width
-
-                                # Calculate boundary position perpendicular to reference line
-                                x_boundary = x_ref - offset * np.sin(hdg)
-                                y_boundary = y_ref + offset * np.cos(hdg)
-                                boundary_points.append([x_boundary, y_boundary, 0.0])
-
-                            except Exception as e:
-                                logger.debug(
-                                    f"Failed to calculate boundary at s={s}: {e}"
-                                )
-                                continue
-
-                        if len(boundary_points) > 1:
-                            boundaries.append(np.array(boundary_points))
+                        if len(boundary_xyz) > 1:
+                            boundaries.append(boundary_xyz)
+                            logger.debug(
+                                f"Added left lane {lane.id} boundary ({len(boundary_xyz)} points)"
+                            )
 
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to process left lane {lane.id} in section at s={lane_section.s_offset}: {e}"
-                        )
+                        logger.warning(f"Failed to process left lane {lane.id}: {e}")
 
                 # Process right lanes
                 for lane in lane_section.right_lanes:
                     try:
-                        boundary_points = []
+                        # Get boundary line (outer edge of lane)
+                        boundary_xy = lane.boundary_line  # Shape: (N, 2)
 
-                        s_start = lane_section.s_offset
-                        s_end = (
-                            lane_section.s_offset + lane_section.length
-                            if hasattr(lane_section, "length")
-                            else road.length
+                        # Convert to 3D by adding z=0
+                        boundary_xyz = np.column_stack(
+                            [boundary_xy, np.zeros(len(boundary_xy))]
                         )
 
-                        for s in s_vals:
-                            if s < s_start or s > s_end:
-                                continue
-
-                            try:
-                                x_ref, y_ref, hdg = road.get_geometry(s)
-
-                                # Calculate offset for outer boundary
-                                offset = 0.0
-                                for i in range(abs(lane.id)):
-                                    other_lane = next(
-                                        (
-                                            ln
-                                            for ln in lane_section.right_lanes
-                                            if ln.id == -(i + 1)
-                                        ),
-                                        None,
-                                    )
-                                    if other_lane:
-                                        s_relative = s - s_start
-                                        width = other_lane.get_width(s_relative)
-                                        offset += width
-
-                                # For right lanes, offset is in the opposite direction
-                                x_boundary = x_ref + offset * np.sin(hdg)
-                                y_boundary = y_ref - offset * np.cos(hdg)
-                                boundary_points.append([x_boundary, y_boundary, 0.0])
-
-                            except Exception as e:
-                                logger.debug(
-                                    f"Failed to calculate boundary at s={s}: {e}"
-                                )
-                                continue
-
-                        if len(boundary_points) > 1:
-                            boundaries.append(np.array(boundary_points))
+                        if len(boundary_xyz) > 1:
+                            boundaries.append(boundary_xyz)
+                            logger.debug(
+                                f"Added right lane {lane.id} boundary ({len(boundary_xyz)} points)"
+                            )
 
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to process right lane {lane.id} in section at s={lane_section.s_offset}: {e}"
-                        )
+                        logger.warning(f"Failed to process right lane {lane.id}: {e}")
 
         logger.info(f"Extracted {len(boundaries)} lane boundaries from OpenDRIVE")
         return boundaries
