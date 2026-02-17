@@ -31,6 +31,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Import autoware extensions before loading maps to ensure proper registration
+# The order matters: projection module must be imported to register extensions
+from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
+
 import lanelet2
 import matplotlib.pyplot as plt
 import numpy as np
