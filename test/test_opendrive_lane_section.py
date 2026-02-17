@@ -131,7 +131,7 @@ def test_lane_section_rht_explicit(lanelet_map):
 
 
 def test_lane_section_lht(lanelet_map):
-    """Test LaneSection construction with LHT produces left lanes with positive IDs."""
+    """Test LaneSection construction with LHT produces right lanes with negative IDs."""
     lanelet_group = [
         lanelet_map.laneletLayer.get(3002094),
         lanelet_map.laneletLayer.get(3002093),
@@ -141,18 +141,18 @@ def test_lane_section_lht(lanelet_map):
         lanelet_map, lanelet_group, s_offset=0.0, traffic_rule="LHT"
     )
 
-    # LHT should produce left lanes with positive IDs
-    assert len(lane_section.left_lanes) == 2
-    assert len(lane_section.right_lanes) == 0
+    # LHT should produce right lanes with negative IDs (same structure as RHT)
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 2
 
-    # Check lane IDs are positive (+1, +2 from right to left)
-    assert 1 in lane_section.left_lanes
-    assert 2 in lane_section.left_lanes
+    # Check lane IDs are negative (-1, -2 from left to right)
+    assert -1 in lane_section.right_lanes
+    assert -2 in lane_section.right_lanes
 
     # Verify lanes are ordered correctly
     all_lanes = lane_section.get_all_lanes()
     lane_ids = [lane.lane_id for lane in all_lanes]
-    assert lane_ids == [1, 2, 0]
+    assert lane_ids == [0, -1, -2]
 
 
 def test_lane_section_traffic_rule_default(lanelet_map):

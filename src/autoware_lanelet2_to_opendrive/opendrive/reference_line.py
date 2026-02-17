@@ -1,5 +1,6 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
+import logging
 from typing import TYPE_CHECKING, List, Optional, Set, Union
 
 import lanelet2
@@ -9,13 +10,15 @@ import numpy as np
 from ..cubic_spline_1d import CubicSpline1D
 from ..spline import Splines
 
-if TYPE_CHECKING:
-    pass
-
 # Import enums directly to avoid circular import
+from .elevation import Elevation, ElevationProfile
 from .enums import LaneType
 from .lane_elements import LaneWidth
-from .elevation import ElevationProfile, Elevation
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    pass
 
 
 class ReferenceLine:
@@ -77,8 +80,8 @@ class ReferenceLine:
             lanelet_group: List of lanelets representing lanes in a road
             traffic_rule: Traffic handedness - "RHT" (Right-Hand Traffic) or "LHT" (Left-Hand Traffic).
                          Defaults to "RHT" if not specified.
-                         - RHT: Uses leftmost lanelet's left boundary as reference line
-                         - LHT: Uses rightmost lanelet's right boundary as reference line
+                         Both RHT and LHT use leftmost lanelet's left boundary as reference line.
+                         The road@rule attribute indicates the traffic direction.
 
         Returns:
             ReferenceLine instance constructed from the center of the lanelet group
@@ -107,18 +110,82 @@ class ReferenceLine:
             border = "left"
             boundary = reference_lanelet.leftBound
         else:  # LHT
-            # LHT: Use rightmost lanelet's right boundary
-            reference_lanelet = sorted_lanelets[-1]
-            border = "right"
-            boundary = reference_lanelet.rightBound
+            # LHT: Use leftmost lanelet's left boundary (same as RHT for consistent structure)
+            # The road@rule attribute indicates left-hand traffic direction
+            reference_lanelet = sorted_lanelets[0]
+            border = "left"
+            boundary = reference_lanelet.leftBound
 
-        from ..centerline import extract_border_from_spline
+        # Log reference line selection
+        logger.debug(f"Traffic rule: {traffic_rule_normalized}")
+        logger.debug(f"Reference lanelet ID: {reference_lanelet.id}")
+        logger.debug(f"Using boundary: {border}")
+        logger.debug(f"Number of sorted lanelets: {len(sorted_lanelets)}")
 
         # Extract 3D points directly from the selected boundary (no 3D spline needed)
         # This avoids the 3D-to-2D arc length mapping issues on steep slopes
         from ..util import extract_points_3d
 
         points_3d = extract_points_3d(boundary)
+        logger.debug(f"Boundary points count: {len(points_3d)}")
+        logger.debug(
+            f"First point (original): [{points_3d[0, 0]:.3f}, {points_3d[0, 1]:.3f}, {points_3d[0, 2]:.3f}]"
+        )
+        logger.debug(
+            f"Last point (original): [{points_3d[-1, 0]:.3f}, {points_3d[-1, 1]:.3f}, {points_3d[-1, 2]:.3f}]"
+        )
+
+        # Track if we reversed the boundary points (needed later for velocity vectors)
+        boundary_reversed = False
+
+        # Verify and correct boundary direction for LHT (legacy check, no longer needed)
+        # Both RHT and LHT now use leftBound, which is in correct direction
+        if traffic_rule_normalized == "LHT" and border == "right":
+            # Get lanelet centerline direction vector (road direction)
+            # Use first and last points of centerline
+            centerline_points_list = []
+            for point in reference_lanelet.centerline:
+                centerline_points_list.append([point.x, point.y])
+            centerline_points: np.ndarray = np.array(centerline_points_list)
+
+            if len(centerline_points) >= 2:
+                # Centerline direction: from first to last point
+                centerline_dir = centerline_points[-1] - centerline_points[0]
+                centerline_dir_norm = centerline_dir / (
+                    np.linalg.norm(centerline_dir) + 1e-10
+                )
+
+                # Boundary direction: from first to last point
+                boundary_dir = points_3d[-1, :2] - points_3d[0, :2]
+                boundary_dir_norm = boundary_dir / (
+                    np.linalg.norm(boundary_dir) + 1e-10
+                )
+
+                # Check if directions align (dot product should be positive)
+                dot_product = np.dot(centerline_dir_norm, boundary_dir_norm)
+
+                logger.debug(f"Centerline direction: {centerline_dir_norm}")
+                logger.debug(f"Boundary direction: {boundary_dir_norm}")
+                logger.debug(f"Direction alignment (dot product): {dot_product:.4f}")
+
+                # If dot product is negative, boundary is reversed
+                if dot_product < 0:
+                    logger.warning(
+                        f"LHT rightBound direction is reversed (dot product={dot_product:.4f}). "
+                        "Reversing point order to align with road direction."
+                    )
+                    points_3d = points_3d[::-1]  # Reverse point order
+                    boundary_reversed = True
+                    logger.debug(
+                        f"First point (corrected): [{points_3d[0, 0]:.3f}, {points_3d[0, 1]:.3f}, {points_3d[0, 2]:.3f}]"
+                    )
+                    logger.debug(
+                        f"Last point (corrected): [{points_3d[-1, 0]:.3f}, {points_3d[-1, 1]:.3f}, {points_3d[-1, 2]:.3f}]"
+                    )
+                else:
+                    logger.debug(
+                        f"LHT rightBound direction is correct (dot product={dot_product:.4f})"
+                    )
 
         # Calculate XY cumulative distances (2D arc length) directly from points
         xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
@@ -128,8 +195,28 @@ class ReferenceLine:
         elevation_offset = points_3d[0, 2]
 
         # Extract the selected boundary as 2D spline (XY only) for reference line geometry
-        centerline_2d = extract_border_from_spline(
-            reference_lanelet, border=border, dimensions=2
+        # Use corrected points_3d for spline fitting
+        from ..centerline import _calculate_centerline_velocity_vector
+
+        # Get velocity vectors for boundary endpoints
+        start_vel = np.array(
+            _calculate_centerline_velocity_vector(reference_lanelet, at_start=True)[:2]
+        )
+        end_vel = np.array(
+            _calculate_centerline_velocity_vector(reference_lanelet, at_start=False)[:2]
+        )
+
+        # If we reversed the boundary points, also reverse the velocity vectors
+        if boundary_reversed:
+            start_vel, end_vel = -end_vel, -start_vel
+            logger.debug("Reversed velocity vectors to match reversed boundary points")
+
+        # Create B-spline directly from corrected points
+        centerline_2d = Splines(
+            points_3d[:, :2],  # Use corrected XY points
+            start_vel=start_vel,
+            end_vel=end_vel,
+            num_control_points=None,
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)

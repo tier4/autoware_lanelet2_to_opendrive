@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import lanelet2
 from typing import List, Optional, Set, Tuple
@@ -5,7 +6,9 @@ from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
-from .conversion_config import WidthEstimationConfig
+from .conversion_config import WidthEstimationConfig, WidthReference
+
+logger = logging.getLogger(__name__)
 
 
 class AsymmetryLaneletException(Exception):
@@ -518,6 +521,125 @@ def _calculate_optimal_num_samples(
     num_samples = max(config.min_samples, min(num_by_interval, config.max_samples))
 
     return num_samples
+
+
+def estimate_lanelet_width_with_reference_line(
+    lanelet: lanelet2.core.Lanelet,
+    reference_line_spline: "Splines",
+    config: WidthEstimationConfig,
+) -> Width1DSplineAdapter:
+    """
+    Estimate lanelet width as a spline using road reference line s-coordinates.
+
+    This function calculates width by aligning s-coordinates to the road reference
+    line instead of individual lanelet boundaries. This ensures correct width
+    representation in OpenDRIVE format, especially for high-curvature sections.
+
+    Args:
+        lanelet: The lanelet to calculate width for
+        reference_line_spline: Road reference line spline for s-coordinate alignment
+        config: Width estimation configuration
+
+    Returns:
+        Width1DSplineAdapter with s-coordinates aligned to road reference line
+
+    Raises:
+        ValueError: If reference type is not supported or lanelet boundaries are invalid
+    """
+    # Handle centerline reference - not affected by this issue
+    if config.reference == WidthReference.CENTER_LINE:
+        return estimate_lanelet_width_as_spline(lanelet, config)
+
+    # Extract boundary points
+    from .util import extract_points_3d
+
+    left_points = extract_points_3d(lanelet.leftBound)
+    right_points = extract_points_3d(lanelet.rightBound)
+
+    # Determine anchor boundary based on traffic rule
+    if config.reference == WidthReference.LEFT_BOUND:
+        # RHT: Use left boundary as anchor
+        anchor_points = left_points
+        other_points = right_points
+    elif config.reference == WidthReference.RIGHT_BOUND:
+        # LHT: Use right boundary as anchor
+        anchor_points = right_points
+        other_points = left_points
+    else:
+        raise ValueError(f"Unsupported width reference: {config.reference}")
+
+    # Get road reference line total length
+    road_length = reference_line_spline.total_length
+
+    # Calculate arc lengths for anchor and other boundaries
+    anchor_dists = np.linalg.norm(np.diff(anchor_points[:, :2], axis=0), axis=1)
+    anchor_cumulative = np.concatenate(([0], np.cumsum(anchor_dists)))
+    anchor_total_length = anchor_cumulative[-1]
+
+    other_dists = np.linalg.norm(np.diff(other_points[:, :2], axis=0), axis=1)
+    other_cumulative = np.concatenate(([0], np.cumsum(other_dists)))
+    other_total_length = other_cumulative[-1]
+
+    # Log boundary length information
+    logger.debug(
+        f"Width calculation for lanelet {lanelet.id}: "
+        f"road_length={road_length:.3f}m, "
+        f"anchor_length={anchor_total_length:.3f}m, "
+        f"other_length={other_total_length:.3f}m, "
+        f"reference={config.reference}"
+    )
+
+    # Determine number of samples using same logic as existing function
+    num_samples = _calculate_optimal_num_samples(road_length, config)
+    normalized_positions = np.linspace(0, 1, num_samples)
+
+    arc_lengths: List[float] = []
+    widths: List[float] = []
+
+    for t_norm in normalized_positions:
+        # Map normalized position to s-coordinate on road reference line
+        s_road = t_norm * road_length
+
+        # Map normalized position to arc lengths on lanelet boundaries
+        s_anchor = t_norm * anchor_total_length
+        s_other = t_norm * other_total_length
+
+        # Interpolate positions on boundaries
+        anchor_pos = _interpolate_on_line_segments(
+            anchor_points, anchor_cumulative, s_anchor
+        )
+        other_pos = _interpolate_on_line_segments(
+            other_points, other_cumulative, s_other
+        )
+
+        # Calculate width as distance between boundaries
+        width = np.linalg.norm(anchor_pos - other_pos)
+
+        # Use road reference line s-coordinate
+        arc_lengths.append(s_road)
+        widths.append(width)
+
+    # Log width statistics
+    widths_array = np.array(widths)
+    logger.debug(
+        f"Width statistics for lanelet {lanelet.id}: "
+        f"min={widths_array.min():.3f}m, "
+        f"max={widths_array.max():.3f}m, "
+        f"mean={widths_array.mean():.3f}m, "
+        f"std={widths_array.std():.3f}m"
+    )
+
+    # Validate s-coordinates are monotonically increasing
+    arc_lengths_array = np.array(arc_lengths)
+    if not np.all(np.diff(arc_lengths_array) >= 0):
+        logger.error(
+            f"s-coordinates are not monotonic for lanelet {lanelet.id} - width calculation may be incorrect"
+        )
+
+    # Create 1D cubic spline from (s_road, width) pairs
+    spline = CubicSpline1D(arc_lengths_array, widths_array, bc_type="not-a-knot")
+
+    return Width1DSplineAdapter(spline)
 
 
 def estimate_lanelet_width_as_spline(
