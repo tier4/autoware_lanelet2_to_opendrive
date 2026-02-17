@@ -1,0 +1,14 @@
+# Map configuration for Nishi-Shinjuku (西新宿)
+# Based on test/data/lanelet2_map.osm
+
+# MGRS grid code for the map origin
+mgrs_grid: 54SUE
+
+# Offset from MGRS grid origin (in meters)
+offset:
+  x: 81655.73
+  y: 50137.43
+  z: 42.49998
+
+# Optional: Traffic rule (LHT = Left-Hand Traffic, RHT = Right-Hand Traffic)
+traffic_rule: LHT

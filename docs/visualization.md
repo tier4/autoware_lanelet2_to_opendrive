@@ -95,10 +95,20 @@ uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
     --mgrs-code 54SUE
 ```
 
+### Use Map Name (Recommended)
+
+```bash
+# Use predefined map configuration by name
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
+    --map nishishinjuku
+
+# Map configs are stored in config/maps/{map_name}.yaml
+```
+
 ### Use Configuration File
 
 ```bash
-# Load origin settings from YAML config (recommended)
+# Load origin settings from specific YAML config file
 uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
     --config outputs/2026-02-09/22-17-16/.hydra/config.yaml
 
@@ -126,6 +136,7 @@ uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
 | `--output-png PATH` | Save visualization as PNG image | Not saved |
 | `--colormap NAME` | Matplotlib colormap name | `coolwarm` |
 | `--no-show` | Do not show interactive plot window | Shows plot |
+| `--map NAME` | Map name (loads config/maps/{name}.yaml) | None |
 | `--mgrs-code CODE` | MGRS code for Lanelet2 projection | No projection |
 | `--config PATH` | YAML config file with origin settings | None |
 
@@ -305,6 +316,62 @@ class SplineConstants:
 ```
 
 Then re-run conversion and visualization to verify improvements.
+
+## Creating Map Configurations
+
+Map configurations are stored in `config/maps/` directory as YAML files. This makes it easy to reuse origin settings for different maps.
+
+### Map Config Format
+
+```yaml
+# config/maps/nishishinjuku.yaml
+
+# MGRS grid code for the map origin
+mgrs_grid: 54SUE
+
+# Offset from MGRS grid origin (in meters)
+offset:
+  x: 81655.73
+  y: 50137.43
+  z: 42.49998
+
+# Optional: Traffic rule (LHT = Left-Hand Traffic, RHT = Right-Hand Traffic)
+traffic_rule: LHT
+```
+
+### Creating a New Map Config
+
+1. **Identify your map's origin**:
+   - Check the Lanelet2 OSM file for coordinate system metadata
+   - Or use the convert command's output config
+
+2. **Create config file**:
+   ```bash
+   # Create config/maps/mymap.yaml
+   cat > config/maps/mymap.yaml << EOF
+   mgrs_grid: 54SUE
+   offset:
+     x: 81655.73
+     y: 50137.43
+     z: 42.49998
+   EOF
+   ```
+
+3. **Use the map config**:
+   ```bash
+   uv run visualize map.xodr map.osm --map mymap
+   ```
+
+### Available Maps
+
+To see available map configurations:
+
+```bash
+ls config/maps/
+```
+
+Current maps:
+- `nishishinjuku.yaml` - Nishi-Shinjuku (西新宿) test data
 
 ## Configuration
 

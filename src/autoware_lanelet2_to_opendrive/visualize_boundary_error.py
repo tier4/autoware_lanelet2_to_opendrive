@@ -481,6 +481,48 @@ def save_figure_pickle(fig: plt.Figure, output_path: Path) -> None:
     logger.info(f"Saved figure pickle to {output_path}")
 
 
+def resolve_map_config_path(map_name: str) -> Path:
+    """Resolve map name to config file path.
+
+    Args:
+        map_name: Name of the map (e.g., "nishishinjuku")
+
+    Returns:
+        Path to the map configuration file
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+    """
+    # Try multiple possible locations
+    search_paths = [
+        Path("config/maps") / f"{map_name}.yaml",  # Project root
+        Path(__file__).parent.parent.parent
+        / "config/maps"
+        / f"{map_name}.yaml",  # Relative to package
+    ]
+
+    for config_path in search_paths:
+        if config_path.exists():
+            logger.info(f"Found map config: {config_path}")
+            return config_path
+
+    # If not found, provide helpful error message
+    available_maps = []
+    for search_path in search_paths:
+        map_dir = search_path.parent
+        if map_dir.exists():
+            available_maps.extend([f.stem for f in map_dir.glob("*.yaml")])
+
+    if available_maps:
+        raise FileNotFoundError(
+            f"Map config '{map_name}' not found. Available maps: {', '.join(set(available_maps))}"
+        )
+    else:
+        raise FileNotFoundError(
+            f"Map config directory not found. Please create config/maps/{map_name}.yaml"
+        )
+
+
 def load_origin_from_yaml(
     config_path: Path,
 ) -> tuple[Optional[str], Optional[tuple[float, float, float]]]:
@@ -630,6 +672,12 @@ Examples:
         metavar="PATH",
         help="YAML config file with origin settings (mgrs_grid, offset)",
     )
+    parser.add_argument(
+        "--map",
+        type=str,
+        metavar="NAME",
+        help="Map name to load config from config/maps/ (e.g., nishishinjuku)",
+    )
 
     return parser.parse_args()
 
@@ -663,11 +711,15 @@ def main() -> int:
         # Load Lanelet2 file
         logger.info("Step 2/4: Loading Lanelet2 file...")
 
-        # Determine origin based on config file or MGRS code
+        # Determine origin based on map name, config file, or MGRS code
         mgrs_code = None
         offset = None
 
-        if args.config:
+        if args.map:
+            # Resolve map name to config file
+            config_path = resolve_map_config_path(args.map)
+            mgrs_code, offset = load_origin_from_yaml(config_path)
+        elif args.config:
             # Load from config file
             mgrs_code, offset = load_origin_from_yaml(args.config)
         elif args.mgrs_code:
