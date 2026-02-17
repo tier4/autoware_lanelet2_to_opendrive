@@ -192,36 +192,22 @@ class Lane:
         )
 
         # Use appropriate boundary based on traffic rule for both single and multi-lane
-        # RHT: Reference line is left boundary (use LEFT_BOUND)
-        # LHT: Reference line is right boundary (use RIGHT_BOUND)
-        rule_normalized = (rule or "RHT").upper()
+        # Both RHT and LHT: Reference line is left boundary (use LEFT_BOUND)
+        # The road@rule attribute indicates the traffic direction
 
-        # Use provided width_config or create default based on traffic rule
+        # Use provided width_config or create default (LEFT_BOUND for both RHT and LHT)
         if width_config is None:
-            if rule_normalized == "LHT":
-                config = WidthEstimationConfig(reference=WidthReference.RIGHT_BOUND)
-            else:
-                config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
+            config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
         else:
-            # Copy config and override reference based on traffic rule
-            if rule_normalized == "LHT":
-                config = WidthEstimationConfig(
-                    num_samples=width_config.num_samples,
-                    reference=WidthReference.RIGHT_BOUND,
-                    adaptive_sampling=width_config.adaptive_sampling,
-                    min_samples=width_config.min_samples,
-                    max_samples=width_config.max_samples,
-                    default_sample_interval=width_config.default_sample_interval,
-                )
-            else:
-                config = WidthEstimationConfig(
-                    num_samples=width_config.num_samples,
-                    reference=WidthReference.LEFT_BOUND,
-                    adaptive_sampling=width_config.adaptive_sampling,
-                    min_samples=width_config.min_samples,
-                    max_samples=width_config.max_samples,
-                    default_sample_interval=width_config.default_sample_interval,
-                )
+            # Copy config and set reference to LEFT_BOUND for both RHT and LHT
+            config = WidthEstimationConfig(
+                num_samples=width_config.num_samples,
+                reference=WidthReference.LEFT_BOUND,
+                adaptive_sampling=width_config.adaptive_sampling,
+                min_samples=width_config.min_samples,
+                max_samples=width_config.max_samples,
+                default_sample_interval=width_config.default_sample_interval,
+            )
 
         # Use reference line-based width calculation if reference line is provided
         if reference_line_spline is not None:

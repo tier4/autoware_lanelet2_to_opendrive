@@ -80,8 +80,8 @@ class ReferenceLine:
             lanelet_group: List of lanelets representing lanes in a road
             traffic_rule: Traffic handedness - "RHT" (Right-Hand Traffic) or "LHT" (Left-Hand Traffic).
                          Defaults to "RHT" if not specified.
-                         - RHT: Uses leftmost lanelet's left boundary as reference line
-                         - LHT: Uses rightmost lanelet's right boundary as reference line
+                         Both RHT and LHT use leftmost lanelet's left boundary as reference line.
+                         The road@rule attribute indicates the traffic direction.
 
         Returns:
             ReferenceLine instance constructed from the center of the lanelet group
@@ -110,10 +110,11 @@ class ReferenceLine:
             border = "left"
             boundary = reference_lanelet.leftBound
         else:  # LHT
-            # LHT: Use rightmost lanelet's right boundary
-            reference_lanelet = sorted_lanelets[-1]
-            border = "right"
-            boundary = reference_lanelet.rightBound
+            # LHT: Use leftmost lanelet's left boundary (same as RHT for consistent structure)
+            # The road@rule attribute indicates left-hand traffic direction
+            reference_lanelet = sorted_lanelets[0]
+            border = "left"
+            boundary = reference_lanelet.leftBound
 
         # Log reference line selection
         logger.debug(f"Traffic rule: {traffic_rule_normalized}")
@@ -137,8 +138,8 @@ class ReferenceLine:
         # Track if we reversed the boundary points (needed later for velocity vectors)
         boundary_reversed = False
 
-        # Verify and correct boundary direction for LHT
-        # In LHT, rightBound points might be in reverse order relative to road direction
+        # Verify and correct boundary direction for LHT (legacy check, no longer needed)
+        # Both RHT and LHT now use leftBound, which is in correct direction
         if traffic_rule_normalized == "LHT" and border == "right":
             # Get lanelet centerline direction vector (road direction)
             # Use first and last points of centerline

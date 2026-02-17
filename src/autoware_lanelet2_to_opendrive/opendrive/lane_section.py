@@ -138,9 +138,10 @@ class LaneSection:
                 lane.lane_id = lane_id
                 lane_section._add_right_lane(lane)
         else:  # LHT
-            # LHT: Left lanes with positive IDs (+1, +2, +3, ...) from right to left
-            for i, lanelet in enumerate(reversed(sorted_lanelets)):
-                lane_id = i + 1  # +1, +2, +3, ...
+            # LHT: Right lanes with negative IDs (-1, -2, -3, ...) from left to right
+            # Same structure as RHT, but road@rule="LHT" indicates left-hand traffic
+            for i, lanelet in enumerate(sorted_lanelets):
+                lane_id = -(i + 1)  # -1, -2, -3, ...
                 lane = Lane.construct_from_lanelet(
                     lanelet_map,
                     lanelet,
@@ -149,7 +150,7 @@ class LaneSection:
                     reference_line_spline=reference_line_spline,
                 )
                 lane.lane_id = lane_id
-                lane_section._add_left_lane(lane)
+                lane_section._add_right_lane(lane)
 
         return lane_section
 

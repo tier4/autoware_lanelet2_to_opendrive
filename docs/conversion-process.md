@@ -749,8 +749,8 @@ traffic_rule: "RHT"                  # Can be overridden
 
 | Traffic Rule | Lane ID Ordering | Use Case |
 |--------------|------------------|----------|
-| `"RHT"` | Right-hand traffic (positive IDs on right) | US, Europe, China |
-| `"LHT"` | Left-hand traffic (positive IDs on left) | UK, Japan, Australia |
+| `"RHT"` | Right-hand traffic (negative IDs) | US, Europe, China |
+| `"LHT"` | Left-hand traffic (negative IDs, same structure as RHT) | UK, Japan, Australia |
 
 #### OpenDRIVE Coordinate System and Lane Placement
 
@@ -767,43 +767,52 @@ traffic_rule: "RHT"                  # Can be overridden
 | Traffic Rule | Reference Line Position | Lane Position | Lane ID | Lane Group | Lane Coordinate Direction | t-coordinate Sign | Compliant |
 |--------------|------------------------|---------------|---------|------------|---------------------------|-------------------|-----------|
 | RHT | Left edge (leftBound) | Right side | Negative (-1, -2, -3) | Right lanes | **Same as road coordinate (forward)** | t > 0 | ✓ |
-| LHT | Right edge (rightBound) | Left side | Positive (+1, +2, +3) | Left lanes | **Same as road coordinate (forward)** | t < 0 | ✓ |
+| LHT | Left edge (leftBound) | Right side | Negative (-1, -2, -3) | Right lanes | **Same as road coordinate (forward)** | t > 0 | ✓ |
 
 **Key Points**:
 
-1. **All lanes have s-axis aligned with road coordinate system**
+1. **Unified reference line placement**
+   - Both RHT and LHT use the left edge (leftBound) as the reference line
+   - This creates a consistent OpenDRIVE structure regardless of traffic rule
+
+2. **All lanes have s-axis aligned with road coordinate system**
    - For both RHT and LHT, s-coordinate increases in the travel direction
    - No need to reverse lane coordinate systems
 
-2. **Lane ID sign determines width definition direction**
-   - Positive IDs (left lanes): from reference line to the left (t < 0)
-   - Negative IDs (right lanes): from reference line to the right (t > 0)
+3. **Lane ID sign determines width definition direction**
+   - Both RHT and LHT use negative IDs (right lanes): from reference line to the right (t > 0)
 
-3. **Traffic rule impact**
-   - RHT: Lanes placed on the right side → negative IDs → right lanes
-   - LHT: Lanes placed on the left side → positive IDs → left lanes
+4. **Traffic rule indication**
+   - The `road@rule` attribute ("RHT" or "LHT") indicates the traffic direction
+   - This is the authoritative source for determining left-hand vs right-hand traffic
 
 **Visual Representation**:
 
 RHT (Right-Hand Traffic):
 ```
-Reference Line (s-axis →)
+Reference Line (s-axis →, left edge)
 [s=0] ━━━━━━━━━━━━━━━━━━━━━━━━━━━→ [s=L]
          ↓ (t > 0, right direction)
     [Lane -1]  s-axis → (same as road coordinate)
     [Lane -2]  s-axis → (same as road coordinate)
     [Lane -3]  s-axis → (same as road coordinate)
+
+    road@rule="RHT"
 ```
 
 LHT (Left-Hand Traffic):
 ```
-    [Lane +3]  s-axis → (same as road coordinate)
-    [Lane +2]  s-axis → (same as road coordinate)
-    [Lane +1]  s-axis → (same as road coordinate)
-         ↑ (t < 0, left direction)
-Reference Line (s-axis →)
+Reference Line (s-axis →, left edge)
 [s=0] ━━━━━━━━━━━━━━━━━━━━━━━━━━━→ [s=L]
+         ↓ (t > 0, right direction)
+    [Lane -1]  s-axis → (same as road coordinate)
+    [Lane -2]  s-axis → (same as road coordinate)
+    [Lane -3]  s-axis → (same as road coordinate)
+
+    road@rule="LHT" (indicates left-hand traffic direction)
 ```
+
+**Note**: Both RHT and LHT use the same geometric structure. The `road@rule` attribute is the only difference, which CARLA uses to determine the correct vehicle driving direction.
 
 ---
 
