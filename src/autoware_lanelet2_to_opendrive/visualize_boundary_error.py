@@ -759,52 +759,56 @@ def main() -> int:
         # Load Lanelet2 file
         logger.info("Step 2/4: Loading Lanelet2 file...")
 
-        # Try to extract origin from OpenDRIVE geoReference first
-        origin_from_opendrive = extract_origin_from_opendrive(args.opendrive_file)
+        # Determine origin from config/map (required for coordinate alignment)
+        mgrs_code = None
+        offset = None
 
-        if origin_from_opendrive:
-            # Use origin from OpenDRIVE geoReference (preferred)
-            origin = origin_from_opendrive
-            logger.info("Using origin from OpenDRIVE geoReference (no offset needed)")
+        if args.map:
+            # Resolve map name to config file
+            config_path = resolve_map_config_path(args.map)
+            mgrs_code, offset = load_origin_from_yaml(config_path)
+        elif args.config:
+            # Load from config file
+            mgrs_code, offset = load_origin_from_yaml(args.config)
+        elif args.mgrs_code:
+            # Use command-line MGRS code
+            mgrs_code = args.mgrs_code
         else:
-            # Fallback: Use origin from config or command-line
-            logger.info(
-                "No geoReference found in OpenDRIVE, using fallback origin method"
+            # Try to extract from OpenDRIVE geoReference as last resort
+            logger.warning(
+                "No map config provided. Trying to extract origin from OpenDRIVE geoReference..."
             )
-
-            mgrs_code = None
-            offset = None
-
-            if args.map:
-                # Resolve map name to config file
-                config_path = resolve_map_config_path(args.map)
-                mgrs_code, offset = load_origin_from_yaml(config_path)
-            elif args.config:
-                # Load from config file
-                mgrs_code, offset = load_origin_from_yaml(args.config)
-            elif args.mgrs_code:
-                # Use command-line MGRS code
-                mgrs_code = args.mgrs_code
-
-            # Create origin
-            if mgrs_code and offset:
-                from .util import mgrs_grid_with_offset_to_lanelet2_origin
-
-                origin = mgrs_grid_with_offset_to_lanelet2_origin(
-                    mgrs_code, offset[0], offset[1], offset[2]
-                )
-                logger.info(
-                    f"Using MGRS origin: {mgrs_code} with offset "
-                    f"({offset[0]:.2f}, {offset[1]:.2f}, {offset[2]:.2f})"
-                )
-            elif mgrs_code:
-                from .util import mgrs_to_lanelet2_origin
-
-                origin = mgrs_to_lanelet2_origin(mgrs_code)
-                logger.info(f"Using MGRS origin: {mgrs_code}")
+            origin_from_opendrive = extract_origin_from_opendrive(args.opendrive_file)
+            if origin_from_opendrive:
+                origin = origin_from_opendrive
+                logger.info("Using origin from geoReference (may not align correctly)")
             else:
                 origin = lanelet2.io.Origin(0, 0)
-                logger.info("Using default origin (0, 0)")
+                logger.warning(
+                    "Using default origin (0, 0) - coordinates may not align"
+                )
+
+        # Create origin with MGRS + offset
+        if mgrs_code and offset:
+            from .config import COORDINATE_OFFSET
+            from .util import mgrs_grid_with_offset_to_lanelet2_origin
+
+            # Apply coordinate offset to align with OpenDRIVE
+            # OpenDRIVE files have offset subtracted during conversion
+            COORDINATE_OFFSET.set(offset[0], offset[1], offset[2])
+
+            origin = mgrs_grid_with_offset_to_lanelet2_origin(
+                mgrs_code, offset[0], offset[1], offset[2]
+            )
+            logger.info(
+                f"Using MGRS origin: {mgrs_code} with offset "
+                f"({offset[0]:.2f}, {offset[1]:.2f}, {offset[2]:.2f})"
+            )
+        elif mgrs_code:
+            from .util import mgrs_to_lanelet2_origin
+
+            origin = mgrs_to_lanelet2_origin(mgrs_code)
+            logger.info(f"Using MGRS origin: {mgrs_code} (no offset)")
 
         projector = MGRSProjector(origin)
         lanelet_map = lanelet2.io.load(str(args.lanelet2_file), projector)
@@ -893,6 +897,13 @@ def main() -> int:
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
         return 1
+    finally:
+        # Reset coordinate offset to avoid affecting other code
+        from .config import COORDINATE_OFFSET
+
+        if COORDINATE_OFFSET.is_active:
+            COORDINATE_OFFSET.reset()
+            logger.debug("Reset coordinate offset")
 
 
 if __name__ == "__main__":
