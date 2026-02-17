@@ -483,6 +483,10 @@ In areas with high curvature (tight curves, intersections), the inner and outer 
 
 *Figure: Lanelet2 map showing curved roads and intersections where inner boundaries (shorter arc) and outer boundaries (longer arc) have significantly different lengths due to road curvature.*
 
+**Impact on OpenDRIVE Conversion**:
+
+When boundary length mismatches occur, the B-spline interpolation algorithm used to calculate `paramPoly3` lane boundary geometries fails to work correctly. This is because the algorithm expects corresponding points on left and right boundaries to align at similar arc length positions. Severe mismatches cause the interpolation to produce invalid geometries, resulting in **polygon flipping** artifacts where lane boundaries cross over each other or invert.
+
 **Numeric Example**:
 
 ```
