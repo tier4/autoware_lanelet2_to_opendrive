@@ -49,21 +49,21 @@ The tool is available as the `visualize` command through `uv run`:
 
 ```bash
 # Visualize all lanelets with default settings
-uv run visualize lanelet2_map.xodr lanelet2_map.osm
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm
 ```
 
 ### Specify Lanelet IDs
 
 ```bash
 # Visualize specific lanelets only
-uv run visualize map.xodr map.osm --lanelet-id 120 121 122
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm --lanelet-id 120 121 122
 ```
 
 ### Save Output Files
 
 ```bash
 # Save error data as JSON and visualization as PNG
-uv run visualize map.xodr map.osm \
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
     --output-json errors.json \
     --output-png boundary_comparison.png
 ```
@@ -72,7 +72,7 @@ uv run visualize map.xodr map.osm \
 
 ```bash
 # Use coarser sampling interval and different colormap
-uv run visualize map.xodr map.osm \
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
     --sample-interval 1.0 \
     --colormap viridis
 ```
@@ -81,7 +81,7 @@ uv run visualize map.xodr map.osm \
 
 ```bash
 # Save outputs without showing interactive plot
-uv run visualize map.xodr map.osm \
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
     --output-json errors.json \
     --output-png visualization.png \
     --no-show
@@ -91,7 +91,7 @@ uv run visualize map.xodr map.osm \
 
 ```bash
 # Use MGRS code for coordinate projection
-uv run visualize map.xodr map.osm \
+uv run visualize test/data/lanelet2_map.xodr test/data/lanelet2_map.osm \
     --mgrs-code 54SUE
 ```
 

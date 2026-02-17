@@ -86,7 +86,7 @@ def extract_opendrive_lane_boundaries(
     """
     try:
         logger.info(f"Loading OpenDRIVE file: {opendrive_path}")
-        network = RoadNetwork.from_opendrive(str(opendrive_path))
+        network = RoadNetwork(str(opendrive_path))
 
         boundaries = []
 
