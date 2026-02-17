@@ -157,11 +157,11 @@ def test_road_construction_lht(lanelet_map):
     assert road.lanes is not None
     assert len(road.lanes.lane_sections) > 0
 
-    # Check first lane section has correct structure for LHT
+    # Check first lane section has correct structure for LHT (same as RHT)
     lane_section = road.lanes.lane_sections[0]
-    assert len(lane_section.left_lanes) == 2
-    assert len(lane_section.right_lanes) == 0
+    assert len(lane_section.left_lanes) == 0
+    assert len(lane_section.right_lanes) == 2
 
-    # Check lane IDs are positive for LHT
-    assert 1 in lane_section.left_lanes
-    assert 2 in lane_section.left_lanes
+    # Check lane IDs are negative for LHT (same structure as RHT)
+    assert -1 in lane_section.right_lanes
+    assert -2 in lane_section.right_lanes

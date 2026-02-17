@@ -141,6 +141,7 @@ class Lane:
         lanelet: lanelet2.core.Lanelet,
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        reference_line_spline: Optional["Splines"] = None,
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -150,6 +151,9 @@ class Lane:
             lanelet: The lanelet to convert to Lane
             rule: Traffic rule for the lane (RHT or LHT)
             width_config: Configuration for width spline sampling
+            reference_line_spline: Road reference line spline for s-coordinate alignment.
+                                  If provided, width s-coordinates will be aligned to
+                                  the road reference line instead of lanelet boundaries.
 
         Returns:
             Lane instance constructed from the lanelet
@@ -188,38 +192,33 @@ class Lane:
         )
 
         # Use appropriate boundary based on traffic rule for both single and multi-lane
-        # RHT: Reference line is left boundary (use LEFT_BOUND)
-        # LHT: Reference line is right boundary (use RIGHT_BOUND)
-        rule_normalized = (rule or "RHT").upper()
+        # Both RHT and LHT: Reference line is left boundary (use LEFT_BOUND)
+        # The road@rule attribute indicates the traffic direction
 
-        # Use provided width_config or create default based on traffic rule
+        # Use provided width_config or create default (LEFT_BOUND for both RHT and LHT)
         if width_config is None:
-            if rule_normalized == "LHT":
-                config = WidthEstimationConfig(reference=WidthReference.RIGHT_BOUND)
-            else:
-                config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
+            config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
         else:
-            # Copy config and override reference based on traffic rule
-            if rule_normalized == "LHT":
-                config = WidthEstimationConfig(
-                    num_samples=width_config.num_samples,
-                    reference=WidthReference.RIGHT_BOUND,
-                    adaptive_sampling=width_config.adaptive_sampling,
-                    min_samples=width_config.min_samples,
-                    max_samples=width_config.max_samples,
-                    default_sample_interval=width_config.default_sample_interval,
-                )
-            else:
-                config = WidthEstimationConfig(
-                    num_samples=width_config.num_samples,
-                    reference=WidthReference.LEFT_BOUND,
-                    adaptive_sampling=width_config.adaptive_sampling,
-                    min_samples=width_config.min_samples,
-                    max_samples=width_config.max_samples,
-                    default_sample_interval=width_config.default_sample_interval,
-                )
+            # Copy config and set reference to LEFT_BOUND for both RHT and LHT
+            config = WidthEstimationConfig(
+                num_samples=width_config.num_samples,
+                reference=WidthReference.LEFT_BOUND,
+                adaptive_sampling=width_config.adaptive_sampling,
+                min_samples=width_config.min_samples,
+                max_samples=width_config.max_samples,
+                default_sample_interval=width_config.default_sample_interval,
+            )
 
-        width_spline = estimate_lanelet_width_as_spline(lanelet, config)
+        # Use reference line-based width calculation if reference line is provided
+        if reference_line_spline is not None:
+            from ..centerline import estimate_lanelet_width_with_reference_line
+
+            width_spline = estimate_lanelet_width_with_reference_line(
+                lanelet, reference_line_spline, config
+            )
+        else:
+            # Fallback to old behavior (for backward compatibility)
+            width_spline = estimate_lanelet_width_as_spline(lanelet, config)
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)
