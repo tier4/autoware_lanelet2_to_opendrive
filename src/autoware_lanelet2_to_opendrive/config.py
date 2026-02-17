@@ -143,6 +143,29 @@ class ParamPoly3Constants:
 
 
 @dataclass(frozen=True)
+class VisualizationConstants:
+    """Constants for boundary error visualization.
+
+    Attributes:
+        sample_interval_default: Default S-coordinate sampling interval (m)
+        error_threshold_warning: Warning threshold for large errors (m)
+        error_threshold_critical: Critical threshold for very large errors (m)
+        histogram_bins: Number of bins for error histogram
+        figure_dpi: DPI for saved PNG images
+        colormap_default: Default matplotlib colormap name
+        nearest_neighbor_search_radius: Maximum search radius for nearest neighbor (m)
+    """
+
+    sample_interval_default: float = 0.5
+    error_threshold_warning: float = 0.5
+    error_threshold_critical: float = 1.0
+    histogram_bins: int = 50
+    figure_dpi: int = 300
+    colormap_default: str = "coolwarm"
+    nearest_neighbor_search_radius: float = 10.0
+
+
+@dataclass(frozen=True)
 class ConversionConfig:
     """Main configuration container for all conversion constants.
 
@@ -181,6 +204,8 @@ class ConversionConfig:
         centerline: Centerline extraction constants
         preprocessing: Preprocessing operation constants
         opendrive: OpenDRIVE format constants
+        parampoly3: ParamPoly3 geometry constants
+        visualization: Visualization constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -189,6 +214,7 @@ class ConversionConfig:
     preprocessing: PreprocessingConstants = PreprocessingConstants()
     opendrive: OpenDriveConstants = OpenDriveConstants()
     parampoly3: ParamPoly3Constants = ParamPoly3Constants()
+    visualization: VisualizationConstants = VisualizationConstants()
 
 
 @dataclass
