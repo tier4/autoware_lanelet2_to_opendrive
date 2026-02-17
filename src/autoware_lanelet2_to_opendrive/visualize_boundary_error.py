@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Import autoware extensions before loading maps to ensure proper registration
 # The order matters: projection module must be imported to register extensions
-from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
+from autoware_lanelet2_extension_python.projection import MGRSProjector
 
 import lanelet2
 import matplotlib.pyplot as plt
@@ -605,7 +605,7 @@ def main() -> int:
             origin = lanelet2.io.Origin(0, 0)
             logger.info("Using default origin (0, 0)")
 
-        projector = lanelet2.projection.UtmProjector(origin)
+        projector = MGRSProjector(origin)
         lanelet_map = lanelet2.io.load(str(args.lanelet2_file), projector)
 
         lanelet_boundaries = extract_lanelet_boundaries(lanelet_map, args.lanelet_id)
