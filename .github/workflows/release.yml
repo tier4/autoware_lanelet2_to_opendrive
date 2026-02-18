@@ -327,7 +327,7 @@ jobs:
           HYDRA_FULL_ERROR=1 uv run convert \
             map=nishishinjuku \
             target=carla \
-            input_map_path=test/data/lanelet2_map.osm
+            input_map_path=test/data/nishisinjyuku.osm
 
       - name: Rename output to sample_nishishinjuku.xodr
         run: mv test/data/lanelet2_map.xodr sample_nishishinjuku.xodr
