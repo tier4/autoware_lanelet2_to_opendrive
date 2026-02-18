@@ -142,12 +142,31 @@ class CrosswalkObject:
                 return None
             s, t, road_hdg_at_s = projection
 
-            # Compute average elevation from 3D boundary points
+            # Compute absolute elevation of crosswalk from 3D boundary points
             left_pts_3d = extract_points(lanelet.leftBound, dimensions=3)
             right_pts_3d = extract_points(lanelet.rightBound, dimensions=3)
-            z_offset = float(
+            crosswalk_absolute_z = float(
                 np.mean([left_pts_3d[:, 2].mean(), right_pts_3d[:, 2].mean()])
             )
+
+            # Evaluate road surface elevation at position s using the elevation profile
+            # (same approach as signals_and_controllers.py:197-210)
+            road_elevation_at_s = 0.0
+            if road.elevation_profile and road.elevation_profile.elevations:
+                for elevation in road.elevation_profile.elevations:
+                    if elevation.s <= s:
+                        ds = s - elevation.s
+                        road_elevation_at_s = (
+                            elevation.a
+                            + elevation.b * ds
+                            + elevation.c * ds * ds
+                            + elevation.d * ds * ds * ds
+                        )
+                    else:
+                        break
+
+            # zOffset = height relative to road surface (should be ~0.0 for on-road crosswalks)
+            z_offset = crosswalk_absolute_z - road_elevation_at_s
 
             # Main crosswalk direction: along leftBound (road-crossing direction)
             cw_dir = left_pts[-1] - left_pts[0]
