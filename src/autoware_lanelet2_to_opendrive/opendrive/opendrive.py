@@ -78,7 +78,11 @@ def get_version_string() -> str:
             timeout=5,
         )
         return result.stdout.strip()  # e.g. "v1.9.0"
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        FileNotFoundError,
+    ):
         pass
 
     # Try to get nearest tag + commit hash
@@ -100,7 +104,11 @@ def get_version_string() -> str:
         tag = tag_result.stdout.strip()  # e.g. "v1.8.5"
         commit = hash_result.stdout.strip()  # e.g. "abc1234"
         return f"{tag}-{commit}"  # e.g. "v1.8.5-abc1234"
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        FileNotFoundError,
+    ):
         pass
 
     # Fallback to package metadata
