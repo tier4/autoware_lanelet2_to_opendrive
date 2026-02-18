@@ -617,6 +617,14 @@ def load_origin_from_yaml(
         # Format 3: Direct mgrs_grid key
         elif "mgrs_grid" in config:
             mgrs_code = config["mgrs_grid"]
+            # Also check for offset at the same level
+            if "offset" in config:
+                offset_dict = config["offset"]
+                offset = (
+                    float(offset_dict.get("x", 0)),
+                    float(offset_dict.get("y", 0)),
+                    float(offset_dict.get("z", 0)),
+                )
 
         if mgrs_code:
             logger.info(f"Loaded MGRS code from config: {mgrs_code}")

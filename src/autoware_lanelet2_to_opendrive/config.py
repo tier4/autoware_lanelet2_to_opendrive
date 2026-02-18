@@ -162,7 +162,7 @@ class VisualizationConstants:
     histogram_bins: int = 50
     figure_dpi: int = 300
     colormap_default: str = "coolwarm"
-    nearest_neighbor_search_radius: float = 10.0
+    nearest_neighbor_search_radius: float = 15.0
 
 
 @dataclass(frozen=True)
