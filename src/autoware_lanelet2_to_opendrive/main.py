@@ -450,6 +450,51 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"Associated {controllers_assigned_count} controller references across {len(junctions)} junctions"
         )
 
+    def _extract_and_assign_crosswalks(self, all_roads: List[Road]) -> None:
+        """Extract crosswalk lanelets and assign them as objects to the nearest roads.
+
+        For each lanelet with subtype="crosswalk", this method:
+        1. Finds the nearest road within a distance threshold
+        2. Constructs a CrosswalkObject with outline coordinates
+        3. Assigns it to the road's objects list
+
+        Args:
+            all_roads: All roads (regular + connecting) to search and assign to.
+        """
+        from autoware_lanelet2_to_opendrive.util import filter_lanelets_by_subtype
+        from autoware_lanelet2_to_opendrive.opendrive.objects import (
+            CrosswalkObject,
+            find_nearest_road,
+        )
+
+        print("\n=== Extracting crosswalks ===")
+        all_lanelets = list(self.lanelet_map.laneletLayer)
+        crosswalk_lanelets = list(
+            filter_lanelets_by_subtype(all_lanelets, ["crosswalk"])
+        )
+        print(f"Found {len(crosswalk_lanelets)} crosswalk lanelets")
+
+        road_objects: Dict[int, List] = {}
+
+        for lanelet in crosswalk_lanelets:
+            best_road = find_nearest_road(lanelet, all_roads)
+            if best_road is None:
+                continue
+            obj = CrosswalkObject.construct_from_crosswalk_lanelet(
+                lanelet, best_road, object_id=lanelet.id
+            )
+            if obj is not None:
+                road_objects.setdefault(best_road.id, []).append(obj)
+
+        crosswalk_count = sum(len(v) for v in road_objects.values())
+        print(
+            f"Assigned {crosswalk_count} crosswalk objects to {len(road_objects)} roads"
+        )
+
+        for road in all_roads:
+            if road.id in road_objects:
+                road.objects = road_objects[road.id]
+
     def _write_opendrive_output(
         self,
         all_roads: List[Road],
@@ -567,6 +612,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         self._assign_controllers_to_junctions(
             signals_and_controllers, junctions, all_roads
         )
+
+        # Step 6.5: Extract crosswalks and assign as road objects
+        self._extract_and_assign_crosswalks(all_roads)
 
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(

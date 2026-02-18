@@ -15,7 +15,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/3e/38/7859ff46355f76f8d
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "1.8.6"
+version = "1.8.7"
 source = { editable = "." }
 dependencies = [
     { name = "hydra-core" },

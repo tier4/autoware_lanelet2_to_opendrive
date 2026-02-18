@@ -43,13 +43,15 @@ flowchart TD
     N --> O
 
     O --> P[Build Junction Connections]
-    P --> Q[Generate OpenDRIVE XML]
+    P --> R[Extract Crosswalk Objects<br/>subtype=crosswalk lanelets]
+    R --> Q[Generate OpenDRIVE XML]
 
     style A fill:#e1f5ff
     style Q fill:#c8e6c9
     style E fill:#fff9c4
     style L fill:#ffe0b2
     style N fill:#f8bbd0
+    style R fill:#e8f5e9
 ```
 
 ---
@@ -598,6 +600,39 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 3. Set `Link` objects on `Road` and `Lane` instances
 
 **Output:** Complete connectivity graph
+
+---
+
+### Stage 8.5: Crosswalk Object Extraction
+
+**Purpose:** Convert Lanelet2 crosswalk lanelets (`subtype="crosswalk"`) into OpenDRIVE `<object type="crosswalk">` elements and assign them to the nearest roads.
+
+**Tags Used:**
+
+| Tag | Purpose |
+|-----|---------|
+| `subtype="crosswalk"` | Identifies pedestrian crossing lanelets |
+
+**Processing:**
+
+1. Filter all lanelets with `subtype="crosswalk"`
+2. For each crosswalk lanelet:
+   a. Extract four boundary vertices (`leftBound[0]`, `leftBound[-1]`, `rightBound[-1]`, `rightBound[0]`)
+   b. Compute centroid of the four vertices
+   c. Sample reference line of all roads (10 points per geometry segment)
+   d. Find the nearest road within 50 m threshold
+   e. Project centroid onto road reference line → `(s, t, road_hdg)`
+   f. Compute crosswalk heading relative to road direction → `hdg`
+   g. Compute `width` (entry span) and `length` (crossing distance)
+   h. Transform polygon vertices to object-local coordinates → `<cornerLocal>` points
+3. Assign `CrosswalkObject` instances to their nearest road's `objects` list
+
+**Output:** `Road.objects` populated with `CrosswalkObject` instances
+
+**Code Location:** [`opendrive/objects.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`main.py` – `_extract_and_assign_crosswalks()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+
+!!! info "Detailed Documentation"
+    For full details on the crosswalk conversion algorithm, coordinate systems, and CARLA behavior, see [Crosswalk Objects](crosswalk_objects.md).
 
 ---
 
@@ -1160,6 +1195,7 @@ This section summarizes which Lanelet2 tags are used by the converter and which 
 | Tag | Scope | Used In | Purpose | Required? |
 |-----|-------|---------|---------|-----------|
 | **`subtype`** | Lanelet | Lane construction | Determines lane type (DRIVING, SIDEWALK, BIKING) | No (defaults to DRIVING) |
+| **`subtype="crosswalk"`** | Lanelet | Crosswalk object extraction | Identifies pedestrian crossing lanelets | Yes (for crosswalk objects) |
 | **`speed_limit`** | Lanelet | Road & Lane metadata | Sets speed restrictions | No (uses fallback values) |
 | **`location`** | Lanelet | Road type classification | Determines road type (TOWN, MOTORWAY, etc.) | No (inferred from speed) |
 | **`turn_direction`** | Lanelet | Junction detection | Identifies intersection lanelets | Yes (for junctions) |

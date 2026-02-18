@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from .signal import Signal
     from .lane import Lane
     from .junction import Junction
+    from .objects import CrosswalkObject
 
 
 @dataclass
@@ -47,6 +48,7 @@ class Road:
     signals: Optional[List["Signal"]] = None
     elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
     road_types: Optional[List[RoadTypeDefinition]] = None
+    objects: Optional[List["CrosswalkObject"]] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -86,6 +88,11 @@ class Road:
             # Each signal gets a corresponding signalReference on the reference line
             for signal in self.signals:
                 signals_elem.append(signal.to_signal_reference_xml())
+
+        if self.objects:
+            objects_elem = ET.SubElement(elem, "objects")
+            for obj in self.objects:
+                objects_elem.append(obj.to_xml())
 
         return elem
 
@@ -147,6 +154,45 @@ class Road:
             mapping.update(section_mapping)
 
         return mapping
+
+    def get_elevation_at_s(self, s: float) -> float:
+        """Calculate road surface elevation at a given s-coordinate.
+
+        Uses the elevation profile to compute the absolute elevation of the road
+        surface at the specified position along the reference line. The elevation
+        is calculated using cubic polynomial interpolation from the elevation profile.
+
+        Args:
+            s: Position along the road reference line (s-coordinate) in meters.
+
+        Returns:
+            Absolute road surface elevation at position s (in meters).
+            Returns 0.0 if the road has no elevation profile.
+
+        Example:
+            >>> road = Road(...)
+            >>> elevation = road.get_elevation_at_s(100.5)
+            >>> print(f"Road elevation at s=100.5m: {elevation:.2f}m")
+        """
+        if not self.elevation_profile or not self.elevation_profile.elevations:
+            return 0.0
+
+        road_elevation_at_s = 0.0
+        for elevation in self.elevation_profile.elevations:
+            if elevation.s <= s:
+                # Calculate distance from segment start
+                ds = s - elevation.s
+                # Evaluate cubic polynomial: elevation = a + b*ds + c*ds^2 + d*ds^3
+                road_elevation_at_s = (
+                    elevation.a
+                    + elevation.b * ds
+                    + elevation.c * ds * ds
+                    + elevation.d * ds * ds * ds
+                )
+            else:
+                break
+
+        return road_elevation_at_s
 
     def set_lane_links(self, context: LaneLinksContext) -> None:
         """Set lane predecessor and successor links based on lanelet connections.
