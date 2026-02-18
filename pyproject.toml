@@ -29,6 +29,7 @@ build-backend = "uv_build"
 [project.scripts]
 convert = "autoware_lanelet2_to_opendrive.main:main"
 preprocess-lanelet = "autoware_lanelet2_to_opendrive.preprocess_lanelet:main"
+analyze = "autoware_lanelet2_to_opendrive.analyze_xodr:main"
 
 [dependency-groups]
 dev = [
