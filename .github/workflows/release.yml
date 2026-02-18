@@ -12,6 +12,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-22.04
+    outputs:
+      bump_type: ${{ steps.pr-labels.outputs.bump_type }}
+      new_version: ${{ steps.bump-version.outputs.new_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -282,3 +285,56 @@ jobs:
         if: steps.pr-labels.outputs.bump_type == 'none'
         run: |
           echo "No version bump label found. Skipping release."
+
+  attach-sample-xodr:
+    runs-on: ubuntu-22.04
+    needs: release
+    if: needs.release.outputs.bump_type != 'none'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographic-dev libboost-python-dev libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
+
+      - name: Configure git for private repositories
+        run: |
+          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install dependencies
+        run: uv sync --dev
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Run conversion for nishishinjuku sample
+        run: |
+          HYDRA_FULL_ERROR=1 uv run convert \
+            map=nishishinjuku \
+            target=carla \
+            input_map_path=test/data/lanelet2_map.osm
+
+      - name: Rename output to sample_nishishinjuku.xodr
+        run: mv test/data/lanelet2_map.xodr sample_nishishinjuku.xodr
+
+      - name: Upload sample xodr to GitHub Release
+        run: |
+          gh release upload "v${{ needs.release.outputs.new_version }}" \
+            sample_nishishinjuku.xodr --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
