@@ -46,7 +46,7 @@ def test_road_xml_includes_speed_limit():
     assert '<type s="0.0" type="town">' in xml_str
 
     # Check that speed element is present
-    assert '<speed max="50.0" unit="km/h"/>' in xml_str
+    assert '<speed max="50" unit="km/h"/>' in xml_str
 
 
 def test_lane_xml_includes_speed_limit():
@@ -66,7 +66,7 @@ def test_lane_xml_includes_speed_limit():
     xml_str = ET.tostring(xml, encoding="unicode")
 
     # Check that speed element is present
-    assert '<speed sOffset="0.0" max="60.0" unit="km/h"/>' in xml_str
+    assert '<speed sOffset="0.0" max="60" unit="km/h"/>' in xml_str
 
 
 def test_construct_from_lanelet_with_speed_limit():
@@ -104,7 +104,7 @@ def test_construct_from_lanelet_with_speed_limit():
     # Verify XML output contains speed
     xml = lane.to_xml()
     xml_str = ET.tostring(xml, encoding="unicode")
-    assert '<speed sOffset="0.0" max="50.0" unit="km/h"/>' in xml_str
+    assert '<speed sOffset="0.0" max="50" unit="km/h"/>' in xml_str
 
 
 def test_opendrive_xml_with_speed_limits():
@@ -156,4 +156,4 @@ def test_opendrive_xml_with_speed_limits():
 
     # Check that speed limit is present in the output
     assert '<type s="0.0" type="town">' in xml_str
-    assert '<speed max="50.0" unit="km/h"/>' in xml_str
+    assert '<speed max="50" unit="km/h"/>' in xml_str
