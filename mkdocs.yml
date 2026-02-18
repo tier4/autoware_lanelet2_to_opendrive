@@ -89,6 +89,7 @@ nav:
     - Geometric Approximation: limitations/geometric-approximation.md
     - Coordinate System: limitations/coordinate-system.md
   - Signals: signals.md
+  - Crosswalk Objects: crosswalk_objects.md
   - Conversion Process: conversion-process.md
   - API Reference: api.md
   - Development: development.md

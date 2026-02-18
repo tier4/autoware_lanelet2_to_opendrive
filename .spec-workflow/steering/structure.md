@@ -30,7 +30,7 @@ autoware_lanelet2_to_opendrive/
 ├── test/                              # Test directory
 │   ├── conftest.py                   # PyTest configuration
 │   ├── data/                          # Test data files
-│   │   ├── lanelet2_map.osm         # Sample Lanelet2 input
+│   │   ├── nishisinjyuku.osm        # Sample Lanelet2 input
 │   │   └── lanelet2_map.xodr        # Expected OpenDRIVE output
 │   ├── test_util.py                  # Utility function tests
 │   ├── test_geometry.py              # Geometry module tests
@@ -57,7 +57,7 @@ autoware_lanelet2_to_opendrive/
 ### Files
 - **Python modules**: `snake_case.py` (e.g., `reference_line.py`, `lane_section.py`)
 - **Test files**: `test_[module_name].py` (e.g., `test_geometry.py`)
-- **Data files**: Descriptive names with format extension (e.g., `lanelet2_map.osm`)
+- **Data files**: Descriptive names with format extension (e.g., `nishisinjyuku.osm`)
 - **Configuration**: Standard names (`pyproject.toml`, `uv.lock`)
 
 ### Code
