@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from .signal import Signal
     from .lane import Lane
     from .junction import Junction
+    from .objects import CrosswalkObject
 
 
 @dataclass
@@ -47,6 +48,7 @@ class Road:
     signals: Optional[List["Signal"]] = None
     elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
     road_types: Optional[List[RoadTypeDefinition]] = None
+    objects: Optional[List["CrosswalkObject"]] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -86,6 +88,11 @@ class Road:
             # Each signal gets a corresponding signalReference on the reference line
             for signal in self.signals:
                 signals_elem.append(signal.to_signal_reference_xml())
+
+        if self.objects:
+            objects_elem = ET.SubElement(elem, "objects")
+            for obj in self.objects:
+                objects_elem.append(obj.to_xml())
 
         return elem
 
