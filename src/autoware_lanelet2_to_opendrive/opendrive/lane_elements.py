@@ -112,7 +112,7 @@ class LaneSpeed:
         """Convert to XML element."""
         elem = ET.Element("speed")
         elem.set("sOffset", str(self.s_offset))
-        elem.set("max", str(self.max))
+        elem.set("max", str(int(self.max)))
         elem.set("unit", self.unit.value)
         return elem
 
@@ -131,7 +131,7 @@ class RoadTypeSpeed:
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
         elem = ET.Element("speed")
-        elem.set("max", str(self.max))
+        elem.set("max", str(int(self.max)))
         elem.set("unit", self.unit.value)
         return elem
 

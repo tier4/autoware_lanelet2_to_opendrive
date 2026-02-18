@@ -18,7 +18,7 @@ def test_lane_speed_xml():
 
     assert xml.tag == "speed"
     assert xml.get("sOffset") == "0.0"
-    assert xml.get("max") == "50.0"
+    assert xml.get("max") == "50"
     assert xml.get("unit") == "km/h"
 
 
@@ -28,7 +28,7 @@ def test_road_type_speed_xml():
     xml = road_type_speed.to_xml()
 
     assert xml.tag == "speed"
-    assert xml.get("max") == "60.0"
+    assert xml.get("max") == "60"
     assert xml.get("unit") == "km/h"
 
 
@@ -45,7 +45,7 @@ def test_road_type_definition_xml():
     # Check that speed element is present
     speed_elem = xml.find("speed")
     assert speed_elem is not None
-    assert speed_elem.get("max") == "50.0"
+    assert speed_elem.get("max") == "50"
     assert speed_elem.get("unit") == "km/h"
 
 
