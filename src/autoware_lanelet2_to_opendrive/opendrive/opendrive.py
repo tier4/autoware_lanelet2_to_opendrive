@@ -1,17 +1,17 @@
 """OpenDRIVE root element and export functionality."""
 
-from dataclasses import dataclass
-from typing import Optional, List, Union
 import importlib.metadata
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Union
+
 import lxml.etree as ET
 
 from .header import Header
-from .road import Road
 from .junction import Junction
+from .road import Road
 from .signal import Controller
-
-from pathlib import Path
 
 
 @dataclass
