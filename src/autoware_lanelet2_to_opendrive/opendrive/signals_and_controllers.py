@@ -185,29 +185,11 @@ class SignalsAndControllers:
                 if roads is not None:
                     # Find the corresponding Road object
                     matching_road = next((r for r in roads if r.id == road_id), None)
-                    if (
-                        matching_road
-                        and matching_road.elevation_profile
-                        and matching_road.elevation_profile.elevations
-                    ):
-                        # Evaluate elevation at position s using the elevation profile
-                        # Find the appropriate elevation segment for this s value
+                    if matching_road:
+                        # Use the Road's public method to get elevation at position s
                         # Note: elevation_profile already contains absolute inertial z-coordinates
                         # (elevation_offset was added to 'a' coefficient in get_elevation_profile)
-                        road_elevation_at_s = 0.0
-                        for elevation in matching_road.elevation_profile.elevations:
-                            if elevation.s <= s:
-                                # Calculate ds from segment start
-                                ds = s - elevation.s
-                                # Evaluate cubic polynomial: elevation = a + b*ds + c*ds^2 + d*ds^3
-                                road_elevation_at_s = (
-                                    elevation.a
-                                    + elevation.b * ds
-                                    + elevation.c * ds * ds
-                                    + elevation.d * ds * ds * ds
-                                )
-                            else:
-                                break
+                        road_elevation_at_s = matching_road.get_elevation_at_s(s)
 
                 # Create Signal object
                 signal = Signal.construct_from_lanelet2_traffic_signal(

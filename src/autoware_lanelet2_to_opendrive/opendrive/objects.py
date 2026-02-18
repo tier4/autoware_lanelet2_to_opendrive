@@ -150,20 +150,7 @@ class CrosswalkObject:
             )
 
             # Evaluate road surface elevation at position s using the elevation profile
-            # (same approach as signals_and_controllers.py:197-210)
-            road_elevation_at_s = 0.0
-            if road.elevation_profile and road.elevation_profile.elevations:
-                for elevation in road.elevation_profile.elevations:
-                    if elevation.s <= s:
-                        ds = s - elevation.s
-                        road_elevation_at_s = (
-                            elevation.a
-                            + elevation.b * ds
-                            + elevation.c * ds * ds
-                            + elevation.d * ds * ds * ds
-                        )
-                    else:
-                        break
+            road_elevation_at_s = road.get_elevation_at_s(s)
 
             # zOffset = height relative to road surface (should be ~0.0 for on-road crosswalks)
             z_offset = crosswalk_absolute_z - road_elevation_at_s
