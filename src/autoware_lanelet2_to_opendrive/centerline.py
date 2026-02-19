@@ -765,12 +765,20 @@ def _calculate_widths_by_reference(
             normalized_positions, left_points, right_points, boundary_data
         )
     elif reference == "left_bound":
-        return _calculate_widths_left_bound_reference(
-            normalized_positions, left_points, right_points, boundary_data
+        return _calculate_widths_boundary_reference(
+            normalized_positions,
+            left_points,
+            right_points,
+            boundary_data,
+            use_left_as_reference=True,
         )
     elif reference == "right_bound":
-        return _calculate_widths_right_bound_reference(
-            normalized_positions, left_points, right_points, boundary_data
+        return _calculate_widths_boundary_reference(
+            normalized_positions,
+            left_points,
+            right_points,
+            boundary_data,
+            use_left_as_reference=False,
         )
     else:
         raise ValueError(f"Unsupported reference type: {reference}")
@@ -844,20 +852,23 @@ def _calculate_widths_centerline_reference(
     return arc_lengths, widths
 
 
-def _calculate_widths_left_bound_reference(
+def _calculate_widths_boundary_reference(
     normalized_positions: np.ndarray,
     left_points: np.ndarray,
     right_points: np.ndarray,
     boundary_data: dict,
+    use_left_as_reference: bool,
 ) -> Tuple[List[float], List[float]]:
     """
-    Calculate widths using left boundary as reference.
+    Calculate widths using either the left or right boundary as arc-length reference.
 
     Args:
         normalized_positions: Normalized positions [0, 1] to sample
         left_points: Array of left boundary points
         right_points: Array of right boundary points
         boundary_data: Dictionary with boundary arc length data
+        use_left_as_reference: If True, use left boundary arc length as the reference;
+            if False, use right boundary arc length as the reference.
 
     Returns:
         Tuple of (arc_lengths, widths) lists
@@ -876,51 +887,9 @@ def _calculate_widths_left_bound_reference(
             right_points, boundary_data["right_cumulative"], s_right
         )
 
-        # Width is distance from left to right border
+        # Width is the distance between the two boundary points
         width = np.linalg.norm(left_pos - right_pos)
-        arc_length = s_left
-
-        arc_lengths.append(arc_length)
-        widths.append(width)
-
-    return arc_lengths, widths
-
-
-def _calculate_widths_right_bound_reference(
-    normalized_positions: np.ndarray,
-    left_points: np.ndarray,
-    right_points: np.ndarray,
-    boundary_data: dict,
-) -> Tuple[List[float], List[float]]:
-    """
-    Calculate widths using right boundary as reference.
-
-    Args:
-        normalized_positions: Normalized positions [0, 1] to sample
-        left_points: Array of left boundary points
-        right_points: Array of right boundary points
-        boundary_data: Dictionary with boundary arc length data
-
-    Returns:
-        Tuple of (arc_lengths, widths) lists
-    """
-    arc_lengths: List[float] = []
-    widths: List[float] = []
-
-    for t_norm in normalized_positions:
-        s_left = t_norm * boundary_data["left_total_length"]
-        s_right = t_norm * boundary_data["right_total_length"]
-
-        left_pos = _interpolate_on_line_segments(
-            left_points, boundary_data["left_cumulative"], s_left
-        )
-        right_pos = _interpolate_on_line_segments(
-            right_points, boundary_data["right_cumulative"], s_right
-        )
-
-        # Width is distance from right to left border
-        width = np.linalg.norm(right_pos - left_pos)
-        arc_length = s_right
+        arc_length = s_left if use_left_as_reference else s_right
 
         arc_lengths.append(arc_length)
         widths.append(width)
