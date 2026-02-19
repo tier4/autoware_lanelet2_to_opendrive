@@ -766,11 +766,19 @@ def _calculate_widths_by_reference(
         )
     elif reference == "left_bound":
         return _calculate_widths_by_reference(
-            normalized_positions, left_points, right_points, boundary_data, use_left_as_reference=True
+            normalized_positions,
+            left_points,
+            right_points,
+            boundary_data,
+            use_left_as_reference=True,
         )
     elif reference == "right_bound":
         return _calculate_widths_by_reference(
-            normalized_positions, left_points, right_points, boundary_data, use_left_as_reference=False
+            normalized_positions,
+            left_points,
+            right_points,
+            boundary_data,
+            use_left_as_reference=False,
         )
     else:
         raise ValueError(f"Unsupported reference type: {reference}")
