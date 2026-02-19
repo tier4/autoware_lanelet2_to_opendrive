@@ -58,6 +58,7 @@ jobs:
   end-of-file-fixer:
     name: Auto-fix End of File
     runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
     permissions:
       contents: write
       pull-requests: write
