@@ -189,7 +189,8 @@ def test_construct_from_linestring_basic():
     assert result.name == "stop_line_1001"
     # Length should equal the distance between first and last 2D point (span along u-axis/heading)
     assert result.length == pytest.approx(4.0, rel=0.01)
-    assert result.width == 0.0
+    # Width defaults to 0.1 (painted thickness in v-direction)
+    assert result.width == pytest.approx(0.1)
 
 
 def test_construct_from_linestring_insufficient_points():

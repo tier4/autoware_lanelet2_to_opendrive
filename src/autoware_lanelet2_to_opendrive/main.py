@@ -43,6 +43,7 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     ConversionConfig,
     OriginSpec,
     ParamPoly3Config,
+    StopLineConfig,
     WidthEstimationConfig,
 )
 
@@ -530,6 +531,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 linestring=ls,
                 road=best_road,
                 object_id=ls.id,
+                width=self.config.stopline.width,
             )
             if obj is not None:
                 road_objects.setdefault(best_road.id, []).append(obj)
@@ -965,6 +967,14 @@ def preprocess_and_convert_with_hydra(
     else:
         width_config = WidthEstimationConfig()
 
+    # Build StopLineConfig from Hydra config
+    # Priority: map config > target config > default
+    stopline_dict = cfg.map.get("stopline") or cfg.target.get("stopline", {})
+    stopline_config = StopLineConfig(
+        width=stopline_dict.get("width", 0.1) if stopline_dict else 0.1,
+    )
+    logger.info(f"Stop line config: width={stopline_config.width}m")
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -977,6 +987,7 @@ def preprocess_and_convert_with_hydra(
         traffic_rule=traffic_rule,
         parampoly3=parampoly3_config,
         width_estimation=width_config,
+        stopline=stopline_config,
     )
 
     opendrive, mapping = convert_lanelet2_to_opendrive(

@@ -374,6 +374,7 @@ class StopLineObject:
         linestring: lanelet2.core.LineString3d,
         road: "Road",
         object_id: int,
+        width: float = 0.1,
     ) -> Optional["StopLineObject"]:
         """Construct a StopLineObject from a stop_line linestring and its nearest road.
 
@@ -415,7 +416,8 @@ class StopLineObject:
             stop_line_angle = math.atan2(float(direction[1]), float(direction[0]))
             hdg = (stop_line_angle - road_hdg_at_s + math.pi) % (2 * math.pi) - math.pi
 
-            # length = span along heading (u-axis = across road); width (thickness) = 0
+            # length = span along heading (u-axis = across road)
+            # width = painted thickness in v-direction (along road)
             length = float(np.linalg.norm(pts[-1] - pts[0]))
 
             return StopLineObject(
@@ -425,7 +427,7 @@ class StopLineObject:
                 t=t,
                 z_offset=z_offset,
                 hdg=hdg,
-                width=0.0,
+                width=width,
                 length=length,
             )
 
