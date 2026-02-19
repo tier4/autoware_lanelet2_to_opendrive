@@ -761,37 +761,6 @@ class Splines:
         self._compute_arc_length_table()
         return self._computed_total_length
 
-    def get_frenet_frame(self, s: float) -> dict:
-        """
-        Get the Frenet frame at a given arc length.
-
-        Args:
-            s: Arc length value from the first point (0.0 to total_length)
-
-        Returns:
-            Dictionary with 'position', 'tangent', and 'normal' vectors
-        """
-        position = self.evaluate(s, derivative=0)
-        tangent = self.evaluate(s, derivative=1)
-
-        # Normalize tangent
-        tangent_norm = np.linalg.norm(tangent)
-        if tangent_norm > 0:
-            tangent = tangent / tangent_norm
-        else:
-            tangent = np.array([1.0, 0.0, 0.0])
-
-        # Calculate normal (assuming 2D in XY plane)
-        # For 2D: normal is perpendicular to tangent in XY plane
-        normal = np.array([-tangent[1], tangent[0], 0.0])
-        normal_norm = np.linalg.norm(normal)
-        if normal_norm > 0:
-            normal = normal / normal_norm
-        else:
-            normal = np.array([0.0, 1.0, 0.0])
-
-        return {"position": position, "tangent": tangent, "normal": normal}
-
     def cartesian_to_frenet(
         self, x: float, y: float, z: float = 0.0
     ) -> Tuple[float, float]:

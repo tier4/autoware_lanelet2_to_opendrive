@@ -102,5 +102,4 @@ The method handles:
 ## See Also
 
 - `Splines.evaluate(s)`: Convert arc length to Cartesian coordinates
-- `Splines.get_frenet_frame(s)`: Get position, tangent, and normal vectors at arc length s
 - `test/test_cartesian_to_frenet.py`: Comprehensive test suite
