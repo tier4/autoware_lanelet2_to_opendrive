@@ -338,3 +338,14 @@ jobs:
             sample_nishishinjuku.xodr --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run ASAM QC analysis
+        run: |
+          uv run analyze test/data/nishisinjyuku.xodr | tee asam_qc_report.txt
+
+      - name: Upload ASAM QC report to GitHub Release
+        run: |
+          gh release upload "v${{ needs.release.outputs.new_version }}" \
+            asam_qc_report.txt --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
