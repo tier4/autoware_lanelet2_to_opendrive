@@ -144,12 +144,6 @@ def run_opendrive_parser_test(xodr_content: str, map_name: str) -> TestResult:
             passed=False,
             message=f"CARLA RuntimeError: {exc}",
         )
-    except ImportError as exc:
-        return TestResult(
-            name=test_name,
-            passed=False,
-            message=f"carla package not available: {exc}",
-        )
     except Exception as exc:  # noqa: BLE001
         return TestResult(
             name=test_name,
@@ -201,12 +195,6 @@ def run_traffic_manager_test(xodr_content: str, map_name: str) -> TestResult:
             name=test_name,
             passed=False,
             message=f"CARLA RuntimeError: {exc}",
-        )
-    except ImportError as exc:
-        return TestResult(
-            name=test_name,
-            passed=False,
-            message=f"carla package not available: {exc}",
         )
     except Exception as exc:  # noqa: BLE001
         return TestResult(
