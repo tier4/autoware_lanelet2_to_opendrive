@@ -765,7 +765,7 @@ def _calculate_widths_by_reference(
             normalized_positions, left_points, right_points, boundary_data
         )
     elif reference == "left_bound":
-        return _calculate_widths_by_reference(
+        return _calculate_widths_boundary_reference(
             normalized_positions,
             left_points,
             right_points,
@@ -773,7 +773,7 @@ def _calculate_widths_by_reference(
             use_left_as_reference=True,
         )
     elif reference == "right_bound":
-        return _calculate_widths_by_reference(
+        return _calculate_widths_boundary_reference(
             normalized_positions,
             left_points,
             right_points,
@@ -852,7 +852,7 @@ def _calculate_widths_centerline_reference(
     return arc_lengths, widths
 
 
-def _calculate_widths_by_reference(
+def _calculate_widths_boundary_reference(
     normalized_positions: np.ndarray,
     left_points: np.ndarray,
     right_points: np.ndarray,
