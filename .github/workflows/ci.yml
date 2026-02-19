@@ -76,8 +76,9 @@ jobs:
           git_commit: ${GIT_COMMIT}
         EOF
 
-        # Build documentation (without --strict to allow PDF plugin warning)
-        uv run mkdocs build
+        # Build documentation (--strict treats warnings as errors)
+        # Use mkdocs.ci.yml to exclude with-pdf plugin (avoids PDF WARNING in strict mode)
+        uv run mkdocs build --strict --config-file mkdocs.ci.yml
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v4
