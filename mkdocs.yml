@@ -45,7 +45,16 @@ plugins:
             show_source: true
             show_root_heading: true
             show_root_full_path: false
-
+  - with-pdf:
+      author: Tier4 Autoware Team
+      copyright: Copyright © 2025 Tier4
+      cover_title: Autoware Lanelet2 to OpenDRIVE
+      cover_subtitle: Documentation
+      output_path: pdf/documentation.pdf
+      enabled_if_env: ENABLE_PDF_EXPORT
+      verbose: false
+      exclude_pages:
+        - 'api/'
 
 markdown_extensions:
   - admonition
