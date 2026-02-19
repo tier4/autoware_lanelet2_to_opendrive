@@ -38,32 +38,6 @@ def ensure_point2d(p: Union[Point2D, Point3D, np.ndarray, List[float]]) -> Point
     return Point2D.from_array(p)
 
 
-def ensure_point3d(p: Union[Point3D, np.ndarray, List[float]]) -> Point3D:
-    """Convert any 3D point representation to Point3D.
-
-    This helper function provides backward compatibility with legacy code
-    using numpy arrays or lists, while also accepting the new Point3D type.
-
-    Args:
-        p: Point as Point3D, numpy array, or list (must have 3 elements)
-
-    Returns:
-        Point3D instance
-
-    Example:
-        ```python
-        # Works with all representations
-        p1 = ensure_point3d([1.0, 2.0, 3.0])
-        p2 = ensure_point3d(np.array([1.0, 2.0, 3.0]))
-        p3 = ensure_point3d(Point3D(1.0, 2.0, 3.0))
-        ```
-    """
-    if isinstance(p, Point3D):
-        return p
-    # Handle numpy array or list
-    return Point3D.from_array(p)
-
-
 def point_to_line_segment_distance(
     point: np.ndarray,
     seg_start: np.ndarray,
