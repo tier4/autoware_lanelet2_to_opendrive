@@ -1408,5 +1408,5 @@ Potential improvements to tag handling:
 - [API Reference](api.md) - Detailed API documentation for all classes
 - [Usage Guide](usage.md) - Command-line usage and examples
 - [Signals](signals.md) - Detailed signal conversion documentation
-- [Known Limitations](limitations.md) - Current converter limitations
+- [Known Limitations](limitations/index.md) - Current converter limitations
 - [CARLA OpenDRIVE and Lanelet2 Tag Mapping](carla_opendrive_lanelet2_mapping.md) - CARLA-specific tag usage and mapping details

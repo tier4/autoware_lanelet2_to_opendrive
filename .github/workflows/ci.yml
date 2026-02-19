@@ -133,7 +133,8 @@ jobs:
         EOF
 
         # Build documentation (--strict treats warnings as errors)
-        uv run mkdocs build --strict
+        # Use mkdocs.ci.yml to exclude with-pdf plugin (avoids PDF WARNING in strict mode)
+        uv run mkdocs build --strict --config-file mkdocs.ci.yml
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v4

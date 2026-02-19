@@ -1,0 +1,19 @@
+INHERIT: mkdocs.yml
+
+# Override plugins to exclude with-pdf, which emits a WARNING when
+# ENABLE_PDF_EXPORT is not set. Since --strict treats warnings as errors,
+# we use this CI-specific config to suppress the PDF plugin entirely.
+plugins:
+  - search
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+      fallback_to_build_date: true
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false

@@ -542,7 +542,7 @@ After preprocessing (merge Lane B with adjacent segments):
 
 - [Conversion Process Flow](conversion-process.md) - Detailed conversion pipeline documentation
 - [Signals Documentation](signals.md) - Traffic signal conversion details
-- [Known Limitations](limitations.md) - Current converter limitations and CARLA compatibility notes
+- [Known Limitations](limitations/index.md) - Current converter limitations and CARLA compatibility notes
 
 ### Related Tools
 
