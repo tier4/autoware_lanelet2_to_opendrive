@@ -1,12 +1,9 @@
 """
 Validate a .xodr file against CARLA's map loading pipeline.
 
-Runs two offline tests (no CARLA server required):
+Both tests run offline (no CARLA server required):
   1. OpenDRIVE Parser  – carla.Map() parse + waypoint/topology generation
   2. Traffic Manager   – cook_in_memory_map() binary cooking
-
-An optional online test requires a running CARLA server:
-  3. World Generation  – client.generate_opendrive_world()
 
 Usage:
     uv run carla-import-test <path_to_xodr_file> [options]
@@ -14,7 +11,6 @@ Usage:
 Examples:
     uv run carla-import-test test/data/nishishinjuku.xodr
     uv run carla-import-test map.xodr --skip-tm
-    uv run carla-import-test map.xodr --host localhost --port 2000
     uv run carla-import-test map.xodr --map-name MyMap --verbose
 """
 
@@ -44,13 +40,9 @@ class CarlaImportConstants:
 
     Attributes:
         waypoint_generation_distance: Distance interval in metres for waypoint generation
-        default_carla_port: Default TCP port for CARLA server connections
-        server_connection_timeout: Timeout in seconds for CARLA server connection
     """
 
     waypoint_generation_distance: float = 1.0
-    default_carla_port: int = 2000
-    server_connection_timeout: float = 10.0
 
 
 CONSTANTS = CarlaImportConstants()
@@ -137,7 +129,7 @@ def run_opendrive_parser_test(xodr_content: str, map_name: str) -> TestResult:
         waypoint_count = len(waypoints)
         topology_count = len(topology)
         detail = (
-            f"{waypoint_count} waypoints generated, " f"{topology_count} topology edges"
+            f"{waypoint_count} waypoints generated, {topology_count} topology edges"
         )
         logger.debug("Parser test detail: %s", detail)
         return TestResult(
@@ -224,68 +216,6 @@ def run_traffic_manager_test(xodr_content: str, map_name: str) -> TestResult:
         )
 
 
-def run_online_world_generation_test(
-    xodr_content: str,
-    host: str,
-    port: int,
-) -> TestResult:
-    """Test CARLA world generation via a live server connection.
-
-    Connects to a running CARLA server and calls generate_opendrive_world()
-    to load the map. Requires a CARLA server to be running.
-
-    Args:
-        xodr_content: Raw XML content of the .xodr file
-        host: Hostname or IP address of the CARLA server
-        port: TCP port of the CARLA server
-
-    Returns:
-        TestResult indicating pass/fail with the generated world map name
-    """
-    test_name = "Online World Generation Test"
-    try:
-        import carla  # type: ignore[import]
-
-        client = carla.Client(host, port)
-        client.set_timeout(CONSTANTS.server_connection_timeout)
-        params = carla.OpendriveGenerationParameters(
-            vertex_distance=2.0,
-            max_road_length=50.0,
-            wall_height=0.0,
-            additional_width=0.6,
-            smooth_junctions=True,
-            enable_mesh_visibility=True,
-        )
-        world = client.generate_opendrive_world(xodr_content, params)
-        map_name = world.get_map().name
-        detail = f"world map name: {map_name}"
-        logger.debug("Online test detail: %s", detail)
-        return TestResult(
-            name=test_name,
-            passed=True,
-            message="generate_opendrive_world() succeeded",
-            detail=detail,
-        )
-    except RuntimeError as exc:
-        return TestResult(
-            name=test_name,
-            passed=False,
-            message=f"CARLA RuntimeError: {exc}",
-        )
-    except ImportError as exc:
-        return TestResult(
-            name=test_name,
-            passed=False,
-            message=f"carla package not available: {exc}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        return TestResult(
-            name=test_name,
-            passed=False,
-            message=f"Unexpected error: {exc}",
-        )
-
-
 # ---------------------------------------------------------------------------
 # Report printing
 # ---------------------------------------------------------------------------
@@ -349,17 +279,6 @@ def main() -> None:
         help="Name passed to carla.Map() (default: file stem)",
     )
     parser.add_argument(
-        "--host",
-        default=None,
-        help="CARLA server host; enables the online world generation test when given",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=CONSTANTS.default_carla_port,
-        help=f"CARLA server port (default: {CONSTANTS.default_carla_port})",
-    )
-    parser.add_argument(
         "--skip-tm",
         action="store_true",
         help="Skip the Traffic Manager cook test",
@@ -391,23 +310,12 @@ def main() -> None:
 
     report = ImportTestReport(xodr_path=str(xodr_path))
 
-    # Offline test 1: OpenDRIVE parser
     logger.debug("Running OpenDRIVE parser test for map '%s'", map_name)
     report.results.append(run_opendrive_parser_test(xodr_content, map_name))
 
-    # Offline test 2: Traffic Manager (optional skip)
     if not args.skip_tm:
         logger.debug("Running Traffic Manager test for map '%s'", map_name)
         report.results.append(run_traffic_manager_test(xodr_content, map_name))
-
-    # Online test 3: World generation (only when --host is provided)
-    if args.host:
-        logger.debug(
-            "Running online world generation test (%s:%d)", args.host, args.port
-        )
-        report.results.append(
-            run_online_world_generation_test(xodr_content, args.host, args.port)
-        )
 
     print_report(report)
 
