@@ -327,10 +327,10 @@ jobs:
           HYDRA_FULL_ERROR=1 uv run convert \
             map=nishishinjuku \
             target=carla \
-            input_map_path=test/data/nishisinjyuku.osm
+            input_map_path=test/data/nishishinjuku.osm
 
       - name: Rename output to sample_nishishinjuku.xodr
-        run: mv test/data/lanelet2_map.xodr sample_nishishinjuku.xodr
+        run: mv test/data/nishishinjuku.xodr sample_nishishinjuku.xodr
 
       - name: Upload sample xodr to GitHub Release
         run: |
@@ -341,7 +341,7 @@ jobs:
 
       - name: Run ASAM QC analysis
         run: |
-          uv run analyze test/data/nishisinjyuku.xodr | tee asam_qc_report.txt
+          uv run analyze test/data/nishishinjuku.xodr | tee asam_qc_report.txt
 
       - name: Upload ASAM QC report to GitHub Release
         run: |
