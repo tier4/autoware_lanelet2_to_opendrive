@@ -290,6 +290,98 @@ def test_find_nearest_road_for_linestring_beyond_threshold():
 
 
 # ---------------------------------------------------------------------------
+# Unit tests – CARLA Stencil_STOP format
+# ---------------------------------------------------------------------------
+
+
+def test_to_xml_carla_format():
+    """Test that carla_format=True produces CARLA Stencil_STOP XML attributes."""
+    obj = StopLineObject(
+        id=77,
+        name="stop_line_77",
+        s=15.0,
+        t=0.5,
+        z_offset=0.03,
+        hdg=math.pi / 2,
+        width=2.0,
+        length=3.5,
+        carla_format=True,
+    )
+    elem = obj.to_xml()
+
+    # CARLA-specific attributes
+    assert elem.get("type") == "-1"
+    assert elem.get("name") == "Stencil_STOP"
+    assert elem.get("orientation") == "-"
+    assert float(elem.get("zOffset")) == pytest.approx(0.0)
+
+    # Geometric attributes must remain unchanged
+    assert float(elem.get("s")) == pytest.approx(15.0)
+    assert float(elem.get("t")) == pytest.approx(0.5)
+    assert float(elem.get("width")) == pytest.approx(2.0)
+    assert float(elem.get("length")) == pytest.approx(3.5)
+    assert elem.get("id") == "77"
+
+
+def test_to_xml_carla_vs_default():
+    """Test that carla_format=False (default) leaves standard OpenDRIVE output unchanged."""
+    obj = StopLineObject(
+        id=88,
+        name="stop_line_88",
+        s=5.0,
+        t=1.0,
+        z_offset=0.05,
+        hdg=0.0,
+        width=0.1,
+        length=4.0,
+        carla_format=False,
+    )
+    elem = obj.to_xml()
+
+    assert elem.get("type") == "stopLine"
+    assert elem.get("name") == "stop_line_88"
+    assert elem.get("orientation") == "none"
+    assert float(elem.get("zOffset")) == pytest.approx(0.05)
+
+
+def test_construct_from_linestring_carla_format():
+    """Test that construct_from_linestring propagates carla_format correctly."""
+    road = _make_mock_road(road_id=0, wx=0.0, wy=0.0)
+
+    from unittest.mock import patch
+
+    pts_2d = np.array([[0.0, -2.0], [0.0, 2.0]])
+    pts_3d = np.array([[0.0, -2.0, 0.1], [0.0, 2.0, 0.1]])
+
+    ls = MagicMock()
+    ls.id = 6006
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.side_effect = lambda linestring, dimensions: (
+            pts_2d if dimensions == 2 else pts_3d
+        )
+        result = StopLineObject.construct_from_linestring(
+            linestring=ls,
+            road=road,
+            object_id=ls.id,
+            width=2.0,
+            carla_format=True,
+        )
+
+    assert result is not None
+    assert result.carla_format is True
+
+    elem = result.to_xml()
+    assert elem.get("type") == "-1"
+    assert elem.get("name") == "Stencil_STOP"
+    assert elem.get("orientation") == "-"
+    assert float(elem.get("zOffset")) == pytest.approx(0.0)
+    assert float(elem.get("width")) == pytest.approx(2.0)
+
+
+# ---------------------------------------------------------------------------
 # Integration test – real map
 # ---------------------------------------------------------------------------
 

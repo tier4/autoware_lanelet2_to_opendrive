@@ -31,8 +31,10 @@ parampoly3:
 
 # Stop line object configuration
 stopline:
-  # Painted width of the stop line in the v-direction (along road), in meters
-  width: 0.1
+  # Stencil_STOP width in v-direction (along road), in meters
+  width: 2.0
+  # Enable CARLA Stencil_STOP format (<object type="-1" name="Stencil_STOP">)
+  carla_stop_line: true
 
 # Width spline sampling configuration
 # Adaptive sampling reduces memory usage for large maps

@@ -332,6 +332,8 @@ class StopLineObject:
     """OpenDRIVE object representing a stop line.
 
     Corresponds to <object type="stopLine"> in OpenDRIVE specification.
+    When carla_format=True, outputs CARLA's Stencil_STOP format instead:
+    <object type="-1" name="Stencil_STOP" orientation="-" zOffset="0.0">.
     """
 
     id: int
@@ -347,24 +349,32 @@ class StopLineObject:
         0.0  # thickness in v-direction (perpendicular to stop line = along road)
     )
     length: float = 0.0  # extent in u-direction (along stop line heading = across road)
+    carla_format: bool = False  # If True, output CARLA Stencil_STOP format
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element.
 
         Returns:
-            <object type="stopLine"> element.
+            <object type="stopLine"> element (standard), or
+            <object type="-1" name="Stencil_STOP"> element (CARLA format).
         """
         elem = ET.Element("object")
-        elem.set("type", "stopLine")
+        if self.carla_format:
+            elem.set("type", "-1")
+            elem.set("name", "Stencil_STOP")
+        else:
+            elem.set("type", "stopLine")
+            elem.set("name", self.name)
         elem.set("id", str(self.id))
-        elem.set("name", self.name)
         elem.set("s", str(self.s))
         elem.set("t", str(self.t))
-        elem.set("zOffset", str(self.z_offset))
+        z_offset = 0.0 if self.carla_format else self.z_offset
+        elem.set("zOffset", str(z_offset))
         elem.set("hdg", str(self.hdg))
         elem.set("pitch", str(self.pitch))
         elem.set("roll", str(self.roll))
-        elem.set("orientation", self.orientation)
+        orientation = "-" if self.carla_format else self.orientation
+        elem.set("orientation", orientation)
         elem.set("width", str(self.width))
         elem.set("length", str(self.length))
         return elem
@@ -375,6 +385,7 @@ class StopLineObject:
         road: "Road",
         object_id: int,
         width: float = 0.1,
+        carla_format: bool = False,
     ) -> Optional["StopLineObject"]:
         """Construct a StopLineObject from a stop_line linestring and its nearest road.
 
@@ -382,6 +393,8 @@ class StopLineObject:
             linestring: LineString with type="stop_line"
             road: The nearest road to associate this stop line with
             object_id: ID for the resulting object (typically linestring.id)
+            width: Painted width of the stop line in v-direction (along road), meters
+            carla_format: If True, create a CARLA Stencil_STOP formatted object
 
         Returns:
             StopLineObject if construction succeeds, None on failure.
@@ -429,6 +442,7 @@ class StopLineObject:
                 hdg=hdg,
                 width=width,
                 length=length,
+                carla_format=carla_format,
             )
 
         except Exception as e:
