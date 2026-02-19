@@ -532,6 +532,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 road=best_road,
                 object_id=ls.id,
                 width=self.config.stopline.width,
+                carla_format=self.config.stopline.carla_stop_line,
             )
             if obj is not None:
                 road_objects.setdefault(best_road.id, []).append(obj)
@@ -972,8 +973,14 @@ def preprocess_and_convert_with_hydra(
     stopline_dict = cfg.map.get("stopline") or cfg.target.get("stopline", {})
     stopline_config = StopLineConfig(
         width=stopline_dict.get("width", 0.1) if stopline_dict else 0.1,
+        carla_stop_line=stopline_dict.get("carla_stop_line", False)
+        if stopline_dict
+        else False,
     )
-    logger.info(f"Stop line config: width={stopline_config.width}m")
+    logger.info(
+        f"Stop line config: width={stopline_config.width}m, "
+        f"carla_stop_line={stopline_config.carla_stop_line}"
+    )
 
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
