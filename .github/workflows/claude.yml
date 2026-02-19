@@ -30,14 +30,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-env
-        with:
-          gh-pat: ${{ secrets.GH_PAT }}
-          install-system-deps: "true"
-          install-dev-deps: "true"
-          run-precommit: "false"
-
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
