@@ -327,6 +327,156 @@ def _compute_corner_locals(
     return corners
 
 
+@dataclass
+class StopLineObject:
+    """OpenDRIVE object representing a stop line.
+
+    Corresponds to <object type="stopLine"> in OpenDRIVE specification.
+    """
+
+    id: int
+    name: str
+    s: float  # s-coordinate on road reference line
+    t: float  # t-coordinate (lateral offset from reference line)
+    z_offset: float  # vertical offset from road surface
+    hdg: float  # heading angle (radians) relative to road direction
+    pitch: float = 0.0
+    roll: float = 0.0
+    orientation: str = "none"
+    width: float = 0.0  # stop_line length (the transversal distance crossing the lanes)
+    length: float = 0.0  # thickness (usually 0.0)
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element.
+
+        Returns:
+            <object type="stopLine"> element.
+        """
+        elem = ET.Element("object")
+        elem.set("type", "stopLine")
+        elem.set("id", str(self.id))
+        elem.set("name", self.name)
+        elem.set("s", str(self.s))
+        elem.set("t", str(self.t))
+        elem.set("zOffset", str(self.z_offset))
+        elem.set("hdg", str(self.hdg))
+        elem.set("pitch", str(self.pitch))
+        elem.set("roll", str(self.roll))
+        elem.set("orientation", self.orientation)
+        elem.set("width", str(self.width))
+        elem.set("length", str(self.length))
+        return elem
+
+    @staticmethod
+    def construct_from_linestring(
+        linestring: lanelet2.core.LineString3d,
+        road: "Road",
+        object_id: int,
+    ) -> Optional["StopLineObject"]:
+        """Construct a StopLineObject from a stop_line linestring and its nearest road.
+
+        Args:
+            linestring: LineString with type="stop_line"
+            road: The nearest road to associate this stop line with
+            object_id: ID for the resulting object (typically linestring.id)
+
+        Returns:
+            StopLineObject if construction succeeds, None on failure.
+        """
+        try:
+            pts = extract_points(linestring, dimensions=2)
+            if len(pts) < 2:
+                logger.warning(
+                    f"Stop line linestring {linestring.id} has fewer than 2 points, skipping"
+                )
+                return None
+
+            # Centroid of all points
+            centroid = np.mean(pts, axis=0)
+
+            projection = _project_point_onto_road(centroid, road)
+            if projection is None:
+                logger.warning(
+                    f"Could not project stop line {linestring.id} centroid onto road {road.id}"
+                )
+                return None
+            s, t, road_hdg_at_s = projection
+
+            # Compute z_offset from 3D points vs road elevation
+            pts_3d = extract_points(linestring, dimensions=3)
+            stop_line_absolute_z = float(np.mean(pts_3d[:, 2]))
+            road_elevation_at_s = road.get_elevation_at_s(s)
+            z_offset = stop_line_absolute_z - road_elevation_at_s
+
+            # Heading: direction of the stop line (from first to last point)
+            direction = pts[-1] - pts[0]
+            stop_line_angle = math.atan2(float(direction[1]), float(direction[0]))
+            hdg = (stop_line_angle - road_hdg_at_s + math.pi) % (2 * math.pi) - math.pi
+
+            # Width = length of the stop line; length (thickness) = 0
+            width = float(np.linalg.norm(pts[-1] - pts[0]))
+
+            return StopLineObject(
+                id=object_id,
+                name=f"stop_line_{object_id}",
+                s=s,
+                t=t,
+                z_offset=z_offset,
+                hdg=hdg,
+                width=width,
+                length=0.0,
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to construct StopLineObject from linestring {linestring.id}: {e}"
+            )
+            return None
+
+
+def find_nearest_road_for_linestring(
+    linestring: lanelet2.core.LineString3d,
+    all_roads: List["Road"],
+    threshold_m: float = _NEAREST_ROAD_THRESHOLD_M,
+) -> Optional["Road"]:
+    """Find the nearest road to a linestring's centroid.
+
+    Args:
+        linestring: LineString to find the nearest road for
+        all_roads: List of all candidate roads
+        threshold_m: Maximum allowed distance in meters
+
+    Returns:
+        Nearest Road within threshold_m, or None if no road is close enough.
+    """
+    pts = extract_points(linestring, dimensions=2)
+    if len(pts) == 0:
+        return None
+
+    centroid = np.mean(pts, axis=0)
+
+    best_road: Optional[Road] = None
+    best_dist = float("inf")
+
+    for road in all_roads:
+        if road.plan_view is None:
+            continue
+        for wx, wy, _, _ in _sample_road_points(road):
+            dist = math.hypot(float(centroid[0]) - wx, float(centroid[1]) - wy)
+            if dist < best_dist:
+                best_dist = dist
+                best_road = road
+
+    if best_dist > threshold_m:
+        logger.warning(
+            f"Stop line linestring {linestring.id}: nearest road is {best_dist:.1f}m away "
+            f"(threshold={threshold_m}m), skipping"
+        )
+        return None
+
+    return best_road
+
+
 def find_nearest_road(
     lanelet: lanelet2.core.Lanelet,
     all_roads: List[Road],

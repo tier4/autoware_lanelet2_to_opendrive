@@ -495,6 +495,56 @@ class _Lanelet2ToOpenDRIVEConverter:
             if road.id in road_objects:
                 road.objects = road_objects[road.id]
 
+    def _extract_and_assign_stop_lines(self, all_roads: List[Road]) -> None:
+        """Extract stop line linestrings and assign them as objects to nearest roads.
+
+        For each linestring with type="stop_line", this method:
+        1. Finds the nearest road within a distance threshold
+        2. Constructs a StopLineObject with position and heading
+        3. Extends the road's objects list with the new object
+
+        Args:
+            all_roads: All roads (regular + connecting) to search and assign to.
+        """
+        from autoware_lanelet2_to_opendrive.opendrive.objects import (
+            StopLineObject,
+            find_nearest_road_for_linestring,
+        )
+
+        print("\n=== Extracting stop lines ===")
+        stop_line_ids_seen: set = set()
+        road_objects: Dict[int, List] = {}
+
+        for ls in self.lanelet_map.lineStringLayer:
+            if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
+                continue
+            if ls.id in stop_line_ids_seen:
+                continue
+            stop_line_ids_seen.add(ls.id)
+
+            best_road = find_nearest_road_for_linestring(ls, all_roads)
+            if best_road is None:
+                continue
+
+            obj = StopLineObject.construct_from_linestring(
+                linestring=ls,
+                road=best_road,
+                object_id=ls.id,
+            )
+            if obj is not None:
+                road_objects.setdefault(best_road.id, []).append(obj)
+
+        stop_line_count = sum(len(v) for v in road_objects.values())
+        print(
+            f"Assigned {stop_line_count} stop line objects to {len(road_objects)} roads"
+        )
+
+        for road in all_roads:
+            if road.id in road_objects:
+                if road.objects is None:
+                    road.objects = []
+                road.objects.extend(road_objects[road.id])
+
     def _write_opendrive_output(
         self,
         all_roads: List[Road],
@@ -615,6 +665,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Step 6.5: Extract crosswalks and assign as road objects
         self._extract_and_assign_crosswalks(all_roads)
+
+        # Step 6.6: Extract stop lines and assign as road objects
+        self._extract_and_assign_stop_lines(all_roads)
 
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(

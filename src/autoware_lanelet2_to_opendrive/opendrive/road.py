@@ -1,7 +1,7 @@
 """OpenDRIVE road definitions."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple, cast
+from typing import Dict, List, Optional, Set, Tuple, Union, cast
 import lxml.etree as ET
 import lanelet2
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from .signal import Signal
     from .lane import Lane
     from .junction import Junction
-    from .objects import CrosswalkObject
+    from .objects import CrosswalkObject, StopLineObject
 
 
 @dataclass
@@ -48,7 +48,7 @@ class Road:
     signals: Optional[List["Signal"]] = None
     elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
     road_types: Optional[List[RoadTypeDefinition]] = None
-    objects: Optional[List["CrosswalkObject"]] = None
+    objects: Optional[List[Union["CrosswalkObject", "StopLineObject"]]] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
