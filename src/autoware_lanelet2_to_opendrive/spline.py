@@ -759,4 +759,3 @@ class Splines:
         """Get the total arc length of the spline."""
         self._compute_arc_length_table()
         return self._computed_total_length
-
