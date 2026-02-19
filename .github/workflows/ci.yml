@@ -46,6 +46,45 @@ jobs:
         run-precommit: "true"
         precommit-continue-on-error: "false"
 
+  auto-format:
+    name: Auto-fix formatting
+    runs-on: ubuntu-22.04
+    needs: lint-and-format
+    if: |
+      failure() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+        with:
+          gh-pat: ${{ secrets.GH_PAT }}
+          install-system-deps: "true"
+          install-dev-deps: "true"
+          run-precommit: "false"
+
+      - name: Run pre-commit auto-fix
+        run: uv run pre-commit run --all-files || true
+
+      - name: Commit and push if changes were made
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -u
+          git commit -m "style: auto-fix formatting with pre-commit"
+          git push
+
   docs:
     runs-on: ubuntu-22.04
     steps:
