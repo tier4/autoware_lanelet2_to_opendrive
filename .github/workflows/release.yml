@@ -311,7 +311,7 @@ jobs:
 
       - name: Run ASAM QC analysis
         run: |
-          uv run analyze test/data/nishishinjuku.xodr | tee asam_qc_report.txt
+          uv run analyze sample_nishishinjuku.xodr | tee asam_qc_report.txt
 
       - name: Upload ASAM QC report to GitHub Release
         run: |
