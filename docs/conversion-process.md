@@ -44,7 +44,8 @@ flowchart TD
 
     O --> P[Build Junction Connections]
     P --> R[Extract Crosswalk Objects<br/>subtype=crosswalk lanelets]
-    R --> Q[Generate OpenDRIVE XML]
+    R --> S[Extract Stop Line Objects<br/>type=stop_line linestrings]
+    S --> Q[Generate OpenDRIVE XML]
 
     style A fill:#e1f5ff
     style Q fill:#c8e6c9
@@ -52,6 +53,7 @@ flowchart TD
     style L fill:#ffe0b2
     style N fill:#f8bbd0
     style R fill:#e8f5e9
+    style S fill:#f3e5f5
 ```
 
 ---
@@ -636,6 +638,38 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 ---
 
+### Stage 8.6: Stop Line Object Extraction
+
+**Purpose:** Convert Lanelet2 linestrings with `type="stop_line"` into OpenDRIVE `<object type="stopLine">` elements and assign them to the nearest roads.
+
+**Tags Used:**
+
+| Tag | Purpose |
+|-----|---------|
+| `type="stop_line"` | Identifies stop line linestrings |
+
+**Processing:**
+
+1. Iterate over all linestrings in `lineStringLayer`; select those with `type="stop_line"`
+2. For each stop line linestring:
+   a. Compute the centroid of all 2D points
+   b. Sample reference lines of all roads (10 points per geometry segment)
+   c. Find the nearest road within 50 m threshold
+   d. Project centroid onto the road reference line → `(s, t, road_hdg)`
+   e. Compute `z_offset` as average 3D elevation minus road elevation at `s`
+   f. Compute stop line heading relative to road direction → `hdg`
+   g. Set `width` = distance from first to last point; `length` = 0 (zero thickness)
+3. Assign `StopLineObject` instances to their nearest road's `objects` list
+
+**Output:** `Road.objects` populated with `StopLineObject` instances alongside any existing `CrosswalkObject` instances
+
+**Code Location:** [`opendrive/objects.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`main.py` – `_extract_and_assign_stop_lines()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+
+!!! info "Detailed Documentation"
+    For full details on the stop line conversion algorithm, see [Stop Line Objects](stop_line_objects.md).
+
+---
+
 ### Stage 9: OpenDRIVE XML Generation
 
 **Purpose:** Serialize the constructed OpenDRIVE objects to XML format.
@@ -1196,6 +1230,7 @@ This section summarizes which Lanelet2 tags are used by the converter and which 
 |-----|-------|---------|---------|-----------|
 | **`subtype`** | Lanelet | Lane construction | Determines lane type (DRIVING, SIDEWALK, BIKING) | No (defaults to DRIVING) |
 | **`subtype="crosswalk"`** | Lanelet | Crosswalk object extraction | Identifies pedestrian crossing lanelets | Yes (for crosswalk objects) |
+| **`type="stop_line"`** | LineString | Stop line object extraction | Identifies stop line linestrings | Yes (for stop line objects) |
 | **`speed_limit`** | Lanelet | Road & Lane metadata | Sets speed restrictions | No (uses fallback values) |
 | **`location`** | Lanelet | Road type classification | Determines road type (TOWN, MOTORWAY, etc.) | No (inferred from speed) |
 | **`turn_direction`** | Lanelet | Junction detection | Identifies intersection lanelets | Yes (for junctions) |
@@ -1254,6 +1289,7 @@ For developers seeking to understand or modify tag handling:
 | **Signal type mapping** | `opendrive/signal.py` | [Lines 281-304](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signal.py#L281-L304) | Reads `type`/`subtype` from traffic lights |
 | **Signal extraction** | `opendrive/signals_and_controllers.py` | [Lines 75-249](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py#L75-L249) | Extracts regulatory elements |
 | **Subtype filtering** | `util.py` | [Lines 456-503](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L456-L503) | Filters lanelets by `subtype` |
+| **Stop line extraction** | `opendrive/objects.py` | [`StopLineObject`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`find_nearest_road_for_linestring()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py) | Reads `type` tag from linestrings, detects `stop_line` |
 
 ---
 

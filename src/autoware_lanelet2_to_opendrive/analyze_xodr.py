@@ -8,7 +8,7 @@ Usage:
     uv run analyze <path_to_xodr_file> [options]
 
 Examples:
-    uv run analyze test/data/nishisinjyuku.xodr
+    uv run analyze test/data/nishishinjuku.xodr
     uv run analyze output.xodr --output result.xqar
     uv run analyze output.xodr --min-severity WARNING
     uv run analyze output.xodr --max-issues 20

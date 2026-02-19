@@ -95,6 +95,19 @@ class WidthEstimationConfig:
 
 
 @dataclass
+class StopLineConfig:
+    """Configuration for stop line object generation.
+
+    Attributes:
+        width: Painted width of the stop line in the v-direction (along road),
+            in meters. Corresponds to the OpenDRIVE object ``width`` attribute.
+            Default 0.1m represents a typical road marking thickness.
+    """
+
+    width: float = 0.1
+
+
+@dataclass
 class ConversionConfig:
     """Configuration for Lanelet2 to OpenDRIVE conversion.
 
@@ -112,6 +125,7 @@ class ConversionConfig:
             LHT: Left-Hand Traffic). Defaults to "RHT"
         parampoly3: Configuration for ParamPoly3 segment generation
         width_estimation: Configuration for width spline sampling
+        stopline: Configuration for stop line object generation
     """
 
     output_path: Optional[Path] = None
@@ -123,6 +137,7 @@ class ConversionConfig:
     width_estimation: WidthEstimationConfig = field(
         default_factory=WidthEstimationConfig
     )
+    stopline: StopLineConfig = field(default_factory=StopLineConfig)
 
     def __post_init__(self):
         """Validate configuration after initialization."""

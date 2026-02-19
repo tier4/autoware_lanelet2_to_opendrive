@@ -90,6 +90,7 @@ nav:
     - Coordinate System: limitations/coordinate-system.md
   - Signals: signals.md
   - Crosswalk Objects: crosswalk_objects.md
+  - Stop Line Objects: stop_line_objects.md
   - Conversion Process: conversion-process.md
   - API Reference: api.md
   - Development: development.md

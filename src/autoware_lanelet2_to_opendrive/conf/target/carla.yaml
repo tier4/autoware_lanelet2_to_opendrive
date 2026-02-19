@@ -29,6 +29,11 @@ parampoly3:
   # Threshold for rounding small coefficients to zero
   coefficient_epsilon: 1.0e-8
 
+# Stop line object configuration
+stopline:
+  # Painted width of the stop line in the v-direction (along road), in meters
+  width: 0.1
+
 # Width spline sampling configuration
 # Adaptive sampling reduces memory usage for large maps
 width_estimation:

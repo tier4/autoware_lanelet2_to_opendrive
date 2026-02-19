@@ -1,8 +1,14 @@
 # Stop Line Position Discrepancies
 
+## Current Status
+
+The converter now exports Lanelet2 `type="stop_line"` linestrings as OpenDRIVE `<object type="stopLine">` elements (see [Stop Line Objects](../stop_line_objects.md)). The geometric position (s, t, heading, width) is faithfully derived from the Lanelet2 linestring geometry.
+
+However, the **positional accuracy perceived by CARLA** remains limited due to the CARLA architecture described below.
+
 ## Issue
 
-Stop line positions may not be accurately preserved in the conversion.
+Stop line positions may not be accurately reflected in CARLA simulation even though the converter correctly outputs them.
 
 ## Cause
 
@@ -38,19 +44,20 @@ CARLA's OpenDRIVE parser does not extract stop line positions:
 
 **3. Road Object Parser: Stop Lines Not Extracted**
 
-Stop lines can be defined as road objects in OpenDRIVE, but CARLA ignores them:
+Stop lines are exported as `<object type="stopLine">` road objects in the OpenDRIVE output, but CARLA ignores them:
 
 - **Object Parser**: [`LibCarla/source/carla/opendrive/parser/ObjectParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp)
   - Parses road objects like poles, barriers, etc.
-  - **Does not specifically handle** stop line road objects
-  - Stop line geometries are not converted into game world coordinates
+  - **Does not specifically handle** `type="stopLine"` road objects
+  - Stop line geometries from the road objects section are not converted into game world coordinates
 
 ## Impact
 
-- Stop lines in the resulting OpenDRIVE map may be **shifted** from their original Lanelet2 positions
-- The shift amount depends on CARLA's trigger volume configuration
+- The converter **correctly outputs** stop line geometry as `<object type="stopLine">` elements
+- However, CARLA does not read these objects; stop positions recognized by CARLA may **differ** from the Lanelet2 source
+- The discrepancy depends on CARLA's trigger volume configuration
 - This is a CARLA architectural limitation, not a converter bug
-- Precise stop line positions from Lanelet2 maps are **lost in translation**
+- Tools and simulators other than CARLA that support the OpenDRIVE object model can use the emitted `stopLine` objects directly
 
 ## Workaround
 

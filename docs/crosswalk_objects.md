@@ -160,7 +160,8 @@ Step 3: Build road-lanelet mappings
 Step 4: Set up road and lane connections
 Step 5: Extract and assign signals
 Step 6: Create and assign controllers
-Step 6.5: Extract crosswalks and assign as road objects  ← New
+Step 6.5: Extract crosswalks and assign as road objects
+Step 6.6: Extract stop lines and assign as road objects
 Step 7: Write OpenDRIVE output
 ```
 

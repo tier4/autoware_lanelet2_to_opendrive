@@ -10,6 +10,7 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 
 - Convert Lanelet2 map data to OpenDRIVE format
 - Crosswalk lanelets (`subtype="crosswalk"`) converted to OpenDRIVE `<objects>` for CARLA navigation mesh
+- Stop line linestrings (`type="stop_line"`) converted to OpenDRIVE `<object type="stopLine">` elements
 - Traffic signal extraction from Lanelet2 regulatory elements
 - Designed for integration with Autoware autonomous driving software
 - Type-safe implementation with full type hints support
@@ -24,6 +25,7 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 - [Known Limitations](limitations.md) - Important limitations and behavioral differences
 - [Signals](signals.md) - Signal handling documentation
 - [Crosswalk Objects](crosswalk_objects.md) - Crosswalk lanelet to OpenDRIVE objects conversion
+- [Stop Line Objects](stop_line_objects.md) - Stop line linestring to OpenDRIVE objects conversion
 - [API Reference](api.md) - Detailed API documentation
 - [Development Guide](development.md) - Contributing and development setup
 
