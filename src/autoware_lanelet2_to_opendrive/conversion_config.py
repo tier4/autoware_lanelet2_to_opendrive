@@ -102,9 +102,14 @@ class StopLineConfig:
         width: Painted width of the stop line in the v-direction (along road),
             in meters. Corresponds to the OpenDRIVE object ``width`` attribute.
             Default 0.1m represents a typical road marking thickness.
+            For CARLA Stencil_STOP, this is the stencil width (recommend ~2.0m).
+        carla_stop_line: If True, output stop lines in CARLA's Stencil_STOP format
+            (<object type="-1" name="Stencil_STOP">) instead of standard OpenDRIVE
+            format. zOffset is fixed at 0.0 and orientation is set to "-".
     """
 
     width: float = 0.1
+    carla_stop_line: bool = False
 
 
 @dataclass
@@ -125,7 +130,8 @@ class ConversionConfig:
             LHT: Left-Hand Traffic). Defaults to "RHT"
         parampoly3: Configuration for ParamPoly3 segment generation
         width_estimation: Configuration for width spline sampling
-        stopline: Configuration for stop line object generation
+        stopline: Configuration for stop line object generation.
+            Set stopline.carla_stop_line=True to enable CARLA Stencil_STOP format
     """
 
     output_path: Optional[Path] = None
