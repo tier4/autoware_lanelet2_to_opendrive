@@ -343,8 +343,10 @@ class StopLineObject:
     pitch: float = 0.0
     roll: float = 0.0
     orientation: str = "none"
-    width: float = 0.0  # stop_line length (the transversal distance crossing the lanes)
-    length: float = 0.0  # thickness (usually 0.0)
+    width: float = (
+        0.0  # thickness in v-direction (perpendicular to stop line = along road)
+    )
+    length: float = 0.0  # extent in u-direction (along stop line heading = across road)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element.
@@ -413,8 +415,8 @@ class StopLineObject:
             stop_line_angle = math.atan2(float(direction[1]), float(direction[0]))
             hdg = (stop_line_angle - road_hdg_at_s + math.pi) % (2 * math.pi) - math.pi
 
-            # Width = length of the stop line; length (thickness) = 0
-            width = float(np.linalg.norm(pts[-1] - pts[0]))
+            # length = span along heading (u-axis = across road); width (thickness) = 0
+            length = float(np.linalg.norm(pts[-1] - pts[0]))
 
             return StopLineObject(
                 id=object_id,
@@ -423,8 +425,8 @@ class StopLineObject:
                 t=t,
                 z_offset=z_offset,
                 hdg=hdg,
-                width=width,
-                length=0.0,
+                width=0.0,
+                length=length,
             )
 
         except Exception as e:
