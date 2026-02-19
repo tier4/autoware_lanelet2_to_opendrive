@@ -22,15 +22,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup base environment
+        uses: ./.github/actions/setup-env
         with:
-          python-version: "3.10"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
+          install-system-deps: "false"
+          install-dev-deps: "false"
 
       - name: Get merged PR labels
         id: pr-labels
@@ -186,22 +182,13 @@ jobs:
             core.setOutput('release_id', release.id);
             core.setOutput('upload_url', release.upload_url);
 
-      - name: Install system dependencies
+      - name: Setup full environment
         if: steps.pr-labels.outputs.bump_type != 'none'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographic-dev libboost-python-dev libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
-
-      - name: Configure git for private repositories
-        if: steps.pr-labels.outputs.bump_type != 'none'
-        run: |
-          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-
-      - name: Install dev dependencies
-        if: steps.pr-labels.outputs.bump_type != 'none'
-        run: uv sync --dev
-        env:
-          GIT_AUTH_TOKEN: ${{ secrets.GH_PAT }}
+        uses: ./.github/actions/setup-env
+        with:
+          gh-pat: ${{ secrets.GH_PAT }}
+          install-system-deps: "true"
+          install-dev-deps: "true"
 
       - name: Build documentation with version info
         if: steps.pr-labels.outputs.bump_type != 'none'
@@ -298,29 +285,12 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
         with:
-          python-version: "3.10"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libboost-dev libeigen3-dev libpugixml-dev libgeographic-dev libboost-python-dev libboost-serialization-dev librange-v3-dev libboost-filesystem-dev libboost-program-options-dev
-
-      - name: Configure git for private repositories
-        run: |
-          git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-
-      - name: Install dependencies
-        run: uv sync --dev
-        env:
-          GIT_AUTH_TOKEN: ${{ secrets.GH_PAT }}
+          gh-pat: ${{ secrets.GH_PAT }}
+          install-system-deps: "true"
+          install-dev-deps: "true"
 
       - name: Run conversion for nishishinjuku sample
         run: |
