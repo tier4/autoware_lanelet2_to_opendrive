@@ -1,0 +1,88 @@
+name: Setup Environment
+description: >
+  Common CI environment setup: Python, uv, optional system dependencies,
+  optional uv sync --dev, and optional pre-commit execution.
+
+inputs:
+  python-version:
+    description: Python version to set up
+    required: false
+    default: "3.10"
+  gh-pat:
+    description: GitHub Personal Access Token for private repositories
+    required: false
+    default: ""
+  install-system-deps:
+    description: Install apt system dependencies (libboost, libeigen3, etc.)
+    required: false
+    default: "true"
+  install-dev-deps:
+    description: Run 'uv sync --dev' to install Python dependencies
+    required: false
+    default: "true"
+  run-precommit:
+    description: Run 'pre-commit install && pre-commit run --all-files'
+    required: false
+    default: "false"
+  precommit-continue-on-error:
+    description: Continue even if pre-commit fails (uses '|| true')
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Install system dependencies
+      if: inputs.install-system-deps == 'true'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libboost-dev \
+          libeigen3-dev \
+          libpugixml-dev \
+          libgeographic-dev \
+          libboost-python-dev \
+          libboost-serialization-dev \
+          librange-v3-dev \
+          libboost-filesystem-dev \
+          libboost-program-options-dev
+
+    - name: Configure git for private repositories
+      if: inputs.install-dev-deps == 'true' && inputs.gh-pat != ''
+      shell: bash
+      run: |
+        git config --global \
+          url."https://${{ inputs.gh-pat }}@github.com/".insteadOf \
+          "https://github.com/"
+
+    - name: Install Python dependencies
+      if: inputs.install-dev-deps == 'true'
+      shell: bash
+      run: uv sync --dev
+      env:
+        GIT_AUTH_TOKEN: ${{ inputs.gh-pat }}
+
+    - name: Run pre-commit hooks
+      if: inputs.run-precommit == 'true' && inputs.precommit-continue-on-error == 'false'
+      shell: bash
+      run: |
+        uv run pre-commit install
+        uv run pre-commit run --all-files
+
+    - name: Run pre-commit hooks (continue on error)
+      if: inputs.run-precommit == 'true' && inputs.precommit-continue-on-error == 'true'
+      shell: bash
+      run: |
+        uv run pre-commit install
+        uv run pre-commit run --all-files || true
