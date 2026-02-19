@@ -83,65 +83,6 @@ def extract_points_2d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
     return extract_points(boundary, dimensions=2)
 
 
-def extract_point(
-    point: lanelet2.core.Point3d,
-    dimensions: Literal[2, 3] = 3,
-) -> np.ndarray:
-    """Extract coordinates from a Lanelet2 point with coordinate offset applied.
-
-    Args:
-        point: Lanelet2 Point3d to extract coordinates from
-        dimensions: Number of dimensions to extract (2 or 3)
-
-    Returns:
-        numpy array of shape (dimensions,) with coordinates,
-        with coordinate offset applied
-
-    Raises:
-        ValueError: If dimensions is not 2 or 3
-    """
-    if dimensions == 3:
-        coords = np.array([point.x, point.y, point.z])
-        if COORDINATE_OFFSET.is_active:
-            coords[0] -= COORDINATE_OFFSET.x
-            coords[1] -= COORDINATE_OFFSET.y
-            coords[2] -= COORDINATE_OFFSET.z
-    elif dimensions == 2:
-        coords = np.array([point.x, point.y])
-        if COORDINATE_OFFSET.is_active:
-            coords[0] -= COORDINATE_OFFSET.x
-            coords[1] -= COORDINATE_OFFSET.y
-    else:
-        raise ValueError(f"Dimensions must be 2 or 3, got {dimensions}")
-    return coords
-
-
-def extract_point_3d(point: lanelet2.core.Point3d) -> np.ndarray:
-    """Extract 3D coordinates from a Lanelet2 point with offset applied.
-
-    Args:
-        point: Lanelet2 Point3d to extract coordinates from
-
-    Returns:
-        numpy array of shape (3,) with [x, y, z] coordinates,
-        with coordinate offset applied
-    """
-    return extract_point(point, dimensions=3)
-
-
-def extract_point_2d(point: lanelet2.core.Point3d) -> np.ndarray:
-    """Extract 2D coordinates from a Lanelet2 point with offset applied.
-
-    Args:
-        point: Lanelet2 Point3d to extract coordinates from
-
-    Returns:
-        numpy array of shape (2,) with [x, y] coordinates,
-        with coordinate offset applied
-    """
-    return extract_point(point, dimensions=2)
-
-
 # Type aliases for common lanelet collection types
 LaneletInput = Union[
     Set[lanelet2.core.Lanelet],
