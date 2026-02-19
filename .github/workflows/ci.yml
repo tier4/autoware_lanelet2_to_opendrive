@@ -127,3 +127,40 @@ jobs:
         name: documentation
         path: site/
         retention-days: 7
+
+  carla-import-test:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup environment
+      uses: ./.github/actions/setup-env
+      with:
+        gh-pat: ${{ secrets.GH_PAT }}
+        install-system-deps: "true"
+        install-dev-deps: "true"
+        run-precommit: "false"
+
+    - name: Convert Lanelet2 map to OpenDRIVE (CARLA target)
+      run: |
+        uv run convert \
+          map=nishishinjuku \
+          target=carla \
+          input_map_path=test/data/nishishinjuku.osm \
+          output_map_path=nishishinjuku_carla.xodr
+
+    - name: Run CARLA import test
+      run: |
+        uv run carla-import-test nishishinjuku_carla.xodr \
+          --map-name nishishinjuku \
+          | tee carla_import_test_result.txt
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: nishishinjuku_carla_artifacts
+        path: |
+          nishishinjuku_carla.xodr
+          carla_import_test_result.txt
+        retention-days: 7
