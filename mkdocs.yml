@@ -53,8 +53,6 @@ plugins:
       output_path: pdf/documentation.pdf
       enabled_if_env: ENABLE_PDF_EXPORT
       verbose: false
-      exclude_pages:
-        - 'api/'
 
 markdown_extensions:
   - admonition

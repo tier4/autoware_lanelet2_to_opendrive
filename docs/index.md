@@ -22,7 +22,7 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 - [Usage Guide](usage.md) - Learn how to use the converter
 - [CARLA OpenDRIVE Mapping](carla_opendrive_lanelet2_mapping.md) - OpenDRIVE tags used by CARLA and Lanelet2 conversion mapping
 - [Conversion Process](conversion-process.md) - Detailed conversion pipeline and tag usage
-- [Known Limitations](limitations.md) - Important limitations and behavioral differences
+- [Known Limitations](limitations/index.md) - Important limitations and behavioral differences
 - [Signals](signals.md) - Signal handling documentation
 - [Crosswalk Objects](crosswalk_objects.md) - Crosswalk lanelet to OpenDRIVE objects conversion
 - [Stop Line Objects](stop_line_objects.md) - Stop line linestring to OpenDRIVE objects conversion
