@@ -188,11 +188,11 @@ convert my_map.osm --preprocess-config config.yaml -o my_map.xodr
 Fix map issues before conversion:
 
 ```bash
-# 1. Create a configuration file with preprocessing operations (preprocess_config.yaml)
+# 1. Create a configuration file with preprocessing operations (nishishinjuku_preprocess_config.yaml)
 # Include merge_operations, remove_lanelet_operations, etc.
 
 # 2. Execute preprocessing and conversion in one step
-convert original_map.osm --preprocess-config preprocess_config.yaml -o fixed_map.xodr
+convert original_map.osm --preprocess-config nishishinjuku_preprocess_config.yaml -o fixed_map.xodr
 ```
 
 ### Use Case 3: Run Preprocessing Only
@@ -201,10 +201,10 @@ Preprocess a map before OpenDRIVE conversion:
 
 ```bash
 # 1. Run preprocessing only
-preprocess-lanelet preprocess_config.yaml
+preprocess-lanelet nishishinjuku_preprocess_config.yaml
 
 # 2. Validate the preprocessed map
-preprocess-lanelet preprocess_config.yaml --dry-run -v
+preprocess-lanelet nishishinjuku_preprocess_config.yaml --dry-run -v
 
 # 3. Convert the preprocessed map
 convert preprocessed_map.osm --preprocess-config simple_config.yaml
