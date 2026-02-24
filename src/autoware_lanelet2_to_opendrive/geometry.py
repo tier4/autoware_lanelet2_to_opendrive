@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Optional, List, Tuple, Dict, Union
+from typing import Optional, List, Dict, Union
 import lanelet2
 import logging
 
@@ -283,89 +283,6 @@ def line_line_intersection_typed(
     except np.linalg.LinAlgError:
         # Lines are parallel or coincident
         return None
-
-
-def find_linestring_containing_point(
-    lanelet_map: lanelet2.core.LaneletMap, point_id: int
-) -> List[lanelet2.core.LineString3d]:
-    """
-    Find all LineString3d objects that contain a point with the given ID.
-
-    Args:
-        lanelet_map: Lanelet2 map to search
-        point_id: ID of the point to find
-
-    Returns:
-        List of LineString3d objects containing the point
-    """
-    linestrings = []
-    seen_ids = set()  # Track already found linestrings to avoid duplicates
-
-    # Search through all lanelets
-    for lanelet in lanelet_map.laneletLayer:
-        # Check left boundary
-        if lanelet.leftBound.id not in seen_ids:
-            for point in lanelet.leftBound:
-                if point.id == point_id:
-                    linestrings.append(lanelet.leftBound)
-                    seen_ids.add(lanelet.leftBound.id)
-                    break
-
-        # Check right boundary
-        if lanelet.rightBound.id not in seen_ids:
-            for point in lanelet.rightBound:
-                if point.id == point_id:
-                    linestrings.append(lanelet.rightBound)
-                    seen_ids.add(lanelet.rightBound.id)
-                    break
-
-    # Search through linestring layer if it exists
-    if hasattr(lanelet_map, "lineStringLayer"):
-        for linestring in lanelet_map.lineStringLayer:
-            if linestring.id not in seen_ids:
-                for point in linestring:
-                    if point.id == point_id:
-                        linestrings.append(linestring)
-                        seen_ids.add(linestring.id)
-                        break
-
-    return linestrings
-
-
-def get_linestring_segment_for_point(
-    linestring: lanelet2.core.LineString3d, point_id: int
-) -> Optional[Tuple[lanelet2.core.Point3d, lanelet2.core.Point3d]]:
-    """
-    Get the line segment (prev_point, next_point) for a point in a linestring.
-
-    Args:
-        linestring: LineString3d containing the point
-        point_id: ID of the point
-
-    Returns:
-        Tuple of (previous_point, next_point) or None if point not found or at boundary
-    """
-    points = list(linestring)
-
-    for i, point in enumerate(points):
-        if point.id == point_id:
-            # Get previous and next points if available
-            prev_point = points[i - 1] if i > 0 else None
-            next_point = points[i + 1] if i < len(points) - 1 else None
-
-            # If point is at the beginning, use next two points
-            if prev_point is None and next_point and i + 2 < len(points):
-                return (next_point, points[i + 2])
-
-            # If point is at the end, use previous two points
-            if next_point is None and prev_point and i - 2 >= 0:
-                return (points[i - 2], prev_point)
-
-            # Normal case: point is in the middle
-            if prev_point and next_point:
-                return (prev_point, next_point)
-
-    return None
 
 
 def delete_points_from_map(
