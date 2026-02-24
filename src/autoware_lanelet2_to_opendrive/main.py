@@ -16,11 +16,13 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
 
-from autoware_lanelet2_to_opendrive.util import (
+from autoware_lanelet2_to_opendrive.projection import (
     mgrs_to_lanelet2_origin,
     mgrs_grid_with_offset_to_lanelet2_origin,
     latlon_to_lanelet2_origin,
     mgrs_to_proj_string,
+)
+from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
@@ -565,7 +567,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         Returns:
             OpenDRIVE object
         """
-        from autoware_lanelet2_to_opendrive.util import latlon_to_proj_string
+        from autoware_lanelet2_to_opendrive.projection import latlon_to_proj_string
 
         # Generate PROJ string for geoReference
         if self.config.origin.lat is not None and self.config.origin.lon is not None:
@@ -778,7 +780,7 @@ def parse_origin_from_config(
                 f"offset x={offset_x} y={offset_y} z={offset_z}"
             )
             # Get lat/lon with offset applied
-            from autoware_lanelet2_to_opendrive.util import (
+            from autoware_lanelet2_to_opendrive.projection import (
                 mgrs_grid_with_offset_to_latlon,
             )
 

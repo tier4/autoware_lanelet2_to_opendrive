@@ -170,12 +170,12 @@ for group in adjacent_groups:
 
 ### MGRS Projection Functions
 
-::: autoware_lanelet2_to_opendrive.util.mgrs_to_lanelet2_origin
+::: autoware_lanelet2_to_opendrive.projection.mgrs_to_lanelet2_origin
     options:
       show_root_heading: true
       heading_level: 4
 
-::: autoware_lanelet2_to_opendrive.util.mgrs_to_proj_string
+::: autoware_lanelet2_to_opendrive.projection.mgrs_to_proj_string
     options:
       show_root_heading: true
       heading_level: 4
@@ -183,7 +183,7 @@ for group in adjacent_groups:
 #### Usage Example
 
 ```python
-from autoware_lanelet2_to_opendrive.util import (
+from autoware_lanelet2_to_opendrive.projection import (
     mgrs_to_lanelet2_origin,
     mgrs_to_proj_string
 )
