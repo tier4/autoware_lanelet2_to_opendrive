@@ -201,32 +201,6 @@ def _calculate_boundary_velocity_vector(boundary, at_start: bool) -> np.ndarray:
     return direction / length
 
 
-def _get_boundary_start_vel(boundary) -> np.ndarray:
-    """
-    Calculate start velocity vector for a boundary spline.
-
-    Args:
-        boundary: List of points representing a boundary
-
-    Returns:
-        3D velocity vector along the boundary direction
-    """
-    return _calculate_boundary_velocity_vector(boundary, at_start=True)
-
-
-def _get_boundary_end_vel(boundary) -> np.ndarray:
-    """
-    Calculate end velocity vector for a boundary spline.
-
-    Args:
-        boundary: List of points representing a boundary
-
-    Returns:
-        3D velocity vector along the boundary direction
-    """
-    return _calculate_boundary_velocity_vector(boundary, at_start=False)
-
-
 def _calculate_centerline_velocity_vector(
     lanelet: lanelet2.core.Lanelet, at_start: bool
 ) -> np.ndarray:
