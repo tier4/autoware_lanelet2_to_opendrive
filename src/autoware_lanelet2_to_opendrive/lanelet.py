@@ -243,7 +243,7 @@ def merge_lanelets_from_ids(
     return merge_lanelets(lanelets, base_id, validate, tolerance)
 
 
-def _copy_map_excluding(
+def copy_map_excluding(
     lanelet_map: lanelet2.core.LaneletMap,
     exclude_ids: Set[int],
 ) -> lanelet2.core.LaneletMap:
@@ -305,7 +305,7 @@ def remove_lanelets(
         New LaneletMap with the specified lanelets removed
     """
     lanelet_ids_to_remove = {ll if isinstance(ll, int) else ll.id for ll in lanelets}
-    return _copy_map_excluding(lanelet_map, lanelet_ids_to_remove)
+    return copy_map_excluding(lanelet_map, lanelet_ids_to_remove)
 
 
 def replace_lanelets(
@@ -377,7 +377,7 @@ def replace_lanelets(
     )
 
     # Create a new map with the replacement, then add the merged lanelet
-    new_map = _copy_map_excluding(lanelet_map, lanelet_ids_to_remove)
+    new_map = copy_map_excluding(lanelet_map, lanelet_ids_to_remove)
     new_map.add(merged_lanelet)
 
     return new_map

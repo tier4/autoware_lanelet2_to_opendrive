@@ -14,7 +14,7 @@ import lanelet2
 
 from .config import DEFAULT_CONFIG
 from .lanelet import (
-    _copy_map_excluding,
+    copy_map_excluding,
     merge_lanelets_from_ids,
     remove_lanelets,
     replace_lanelets,
@@ -635,7 +635,7 @@ class LaneletPreprocessor:
             )
 
             # Create new map with merged lanelets replacing originals
-            new_map = _copy_map_excluding(lanelet_map, all_lanelets_to_remove)
+            new_map = copy_map_excluding(lanelet_map, all_lanelets_to_remove)
 
             # Add all the merged lanelets
             for merged_lanelet in merged_lanelets:
@@ -840,7 +840,7 @@ class LaneletPreprocessor:
                 logger.debug(f"  Removed lanelet {ll.id}")
 
         # Create new map without the specified lanelets
-        new_map = _copy_map_excluding(lanelet_map, all_lanelets_to_remove)
+        new_map = copy_map_excluding(lanelet_map, all_lanelets_to_remove)
 
         logger.info(
             f"Successfully removed {removed_count}/{len(all_lanelets_to_remove)} lanelets"
