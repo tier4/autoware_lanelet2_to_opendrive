@@ -40,7 +40,9 @@ def _normalize_mgrs_grid(mgrs_grid: str) -> str:
     return processed_mgrs
 
 
-def _build_utm_proj_string(zone: int | str, lat: float, lon: float, is_south: bool) -> str:
+def _build_utm_proj_string(
+    zone: int | str, lat: float, lon: float, is_south: bool
+) -> str:
     """Build a UTM PROJ string from zone, origin coordinates, and hemisphere.
 
     Args:
