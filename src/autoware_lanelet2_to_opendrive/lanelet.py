@@ -1,6 +1,6 @@
 """Functions for working with Lanelet2 lanelet objects."""
 
-from typing import Optional, List, Union, Dict
+from typing import Optional, List, Union, Dict, Set
 import lanelet2
 import logging
 import numpy as np
@@ -243,6 +243,33 @@ def merge_lanelets_from_ids(
     return merge_lanelets(lanelets, base_id, validate, tolerance)
 
 
+def copy_map_excluding(
+    lanelet_map: lanelet2.core.LaneletMap,
+    exclude_ids: Set[int],
+) -> lanelet2.core.LaneletMap:
+    """Create a new LaneletMap with specified lanelets excluded.
+
+    This is a shared helper that implements the common pattern of:
+    1. Create a new LaneletMap
+    2. Copy all lanelets except those in exclude_ids
+    3. Copy all regulatory elements
+
+    Args:
+        lanelet_map: The source lanelet map
+        exclude_ids: Set of lanelet IDs to exclude from the new map
+
+    Returns:
+        New LaneletMap without the excluded lanelets
+    """
+    new_map = lanelet2.core.LaneletMap()
+    for ll in lanelet_map.laneletLayer:
+        if ll.id not in exclude_ids:
+            new_map.add(ll)
+    for reg_elem in lanelet_map.regulatoryElementLayer:
+        new_map.add(reg_elem)
+    return new_map
+
+
 def remove_lanelet(
     lanelet_map: lanelet2.core.LaneletMap,
     lanelet: Union[lanelet2.core.Lanelet, int],
@@ -260,25 +287,7 @@ def remove_lanelet(
     Returns:
         New LaneletMap with the specified lanelet removed
     """
-    # Handle both Lanelet object and ID input
-    if isinstance(lanelet, int):
-        lanelet_id = lanelet
-    else:
-        lanelet_id = lanelet.id
-
-    # Create a new map
-    new_map = lanelet2.core.LaneletMap()
-
-    # Copy all lanelets except the one to remove
-    for ll in lanelet_map.laneletLayer:
-        if ll.id != lanelet_id:
-            new_map.add(ll)
-
-    # Copy regulatory elements
-    for reg_elem in lanelet_map.regulatoryElementLayer:
-        new_map.add(reg_elem)
-
-    return new_map
+    return remove_lanelets(lanelet_map, [lanelet])
 
 
 def remove_lanelets(
@@ -295,27 +304,8 @@ def remove_lanelets(
     Returns:
         New LaneletMap with the specified lanelets removed
     """
-    # Convert all inputs to IDs
-    lanelet_ids_to_remove = set()
-    for lanelet in lanelets:
-        if isinstance(lanelet, int):
-            lanelet_ids_to_remove.add(lanelet)
-        else:
-            lanelet_ids_to_remove.add(lanelet.id)
-
-    # Create a new map
-    new_map = lanelet2.core.LaneletMap()
-
-    # Copy all lanelets except those to remove
-    for ll in lanelet_map.laneletLayer:
-        if ll.id not in lanelet_ids_to_remove:
-            new_map.add(ll)
-
-    # Copy regulatory elements
-    for reg_elem in lanelet_map.regulatoryElementLayer:
-        new_map.add(reg_elem)
-
-    return new_map
+    lanelet_ids_to_remove = {ll if isinstance(ll, int) else ll.id for ll in lanelets}
+    return copy_map_excluding(lanelet_map, lanelet_ids_to_remove)
 
 
 def replace_lanelets(
@@ -386,20 +376,9 @@ def replace_lanelets(
         lanelet_objects, base_id=new_base_id, validate=validate, tolerance=tolerance
     )
 
-    # Create a new map with the replacement
-    new_map = lanelet2.core.LaneletMap()
-
-    # Copy all lanelets except those being replaced
-    for ll in lanelet_map.laneletLayer:
-        if ll.id not in lanelet_ids_to_remove:
-            new_map.add(ll)
-
-    # Add the new merged lanelet
+    # Create a new map with the replacement, then add the merged lanelet
+    new_map = copy_map_excluding(lanelet_map, lanelet_ids_to_remove)
     new_map.add(merged_lanelet)
-
-    # Copy regulatory elements
-    for reg_elem in lanelet_map.regulatoryElementLayer:
-        new_map.add(reg_elem)
 
     return new_map
 
