@@ -802,7 +802,9 @@ def parse_origin_from_config(
             logger.info(f"Using MGRS grid origin: {mgrs_grid}")
             origin = mgrs_to_lanelet2_origin(mgrs_grid)
             # Get lat/lon from MGRS grid origin (no offset)
-            origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(mgrs_grid, 0.0, 0.0)
+            origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
+                mgrs_grid, 0.0, 0.0
+            )
             logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
             # No offset specified
             return origin, mgrs_grid, origin_lat, origin_lon, 0.0, 0.0, 0.0
