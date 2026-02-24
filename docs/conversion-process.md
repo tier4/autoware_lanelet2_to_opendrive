@@ -468,8 +468,8 @@ remove_turn_direction_operations:
 
 **Processing:**
 ```python
-junction_lanelets = filter_lanelets_inside_junction(lanelet_map)
-road_lanelets = filter_lanelets_outside_junction(lanelet_map)
+junction_lanelets = _filter_lanelets_inside_junction(lanelet_map)
+road_lanelets = _filter_lanelets_outside_junction(lanelet_map)
 ```
 
 **Output:**

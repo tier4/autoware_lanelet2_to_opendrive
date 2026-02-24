@@ -202,13 +202,13 @@ class Junction:
             ...     print(f"Junction {junction.id}: {junction.name}")
         """
         # Import here to avoid circular dependency
-        from ..junction import filter_lanelets_inside_junction, find_junction_groups
+        from ..junction import _filter_lanelets_inside_junction, find_junction_groups
 
         # Get all lanelets from the map
         all_lanelets = list(lanelet_map.laneletLayer)
 
         # Filter lanelets that are inside junctions (have turn_direction attribute)
-        junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+        junction_lanelets = _filter_lanelets_inside_junction(all_lanelets)
 
         # Group junction lanelets into separate junction groups
         junction_groups = find_junction_groups(junction_lanelets)

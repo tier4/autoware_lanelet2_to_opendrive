@@ -671,9 +671,9 @@ class Road:
         all_lanelets = list(lanelet_map.laneletLayer)
 
         # Filter out lanelets inside junctions
-        from ..junction import filter_lanelets_outside_junction
+        from ..junction import _filter_lanelets_outside_junction
 
-        road_lanelets = filter_lanelets_outside_junction(
+        road_lanelets = _filter_lanelets_outside_junction(
             filter_lanelets_by_subtype(all_lanelets, ["road"])
         )
 
@@ -863,8 +863,8 @@ class Road:
             - Dict mapping lanelet_id -> road_id for all junction lanelets
 
         Example:
-            >>> from autoware_lanelet2_to_opendrive.junction import find_junction_groups, filter_lanelets_inside_junction
-            >>> junction_lanelets = filter_lanelets_inside_junction(lanelet_map.laneletLayer)
+            >>> from autoware_lanelet2_to_opendrive.junction import find_junction_groups, _filter_lanelets_inside_junction
+            >>> junction_lanelets = _filter_lanelets_inside_junction(lanelet_map.laneletLayer)
             >>> junction_groups = find_junction_groups(junction_lanelets)
             >>> roads, junction_to_roads, lanelet_to_road = Road.construct_connecting_roads_from_junctions(
             ...     lanelet_map, junction_groups, starting_road_id=1000, junction_id_offset=1000
