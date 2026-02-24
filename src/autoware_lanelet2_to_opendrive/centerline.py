@@ -58,98 +58,6 @@ class Width1DSplineAdapter:
         return self.spline_1d.get_segments()
 
 
-class WidthSplineWrapper:
-    """
-    Wrapper class that provides a proper interface for width splines.
-
-    This class wraps a parametric spline that maps t ∈ [0,1] to (arc_length, width)
-    and provides methods to query width at a given arc_length.
-    """
-
-    def __init__(self, parametric_spline: Splines, total_arc_length: float):
-        """
-        Initialize the width spline wrapper.
-
-        Args:
-            parametric_spline: A Splines object that maps t to (arc_length, width, 0)
-            total_arc_length: Total arc length of the reference line
-        """
-        self.parametric_spline = parametric_spline
-        self.total_arc_length = total_arc_length
-
-        # Build lookup table for arc_length -> parameter t mapping
-        self._build_lookup_table()
-
-    def _build_lookup_table(self, num_samples: int = 100) -> None:
-        """Build a lookup table for converting arc_length to parameter t."""
-        self.t_samples = np.linspace(0, 1, num_samples)
-        self.arc_length_samples = []
-        self.width_samples = []
-
-        for t in self.t_samples:
-            # Evaluate the parametric spline at t
-            # Note: _evaluate_normalized returns points in the translated coordinate system
-            point = self.parametric_spline._evaluate_normalized(t)
-            # Need to add back the origin offset to get actual values
-            actual_point = point + self.parametric_spline._origin_offset
-            # point[0] is arc_length, point[1] is width
-            self.arc_length_samples.append(actual_point[0])
-            self.width_samples.append(actual_point[1])
-
-        self.arc_length_samples = np.array(self.arc_length_samples)
-        self.width_samples = np.array(self.width_samples)
-
-    def evaluate(self, s: float, derivative: int = 0) -> np.ndarray:
-        """
-        Evaluate the width at a given arc length.
-
-        Args:
-            s: Arc length along the reference line
-            derivative: Derivative order (only 0 is supported for now)
-
-        Returns:
-            For derivative=0: Returns a 3D array [s, width, 0] for compatibility
-        """
-        if derivative != 0:
-            raise NotImplementedError("Width derivatives not yet implemented")
-
-        # Clamp arc length to valid range
-        s = np.clip(s, 0, self.total_arc_length)
-
-        # Find parameter t corresponding to arc length s
-        # Use linear interpolation on the lookup table
-        t = np.interp(s, self.arc_length_samples, self.t_samples)
-
-        # Evaluate the parametric spline at t
-        point = self.parametric_spline._evaluate_normalized(t)
-        actual_point = point + self.parametric_spline._origin_offset
-
-        # Return in format [arc_length, width, 0] for compatibility
-        return np.array([s, actual_point[1], 0.0])
-
-    def evaluate_arc_length(self, s: float, derivative: int = 0) -> np.ndarray:
-        """Alias for evaluate method."""
-        return self.evaluate(s, derivative)
-
-    @property
-    def total_length(self) -> float:
-        """Get the total arc length."""
-        return self.total_arc_length
-
-    def get_width_at_arc_length(self, s: float) -> float:
-        """
-        Get just the width value at a given arc length.
-
-        Args:
-            s: Arc length along the reference line
-
-        Returns:
-            Width value at the given arc length
-        """
-        result = self.evaluate(s)
-        return result[1]  # Return just the width component
-
-
 def _calculate_boundary_velocity_vector(boundary, at_start: bool) -> np.ndarray:
     """
     Calculate velocity vector at boundary point.
@@ -681,7 +589,6 @@ def estimate_lanelet_width_as_spline(
         bc_type=DEFAULT_CONFIG.centerline.boundary_condition_default,
     )
 
-    # Create a wrapper that provides the same interface as the old WidthSplineWrapper
     return Width1DSplineAdapter(width_spline_1d)
 
 
