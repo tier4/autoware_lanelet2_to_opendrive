@@ -20,7 +20,7 @@ from .lanelet import (
     get_max_lanelet_id,
     validate_lanelet_continuity,
 )
-from .util import mgrs_to_lanelet2_origin
+from .projection import mgrs_to_lanelet2_origin
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
