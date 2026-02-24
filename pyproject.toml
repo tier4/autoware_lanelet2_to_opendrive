@@ -1,6 +1,6 @@
 [project]
 name = "autoware-lanelet2-to-opendrive"
-version = "1.13.11"
+version = "1.13.12"
 description = "Add your description here"
 readme = "README.md"
 authors = [
