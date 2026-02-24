@@ -1,7 +1,7 @@
 """Test module for move_point functionality."""
 
 import lanelet2
-from autoware_lanelet2_to_opendrive.geometry import (
+from autoware_lanelet2_to_opendrive.lanelet import (
     move_point_in_map,
     move_points_in_map,
 )

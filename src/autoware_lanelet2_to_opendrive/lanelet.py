@@ -1,8 +1,11 @@
 """Functions for working with Lanelet2 lanelet objects."""
 
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict
 import lanelet2
+import logging
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def merge_lanelet(
@@ -416,3 +419,278 @@ def get_max_lanelet_id(lanelet_map: lanelet2.core.LaneletMap) -> int:
         if ll.id > max_id:
             max_id = ll.id
     return max_id
+
+
+def delete_points_from_map(
+    lanelet_map: lanelet2.core.LaneletMap, point_ids: List[int]
+) -> Dict[int, bool]:
+    """
+    Delete specified points from all LineStrings in the map.
+
+    Args:
+        lanelet_map: Lanelet2 map containing the points
+        point_ids: List of point IDs to delete
+
+    Returns:
+        Dictionary mapping point IDs to deletion success status
+    """
+    results = {}
+    point_ids_set = set(point_ids)
+
+    logger.info(f"Deleting {len(point_ids)} points from map")
+
+    # Process all lanelets
+    for lanelet in lanelet_map.laneletLayer:
+        # Process left boundary
+        left_points = list(lanelet.leftBound)
+        modified_left = False
+        new_left_points = []
+
+        for point in left_points:
+            if point.id not in point_ids_set:
+                new_left_points.append(point)
+            else:
+                modified_left = True
+                results[point.id] = True
+                logger.debug(
+                    f"  Removing point {point.id} from lanelet {lanelet.id} left bound"
+                )
+
+        # Update left boundary if points were removed
+        if modified_left and len(new_left_points) >= 2:
+            # Create new LineString with remaining points
+            new_left_bound = lanelet2.core.LineString3d(
+                lanelet.leftBound.id, new_left_points
+            )
+
+            # Replace the lanelet's left bound
+            lanelet.leftBound = new_left_bound
+        elif modified_left and len(new_left_points) < 2:
+            logger.warning(
+                f"  Cannot remove points from lanelet {lanelet.id} left bound - would result in less than 2 points"
+            )
+            # Mark points as not deleted if removal would break the linestring
+            for point in left_points:
+                if point.id in point_ids_set:
+                    results[point.id] = False
+
+        # Process right boundary
+        right_points = list(lanelet.rightBound)
+        modified_right = False
+        new_right_points = []
+
+        for point in right_points:
+            if point.id not in point_ids_set:
+                new_right_points.append(point)
+            else:
+                modified_right = True
+                results[point.id] = True
+                logger.debug(
+                    f"  Removing point {point.id} from lanelet {lanelet.id} right bound"
+                )
+
+        # Update right boundary if points were removed
+        if modified_right and len(new_right_points) >= 2:
+            # Create new LineString with remaining points
+            new_right_bound = lanelet2.core.LineString3d(
+                lanelet.rightBound.id, new_right_points
+            )
+
+            # Replace the lanelet's right bound
+            lanelet.rightBound = new_right_bound
+        elif modified_right and len(new_right_points) < 2:
+            logger.warning(
+                f"  Cannot remove points from lanelet {lanelet.id} right bound - would result in less than 2 points"
+            )
+            # Mark points as not deleted if removal would break the linestring
+            for point in right_points:
+                if point.id in point_ids_set:
+                    results[point.id] = False
+
+    # Note: LineString layer handling is commented out as LaneletMap doesn't
+    # provide a simple way to modify standalone linestrings.
+    # Points are primarily removed from lanelet boundaries above.
+
+    # Check for points that weren't found
+    for point_id in point_ids:
+        if point_id not in results:
+            results[point_id] = False
+            logger.warning(f"  Point {point_id} not found in any LineString")
+
+    # Log summary
+    successful = sum(1 for s in results.values() if s)
+    logger.info(f"Successfully deleted {successful}/{len(point_ids)} points")
+
+    return results
+
+
+def move_point_in_map(
+    lanelet_map: lanelet2.core.LaneletMap,
+    point_id: int,
+    new_x: float,
+    new_y: float,
+    new_z: Optional[float] = None,
+) -> bool:
+    """
+    Move a point to new coordinates in the map.
+
+    Args:
+        lanelet_map: Lanelet2 map containing the point
+        point_id: ID of the point to move
+        new_x: New X coordinate
+        new_y: New Y coordinate
+        new_z: New Z coordinate (if None, keep original)
+
+    Returns:
+        True if point was found and moved, False otherwise
+    """
+    # Find all points in the map
+    all_points = {}
+    for lanelet in lanelet_map.laneletLayer:
+        for point in lanelet.leftBound:
+            all_points[point.id] = point
+        for point in lanelet.rightBound:
+            all_points[point.id] = point
+
+    # Get target point
+    target_point = all_points.get(point_id)
+    if not target_point:
+        logger.warning(f"Point {point_id} not found in map")
+        return False
+
+    # Log before and after coordinates
+    final_z = new_z if new_z is not None else target_point.z
+
+    logger.info(
+        f"Moving point {point_id} from ({target_point.x:.3f}, {target_point.y:.3f}, {target_point.z:.3f}) "
+        f"to ({new_x:.3f}, {new_y:.3f}, {final_z:.3f})"
+    )
+
+    # Create a new Point3d with the updated coordinates
+    new_point = lanelet2.core.Point3d(
+        point_id,
+        new_x,
+        new_y,
+        final_z,
+    )
+
+    # Copy attributes from original point and update local coordinates
+    for key, value in target_point.attributes.items():
+        new_point.attributes[key] = value
+
+    # Update local coordinate attributes
+    new_point.attributes["local_x"] = f"{new_x:.4f}"
+    new_point.attributes["local_y"] = f"{new_y:.4f}"
+    if new_z is not None:
+        new_point.attributes["ele"] = f"{new_z:.12f}"
+
+    # Update all LineStrings containing this point
+    _update_point_in_map(lanelet_map, point_id, new_point)
+
+    # Verify the update
+    logger.info(
+        f"Point {point_id} updated to ({new_x:.3f}, {new_y:.3f}, {final_z:.3f})"
+    )
+
+    return True
+
+
+def move_points_in_map(
+    lanelet_map: lanelet2.core.LaneletMap,
+    point_moves: List[tuple[int, float, float, Optional[float]]],
+) -> Dict[int, bool]:
+    """
+    Move multiple points in the map.
+
+    Args:
+        lanelet_map: Lanelet2 map containing the points
+        point_moves: List of tuples (point_id, new_x, new_y, new_z)
+
+    Returns:
+        Dictionary mapping point IDs to move success status
+    """
+    results = {}
+
+    logger.info(f"Moving {len(point_moves)} points in map")
+
+    for point_id, new_x, new_y, new_z in point_moves:
+        success = move_point_in_map(lanelet_map, point_id, new_x, new_y, new_z)
+        results[point_id] = success
+
+        if not success:
+            logger.warning(f"Failed to move point {point_id}")
+
+    # Log summary
+    successful = sum(1 for s in results.values() if s)
+    logger.info(f"Successfully moved {successful}/{len(point_moves)} points")
+
+    return results
+
+
+def _update_point_in_map(
+    lanelet_map: lanelet2.core.LaneletMap,
+    point_id: int,
+    new_point: lanelet2.core.Point3d,
+) -> None:
+    """
+    Update a point in the lanelet map by recreating all LineStrings and Lanelets that contain it.
+
+    Args:
+        lanelet_map: The lanelet map to update
+        point_id: ID of the point to update
+        new_point: New point with updated coordinates
+    """
+    # Find all lanelets that contain this point
+    lanelets_to_update = []
+
+    for lanelet in lanelet_map.laneletLayer:
+        needs_update = False
+        new_left_points = []
+        new_right_points = []
+
+        # Check left boundary
+        for point in lanelet.leftBound:
+            if point.id == point_id:
+                new_left_points.append(new_point)
+                needs_update = True
+            else:
+                new_left_points.append(point)
+
+        # Check right boundary
+        for point in lanelet.rightBound:
+            if point.id == point_id:
+                new_right_points.append(new_point)
+                needs_update = True
+            else:
+                new_right_points.append(point)
+
+        if needs_update:
+            # Create new LineStrings with updated points
+            new_left_bound = lanelet2.core.LineString3d(
+                lanelet.leftBound.id, new_left_points
+            )
+            new_right_bound = lanelet2.core.LineString3d(
+                lanelet.rightBound.id, new_right_points
+            )
+
+            # Create new lanelet with updated boundaries
+            new_lanelet = lanelet2.core.Lanelet(
+                lanelet.id, new_left_bound, new_right_bound
+            )
+
+            # Copy attributes
+            for key, value in lanelet.attributes.items():
+                new_lanelet.attributes[key] = value
+
+            # Copy regulatory elements
+            for reg_elem in lanelet.regulatoryElements:
+                new_lanelet.addRegulatoryElement(reg_elem)
+
+            lanelets_to_update.append((lanelet, new_lanelet))
+
+    # Update the lanelets in place by replacing their boundaries
+    for old_lanelet, new_lanelet in lanelets_to_update:
+        old_lanelet.leftBound = new_lanelet.leftBound
+        old_lanelet.rightBound = new_lanelet.rightBound
+
+        logger.debug(f"Updated lanelet {old_lanelet.id} with new point coordinates")

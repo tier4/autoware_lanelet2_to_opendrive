@@ -764,7 +764,7 @@ class LaneletPreprocessor:
         Returns:
             Updated lanelet map
         """
-        from .geometry import move_point_in_map
+        from .lanelet import move_point_in_map
 
         for i, op in enumerate(self.config.move_point_operations):
             logger.info(
@@ -798,7 +798,7 @@ class LaneletPreprocessor:
         Returns:
             Updated lanelet map
         """
-        from .geometry import delete_points_from_map
+        from .lanelet import delete_points_from_map
 
         for i, op in enumerate(self.config.delete_point_operations):
             logger.info(
