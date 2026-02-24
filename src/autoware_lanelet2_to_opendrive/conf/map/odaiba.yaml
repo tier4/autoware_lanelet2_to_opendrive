@@ -1,0 +1,44 @@
+# Odaiba map configuration
+
+# MGRS grid for map projection (REQUIRED)
+# Using MGRS grid with offset specification
+mgrs_grid: 54SUE
+offset:
+  x: 92008.5
+  y: 45335.1
+  z: 0
+
+# Traffic rule for Japan (Left-Hand Traffic)
+traffic_rule: "LHT"
+
+# Merge operations - merge multiple lanelets into one
+# The merged lanelet is added to the map (originals are kept)
+merge_operations:
+
+# Move point operations - move points to specific coordinates
+move_point_operations:
+
+# Delete point operations - remove points from linestrings
+delete_point_operations:
+
+# Remove lanelet operations - remove entire lanelets from the map
+remove_lanelet_operations:
+
+# Remove turn direction operations - remove turn_direction attributes
+remove_turn_direction_operations:
+
+# ParamPoly3 segment generation configuration
+parampoly3:
+  enabled: true
+  min_segment_length: 0.5  # meters (CARLA minimum requirement)
+  default_segment_length: 1.0  # meters
+  max_segments: 100
+  min_segments: 1
+  coefficient_epsilon: 1.0e-8
+
+# Width spline sampling configuration
+width_estimation:
+  adaptive_sampling: true
+  min_samples: 5
+  max_samples: 50
+  default_sample_interval: 5.0  # meters

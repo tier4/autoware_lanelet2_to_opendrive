@@ -863,9 +863,15 @@ def preprocess_and_convert_with_hydra(
     input_map_path = lanelet2_file
 
     # Parse origin from config (with mutual exclusion validation)
-    origin, mgrs_code, origin_lat, origin_lon, offset_x, offset_y, offset_z = (
-        parse_origin_from_config(cfg)
-    )
+    (
+        origin,
+        mgrs_code,
+        origin_lat,
+        origin_lon,
+        offset_x,
+        offset_y,
+        offset_z,
+    ) = parse_origin_from_config(cfg)
 
     # Set global coordinate offset for conversion
     # This will be applied to all coordinates during OpenDRIVE export
@@ -973,9 +979,9 @@ def preprocess_and_convert_with_hydra(
     stopline_dict = cfg.map.get("stopline") or cfg.target.get("stopline", {})
     stopline_config = StopLineConfig(
         width=stopline_dict.get("width", 0.1) if stopline_dict else 0.1,
-        carla_stop_line=stopline_dict.get("carla_stop_line", False)
-        if stopline_dict
-        else False,
+        carla_stop_line=(
+            stopline_dict.get("carla_stop_line", False) if stopline_dict else False
+        ),
     )
     logger.info(
         f"Stop line config: width={stopline_config.width}m, "
