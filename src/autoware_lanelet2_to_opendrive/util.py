@@ -204,17 +204,7 @@ def find_lanelets_without_next(
     Returns:
         Set of lanelets that have no successors
     """
-    # Create routing graph for the map
-    routing_graph = create_routing_graph(lanelet_map)
-
-    lanelets_without_next = set()
-
-    for lanelet in lanelet_map.laneletLayer:
-        # Check if this lanelet has any following lanelets
-        following = routing_graph.following(lanelet)
-        if not following:
-            lanelets_without_next.add(lanelet)
-
+    _, lanelets_without_next = find_terminal_lanelets(lanelet_map)
     return lanelets_without_next
 
 
@@ -229,17 +219,7 @@ def find_lanelets_without_previous(
     Returns:
         Set of lanelets that have no predecessors
     """
-    # Create routing graph for the map
-    routing_graph = create_routing_graph(lanelet_map)
-
-    lanelets_without_previous = set()
-
-    for lanelet in lanelet_map.laneletLayer:
-        # Check if this lanelet has any preceding lanelets
-        previous = routing_graph.previous(lanelet)
-        if not previous:
-            lanelets_without_previous.add(lanelet)
-
+    lanelets_without_previous, _ = find_terminal_lanelets(lanelet_map)
     return lanelets_without_previous
 
 
