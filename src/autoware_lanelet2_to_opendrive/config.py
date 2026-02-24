@@ -143,8 +143,8 @@ class ParamPoly3Constants:
 
 
 @dataclass(frozen=True)
-class ConversionConfig:
-    """Main configuration container for all conversion constants.
+class InternalConfig:
+    """Main configuration container for all internal constants.
 
     This dataclass provides centralized access to all constant configurations
     used throughout the conversion process. Create an instance to access
@@ -152,9 +152,9 @@ class ConversionConfig:
 
     Example:
         ```python
-        from autoware_lanelet2_to_opendrive.config import ConversionConfig
+        from autoware_lanelet2_to_opendrive.config import InternalConfig
 
-        config = ConversionConfig()
+        config = InternalConfig()
 
         # Access geometry constants
         if distance < config.geometry.epsilon:
@@ -239,7 +239,7 @@ class CoordinateOffset:
 
 # Global default configuration instance
 # This can be imported and used directly throughout the codebase
-DEFAULT_CONFIG = ConversionConfig()
+DEFAULT_CONFIG = InternalConfig()
 
 # Global runtime coordinate offset
 # Set this before conversion to apply coordinate offset to all outputs
