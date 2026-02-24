@@ -3,7 +3,6 @@
 import lanelet2
 from autoware_lanelet2_to_opendrive.lanelet import (
     move_point_in_map,
-    move_points_in_map,
 )
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
@@ -98,59 +97,6 @@ class TestMovePointBasic:
         success = move_point_in_map(lanelet_map, 999, 5.0, 6.0, 7.0)
 
         assert success is False
-
-    def test_move_multiple_points(self):
-        """Test moving multiple points."""
-        # Create test points
-        p1 = lanelet2.core.Point3d(1, 0, 0, 0)
-        p2 = lanelet2.core.Point3d(2, 1, 0, 0)
-        p3 = lanelet2.core.Point3d(3, 2, 0, 0)
-
-        left_bound = lanelet2.core.LineString3d(101, [p1, p2, p3])
-        right_bound = lanelet2.core.LineString3d(102, [p1, p2, p3])
-        lanelet = lanelet2.core.Lanelet(201, left_bound, right_bound)
-
-        lanelet_map = lanelet2.core.LaneletMap()
-        lanelet_map.add(lanelet)
-
-        # Move multiple points
-        point_moves = [
-            (1, 10.0, 20.0, 30.0),  # Move point 1
-            (2, 11.0, 21.0, None),  # Move point 2, keep Z
-            (999, 0.0, 0.0, 0.0),  # Non-existent point
-        ]
-
-        results = move_points_in_map(lanelet_map, point_moves)
-
-        assert len(results) == 3
-        assert results[1] is True
-        assert results[2] is True
-        assert results[999] is False
-
-        # Verify points were moved correctly
-        updated_lanelet = list(lanelet_map.laneletLayer)[0]
-
-        # Check point 1
-        p1_updated = None
-        for p in updated_lanelet.leftBound:
-            if p.id == 1:
-                p1_updated = p
-                break
-        assert p1_updated is not None
-        assert abs(p1_updated.x - 10.0) < 1e-10
-        assert abs(p1_updated.y - 20.0) < 1e-10
-        assert abs(p1_updated.z - 30.0) < 1e-10
-
-        # Check point 2
-        p2_updated = None
-        for p in updated_lanelet.leftBound:
-            if p.id == 2:
-                p2_updated = p
-                break
-        assert p2_updated is not None
-        assert abs(p2_updated.x - 11.0) < 1e-10
-        assert abs(p2_updated.y - 21.0) < 1e-10
-        assert abs(p2_updated.z - 0.0) < 1e-10  # Original Z preserved
 
 
 class TestMovePointAttributes:

@@ -595,38 +595,6 @@ def move_point_in_map(
     return True
 
 
-def move_points_in_map(
-    lanelet_map: lanelet2.core.LaneletMap,
-    point_moves: List[tuple[int, float, float, Optional[float]]],
-) -> Dict[int, bool]:
-    """
-    Move multiple points in the map.
-
-    Args:
-        lanelet_map: Lanelet2 map containing the points
-        point_moves: List of tuples (point_id, new_x, new_y, new_z)
-
-    Returns:
-        Dictionary mapping point IDs to move success status
-    """
-    results = {}
-
-    logger.info(f"Moving {len(point_moves)} points in map")
-
-    for point_id, new_x, new_y, new_z in point_moves:
-        success = move_point_in_map(lanelet_map, point_id, new_x, new_y, new_z)
-        results[point_id] = success
-
-        if not success:
-            logger.warning(f"Failed to move point {point_id}")
-
-    # Log summary
-    successful = sum(1 for s in results.values() if s)
-    logger.info(f"Successfully moved {successful}/{len(point_moves)} points")
-
-    return results
-
-
 def _update_point_in_map(
     lanelet_map: lanelet2.core.LaneletMap,
     point_id: int,
