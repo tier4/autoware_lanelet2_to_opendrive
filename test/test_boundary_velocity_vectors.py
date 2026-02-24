@@ -42,8 +42,12 @@ def test_boundary_velocity_discrepancy():
     lanelet = create_test_lanelet_with_curved_boundaries()
 
     # Current implementation: Calculate velocity from adjacent points in each boundary
-    left_start_vel = _calculate_boundary_velocity_vector(lanelet.leftBound, at_start=True)[:2]
-    right_start_vel = _calculate_boundary_velocity_vector(lanelet.rightBound, at_start=True)[:2]
+    left_start_vel = _calculate_boundary_velocity_vector(
+        lanelet.leftBound, at_start=True
+    )[:2]
+    right_start_vel = _calculate_boundary_velocity_vector(
+        lanelet.rightBound, at_start=True
+    )[:2]
 
     # Verify that the vectors are different (demonstrating the problem)
     dot_product = np.dot(left_start_vel, right_start_vel)
@@ -160,10 +164,18 @@ def test_spline_tangent_misalignment_with_wrong_velocity():
     right_points = np.array([[p.x, p.y] for p in lanelet.rightBound])
 
     # Wrong velocity vectors (different for each boundary)
-    left_start_vel = _calculate_boundary_velocity_vector(lanelet.leftBound, at_start=True)[:2]
-    left_end_vel = _calculate_boundary_velocity_vector(lanelet.leftBound, at_start=False)[:2]
-    right_start_vel = _calculate_boundary_velocity_vector(lanelet.rightBound, at_start=True)[:2]
-    right_end_vel = _calculate_boundary_velocity_vector(lanelet.rightBound, at_start=False)[:2]
+    left_start_vel = _calculate_boundary_velocity_vector(
+        lanelet.leftBound, at_start=True
+    )[:2]
+    left_end_vel = _calculate_boundary_velocity_vector(
+        lanelet.leftBound, at_start=False
+    )[:2]
+    right_start_vel = _calculate_boundary_velocity_vector(
+        lanelet.rightBound, at_start=True
+    )[:2]
+    right_end_vel = _calculate_boundary_velocity_vector(
+        lanelet.rightBound, at_start=False
+    )[:2]
 
     # Create splines with wrong velocity vectors
     left_spline = Splines(
@@ -206,8 +218,12 @@ def test_endpoint_velocity_comparison():
     lanelet = create_test_lanelet_with_curved_boundaries()
 
     # Test start point
-    left_start_wrong = _calculate_boundary_velocity_vector(lanelet.leftBound, at_start=True)[:2]
-    right_start_wrong = _calculate_boundary_velocity_vector(lanelet.rightBound, at_start=True)[:2]
+    left_start_wrong = _calculate_boundary_velocity_vector(
+        lanelet.leftBound, at_start=True
+    )[:2]
+    right_start_wrong = _calculate_boundary_velocity_vector(
+        lanelet.rightBound, at_start=True
+    )[:2]
     correct_start = _calculate_centerline_velocity_vector(lanelet, at_start=True)[:2]
 
     # Start: Wrong method produces different vectors
@@ -225,8 +241,12 @@ def test_endpoint_velocity_comparison():
     ), "Start: Should be perpendicular"
 
     # Test end point
-    left_end_wrong = _calculate_boundary_velocity_vector(lanelet.leftBound, at_start=False)[:2]
-    right_end_wrong = _calculate_boundary_velocity_vector(lanelet.rightBound, at_start=False)[:2]
+    left_end_wrong = _calculate_boundary_velocity_vector(
+        lanelet.leftBound, at_start=False
+    )[:2]
+    right_end_wrong = _calculate_boundary_velocity_vector(
+        lanelet.rightBound, at_start=False
+    )[:2]
     correct_end = _calculate_centerline_velocity_vector(lanelet, at_start=False)[:2]
 
     # End: Wrong method produces different vectors
