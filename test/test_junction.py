@@ -1,13 +1,13 @@
 """Tests for junction functions."""
 
 
-def test_filter_lanelets_inside_junction(lanelet_map):
+def test__filter_lanelets_inside_junction(lanelet_map):
     """Test filtering lanelets inside a junction."""
     lanelets = list(lanelet_map.laneletLayer)
 
-    from autoware_lanelet2_to_opendrive.junction import filter_lanelets_inside_junction
+    from autoware_lanelet2_to_opendrive.junction import _filter_lanelets_inside_junction
 
-    junction_lanelets = filter_lanelets_inside_junction(lanelets)
+    junction_lanelets = _filter_lanelets_inside_junction(lanelets)
 
     junction_ids = {ll.id for ll in junction_lanelets}
     assert 3002084 in junction_ids  # Example junction lanelet ID
@@ -20,14 +20,14 @@ def test_filter_lanelets_inside_junction(lanelet_map):
 def test_find_junction_groups(lanelet_map):
     """Test finding separate junction groups from lanelets."""
     from autoware_lanelet2_to_opendrive.junction import (
-        filter_lanelets_inside_junction,
+        _filter_lanelets_inside_junction,
         find_junction_groups,
     )
 
     lanelets = list(lanelet_map.laneletLayer)
 
     # First filter to get only junction lanelets
-    junction_lanelets = filter_lanelets_inside_junction(lanelets)
+    junction_lanelets = _filter_lanelets_inside_junction(lanelets)
 
     # Find groups of junctions
     junction_groups = find_junction_groups(junction_lanelets)
@@ -90,7 +90,7 @@ def test_find_junction_groups(lanelet_map):
 def test_construct_from_lanelet_groups(lanelet_map):
     """Test constructing Junction instances from lanelet groups."""
     from autoware_lanelet2_to_opendrive.junction import (
-        filter_lanelets_inside_junction,
+        _filter_lanelets_inside_junction,
         find_junction_groups,
     )
     from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
@@ -98,7 +98,7 @@ def test_construct_from_lanelet_groups(lanelet_map):
     lanelets = list(lanelet_map.laneletLayer)
 
     # Get junction lanelets and group them
-    junction_lanelets = filter_lanelets_inside_junction(lanelets)
+    junction_lanelets = _filter_lanelets_inside_junction(lanelets)
     junction_groups = find_junction_groups(junction_lanelets)
 
     # Test constructing Junctions from groups
@@ -141,7 +141,7 @@ def test_construct_from_lanelet_map(lanelet_map):
     """Test constructing Junction instances directly from a lanelet map."""
     from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
     from autoware_lanelet2_to_opendrive.junction import (
-        filter_lanelets_inside_junction,
+        _filter_lanelets_inside_junction,
         find_junction_groups,
     )
 
@@ -160,7 +160,7 @@ def test_construct_from_lanelet_map(lanelet_map):
 
     # Verify consistency with manual approach
     lanelets = list(lanelet_map.laneletLayer)
-    junction_lanelets = filter_lanelets_inside_junction(lanelets)
+    junction_lanelets = _filter_lanelets_inside_junction(lanelets)
     junction_groups = find_junction_groups(junction_lanelets)
     assert len(junctions) == len(
         junction_groups

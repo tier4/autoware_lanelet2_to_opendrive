@@ -123,7 +123,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 - Dictionary mapping lanelet ID to road ID for regular roads
         """
         from autoware_lanelet2_to_opendrive.junction import (
-            filter_lanelets_outside_junction,
+            _filter_lanelets_outside_junction,
         )
         from autoware_lanelet2_to_opendrive.util import (
             find_adjacent_groups,
@@ -140,7 +140,7 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Build lanelet-to-road mapping for regular roads
         all_lanelets = list(self.lanelet_map.laneletLayer)
-        road_lanelets = filter_lanelets_outside_junction(
+        road_lanelets = _filter_lanelets_outside_junction(
             filter_lanelets_by_subtype(all_lanelets, ["road"])
         )
         adjacent_groups = find_adjacent_groups(self.lanelet_map, set(road_lanelets))
@@ -179,14 +179,14 @@ class _Lanelet2ToOpenDRIVEConverter:
                 - List of junction lanelets
         """
         from autoware_lanelet2_to_opendrive.junction import (
-            filter_lanelets_inside_junction,
+            _filter_lanelets_inside_junction,
             find_junction_groups,
         )
 
         # Get junction groups
         print("\n=== Finding junctions ===")
         all_lanelets = list(self.lanelet_map.laneletLayer)
-        junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+        junction_lanelets = _filter_lanelets_inside_junction(all_lanelets)
         junction_groups = find_junction_groups(junction_lanelets)
         print(f"Found {len(junction_groups)} junctions")
 
