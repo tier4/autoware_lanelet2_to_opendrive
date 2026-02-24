@@ -98,6 +98,7 @@ class TestMovePointBasic:
 
         assert success is False
 
+
 class TestMovePointAttributes:
     """Test point movement preserves attributes."""
 
