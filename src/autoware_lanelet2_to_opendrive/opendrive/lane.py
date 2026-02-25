@@ -277,6 +277,10 @@ class Lane:
                 succ_elem = ET.SubElement(link_elem, "successor")
                 succ_elem.set("id", str(self.successor.id))
 
+        # Add borders (schema order: link → border → width → roadMark → speed → height)
+        for border in self.borders:
+            elem.append(border.to_xml())
+
         # Add width definitions
         for width in self.widths:
             elem.append(width.to_xml())
@@ -288,10 +292,6 @@ class Lane:
         # Add speeds
         for speed in self.speeds:
             elem.append(speed.to_xml())
-
-        # Add borders
-        for border in self.borders:
-            elem.append(border.to_xml())
 
         # Add heights
         for height in self.heights:
