@@ -111,49 +111,31 @@ class _Lanelet2ToOpenDRIVEConverter:
 
     def _build_regular_roads(
         self,
-    ) -> Tuple[List[Road], Dict[int, int]]:
+    ) -> Tuple[List[Road], Dict[int, int], int]:
         """
         Build roads from non-junction lanelets.
 
         Returns:
             Tuple of:
                 - List of Road objects for non-junction lanelets
-                - Dictionary mapping lanelet ID to road ID for regular roads
+                - Dictionary mapping lanelet ID to road ID (only successfully built roads)
+                - Total number of adjacent groups (including failed ones)
         """
-        from autoware_lanelet2_to_opendrive.junction import (
-            filter_lanelets_outside_junction,
-        )
-        from autoware_lanelet2_to_opendrive.util import (
-            find_adjacent_groups,
-            filter_lanelets_by_subtype,
-        )
-
         print("\n=== Building regular roads ===")
-        regular_roads = Road.construct_from_lanelet_map(
+        regular_roads, lanelet_to_road_id, num_groups = Road.construct_from_lanelet_map(
             self.lanelet_map,
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
             width_config=self.config.width_estimation,
         )
 
-        # Build lanelet-to-road mapping for regular roads
-        all_lanelets = list(self.lanelet_map.laneletLayer)
-        road_lanelets = filter_lanelets_outside_junction(
-            filter_lanelets_by_subtype(all_lanelets, ["road"])
-        )
-        adjacent_groups = find_adjacent_groups(self.lanelet_map, set(road_lanelets))
-
-        lanelet_to_road_id: Dict[int, int] = {}
-        for road_id, adjacent_group in enumerate(adjacent_groups):
-            for lanelet in adjacent_group:
-                lanelet_to_road_id[lanelet.id] = road_id
-
-        return regular_roads, lanelet_to_road_id
+        return regular_roads, lanelet_to_road_id, num_groups
 
     def _build_junction_structure(
         self,
         regular_roads: List[Road],
         lanelet_to_road_id: Dict[int, int],
+        num_regular_groups: int,
     ) -> Tuple[
         List[Road],
         List[Junction],
@@ -167,6 +149,8 @@ class _Lanelet2ToOpenDRIVEConverter:
         Args:
             regular_roads: Already-built regular roads
             lanelet_to_road_id: Existing lanelet-to-road mapping from regular roads
+            num_regular_groups: Total number of regular road groups (including failed ones),
+                used to assign non-overlapping IDs to junction roads
 
         Returns:
             Tuple of:
@@ -189,8 +173,10 @@ class _Lanelet2ToOpenDRIVEConverter:
         print(f"Found {len(junction_groups)} junctions")
 
         # Create connecting roads
+        # Use total number of regular groups (not just successful ones) to avoid
+        # ID collisions between junction roads and regular roads when some groups fail.
         print("\n=== Building connecting roads inside junctions ===")
-        starting_junction_road_id = len(regular_roads)
+        starting_junction_road_id = num_regular_groups
         junction_id_offset = self.config.junction_id_offset
 
         (
@@ -627,7 +613,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         print("Converting Lanelet2 map to OpenDRIVE format...")
 
         # Step 1: Build regular roads from non-junction lanelets
-        regular_roads, lanelet_to_road_id = self._build_regular_roads()
+        regular_roads, lanelet_to_road_id, num_regular_groups = (
+            self._build_regular_roads()
+        )
 
         # Step 2: Build junction structure
         (
@@ -636,7 +624,9 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_to_roads,
             junction_lanelet_to_road,
             junction_lanelets,
-        ) = self._build_junction_structure(regular_roads, lanelet_to_road_id)
+        ) = self._build_junction_structure(
+            regular_roads, lanelet_to_road_id, num_regular_groups
+        )
 
         # Step 3: Create bidirectional mappings
         mapping = self._build_road_lanelet_mappings(lanelet_to_road_id)
@@ -671,6 +661,15 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Step 6.6: Extract stop lines and assign as road objects
         self._extract_and_assign_stop_lines(all_roads)
+
+        # Step 6.7: Validate no duplicate road IDs (safety check for ID assignment bugs)
+        from autoware_lanelet2_to_opendrive.opendrive.validation import (
+            validate_no_duplicate_road_ids,
+        )
+
+        dup_result = validate_no_duplicate_road_ids(all_roads)
+        if not dup_result.is_valid:
+            print(f"\nWARNING: {dup_result.get_error_summary()}")
 
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(
