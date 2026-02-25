@@ -3,10 +3,12 @@
 import lxml.etree as ET
 import pytest
 from autoware_lanelet2_to_opendrive.opendrive.signal import (
+    Dependency,
+    Reference,
     Signal,
-    Validity,
-    SignalUserData,
     SignalType,
+    SignalUserData,
+    Validity,
 )
 
 
@@ -576,3 +578,147 @@ def test_signal_reference_without_validities():
     xml = signal.to_signal_reference_xml()
     validity_elems = xml.findall("validity")
     assert len(validity_elems) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for Dependency and Reference dataclasses
+# ---------------------------------------------------------------------------
+
+
+def test_dependency_to_xml():
+    """Test Dependency XML conversion."""
+    dep = Dependency(id=102, type="trafficLight")
+    xml = dep.to_xml()
+
+    assert xml.tag == "dependency"
+    assert xml.get("id") == "102"
+    assert xml.get("type") == "trafficLight"
+
+
+def test_reference_to_xml():
+    """Test Reference XML conversion."""
+    ref = Reference(id=203, element_type="signal", type="stopLine")
+    xml = ref.to_xml()
+
+    assert xml.tag == "reference"
+    assert xml.get("id") == "203"
+    assert xml.get("elementType") == "signal"
+    assert xml.get("type") == "stopLine"
+
+
+def test_signal_type_stop_line():
+    """Test that STOP_LINE type constant is defined."""
+    assert SignalType.STOP_LINE == 294
+
+
+def test_stop_line_signal_with_dependencies():
+    """Test Signal of type 294 (stop line) with traffic light dependencies."""
+    signal = Signal(
+        id=203,
+        name="StopLine_100",
+        s=3.0,
+        t=0.0,
+        orientation="-",
+        dynamic="no",
+        country="OpenDRIVE",
+        type=SignalType.STOP_LINE,
+        subtype=-1,
+        dependencies=[
+            Dependency(id=102, type="trafficLight"),
+            Dependency(id=103, type="trafficLight"),
+        ],
+    )
+
+    xml = signal.to_xml()
+    xml_string = ET.tostring(xml, encoding="unicode", pretty_print=True)
+
+    assert xml.get("type") == "294"
+    assert xml.get("dynamic") == "no"
+
+    dep_elems = xml.findall("dependency")
+    assert len(dep_elems) == 2
+    assert dep_elems[0].get("id") == "102"
+    assert dep_elems[0].get("type") == "trafficLight"
+    assert dep_elems[1].get("id") == "103"
+    assert dep_elems[1].get("type") == "trafficLight"
+
+    assert "<dependency" in xml_string
+    assert 'type="trafficLight"' in xml_string
+
+
+def test_traffic_light_signal_with_stop_line_reference():
+    """Test traffic light Signal with a stop line reference."""
+    signal = Signal(
+        id=102,
+        name="TrafficLight_1000",
+        s=3.0,
+        t=-4.5,
+        orientation="-",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
+        subtype=-1,
+        references=[
+            Reference(id=203, element_type="signal", type="stopLine"),
+        ],
+    )
+
+    xml = signal.to_xml()
+    xml_string = ET.tostring(xml, encoding="unicode", pretty_print=True)
+
+    assert xml.get("type") == "1000001"
+
+    ref_elems = xml.findall("reference")
+    assert len(ref_elems) == 1
+    assert ref_elems[0].get("id") == "203"
+    assert ref_elems[0].get("elementType") == "signal"
+    assert ref_elems[0].get("type") == "stopLine"
+
+    assert "<reference" in xml_string
+    assert 'elementType="signal"' in xml_string
+    assert 'type="stopLine"' in xml_string
+
+
+def test_signal_dependency_ordering_after_validity():
+    """Test that dependencies appear after validity elements in XML output."""
+    signal = Signal(
+        id=203,
+        name="StopLine_200",
+        s=5.0,
+        t=-2.0,
+        orientation="-",
+        dynamic="no",
+        country="OpenDRIVE",
+        type=SignalType.STOP_LINE,
+        subtype=-1,
+        validities=[Validity(from_lane=-1, to_lane=-1)],
+        dependencies=[Dependency(id=50, type="trafficLight")],
+    )
+
+    xml = signal.to_xml()
+    children = list(xml)
+
+    # validity must appear before dependency
+    tags = [child.tag for child in children]
+    assert "validity" in tags
+    assert "dependency" in tags
+    assert tags.index("validity") < tags.index("dependency")
+
+
+def test_signal_no_dependencies_no_elements():
+    """Test that signals without dependencies/references have no such elements."""
+    signal = Signal(
+        id=10,
+        name="TL_10",
+        s=1.0,
+        t=-3.0,
+        orientation="-",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
+        subtype=-1,
+    )
+
+    xml = signal.to_xml()
+    assert xml.find("dependency") is None
+    assert xml.find("reference") is None

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Main script to convert Lanelet2 maps to OpenDRIVE format."""
 
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -9,6 +10,7 @@ import logging
 from datetime import datetime
 
 import hydra
+import mgrs as mgrs_lib
 from omegaconf import DictConfig, OmegaConf
 
 # Import autoware extensions before loading maps to ensure proper registration
@@ -16,11 +18,15 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
 
-from autoware_lanelet2_to_opendrive.util import (
+from autoware_lanelet2_to_opendrive.projection import (
     mgrs_to_lanelet2_origin,
     mgrs_grid_with_offset_to_lanelet2_origin,
+    mgrs_grid_with_offset_to_latlon,
     latlon_to_lanelet2_origin,
+    latlon_to_proj_string,
     mgrs_to_proj_string,
+)
+from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
@@ -161,14 +167,14 @@ class _Lanelet2ToOpenDRIVEConverter:
                 - List of junction lanelets
         """
         from autoware_lanelet2_to_opendrive.junction import (
-            filter_lanelets_inside_junction,
+            _filter_lanelets_inside_junction,
             find_junction_groups,
         )
 
         # Get junction groups
         print("\n=== Finding junctions ===")
         all_lanelets = list(self.lanelet_map.laneletLayer)
-        junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+        junction_lanelets = _filter_lanelets_inside_junction(all_lanelets)
         junction_groups = find_junction_groups(junction_lanelets)
         print(f"Found {len(junction_groups)} junctions")
 
@@ -482,25 +488,93 @@ class _Lanelet2ToOpenDRIVEConverter:
             if road.id in road_objects:
                 road.objects = road_objects[road.id]
 
-    def _extract_and_assign_stop_lines(self, all_roads: List[Road]) -> None:
+    def _build_stop_line_to_tl_mapping(self) -> Dict[int, List[int]]:
+        """Build mapping from stop line linestring ID to associated traffic light RE IDs.
+
+        Iterates through all traffic light regulatory elements in the Lanelet2 map
+        and extracts stop line references via the stopLine attribute.
+
+        Returns:
+            Dictionary mapping stop line linestring ID to list of traffic light
+            regulatory element IDs that reference it.
+        """
+        stop_line_to_tl_ids: Dict[int, List[int]] = {}
+        seen_tl_ids: set = set()
+
+        for lanelet in self.lanelet_map.laneletLayer:
+            for reg_elem in lanelet.regulatoryElements:
+                if not (hasattr(reg_elem, "trafficLights") and reg_elem.trafficLights):
+                    continue
+                if reg_elem.id in seen_tl_ids:
+                    continue
+                seen_tl_ids.add(reg_elem.id)
+
+                stop_line = None
+                if hasattr(reg_elem, "stopLine"):
+                    try:
+                        stop_line = reg_elem.stopLine
+                    except Exception:
+                        pass
+
+                if stop_line is not None:
+                    sl_id = stop_line.id
+                    if sl_id not in stop_line_to_tl_ids:
+                        stop_line_to_tl_ids[sl_id] = []
+                    stop_line_to_tl_ids[sl_id].append(reg_elem.id)
+
+        return stop_line_to_tl_ids
+
+    def _extract_and_assign_stop_lines(
+        self,
+        all_roads: List[Road],
+        stop_line_to_tl_signal_ids: Optional[Dict[int, List[int]]] = None,
+        starting_signal_id: int = 0,
+    ) -> Dict[int, List[int]]:
         """Extract stop line linestrings and assign them as objects to nearest roads.
 
         For each linestring with type="stop_line", this method:
         1. Finds the nearest road within a distance threshold
         2. Constructs a StopLineObject with position and heading
         3. Extends the road's objects list with the new object
+        4. If traffic light associations exist, also creates a Signal (type 294)
+           with dependency elements referencing the associated traffic lights
 
         Args:
             all_roads: All roads (regular + connecting) to search and assign to.
+            stop_line_to_tl_signal_ids: Mapping from stop line lanelet2 ID to list
+                of OpenDRIVE traffic light signal IDs. If provided (and not in CARLA
+                mode), stop line Signal elements are created with dependency references.
+            starting_signal_id: Starting ID for generated stop line signals.
+
+        Returns:
+            Dictionary mapping traffic light signal ID to list of stop line signal IDs,
+            used to add back-references (Reference elements) to traffic light signals.
         """
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
             StopLineObject,
             find_nearest_road_for_linestring,
         )
+        from autoware_lanelet2_to_opendrive.opendrive.signal import (
+            Signal,
+            Dependency,
+            SignalType,
+        )
 
         print("\n=== Extracting stop lines ===")
         stop_line_ids_seen: set = set()
         road_objects: Dict[int, List] = {}
+        road_stop_line_signals: Dict[int, List] = {}
+        tl_signal_to_stop_line_signal_ids: Dict[int, List[int]] = {}
+        stop_line_signal_id_counter = starting_signal_id
+        # Resolve Optional to a concrete dict for type narrowing
+        resolved_tl_signal_ids: Dict[int, List[int]] = (
+            stop_line_to_tl_signal_ids
+            if (
+                not self.config.stopline.carla_stop_line
+                and stop_line_to_tl_signal_ids is not None
+            )
+            else {}
+        )
 
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
@@ -520,19 +594,71 @@ class _Lanelet2ToOpenDRIVEConverter:
                 width=self.config.stopline.width,
                 carla_format=self.config.stopline.carla_stop_line,
             )
-            if obj is not None:
-                road_objects.setdefault(best_road.id, []).append(obj)
+            if obj is None:
+                continue
+
+            road_objects.setdefault(best_road.id, []).append(obj)
+
+            # Create stop line Signal (type 294) when traffic light associations exist
+            if ls.id in resolved_tl_signal_ids:
+                tl_signal_ids = resolved_tl_signal_ids[ls.id]
+                stop_line_signal = Signal(
+                    id=stop_line_signal_id_counter,
+                    name=f"StopLine_{ls.id}",
+                    s=obj.s,
+                    t=obj.t,
+                    z_offset=obj.z_offset,
+                    h_offset=0.0,
+                    roll=0.0,
+                    pitch=0.0,
+                    orientation="-" if obj.t < 0 else "+",
+                    dynamic="no",
+                    country="OpenDRIVE",
+                    type=SignalType.STOP_LINE,
+                    subtype=-1,
+                    value=-1.0,
+                    text="",
+                    height=0.0,
+                    width=obj.length,
+                    dependencies=[
+                        Dependency(id=tl_sig_id, type="trafficLight")
+                        for tl_sig_id in tl_signal_ids
+                    ],
+                )
+                road_stop_line_signals.setdefault(best_road.id, []).append(
+                    stop_line_signal
+                )
+
+                # Build reverse mapping for adding references to TL signals
+                for tl_sig_id in tl_signal_ids:
+                    tl_signal_to_stop_line_signal_ids.setdefault(tl_sig_id, []).append(
+                        stop_line_signal_id_counter
+                    )
+
+                stop_line_signal_id_counter += 1
 
         stop_line_count = sum(len(v) for v in road_objects.values())
+        stop_line_signal_count = sum(len(v) for v in road_stop_line_signals.values())
         print(
             f"Assigned {stop_line_count} stop line objects to {len(road_objects)} roads"
         )
+        if stop_line_signal_count > 0:
+            print(
+                f"Created {stop_line_signal_count} stop line signals "
+                f"with traffic light dependencies"
+            )
 
         for road in all_roads:
             if road.id in road_objects:
                 if road.objects is None:
                     road.objects = []
                 road.objects.extend(road_objects[road.id])
+            if road.id in road_stop_line_signals:
+                if road.signals is None:
+                    road.signals = []
+                road.signals.extend(road_stop_line_signals[road.id])
+
+        return tl_signal_to_stop_line_signal_ids
 
     def _write_opendrive_output(
         self,
@@ -551,8 +677,6 @@ class _Lanelet2ToOpenDRIVEConverter:
         Returns:
             OpenDRIVE object
         """
-        from autoware_lanelet2_to_opendrive.util import latlon_to_proj_string
-
         # Generate PROJ string for geoReference
         if self.config.origin.lat is not None and self.config.origin.lon is not None:
             geo_reference_proj = latlon_to_proj_string(
@@ -659,8 +783,52 @@ class _Lanelet2ToOpenDRIVEConverter:
         # Step 6.5: Extract crosswalks and assign as road objects
         self._extract_and_assign_crosswalks(all_roads)
 
-        # Step 6.6: Extract stop lines and assign as road objects
-        self._extract_and_assign_stop_lines(all_roads)
+        # Step 6.6: Build stop line -> traffic light signal associations
+        print("\n=== Building stop line to traffic light associations ===")
+        stop_line_to_tl_ids = self._build_stop_line_to_tl_mapping()
+        print(
+            f"Found {len(stop_line_to_tl_ids)} stop lines with traffic light references"
+        )
+
+        # Resolve Lanelet2 TL IDs to OpenDRIVE signal IDs
+        stop_line_to_tl_signal_ids: Dict[int, List[int]] = {}
+        for sl_id, tl_ids in stop_line_to_tl_ids.items():
+            resolved_signal_ids: List[int] = []
+            for tl_id in tl_ids:
+                resolved_signal_ids.extend(
+                    signals_and_controllers.lanelet2_tl_id_to_signal_ids.get(tl_id, [])
+                )
+            if resolved_signal_ids:
+                stop_line_to_tl_signal_ids[sl_id] = resolved_signal_ids
+
+        # Step 6.7: Extract stop lines and assign as road objects (with signal dependencies)
+        next_signal_id = len(signals_and_controllers.signals)
+        tl_signal_to_stop_line_signal_ids = self._extract_and_assign_stop_lines(
+            all_roads,
+            stop_line_to_tl_signal_ids,
+            next_signal_id,
+        )
+
+        # Step 6.8: Add back-references to traffic light signals pointing to stop lines
+        if tl_signal_to_stop_line_signal_ids:
+            from autoware_lanelet2_to_opendrive.opendrive.signal import Reference
+
+            ref_count = 0
+            for signal in signals_and_controllers.signals:
+                stop_line_signal_ids = tl_signal_to_stop_line_signal_ids.get(
+                    signal.id, []
+                )
+                if stop_line_signal_ids:
+                    signal.references = [
+                        Reference(
+                            id=sl_sig_id,
+                            element_type="signal",
+                            type="stopLine",
+                        )
+                        for sl_sig_id in stop_line_signal_ids
+                    ]
+                    ref_count += 1
+            print(f"Added stop line references to {ref_count} traffic light signals")
 
         # Step 6.7: Validate no duplicate road IDs (safety check for ID assignment bugs)
         from autoware_lanelet2_to_opendrive.opendrive.validation import (
@@ -777,10 +945,6 @@ def parse_origin_from_config(
                 f"offset x={offset_x} y={offset_y} z={offset_z}"
             )
             # Get lat/lon with offset applied
-            from autoware_lanelet2_to_opendrive.util import (
-                mgrs_grid_with_offset_to_latlon,
-            )
-
             origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
                 mgrs_grid, offset_x, offset_y
             )
@@ -800,13 +964,10 @@ def parse_origin_from_config(
         else:
             logger.info(f"Using MGRS grid origin: {mgrs_grid}")
             origin = mgrs_to_lanelet2_origin(mgrs_grid)
-            # Get lat/lon from MGRS grid origin
-            import mgrs as mgrs_lib
-
-            m = mgrs_lib.MGRS()
-            # Pad with zeros to get grid origin
-            processed_mgrs = mgrs_grid + "0000000000"
-            origin_lat, origin_lon = m.toLatLon(processed_mgrs)
+            # Get lat/lon from MGRS grid origin (no offset)
+            origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
+                mgrs_grid, 0.0, 0.0
+            )
             logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
             # No offset specified
             return origin, mgrs_grid, origin_lat, origin_lon, 0.0, 0.0, 0.0
@@ -824,14 +985,10 @@ def parse_origin_from_config(
 
         # For lat/lon origin, we need to generate an approximate MGRS code for the PROJ string
         # Convert lat/lon back to MGRS to get the grid zone
-        import mgrs as mgrs_lib
-
         m = mgrs_lib.MGRS()
         mgrs_code = m.toMGRS(latitude, longitude)
         # Extract just the grid zone designator (first 5 characters: zone + band + square)
         # Format: 54SUE1234567890 -> we want 54SUE
-        import re
-
         match = re.match(r"^(\d+[A-Z][A-Z][A-Z])", mgrs_code)
         if match:
             mgrs_grid = match.group(1)

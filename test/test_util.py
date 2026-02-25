@@ -1,6 +1,13 @@
 """Tests for utility functions."""
 
 import lanelet2
+from autoware_lanelet2_to_opendrive.projection import (
+    mgrs_to_lanelet2_origin,
+    mgrs_grid_with_offset_to_latlon,
+    mgrs_grid_with_offset_to_lanelet2_origin,
+    latlon_to_lanelet2_origin,
+    latlon_to_proj_string,
+)
 from autoware_lanelet2_to_opendrive.util import (
     find_lanelets_without_next,
     find_lanelets_without_previous,
@@ -9,11 +16,6 @@ from autoware_lanelet2_to_opendrive.util import (
     filter_lanelets_by_subtype,
     check_lanelet_groups_intersect,
     sort_adjacent_groups,
-    mgrs_to_lanelet2_origin,
-    mgrs_grid_with_offset_to_latlon,
-    mgrs_grid_with_offset_to_lanelet2_origin,
-    latlon_to_lanelet2_origin,
-    latlon_to_proj_string,
 )
 
 
@@ -836,7 +838,7 @@ def test_latlon_to_proj_string_nishishinjuku():
 
 def test_latlon_to_proj_string_vs_mgrs_to_proj_string():
     """Test that latlon_to_proj_string produces different result than mgrs_to_proj_string when offset is applied."""
-    from autoware_lanelet2_to_opendrive.util import mgrs_to_proj_string
+    from autoware_lanelet2_to_opendrive.projection import mgrs_to_proj_string
 
     # Get lat/lon with offset (Nishishinjuku coordinates)
     lat_with_offset, lon_with_offset = mgrs_grid_with_offset_to_latlon(

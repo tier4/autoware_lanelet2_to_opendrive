@@ -32,6 +32,7 @@ class SignalsAndControllers:
     signals: List[Signal] = field(default_factory=list)
     controllers: List[Controller] = field(default_factory=list)
     signal_to_road_id: Dict[int, int] = field(default_factory=dict)
+    lanelet2_tl_id_to_signal_ids: Dict[int, List[int]] = field(default_factory=dict)
 
     def add_signal(self, signal: Signal) -> None:
         """Add a signal to the collection.
@@ -206,6 +207,13 @@ class SignalsAndControllers:
 
                 # Track signal to road mapping
                 result.signal_to_road_id[signal_id_counter] = road_id
+
+                # Track lanelet2 traffic light ID to OpenDRIVE signal ID mapping
+                if lanelet2_traffic_light_id not in result.lanelet2_tl_id_to_signal_ids:
+                    result.lanelet2_tl_id_to_signal_ids[lanelet2_traffic_light_id] = []
+                result.lanelet2_tl_id_to_signal_ids[lanelet2_traffic_light_id].append(
+                    signal_id_counter
+                )
 
                 signal_id_counter += 1
 
