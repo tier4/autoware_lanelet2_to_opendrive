@@ -12,10 +12,13 @@ Examples:
     uv run analyze output.xodr --output result.xqar
     uv run analyze output.xodr --min-severity WARNING
     uv run analyze output.xodr --max-issues 20
+    uv run analyze output.xodr --ignore-pattern "attribute 'rule'"
+    uv run analyze output.xodr --ignore-pattern "attribute 'rule'" --ignore-pattern "other pattern"
 """
 
 import argparse
 import logging
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -76,13 +79,31 @@ def print_report(
     xodr_path: str,
     min_severity: IssueSeverity = IssueSeverity.INFORMATION,
     max_issues_per_checker: int = 10,
+    ignore_patterns: list[str] | None = None,
 ) -> int:
     """
     Print a human-readable analysis report.
 
-    Returns the total number of ERROR-level issues.
+    Args:
+        result: The QC result object.
+        xodr_path: Path to the analyzed .xodr file.
+        min_severity: Minimum severity level to display.
+        max_issues_per_checker: Maximum issues to show per checker.
+        ignore_patterns: List of regex patterns. Issues whose description
+            matches any pattern are excluded from the report and error count.
+
+    Returns the total number of ERROR-level issues (after filtering).
     """
     from qc_baselib.models.result import StatusType
+
+    compiled_patterns = [re.compile(p) for p in (ignore_patterns or [])]
+
+    def is_ignored(issue) -> bool:  # type: ignore[no-untyped-def]
+        # Match against issue description and all location descriptions
+        texts = [issue.description] + [
+            loc.description for loc in issue.locations if loc.description
+        ]
+        return any(p.search(t) for p in compiled_patterns for t in texts)
 
     bundle_name = constants.BUNDLE_NAME
     checker_ids = result.get_checker_ids(bundle_name)
@@ -95,6 +116,7 @@ def print_report(
     }
     skipped_checkers: list[tuple[str, str]] = []
     error_checkers: list[tuple[str, str]] = []
+    ignored_count = 0
 
     for checker_id in checker_ids:
         checker = result.get_checker_result(bundle_name, checker_id)
@@ -104,6 +126,9 @@ def print_report(
         if checker.status == StatusType.ERROR:
             error_checkers.append((checker_id, checker.summary))
         for issue in checker.issues:
+            if is_ignored(issue):
+                ignored_count += 1
+                continue
             issues_by_severity[issue.level].append((checker_id, issue))
 
     total_errors = len(issues_by_severity[IssueSeverity.ERROR])
@@ -147,11 +172,13 @@ def print_report(
 
     # ── Issue summary ───────────────────────────────────────────────────────
     print(f"\n{'─' * 72}")
+    ignored_suffix = f"  |  {ignored_count} ignored" if ignored_count > 0 else ""
     print(
         f"Issues   : {total_all} total  |  "
         f"{total_errors} errors  |  "
         f"{total_warnings} warnings  |  "
         f"{total_info} info"
+        f"{ignored_suffix}"
     )
     print(f"{'─' * 72}")
 
@@ -264,6 +291,18 @@ def main() -> None:
         action="store_true",
         help="Exit with non-zero code if any warnings are found",
     )
+    parser.add_argument(
+        "--ignore-pattern",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        dest="ignore_patterns",
+        help=(
+            "Regex pattern to ignore matching issues (can be specified multiple times). "
+            "Matched issues are excluded from the report and do not affect the exit code. "
+            "Example: --ignore-pattern \"attribute 'rule'\""
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -307,6 +346,7 @@ def main() -> None:
         str(xodr_path),
         min_severity,
         max_issues_per_checker=args.max_issues,
+        ignore_patterns=args.ignore_patterns,
     )
 
     # Write result file (generate_summary appends issue counts to summaries)
