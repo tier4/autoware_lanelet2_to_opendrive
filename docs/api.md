@@ -231,7 +231,7 @@ from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
 )
 
 # Load preprocessing configuration from YAML
-config = PreprocessOperation.from_yaml("preprocess_config.yaml")
+config = PreprocessOperation.from_yaml("nishishinjuku_preprocess_config.yaml")
 
 # Or create configuration programmatically
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
