@@ -246,9 +246,6 @@ class ReferenceLine:
             elevation_offset=elevation_offset,
         )
 
-        # Reference line is a virtual line, so I hardcode a small constant width
-        reference_line._lane._add_width(LaneWidth(s_offset=0, a=0.1))
-
         # TODO: Add road marks based on lanelet line types
 
         return reference_line
