@@ -151,9 +151,17 @@ jobs:
 
     - name: Run CARLA import test
       run: |
+        set -o pipefail
         uv run carla-import-test nishishinjuku_carla.xodr \
           --map-name nishishinjuku \
           | tee carla_import_test_result.txt
+
+    - name: Run QC analysis
+      run: |
+        set -o pipefail
+        uv run analyze nishishinjuku_carla.xodr \
+          --output nishishinjuku_carla_qc_report.xqar \
+          | tee analyze_result.txt
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -163,4 +171,6 @@ jobs:
         path: |
           nishishinjuku_carla.xodr
           carla_import_test_result.txt
+          nishishinjuku_carla_qc_report.xqar
+          analyze_result.txt
         retention-days: 7
