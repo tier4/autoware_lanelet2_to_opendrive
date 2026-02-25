@@ -4,6 +4,7 @@ This module provides validation functions to ensure OpenDRIVE files comply with 
 specification and prevent issues in downstream tools like CARLA.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, List
 
@@ -139,5 +140,40 @@ def validate_lane_road_link_consistency(
                                 ),
                             )
                         )
+
+    return ValidationResult(is_valid=(len(errors) == 0), errors=errors)
+
+
+def validate_no_duplicate_road_ids(roads: List[Road]) -> ValidationResult:
+    """Validate that no two roads share the same ID.
+
+    Duplicate road IDs can cause silent data corruption when building lookup
+    dictionaries (last writer wins) and lead to invalid lane links or dangling
+    road references in the output OpenDRIVE file.
+
+    Args:
+        roads: List of Road objects to validate
+
+    Returns:
+        ValidationResult containing validation status and any errors found
+
+    Example:
+        >>> result = validate_no_duplicate_road_ids(all_roads)
+        >>> if not result.is_valid:
+        ...     print(result.get_error_summary())
+    """
+    errors: List[LaneConnectionError] = []
+
+    id_counts = Counter(road.id for road in roads)
+    for road_id, count in id_counts.items():
+        if count > 1:
+            errors.append(
+                LaneConnectionError(
+                    road_id=road_id,
+                    lane_id=0,
+                    connection_type="duplicate",
+                    message=f"Road ID {road_id} appears {count} times in the road list",
+                )
+            )
 
     return ValidationResult(is_valid=(len(errors) == 0), errors=errors)
