@@ -14,13 +14,14 @@ import lanelet2
 
 from .config import DEFAULT_CONFIG
 from .lanelet import (
+    copy_map_excluding,
     merge_lanelets_from_ids,
     remove_lanelets,
     replace_lanelets,
     get_max_lanelet_id,
     validate_lanelet_continuity,
 )
-from .util import mgrs_to_lanelet2_origin
+from .projection import mgrs_to_lanelet2_origin
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -634,20 +635,11 @@ class LaneletPreprocessor:
             )
 
             # Create new map with merged lanelets replacing originals
-            new_map = lanelet2.core.LaneletMap()
-
-            # Copy all lanelets except those that were merged
-            for ll in lanelet_map.laneletLayer:
-                if ll.id not in all_lanelets_to_remove:
-                    new_map.add(ll)
+            new_map = copy_map_excluding(lanelet_map, all_lanelets_to_remove)
 
             # Add all the merged lanelets
             for merged_lanelet in merged_lanelets:
                 new_map.add(merged_lanelet)
-
-            # Copy regulatory elements
-            for reg_elem in lanelet_map.regulatoryElementLayer:
-                new_map.add(reg_elem)
 
             logger.info(
                 f"  Replaced {len(all_lanelets_to_remove)} original lanelets "
@@ -764,7 +756,7 @@ class LaneletPreprocessor:
         Returns:
             Updated lanelet map
         """
-        from .geometry import move_point_in_map
+        from .lanelet import move_point_in_map
 
         for i, op in enumerate(self.config.move_point_operations):
             logger.info(
@@ -798,7 +790,7 @@ class LaneletPreprocessor:
         Returns:
             Updated lanelet map
         """
-        from .geometry import delete_points_from_map
+        from .lanelet import delete_points_from_map
 
         for i, op in enumerate(self.config.delete_point_operations):
             logger.info(
@@ -840,21 +832,15 @@ class LaneletPreprocessor:
 
         logger.info(f"Removing {len(all_lanelets_to_remove)} lanelets from map")
 
-        # Create new map without the specified lanelets
-        new_map = lanelet2.core.LaneletMap()
-
-        # Copy all lanelets except those to be removed
+        # Count removed lanelets and log debug info before creating the new map
         removed_count = 0
         for ll in lanelet_map.laneletLayer:
-            if ll.id not in all_lanelets_to_remove:
-                new_map.add(ll)
-            else:
+            if ll.id in all_lanelets_to_remove:
                 removed_count += 1
                 logger.debug(f"  Removed lanelet {ll.id}")
 
-        # Copy regulatory elements
-        for reg_elem in lanelet_map.regulatoryElementLayer:
-            new_map.add(reg_elem)
+        # Create new map without the specified lanelets
+        new_map = copy_map_excluding(lanelet_map, all_lanelets_to_remove)
 
         logger.info(
             f"Successfully removed {removed_count}/{len(all_lanelets_to_remove)} lanelets"

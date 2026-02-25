@@ -135,8 +135,8 @@ Global offset system ([config.py:155-207](https://github.com/tier4/autoware_lane
 **C. PROJ String Generation**
 
 For OpenDRIVE `<geoReference>` element:
-- **From MGRS**: `mgrs_to_proj_string()` ([util.py:795-860](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L795-L860))
-- **From Lat/Lon**: `latlon_to_proj_string()` ([util.py:863-897](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L863-L897))
+- **From MGRS**: `mgrs_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/projection.py))
+- **From Lat/Lon**: `latlon_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/projection.py))
 
 Format: `+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m +no_defs`
 
@@ -468,8 +468,8 @@ remove_turn_direction_operations:
 
 **Processing:**
 ```python
-junction_lanelets = filter_lanelets_inside_junction(lanelet_map)
-road_lanelets = filter_lanelets_outside_junction(lanelet_map)
+junction_lanelets = _filter_lanelets_inside_junction(lanelet_map)
+road_lanelets = _filter_lanelets_outside_junction(lanelet_map)
 ```
 
 **Output:**

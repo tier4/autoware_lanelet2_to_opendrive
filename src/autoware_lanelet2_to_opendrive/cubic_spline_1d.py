@@ -81,34 +81,17 @@ class CubicSpline1D:
         if segment_index < 0 or segment_index >= self.num_segments:
             raise ValueError(f"Invalid segment index: {segment_index}")
 
-        # Get the polynomial piece for this segment
-        # scipy's CubicSpline uses a different representation internally
-        # We need to extract and convert the coefficients
+        # Access scipy's CubicSpline internal coefficient matrix directly.
+        # self.spline.c has shape (4, n-1) where n is number of knots.
+        # Each column stores [d, c, b, a] for the polynomial:
+        #   w(s) = a + b*(s-s0) + c*(s-s0)^2 + d*(s-s0)^3
+        c_matrix = self.spline.c
+        d = float(c_matrix[0, segment_index])  # Coefficient of (s-s0)^3
+        c = float(c_matrix[1, segment_index])  # Coefficient of (s-s0)^2
+        b = float(c_matrix[2, segment_index])  # Coefficient of (s-s0)
+        a = float(c_matrix[3, segment_index])  # Constant term
 
-        # Get the segment start point
-        s0 = self.segment_starts[segment_index]
-
-        # Evaluate the polynomial and its derivatives at the start of the segment
-        a = self.spline(s0, 0)  # w(s0)
-        b = self.spline(s0, 1)  # w'(s0)
-        c = self.spline(s0, 2) / 2.0  # w''(s0) / 2!
-        d = self.spline(s0, 3) / 6.0  # w'''(s0) / 3!
-
-        # For cubic splines, the third derivative is piecewise constant within each segment
-        # We need to get it from the spline's internal representation
-        if hasattr(self.spline, "c"):
-            # Access scipy's internal coefficient matrix
-            # self.spline.c has shape (4, n-1) where n is number of knots
-            # Each column represents [d, c, b, a] for that segment
-            c_matrix = self.spline.c
-            if segment_index < c_matrix.shape[1]:
-                # The coefficients are stored in reverse order and for (x - x_i)
-                d = c_matrix[0, segment_index]  # Coefficient of (s-s0)^3
-                c = c_matrix[1, segment_index]  # Coefficient of (s-s0)^2
-                b = c_matrix[2, segment_index]  # Coefficient of (s-s0)
-                a = c_matrix[3, segment_index]  # Constant term
-
-        return float(a), float(b), float(c), float(d)
+        return a, b, c, d
 
     def get_segments(self) -> List[Tuple[float, float, float, float, float]]:
         """

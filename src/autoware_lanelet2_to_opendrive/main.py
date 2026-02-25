@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Main script to convert Lanelet2 maps to OpenDRIVE format."""
 
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -9,6 +10,7 @@ import logging
 from datetime import datetime
 
 import hydra
+import mgrs as mgrs_lib
 from omegaconf import DictConfig, OmegaConf
 
 # Import autoware extensions before loading maps to ensure proper registration
@@ -16,11 +18,15 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
 
-from autoware_lanelet2_to_opendrive.util import (
+from autoware_lanelet2_to_opendrive.projection import (
     mgrs_to_lanelet2_origin,
     mgrs_grid_with_offset_to_lanelet2_origin,
+    mgrs_grid_with_offset_to_latlon,
     latlon_to_lanelet2_origin,
+    latlon_to_proj_string,
     mgrs_to_proj_string,
+)
+from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
@@ -121,7 +127,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 - Dictionary mapping lanelet ID to road ID for regular roads
         """
         from autoware_lanelet2_to_opendrive.junction import (
-            filter_lanelets_outside_junction,
+            _filter_lanelets_outside_junction,
         )
         from autoware_lanelet2_to_opendrive.util import (
             find_adjacent_groups,
@@ -138,7 +144,7 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Build lanelet-to-road mapping for regular roads
         all_lanelets = list(self.lanelet_map.laneletLayer)
-        road_lanelets = filter_lanelets_outside_junction(
+        road_lanelets = _filter_lanelets_outside_junction(
             filter_lanelets_by_subtype(all_lanelets, ["road"])
         )
         adjacent_groups = find_adjacent_groups(self.lanelet_map, set(road_lanelets))
@@ -177,14 +183,14 @@ class _Lanelet2ToOpenDRIVEConverter:
                 - List of junction lanelets
         """
         from autoware_lanelet2_to_opendrive.junction import (
-            filter_lanelets_inside_junction,
+            _filter_lanelets_inside_junction,
             find_junction_groups,
         )
 
         # Get junction groups
         print("\n=== Finding junctions ===")
         all_lanelets = list(self.lanelet_map.laneletLayer)
-        junction_lanelets = filter_lanelets_inside_junction(all_lanelets)
+        junction_lanelets = _filter_lanelets_inside_junction(all_lanelets)
         junction_groups = find_junction_groups(junction_lanelets)
         print(f"Found {len(junction_groups)} junctions")
 
@@ -565,8 +571,6 @@ class _Lanelet2ToOpenDRIVEConverter:
         Returns:
             OpenDRIVE object
         """
-        from autoware_lanelet2_to_opendrive.util import latlon_to_proj_string
-
         # Generate PROJ string for geoReference
         if self.config.origin.lat is not None and self.config.origin.lon is not None:
             geo_reference_proj = latlon_to_proj_string(
@@ -778,10 +782,6 @@ def parse_origin_from_config(
                 f"offset x={offset_x} y={offset_y} z={offset_z}"
             )
             # Get lat/lon with offset applied
-            from autoware_lanelet2_to_opendrive.util import (
-                mgrs_grid_with_offset_to_latlon,
-            )
-
             origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
                 mgrs_grid, offset_x, offset_y
             )
@@ -801,13 +801,10 @@ def parse_origin_from_config(
         else:
             logger.info(f"Using MGRS grid origin: {mgrs_grid}")
             origin = mgrs_to_lanelet2_origin(mgrs_grid)
-            # Get lat/lon from MGRS grid origin
-            import mgrs as mgrs_lib
-
-            m = mgrs_lib.MGRS()
-            # Pad with zeros to get grid origin
-            processed_mgrs = mgrs_grid + "0000000000"
-            origin_lat, origin_lon = m.toLatLon(processed_mgrs)
+            # Get lat/lon from MGRS grid origin (no offset)
+            origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
+                mgrs_grid, 0.0, 0.0
+            )
             logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
             # No offset specified
             return origin, mgrs_grid, origin_lat, origin_lon, 0.0, 0.0, 0.0
@@ -825,14 +822,10 @@ def parse_origin_from_config(
 
         # For lat/lon origin, we need to generate an approximate MGRS code for the PROJ string
         # Convert lat/lon back to MGRS to get the grid zone
-        import mgrs as mgrs_lib
-
         m = mgrs_lib.MGRS()
         mgrs_code = m.toMGRS(latitude, longitude)
         # Extract just the grid zone designator (first 5 characters: zone + band + square)
         # Format: 54SUE1234567890 -> we want 54SUE
-        import re
-
         match = re.match(r"^(\d+[A-Z][A-Z][A-Z])", mgrs_code)
         if match:
             mgrs_grid = match.group(1)
