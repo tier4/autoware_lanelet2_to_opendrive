@@ -77,6 +77,11 @@ class Road:
             elem.append(self.elevation_profile.to_xml())
         if self.lanes:
             elem.append(self.lanes.to_xml())
+        if self.objects:
+            objects_elem = ET.SubElement(elem, "objects")
+            for obj in self.objects:
+                objects_elem.append(obj.to_xml())
+
         if self.signals:
             signals_elem = ET.SubElement(elem, "signals")
 
@@ -88,11 +93,6 @@ class Road:
             # Each signal gets a corresponding signalReference on the reference line
             for signal in self.signals:
                 signals_elem.append(signal.to_signal_reference_xml())
-
-        if self.objects:
-            objects_elem = ET.SubElement(elem, "objects")
-            for obj in self.objects:
-                objects_elem.append(obj.to_xml())
 
         return elem
 
