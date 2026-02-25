@@ -13,7 +13,8 @@ Examples:
     uv run analyze output.xodr --min-severity WARNING
     uv run analyze output.xodr --max-issues 20
     uv run analyze output.xodr --ignore-pattern "attribute 'rule'"
-    uv run analyze output.xodr --ignore-pattern "attribute 'rule'" --ignore-pattern "other pattern"
+    uv run analyze output.xodr --ignore-pattern "foo" --ignore-pattern "bar"
+    uv run analyze output.xodr --no-default-ignores
 """
 
 import argparse
@@ -29,6 +30,15 @@ from qc_opendrive.main import run_checks
 
 # Silence verbose library logging (overridden by --verbose)
 logging.getLogger().setLevel(logging.WARNING)
+
+# Default ignore patterns for known false positives.
+# The converter targets CARLA which uses OpenDRIVE 1.4 syntax but supports
+# the rule attribute introduced in 1.7. The ASAM QC checker validates against
+# the declared schema version (1.4), so rule on <road> triggers a false positive.
+# Use --no-default-ignores to disable these defaults.
+DEFAULT_IGNORE_PATTERNS: list[str] = [
+    r"attribute 'rule'",  # <road rule="RHT/LHT"> valid in 1.7, false positive on 1.4
+]
 
 SEVERITY_LABEL = {
     IssueSeverity.ERROR: "ERROR",
@@ -300,7 +310,16 @@ def main() -> None:
         help=(
             "Regex pattern to ignore matching issues (can be specified multiple times). "
             "Matched issues are excluded from the report and do not affect the exit code. "
+            "Added on top of the default ignore patterns. "
             "Example: --ignore-pattern \"attribute 'rule'\""
+        ),
+    )
+    parser.add_argument(
+        "--no-default-ignores",
+        action="store_true",
+        help=(
+            f"Disable the built-in default ignore patterns: {DEFAULT_IGNORE_PATTERNS}. "
+            "By default these known false positives are suppressed."
         ),
     )
 
@@ -341,12 +360,15 @@ def main() -> None:
 
     # Print report BEFORE write_to_file so generate_summary=True does not
     # append "X issue(s) are found." to checker summaries before we read them.
+    base_patterns = [] if args.no_default_ignores else DEFAULT_IGNORE_PATTERNS
+    all_ignore_patterns = base_patterns + args.ignore_patterns
+
     error_count = print_report(
         result_obj,
         str(xodr_path),
         min_severity,
         max_issues_per_checker=args.max_issues,
-        ignore_patterns=args.ignore_patterns,
+        ignore_patterns=all_ignore_patterns,
     )
 
     # Write result file (generate_summary appends issue counts to summaries)
