@@ -649,7 +649,7 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
-    ) -> List["Road"]:
+    ) -> Tuple[List["Road"], Dict[int, int], int]:
         """Construct Roads from a lanelet map.
 
         Args:
@@ -659,7 +659,10 @@ class Road:
             width_config: Configuration for width spline sampling
 
         Returns:
-            List of Road objects constructed from non-junction lanelets grouped by adjacency
+            Tuple of:
+                - List of Road objects constructed from non-junction lanelets
+                - Dictionary mapping lanelet ID to road ID (only for successfully built roads)
+                - Total number of adjacent groups (including failed ones)
 
         Raises:
             ValueError: If lanelet_map is empty or contains no valid lanelets
@@ -829,7 +832,7 @@ class Road:
         # after combining regular roads and connecting roads from junctions.
         Road.set_all_lane_links(lanelet_map, roads, routing_graph)
 
-        return roads
+        return roads, lanelet_to_road, len(adjacent_groups)
 
     @staticmethod
     def construct_connecting_roads_from_junctions(
