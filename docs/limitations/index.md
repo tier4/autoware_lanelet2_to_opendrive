@@ -19,6 +19,7 @@ Jump to specific limitations:
 4. [Priority-Based Right-of-Way Control Not Supported](priority-right-of-way.md) - CARLA does not support priority attributes
 5. [Geometric Approximation Limitations](geometric-approximation.md) - Parametric curve fitting to discrete points
 6. [Coordinate System Considerations](coordinate-system.md) - MGRS projection constraints
+7. [ASAM Schema Compliance](asam-schema-compliance.md) - Known QC checker false positives due to CARLA's LHT extension on OpenDRIVE 1.4
 
 For a summary comparison, see the [Summary](#summary) table below.
 
@@ -34,6 +35,7 @@ For a summary comparison, see the [Summary](#summary) table below.
 | [Priority-based right-of-way not supported](priority-right-of-way.md) | Low | Yes | CARLA source modification only |
 | [Geometric approximation](geometric-approximation.md) | Low | No | Use high-resolution input data |
 | [MGRS projection limitations](coordinate-system.md) | Medium | No | Split large maps by grid zone |
+| [ASAM schema compliance](asam-schema-compliance.md) | Low | No | Suppressed automatically by `analyze` command |
 
 !!! info "Feedback Welcome"
     If you encounter limitations not documented here, please [report them](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues) so we can improve this documentation.
