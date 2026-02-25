@@ -8,6 +8,50 @@ from ..config import COORDINATE_OFFSET
 
 
 @dataclass
+class Dependency:
+    """Dependency reference from a stop line signal to a controlling traffic light.
+
+    Per ASAM OpenDRIVE specification, stop line signals shall have a dependency
+    to each of the corresponding traffic lights.
+
+    Reference: ASAM OpenDRIVE Junction Guideline - Section 9: Traffic Lights
+    """
+
+    id: int  # ID of the dependent signal (e.g., traffic light signal ID)
+    type: str  # Type of dependency (e.g., "trafficLight")
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("dependency")
+        elem.set("id", str(self.id))
+        elem.set("type", self.type)
+        return elem
+
+
+@dataclass
+class Reference:
+    """Reference from a traffic light signal to its associated stop line.
+
+    Per ASAM OpenDRIVE specification, traffic light signals should reference
+    their associated stop lines.
+
+    Reference: ASAM OpenDRIVE Junction Guideline - Section 9: Traffic Lights
+    """
+
+    id: int  # ID of the referenced signal (e.g., stop line signal ID)
+    element_type: str  # Type of referenced element (e.g., "signal")
+    type: str  # Type qualifier (e.g., "stopLine")
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("reference")
+        elem.set("id", str(self.id))
+        elem.set("elementType", self.element_type)
+        elem.set("type", self.type)
+        return elem
+
+
+@dataclass
 class Validity:
     """Signal validity element defining which lanes the signal applies to."""
 
@@ -129,6 +173,12 @@ class Signal:
     width: float = 0.0  # Signal width
     validities: Optional[List[Validity]] = None  # Lane validity definitions
     user_data: Optional[SignalUserData] = None  # Custom user data
+    dependencies: Optional[List[Dependency]] = (
+        None  # Dependencies on other signals (e.g., stop line -> traffic light)
+    )
+    references: Optional[List[Reference]] = (
+        None  # References to related signals (e.g., traffic light -> stop line)
+    )
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -157,6 +207,16 @@ class Signal:
         if self.validities:
             for validity in self.validities:
                 elem.append(validity.to_xml())
+
+        # Add dependencies if present (e.g., stop line -> traffic light)
+        if self.dependencies:
+            for dependency in self.dependencies:
+                elem.append(dependency.to_xml())
+
+        # Add references if present (e.g., traffic light -> stop line)
+        if self.references:
+            for reference in self.references:
+                elem.append(reference.to_xml())
 
         # Add user data if present
         if self.user_data:
@@ -363,6 +423,10 @@ class SignalType:
     )
     TRAFFIC_LIGHT_PEDESTRIAN = 1000002  # Pedestrian traffic light
     TRAFFIC_LIGHT_ARROW = 1000003  # Arrow traffic light
+
+    # Stop line (type 294 corresponds to German StVO sign 294 - stop line)
+    # Used in OpenDRIVE to represent painted stop lines with signal dependencies
+    STOP_LINE = 294
 
     # Custom types should use appropriate country codes and follow
     # national regulations or use country="OpenDRIVE" for simulation-specific signals
