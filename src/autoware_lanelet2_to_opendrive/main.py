@@ -726,14 +726,14 @@ class _Lanelet2ToOpenDRIVEConverter:
     def _generate_speed_limit_signs(
         self,
         all_roads: List[Road],
-        mapping: "RoadLaneletMapping",
     ) -> int:
         """Generate speed limit road sign signals for simulators lacking lane-level speed support.
 
         AD-HOC WORKAROUND: This method creates OpenDRIVE signal elements (type=274)
-        for each unique speed limit found in the lanelets of each road. This is
-        necessary for simulators (e.g. CARLA's TrafficManager) that do not read
-        lane-level <speed> elements.
+        for each unique speed limit value found in the lanelets of each road.  When
+        lanes within the same road carry different speed limits, one signal per
+        distinct value is created, each carrying a <validity> element that restricts
+        it to the lanes that share that limit.
 
         WARNING: This violates OpenDRIVE's speed limit priority semantics. The
         specification defines precedence rules between road types, lane speeds,
@@ -745,32 +745,46 @@ class _Lanelet2ToOpenDRIVEConverter:
         if not self.config.export_lane_speed_limit_as_speed_sign:
             return 0
 
-        from autoware_lanelet2_to_opendrive.opendrive.signal import Signal, SignalType
+        from collections import defaultdict
+
+        from autoware_lanelet2_to_opendrive.opendrive.signal import (
+            Signal,
+            SignalType,
+            Validity,
+        )
 
         _SPEED_LIMIT_SIGN_ID_BASE = 5_000_000
         sign_count = 0
 
         for road in all_roads:
-            lanelet_ids = mapping.get_lanelets_for_road(road.id)
+            # Build lanelet_id -> lane_id mapping from the road's lane structure.
+            # This tells us which OpenDRIVE lane ID each lanelet was assigned.
+            lanelet_to_lane = road.get_lanelet_to_lane_mapping()
 
-            # Collect unique speed limits from lanelets of this road
-            speed_limits: set = set()
-            for ll_id in lanelet_ids:
+            # Group lane IDs by their speed limit value.
+            # speed_limit_value -> [lane_id, ...]
+            speed_to_lane_ids: dict = defaultdict(list)
+            for ll_id, lane_id in lanelet_to_lane.items():
                 try:
                     ll = self.lanelet_map.laneletLayer[ll_id]
                     if "speed_limit" in ll.attributes:
                         speed_limit = float(ll.attributes["speed_limit"])
-                        speed_limits.add(speed_limit)
+                        speed_to_lane_ids[speed_limit].append(lane_id)
                 except (KeyError, ValueError, TypeError):
                     continue
 
-            if not speed_limits:
+            if not speed_to_lane_ids:
                 continue
 
             if road.signals is None:
                 road.signals = []
 
-            for speed_limit in sorted(speed_limits):
+            # One signal per unique speed limit, with <validity> covering all
+            # lanes that share that limit.
+            for speed_limit in sorted(speed_to_lane_ids.keys()):
+                lane_ids = speed_to_lane_ids[speed_limit]
+                from_lane = min(lane_ids)
+                to_lane = max(lane_ids)
                 signal_id = _SPEED_LIMIT_SIGN_ID_BASE + sign_count
                 signal = Signal(
                     id=signal_id,
@@ -783,6 +797,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     type=SignalType.SPEED_LIMIT,
                     subtype=-1,
                     value=speed_limit,
+                    validities=[Validity(from_lane=from_lane, to_lane=to_lane)],
                 )
                 road.signals.append(signal)
                 sign_count += 1
@@ -939,7 +954,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         # Step 6.9: Generate speed limit signs (AD-HOC workaround for simulators
         # that do not read lane-level <speed> elements, e.g. CARLA TrafficManager).
         # The method checks the config flag internally and is a no-op when disabled.
-        self._generate_speed_limit_signs(all_roads, mapping)
+        self._generate_speed_limit_signs(all_roads)
 
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(
