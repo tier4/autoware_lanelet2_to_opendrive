@@ -547,6 +547,7 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -557,6 +558,8 @@ class Road:
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
             width_config: Configuration for width spline sampling
+            routing_graph: Optional pre-built routing graph for lane-change detection.
+                If None, creates a new one internally.
 
         Returns:
             Road object constructed from the lanelet group
@@ -600,6 +603,7 @@ class Road:
                 s_offset=s_offset,
                 traffic_rule=traffic_rule,
                 width_config=width_config,
+                routing_graph=routing_graph,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -728,6 +732,7 @@ class Road:
                     traffic_rule=traffic_rule,
                     parampoly3_config=parampoly3_config,
                     width_config=width_config,
+                    routing_graph=routing_graph,
                 )
                 roads.append(road)
 

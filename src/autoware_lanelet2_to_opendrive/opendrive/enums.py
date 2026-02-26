@@ -52,6 +52,15 @@ class RoadMarkColor(Enum):
     ORANGE = "orange"
 
 
+class RoadMarkLaneChange(Enum):
+    """Lane change permission for road markings according to OpenDRIVE standard."""
+
+    INCREASE = "increase"  # Lane change only in direction of increasing lane IDs
+    DECREASE = "decrease"  # Lane change only in direction of decreasing lane IDs
+    BOTH = "both"  # Lane change allowed in both directions
+    NONE = "none"  # No lane change allowed
+
+
 class GeometryType(Enum):
     """Geometry types supported in OpenDRIVE planView."""
 

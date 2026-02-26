@@ -335,15 +335,21 @@ def find_adjacent_groups(
         """Get laterally adjacent lanelets (left/right only, not following/previous)."""
         adjacent: Set[lanelet2.core.Lanelet] = set()
 
-        # Add left adjacent lanelets
-        left_ll = routing_graph.left(lanelet)
-        if left_ll and left_ll in lanelets_to_group:
-            adjacent.add(left_ll)
+        # Add left adjacent lanelets.
+        # Check both left() (lane-change allowed) and adjacentLeft() (no lane-change)
+        # to capture all physically shared boundaries.
+        for get_left in (routing_graph.left, routing_graph.adjacentLeft):
+            left_ll = get_left(lanelet)
+            if left_ll and left_ll in lanelets_to_group:
+                adjacent.add(left_ll)
 
-        # Add right adjacent lanelets
-        right_ll = routing_graph.right(lanelet)
-        if right_ll and right_ll in lanelets_to_group:
-            adjacent.add(right_ll)
+        # Add right adjacent lanelets.
+        # Check both right() (lane-change allowed) and adjacentRight() (no lane-change)
+        # to capture all physically shared boundaries.
+        for get_right in (routing_graph.right, routing_graph.adjacentRight):
+            right_ll = get_right(lanelet)
+            if right_ll and right_ll in lanelets_to_group:
+                adjacent.add(right_ll)
 
         return adjacent
 
@@ -446,12 +452,14 @@ def check_lanelet_groups_intersect(
 def sort_adjacent_groups(
     lanelet_map: lanelet2.core.LaneletMap,
     target_lanelets: LaneletInput,
+    routing_graph: Optional[RoutingGraph] = None,
 ) -> List[lanelet2.core.Lanelet]:
     """Sort lanelets from left to right by following their adjacent relationships.
 
     Args:
         lanelet_map: The lanelet2 map containing the lanelets
         target_lanelets: Set of lanelets to sort
+        routing_graph: Optional pre-built routing graph. If None, creates a new one.
 
     Returns:
         List of lanelets sorted from left to right
@@ -465,8 +473,30 @@ def sort_adjacent_groups(
     # Convert input to set for consistent processing
     lanelet_set = to_lanelet_set(target_lanelets)
 
-    # Create routing graph for finding adjacent relationships
-    routing_graph = create_routing_graph(lanelet_map)
+    # Use provided routing graph or create a new one
+    if routing_graph is None:
+        routing_graph = create_routing_graph(lanelet_map)
+
+    def _get_left_neighbor(
+        lanelet: lanelet2.core.Lanelet,
+    ) -> Optional[lanelet2.core.Lanelet]:
+        """Return the left neighbor in the target set (lane-change or adjacent)."""
+        for get_left in (routing_graph.left, routing_graph.adjacentLeft):
+            neighbor = get_left(lanelet)
+            if neighbor and neighbor in lanelet_set:
+                return neighbor
+        return None
+
+    def _get_right_neighbor(
+        lanelet: lanelet2.core.Lanelet,
+        remaining: Set[lanelet2.core.Lanelet],
+    ) -> Optional[lanelet2.core.Lanelet]:
+        """Return the right neighbor in the remaining set (lane-change or adjacent)."""
+        for get_right in (routing_graph.right, routing_graph.adjacentRight):
+            neighbor = get_right(lanelet)
+            if neighbor and neighbor in remaining:
+                return neighbor
+        return None
 
     # Find the leftmost lanelet by traversing left until no more left neighbors
     def find_leftmost_lanelet(
@@ -474,8 +504,8 @@ def sort_adjacent_groups(
     ) -> lanelet2.core.Lanelet:
         current = start_lanelet
         while True:
-            left_neighbor = routing_graph.left(current)
-            if left_neighbor and left_neighbor in lanelet_set:
+            left_neighbor = _get_left_neighbor(current)
+            if left_neighbor:
                 current = left_neighbor
             else:
                 break
@@ -495,8 +525,8 @@ def sort_adjacent_groups(
         remaining_lanelets.remove(current)
 
         # Move to the right neighbor
-        right_neighbor = routing_graph.right(current)
-        if right_neighbor and right_neighbor in remaining_lanelets:
+        right_neighbor = _get_right_neighbor(current, remaining_lanelets)
+        if right_neighbor:
             current = right_neighbor
         else:
             break
