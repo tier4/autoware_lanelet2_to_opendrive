@@ -153,19 +153,30 @@ class LaneSection:
             lanes_built.append(lane)
 
         # Assign road marks based on lane-change permission.
-        # routing_graph.right() returns the right neighbor only if lane-change is allowed.
-        for i, (lanelet, lane) in enumerate(zip(sorted_lanelets, lanes_built)):
-            if i + 1 < len(sorted_lanelets):
-                # Check if lane change to the right neighbor is permitted
-                can_change = routing_graph.right(lanelet) is not None
+        #
+        # In OpenDRIVE, the road mark on a negative-ID lane describes its INNER
+        # (left/center-side) boundary:
+        #   lane -1  road mark  = boundary between center (0) and lane -1
+        #   lane -2  road mark  = boundary between lane -1 and lane -2
+        #   lane -(i+1) road mark = boundary between lane -i and lane -(i+1)
+        #
+        # Therefore:
+        #   i == 0  (lane -1, innermost): center line — always solid, no lane change
+        #   i  > 0  (lane -(i+1)): check whether sorted_lanelets[i-1] can change right
+        for i, lane in enumerate(lanes_built):
+            if i == 0:
+                # Innermost lane: road mark describes the center-to-lane boundary.
+                # The center lane is a reference line (type="none"), so no lane change.
+                mark_type = RoadMarkType.SOLID
+                lane_change = RoadMarkLaneChange.NONE
+            else:
+                # Lane -(i+1): road mark describes the boundary between lane -i and
+                # lane -(i+1).  Check whether the i-th lanelet can change rightward.
+                can_change = routing_graph.right(sorted_lanelets[i - 1]) is not None
                 mark_type = RoadMarkType.BROKEN if can_change else RoadMarkType.SOLID
                 lane_change = (
                     RoadMarkLaneChange.BOTH if can_change else RoadMarkLaneChange.NONE
                 )
-            else:
-                # Outermost lane: road edge is always solid with no lane change
-                mark_type = RoadMarkType.SOLID
-                lane_change = RoadMarkLaneChange.NONE
             lane._add_road_mark(
                 RoadMark(
                     s_offset=0.0,
