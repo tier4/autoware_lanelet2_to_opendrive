@@ -301,8 +301,8 @@ def test_find_adjacent_groups_connectivity(lanelet_map):
                 if (
                     ll2 in routing_graph.following(ll1)
                     or ll2 in routing_graph.previous(ll1)
-                    or routing_graph.left(ll1) == ll2
-                    or routing_graph.right(ll1) == ll2
+                    or routing_graph.adjacentLeft(ll1) == ll2
+                    or routing_graph.adjacentRight(ll1) == ll2
                 ):
                     connected_to_others = True
                     break
@@ -680,10 +680,12 @@ def test_find_connecting_lanelet_groups(lanelet_map):
         lanelet_map, input_group, ConnectionDirection.FOLLOWING
     )
 
-    # Following should return 4 groups: [359], [360], [361], [451]
+    # Following should return 3 groups: [359], [360, 361], [451]
+    # Note: lanelets 360 and 361 share a physical boundary (solid line, no lane-change),
+    # so they are now grouped together since find_adjacent_groups uses adjacentLeft/Right.
     assert (
-        len(following_groups) == 4
-    ), f"Expected 4 groups in FOLLOWING direction, but got {len(following_groups)}"
+        len(following_groups) == 3
+    ), f"Expected 3 groups in FOLLOWING direction, but got {len(following_groups)}"
 
     # Check that lanelet 451 is in one of the following groups
     group_with_451 = None
@@ -695,6 +697,19 @@ def test_find_connecting_lanelet_groups(lanelet_map):
     assert group_with_451 is not None, (
         f"Lanelet 451 should be in one of the following groups. "
         f"Group IDs found: {[{ll.id for ll in g} for g in following_groups]}"
+    )
+
+    # Check that lanelets 360 and 361 are in the same group
+    # (they share a physical boundary without lane-change permission)
+    group_with_360_361 = None
+    for group in following_groups:
+        group_ids = {ll.id for ll in group}
+        if 360 in group_ids and 361 in group_ids:
+            group_with_360_361 = group
+
+    assert group_with_360_361 is not None, (
+        f"Lanelets 360 and 361 should be in the same group (shared solid boundary). "
+        f"Group IDs found: {[sorted({ll.id for ll in g}) for g in following_groups]}"
     )
 
     # Test PREVIOUS direction

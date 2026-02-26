@@ -36,7 +36,7 @@ repos:
     hooks:
       - id: pytest
         name: pytest
-        entry: uv run pytest
+        entry: uv run pytest --no-testmon
         language: system
         types: [python]
         pass_filenames: false

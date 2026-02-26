@@ -3,11 +3,14 @@
 from typing import List, Optional, Dict, Union, Set, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
+from lanelet2.routing import RoutingGraph
 
 if TYPE_CHECKING:
     from .lane import Lane
 from .reference_line import ReferenceLine
 from ..conversion_config import WidthEstimationConfig
+from .enums import RoadMarkType, RoadMarkColor
+from .lane_elements import RoadMark
 
 
 class LaneSection:
@@ -69,6 +72,7 @@ class LaneSection:
         s_offset: float = 0.0,
         traffic_rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -79,6 +83,8 @@ class LaneSection:
             s_offset: Start position of the lane section
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             width_config: Configuration for width spline sampling
+            routing_graph: Optional pre-built routing graph for lane-change detection.
+                If None, creates a new one.
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -103,7 +109,13 @@ class LaneSection:
         else:  # lanelet2.core.LaneletLayer
             lanelet_set = set(lanelet_group)
 
-        sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_set)
+        # Use provided routing graph or create a new one
+        if routing_graph is None:
+            from ..util import create_routing_graph
+
+            routing_graph = create_routing_graph(lanelet_map)
+
+        sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_set, routing_graph)
 
         # Create and set the reference line
         reference_line = ReferenceLine.construct_from_lanelet_groups(
@@ -123,34 +135,36 @@ class LaneSection:
         # Extract reference line spline for width calculation
         reference_line_spline = reference_line.centerline_2d
 
-        # Create lanes based on traffic rule
-        if traffic_rule_normalized == "RHT":
-            # RHT: Right lanes with negative IDs (-1, -2, -3, ...) from left to right
-            for i, lanelet in enumerate(sorted_lanelets):
-                lane_id = -(i + 1)  # -1, -2, -3, ...
-                lane = Lane.construct_from_lanelet(
-                    lanelet_map,
-                    lanelet,
-                    rule=traffic_rule_normalized,
-                    width_config=width_config,
-                    reference_line_spline=reference_line_spline,
-                )
-                lane.lane_id = lane_id
-                lane_section._add_right_lane(lane)
-        else:  # LHT
-            # LHT: Right lanes with negative IDs (-1, -2, -3, ...) from left to right
-            # Same structure as RHT, but road@rule="LHT" indicates left-hand traffic
-            for i, lanelet in enumerate(sorted_lanelets):
-                lane_id = -(i + 1)  # -1, -2, -3, ...
-                lane = Lane.construct_from_lanelet(
-                    lanelet_map,
-                    lanelet,
-                    rule=traffic_rule_normalized,
-                    width_config=width_config,
-                    reference_line_spline=reference_line_spline,
-                )
-                lane.lane_id = lane_id
-                lane_section._add_right_lane(lane)
+        # Create lanes and collect them for road mark assignment
+        lanes_built: List["Lane"] = []
+
+        # Create lanes based on traffic rule (RHT and LHT use the same structure)
+        for i, lanelet in enumerate(sorted_lanelets):
+            lane_id = -(i + 1)  # -1, -2, -3, ...
+            lane = Lane.construct_from_lanelet(
+                lanelet_map,
+                lanelet,
+                rule=traffic_rule_normalized,
+                width_config=width_config,
+                reference_line_spline=reference_line_spline,
+            )
+            lane.lane_id = lane_id
+            lane_section._add_right_lane(lane)
+            lanes_built.append(lane)
+
+        # Assign road marks based on lane-change permission
+        # routing_graph.right() returns the right neighbor only if lane-change is allowed
+        for i, (lanelet, lane) in enumerate(zip(sorted_lanelets, lanes_built)):
+            if i + 1 < len(sorted_lanelets):
+                # Check if lane change to the right neighbor is permitted
+                can_change = routing_graph.right(lanelet) is not None
+                mark_type = RoadMarkType.BROKEN if can_change else RoadMarkType.SOLID
+            else:
+                # Outermost lane: road edge is always solid
+                mark_type = RoadMarkType.SOLID
+            lane._add_road_mark(
+                RoadMark(s_offset=0.0, type=mark_type, color=RoadMarkColor.STANDARD)
+            )
 
         return lane_section
 
