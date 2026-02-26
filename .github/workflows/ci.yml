@@ -128,7 +128,22 @@ jobs:
         path: site/
         retention-days: 7
 
+  check-src-changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      src-changed: ${{ steps.filter.outputs.src }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        filters: |
+          src:
+            - 'src/autoware_lanelet2_to_opendrive/**'
+
   carla-import-test:
+    needs: check-src-changes
+    if: needs.check-src-changes.outputs.src-changed == 'true'
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
