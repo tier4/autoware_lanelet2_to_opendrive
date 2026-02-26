@@ -29,7 +29,7 @@ flowchart TD
     E --> G[Regular Road Lanelets<br/>no turn_direction]
 
     F --> H[Group Junction Lanelets<br/>by spatial overlap]
-    G --> I[Group Road Lanelets<br/>by connectivity]
+    G --> I[Group Road Lanelets<br/>by lateral adjacency]
 
     H --> J[Build Junction Objects]
     I --> K[Build Road Objects]
@@ -468,8 +468,9 @@ remove_turn_direction_operations:
 
 **Processing:**
 ```python
-junction_lanelets = _filter_lanelets_inside_junction(lanelet_map)
-road_lanelets = _filter_lanelets_outside_junction(lanelet_map)
+all_lanelets = list(lanelet_map.laneletLayer)
+junction_lanelets = _filter_lanelets_inside_junction(all_lanelets)
+road_lanelets = _filter_lanelets_outside_junction(all_lanelets)
 ```
 
 **Output:**
@@ -483,16 +484,16 @@ road_lanelets = _filter_lanelets_outside_junction(lanelet_map)
 
 ### Stage 3: Road Grouping
 
-**Purpose:** Group adjacent road lanelets into roads based on connectivity.
+**Purpose:** Group adjacent road lanelets into roads based on lateral adjacency (physically adjacent lanes sharing left/right boundaries).
 
 **Processing:**
-1. Filter lanelets by subtype (e.g., only "road" lanelets)
-2. Build connectivity graph using successor/predecessor relationships
-3. Group connected lanelets into road segments
+1. Filter lanelets by subtype (only "road" lanelets) and exclude junction lanelets
+2. Find laterally adjacent lanelets using routing graph (left/right relationships, not successor/predecessor)
+3. Group laterally adjacent lanelets into road segments using depth-first search
 
-**Output:** List of road groups (each group = list of lanelets)
+**Output:** List of road groups (each group = set of laterally adjacent lanelets)
 
-**Code Location:** [`main.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+**Code Location:** [`road.py` – `Road.construct_from_lanelet_map()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py), [`util.py` – `find_adjacent_groups()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py)
 
 ---
 
@@ -510,9 +511,9 @@ road_lanelets = _filter_lanelets_outside_junction(lanelet_map)
 **Fallback Logic:**
 If `location` tag is not present, road type is inferred from speed:
 - `speed ≤ 10` → `LOW_SPEED`
-- `10 < speed ≤ 40` → `TOWN`
-- `40 < speed ≤ 90` → `RURAL`
-- `speed > 90` → `MOTORWAY`
+- `10 < speed ≤ 50` → `TOWN`
+- `50 < speed ≤ 100` → `RURAL`
+- `speed > 100` → `MOTORWAY`
 
 **Processing:**
 ```python
@@ -521,7 +522,7 @@ road_type_definitions = Road._extract_road_types_from_lanelets(lanelets)
 
 **Output:** `RoadTypeDefinition` objects with speed and road type
 
-**Code Location:** [`road.py:453-513`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L453-L513)
+**Code Location:** [`road.py:479-538`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L479-L538)
 
 ---
 
@@ -543,7 +544,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** `Lane` objects with proper type and speed attributes
 
-**Code Location:** [`lane.py:150-216`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L150-L216)
+**Code Location:** [`lane.py:138-239`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L138-L239)
 
 ---
 
@@ -588,7 +589,11 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** List of `Junction` objects with connections
 
-**Code Location:** [`junction.py:54-107`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L54-L107)
+**Code Location:**
+
+- Junction grouping: [`junction.py:48-100`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L48-L100) – `find_junction_groups()`
+- Connecting road construction: [`road.py` – `Road.construct_connecting_roads_from_junctions()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py)
+- Orchestration: [`main.py` – `_build_junction_structure()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
 
 ---
 
