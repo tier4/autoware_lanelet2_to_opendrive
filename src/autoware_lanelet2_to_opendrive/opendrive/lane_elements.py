@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 import lxml.etree as ET
 
-from .enums import RoadMarkType, RoadMarkColor, SpeedUnit, RoadType
+from .enums import RoadMarkType, RoadMarkColor, RoadMarkLaneChange, SpeedUnit, RoadType
 
 
 @dataclass
@@ -35,6 +35,7 @@ class RoadMark:
     s_offset: float
     type: RoadMarkType
     color: RoadMarkColor
+    lane_change: Optional[RoadMarkLaneChange] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -42,6 +43,8 @@ class RoadMark:
         elem.set("sOffset", str(self.s_offset))
         elem.set("type", self.type.value)
         elem.set("color", self.color.value)
+        if self.lane_change is not None:
+            elem.set("laneChange", self.lane_change.value)
         return elem
 
 

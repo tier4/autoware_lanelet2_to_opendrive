@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .lane import Lane
 from .reference_line import ReferenceLine
 from ..conversion_config import WidthEstimationConfig
-from .enums import RoadMarkType, RoadMarkColor
+from .enums import RoadMarkType, RoadMarkColor, RoadMarkLaneChange
 from .lane_elements import RoadMark
 
 
@@ -152,18 +152,27 @@ class LaneSection:
             lane_section._add_right_lane(lane)
             lanes_built.append(lane)
 
-        # Assign road marks based on lane-change permission
-        # routing_graph.right() returns the right neighbor only if lane-change is allowed
+        # Assign road marks based on lane-change permission.
+        # routing_graph.right() returns the right neighbor only if lane-change is allowed.
         for i, (lanelet, lane) in enumerate(zip(sorted_lanelets, lanes_built)):
             if i + 1 < len(sorted_lanelets):
                 # Check if lane change to the right neighbor is permitted
                 can_change = routing_graph.right(lanelet) is not None
                 mark_type = RoadMarkType.BROKEN if can_change else RoadMarkType.SOLID
+                lane_change = (
+                    RoadMarkLaneChange.BOTH if can_change else RoadMarkLaneChange.NONE
+                )
             else:
-                # Outermost lane: road edge is always solid
+                # Outermost lane: road edge is always solid with no lane change
                 mark_type = RoadMarkType.SOLID
+                lane_change = RoadMarkLaneChange.NONE
             lane._add_road_mark(
-                RoadMark(s_offset=0.0, type=mark_type, color=RoadMarkColor.STANDARD)
+                RoadMark(
+                    s_offset=0.0,
+                    type=mark_type,
+                    color=RoadMarkColor.STANDARD,
+                    lane_change=lane_change,
+                )
             )
 
         return lane_section
