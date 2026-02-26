@@ -36,6 +36,13 @@ stopline:
   # Enable CARLA Stencil_STOP format (<object type="-1" name="Stencil_STOP">)
   carla_stop_line: true
 
+# Speed limit sign workaround for simulators that do not read lane-level <speed> elements
+# WARNING: This is an AD-HOC workaround. When enabled, lane speed limits are duplicated
+# as road sign signals (type="274"). This violates OpenDRIVE's speed limit priority
+# semantics and should be removed once the target simulator properly supports lane-level
+# speed limits.
+export_lane_speed_limit_as_speed_sign: true
+
 # Width spline sampling configuration
 # Adaptive sampling reduces memory usage for large maps
 width_estimation:

@@ -58,7 +58,7 @@ wheels = [
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "1.16.4"
+version = "1.17.0"
 source = { editable = "." }
 dependencies = [
     { name = "asam-qc-opendrive" },

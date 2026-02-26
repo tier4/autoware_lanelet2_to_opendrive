@@ -723,6 +723,76 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return opendrive
 
+    def _generate_speed_limit_signs(
+        self,
+        all_roads: List[Road],
+        mapping: "RoadLaneletMapping",
+    ) -> int:
+        """Generate speed limit road sign signals for simulators lacking lane-level speed support.
+
+        AD-HOC WORKAROUND: This method creates OpenDRIVE signal elements (type=274)
+        for each unique speed limit found in the lanelets of each road. This is
+        necessary for simulators (e.g. CARLA's TrafficManager) that do not read
+        lane-level <speed> elements.
+
+        WARNING: This violates OpenDRIVE's speed limit priority semantics. The
+        specification defines precedence rules between road types, lane speeds,
+        and road signs that are not respected by this workaround.
+
+        Returns:
+            Number of speed limit sign signals generated
+        """
+        if not self.config.export_lane_speed_limit_as_speed_sign:
+            return 0
+
+        from autoware_lanelet2_to_opendrive.opendrive.signal import Signal, SignalType
+
+        _SPEED_LIMIT_SIGN_ID_BASE = 5_000_000
+        sign_count = 0
+
+        for road in all_roads:
+            lanelet_ids = mapping.get_lanelets_for_road(road.id)
+
+            # Collect unique speed limits from lanelets of this road
+            speed_limits: set = set()
+            for ll_id in lanelet_ids:
+                try:
+                    ll = self.lanelet_map.laneletLayer[ll_id]
+                    if "speed_limit" in ll.attributes:
+                        speed_limit = float(ll.attributes["speed_limit"])
+                        speed_limits.add(speed_limit)
+                except (KeyError, ValueError, TypeError):
+                    continue
+
+            if not speed_limits:
+                continue
+
+            if road.signals is None:
+                road.signals = []
+
+            for speed_limit in sorted(speed_limits):
+                signal_id = _SPEED_LIMIT_SIGN_ID_BASE + sign_count
+                signal = Signal(
+                    id=signal_id,
+                    name=f"SpeedLimit_{int(speed_limit)}",
+                    s=0.0,
+                    t=0.0,
+                    dynamic="no",
+                    orientation="+",
+                    country="OpenDRIVE",
+                    type=SignalType.SPEED_LIMIT,
+                    subtype=-1,
+                    value=speed_limit,
+                )
+                road.signals.append(signal)
+                sign_count += 1
+
+        print(
+            f"Generated {sign_count} speed limit sign signals "
+            f"(export_lane_speed_limit_as_speed_sign workaround)"
+        )
+        return sign_count
+
     def convert(self) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
         """
         Convert Lanelet2 map to OpenDRIVE format.
@@ -735,6 +805,33 @@ class _Lanelet2ToOpenDRIVEConverter:
                 - RoadLaneletMapping containing bidirectional mapping
         """
         print("Converting Lanelet2 map to OpenDRIVE format...")
+
+        # Warn upfront when the speed limit sign workaround is active so the
+        # message is visible before the (potentially long) conversion begins.
+        if self.config.export_lane_speed_limit_as_speed_sign:
+            import warnings
+
+            warnings.warn(
+                "\n"
+                "========================================================\n"
+                "WARNING: export_lane_speed_limit_as_speed_sign is ENABLED.\n"
+                "This is an AD-HOC workaround for simulators whose traffic\n"
+                "manager does not read lane-level <speed> elements (e.g. CARLA).\n"
+                "\n"
+                "CONSEQUENCES:\n"
+                "1. OpenDRIVE's speed limit priority semantics are NOT correctly\n"
+                "   reflected. Road sign signals (type=274) override lane-level\n"
+                "   <speed> elements in ways not defined by the spec.\n"
+                "   See: https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/\n"
+                "   ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/\n"
+                "   11_07_lane_properties.html\n"
+                "2. This option is intended to be REMOVED once the target simulator\n"
+                "   adds proper support for lane-level speed limits. Backward\n"
+                "   compatibility of this option is NOT guaranteed.\n"
+                "========================================================",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # Step 1: Build regular roads from non-junction lanelets
         regular_roads, lanelet_to_road_id, num_regular_groups = (
@@ -838,6 +935,11 @@ class _Lanelet2ToOpenDRIVEConverter:
         dup_result = validate_no_duplicate_road_ids(all_roads)
         if not dup_result.is_valid:
             print(f"\nWARNING: {dup_result.get_error_summary()}")
+
+        # Step 6.9: Generate speed limit signs (AD-HOC workaround for simulators
+        # that do not read lane-level <speed> elements, e.g. CARLA TrafficManager).
+        # The method checks the config flag internally and is a no-op when disabled.
+        self._generate_speed_limit_signs(all_roads, mapping)
 
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(
@@ -1144,6 +1246,16 @@ def preprocess_and_convert_with_hydra(
         f"carla_stop_line={stopline_config.carla_stop_line}"
     )
 
+    # Read export_lane_speed_limit_as_speed_sign option
+    # Priority: map config > target config > default (False)
+    export_lane_speed_limit_as_speed_sign = bool(
+        cfg.map.get("export_lane_speed_limit_as_speed_sign")
+        or cfg.target.get("export_lane_speed_limit_as_speed_sign", False)
+    )
+    logger.info(
+        f"export_lane_speed_limit_as_speed_sign={export_lane_speed_limit_as_speed_sign}"
+    )
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -1157,6 +1269,7 @@ def preprocess_and_convert_with_hydra(
         parampoly3=parampoly3_config,
         width_estimation=width_config,
         stopline=stopline_config,
+        export_lane_speed_limit_as_speed_sign=export_lane_speed_limit_as_speed_sign,
     )
 
     opendrive, mapping = convert_lanelet2_to_opendrive(

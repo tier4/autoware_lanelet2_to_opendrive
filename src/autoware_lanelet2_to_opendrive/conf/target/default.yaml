@@ -27,6 +27,9 @@ parampoly3:
   # Threshold for rounding small coefficients to zero
   coefficient_epsilon: 1.0e-8
 
+# Speed limit sign workaround (disabled by default, enabled for CARLA target)
+export_lane_speed_limit_as_speed_sign: false
+
 # Stop line object configuration
 stopline:
   # Painted width of the stop line in the v-direction (along road), in meters

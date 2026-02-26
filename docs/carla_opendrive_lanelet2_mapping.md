@@ -523,6 +523,74 @@ After preprocessing (merge Lane B with adjacent segments):
 - ⚠️ Partially implemented or basic support
 - ❌ Not implemented
 
+---
+
+## Ad-hoc Workarounds for CARLA Compatibility
+
+### Speed Limit Signs (`export_lane_speed_limit_as_speed_sign`)
+
+**Background**
+
+CARLA's TrafficManager reads speed limits from OpenDRIVE **road sign signals**
+(`<road>/<signals>/<signal type="274">`) and does **not** read lane-level `<speed>`
+elements (`<road>/<lanes>/<laneSection>/<lane>/<speed>`).
+
+This converter normally writes speed limits as lane-level `<speed>` elements
+following the OpenDRIVE specification. As a result, CARLA NPC vehicles ignore
+speed limits by default.
+
+**Workaround: `export_lane_speed_limit_as_speed_sign`**
+
+Setting `export_lane_speed_limit_as_speed_sign: true` causes the converter to
+additionally output each lane's speed limit as a road sign signal with
+`type="274"` (German StVO sign 274 — maximum speed). This makes CARLA's
+TrafficManager respect the speed limits.
+
+```yaml
+# conf/target/carla.yaml (enabled by default for CARLA target)
+export_lane_speed_limit_as_speed_sign: true
+```
+
+The generated signal element looks like:
+
+```xml
+<signals>
+  <signal id="5000000" name="SpeedLimit_50" s="0.0000000000000000e+00"
+          t="0.0000000000000000e+00" zOffset="0.0000000000000000e+00"
+          dynamic="no" orientation="+" country="OpenDRIVE"
+          type="274" subtype="-1" value="5.0000000000000000e+01" ... />
+</signals>
+```
+
+**Signal ID range**: `5_000_000+` (sequential index) to avoid collisions with
+traffic light signals and stop line signals that use much smaller IDs.
+
+**Signal placement**: `s=0.0, t=0.0` (road start, on reference line). Since
+CARLA reads speed limits at the road level, exact placement is not critical.
+
+**⚠️ WARNING: This is an AD-HOC workaround**
+
+This option has the following known limitations and caveats:
+
+1. **Violates OpenDRIVE speed limit priority semantics.** The OpenDRIVE
+   specification defines a precedence hierarchy between road type speed,
+   lane-level speed, and road sign speed. By duplicating lane speeds as road
+   signs, this hierarchy is bypassed in an unspecified way. See:
+   [ASAM OpenDRIVE — Lane Properties](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html#sec-866ad6d9-a026-4051-9a3a-5f94405a15f7)
+
+2. **Backward compatibility is NOT guaranteed.** This option is intended to be
+   removed once CARLA adds proper support for lane-level `<speed>` elements.
+   Do not rely on this behavior for long-term compatibility.
+
+3. **Ideally, CARLA should be fixed.** The correct long-term solution is for
+   CARLA's TrafficManager to parse lane-level `<speed>` elements. This
+   workaround exists as a pragmatic stopgap.
+
+4. **A `UserWarning` is emitted at runtime** when this option is enabled, to
+   make the workaround visible to users.
+
+---
+
 ## References
 
 ### CARLA Documentation

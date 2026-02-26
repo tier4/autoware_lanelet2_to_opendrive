@@ -428,5 +428,11 @@ class SignalType:
     # Used in OpenDRIVE to represent painted stop lines with signal dependencies
     STOP_LINE = 294
 
+    # Speed limit sign (type 274 corresponds to German StVO sign 274 - maximum speed)
+    # Used to represent speed limit signs in OpenDRIVE.
+    # Note: Some simulators (e.g. CARLA's TrafficManager) read speed limits from
+    # road sign signals of this type rather than from lane-level <speed> elements.
+    SPEED_LIMIT = 274
+
     # Custom types should use appropriate country codes and follow
     # national regulations or use country="OpenDRIVE" for simulation-specific signals

@@ -132,6 +132,18 @@ class ConversionConfig:
         width_estimation: Configuration for width spline sampling
         stopline: Configuration for stop line object generation.
             Set stopline.carla_stop_line=True to enable CARLA Stencil_STOP format
+        export_lane_speed_limit_as_speed_sign: If True, output lane speed limits
+            as road sign signals (type=274) in addition to lane-level <speed>
+            elements. This is an AD-HOC workaround for simulators (e.g. CARLA's
+            TrafficManager) that do not read lane-level speed limits.
+
+            WARNING: This option violates OpenDRIVE's intended speed limit
+            priority semantics. See:
+            https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/
+            ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/
+            11_07_lane_properties.html#sec-866ad6d9-a026-4051-9a3a-5f94405a15f7
+            This should be removed when the target simulator adds proper support
+            for lane-level speed limits.
     """
 
     output_path: Optional[Path] = None
@@ -144,6 +156,7 @@ class ConversionConfig:
         default_factory=WidthEstimationConfig
     )
     stopline: StopLineConfig = field(default_factory=StopLineConfig)
+    export_lane_speed_limit_as_speed_sign: bool = False
 
     def __post_init__(self):
         """Validate configuration after initialization."""
