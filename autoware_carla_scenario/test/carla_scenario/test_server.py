@@ -44,6 +44,11 @@ class TestCarlaServerIntegration:
         assert carla_queue._server.is_alive()
 
     def test_server_process_is_running(self, carla_queue) -> None:  # noqa: ANN001
-        """The underlying process must still be alive."""
-        assert carla_queue._server._process is not None
-        assert carla_queue._server._process.poll() is None
+        """The server process is alive (owned or reused)."""
+        server = carla_queue._server
+        if server._reused:
+            # Externally-managed server: no _process, but must be pingable.
+            assert server._ping()
+        else:
+            assert server._process is not None
+            assert server._process.poll() is None

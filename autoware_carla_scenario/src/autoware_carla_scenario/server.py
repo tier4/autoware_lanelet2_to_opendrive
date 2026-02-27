@@ -16,11 +16,23 @@ class CarlaServerManager:
     The path to the ``CarlaUE5.sh`` executable is read from the
     ``CARLA_UE5_EXECUTABLE`` environment variable.
 
-    Example::
+    If *reuse_if_running* is ``True`` (the default) and a CARLA server is
+    already reachable on *host*:*port* at the time :meth:`start` is called,
+    no new process is launched – the existing server is reused.  This is the
+    recommended mode for local development where CARLA may already be running.
+
+    Example – managed lifecycle::
 
         with CarlaServerManager() as server:
             client = carla.Client(server.host, server.port)
             ...
+
+    Example – reuse an already-running server::
+
+        manager = CarlaServerManager(reuse_if_running=True)
+        manager.start()   # no-op if CARLA is already up
+        ...
+        manager.stop()    # no-op if the server was not launched by us
     """
 
     ENV_VAR: str = "CARLA_UE5_EXECUTABLE"
@@ -29,37 +41,54 @@ class CarlaServerManager:
         self,
         host: str = "localhost",
         port: int = 2000,
-        timeout: float = 60.0,
+        timeout: float = 120.0,
         extra_args: Optional[List[str]] = None,
+        reuse_if_running: bool = True,
     ) -> None:
         """Initialize the server manager.
 
         Args:
-            host: Hostname to bind the CARLA server to.
+            host: Hostname to connect / bind the CARLA server to.
             port: TCP port for the CARLA RPC server.
-            timeout: Seconds to wait for the server to become reachable.
-            extra_args: Additional command-line arguments passed to CarlaUE5.sh.
+            timeout: Seconds to wait for the server to become reachable
+                after launching it.  Defaults to 120 s (UE5 can be slow
+                on first boot).
+            extra_args: Additional CLI arguments passed to ``CarlaUE5.sh``.
+            reuse_if_running: When ``True`` (default), :meth:`start` skips
+                launching a new process if a CARLA server is already
+                reachable on *host*:*port*.  :meth:`stop` is also a no-op
+                in that case so the externally-managed server is left alive.
         """
         self.host = host
         self.port = port
         self.timeout = timeout
         self.extra_args: List[str] = extra_args or []
+        self.reuse_if_running = reuse_if_running
         self._process: Optional[subprocess.Popen[bytes]] = None
+        self._reused: bool = False  # True when we connected to an existing server
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Launch the CARLA server and wait until it is reachable.
+        """Launch (or reuse) the CARLA server.
 
-        Reads the executable path from the ``CARLA_UE5_EXECUTABLE`` env var.
+        Behaviour:
+        1. If *reuse_if_running* is ``True`` and the server is already
+           reachable, record that we are reusing it and return immediately.
+        2. Otherwise, read ``CARLA_UE5_EXECUTABLE``, launch the process, and
+           poll until the server accepts connections.
 
         Raises:
-            RuntimeError: If ``CARLA_UE5_EXECUTABLE`` is not set, the
-                executable does not exist, or the server does not become
-                reachable within *timeout* seconds.
+            RuntimeError: If ``CARLA_UE5_EXECUTABLE`` is not set (when a new
+                process must be launched), the executable does not exist, or
+                the server does not become reachable within *timeout* seconds.
         """
+        if self.reuse_if_running and self._ping():
+            self._reused = True
+            return
+
         executable = os.environ.get(self.ENV_VAR)
         if not executable:
             raise RuntimeError(
@@ -81,20 +110,21 @@ class CarlaServerManager:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-
+        self._reused = False
         self._wait_until_ready()
 
     def stop(self) -> None:
         """Terminate the CARLA server process group.
 
+        If the server was *reused* (not launched by this manager), this method
+        is a no-op so the externally-managed process is left running.
+
         CarlaUE5.sh launches the real UE5 binary as a child process.
         Sending SIGTERM only to the shell would leave the UE5 binary running
         as an orphan.  Instead, we send SIGTERM/SIGKILL to the *entire
-        process group* created by ``start_new_session=True`` in :meth:`start`,
-        which guarantees that the UE5 binary and any other children are also
-        terminated.
+        process group* created by ``start_new_session=True`` in :meth:`start`.
         """
-        if self._process is None:
+        if self._reused or self._process is None:
             return
         try:
             pgid = os.getpgid(self._process.pid)
@@ -110,8 +140,10 @@ class CarlaServerManager:
         self._process = None
 
     def is_alive(self) -> bool:
-        """Return True if the server process is running and reachable."""
-        if self._process is None or self._process.poll() is not None:
+        """Return True if the server is reachable (regardless of who started it)."""
+        if not self._reused and (
+            self._process is None or self._process.poll() is not None
+        ):
             return False
         return self._ping()
 
