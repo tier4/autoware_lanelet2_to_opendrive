@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from autoware_carla_scenario import CarlaServerManager
@@ -30,24 +28,22 @@ def test_stop_is_idempotent() -> None:
 
 
 class TestCarlaServerIntegration:
-    """Integration tests that require CARLA to be installed."""
+    """Integration tests that verify the session-scoped CARLA server.
+
+    These tests reuse the server already started by the ``carla_queue``
+    session fixture.  They do NOT start a new CarlaServerManager because
+    doing so would attempt to bind the same port twice.
+    """
 
     @pytest.fixture(autouse=True)
-    def skip_if_no_carla(self) -> None:
-        if not os.environ.get(CarlaServerManager.ENV_VAR):
-            pytest.skip("CARLA_UE5_EXECUTABLE not set")
+    def skip_if_no_carla(self, carla_queue) -> None:  # noqa: ANN001
+        """Depend on the session fixture; skips automatically if CARLA is unavailable."""
 
-    def test_context_manager_start_stop(self) -> None:
-        """Server starts and stops cleanly via context manager."""
-        with CarlaServerManager() as server:
-            assert server.is_alive()
-        # After __exit__ the process should be gone
-        assert server._process is None
+    def test_server_is_alive(self, carla_queue) -> None:  # noqa: ANN001
+        """The session server must be reachable during the test run."""
+        assert carla_queue._server.is_alive()
 
-    def test_is_alive_after_stop(self) -> None:
-        """is_alive() returns False after stop()."""
-        manager = CarlaServerManager()
-        manager.start()
-        assert manager.is_alive()
-        manager.stop()
-        assert manager.is_alive() is False
+    def test_server_process_is_running(self, carla_queue) -> None:  # noqa: ANN001
+        """The underlying process must still be alive."""
+        assert carla_queue._server._process is not None
+        assert carla_queue._server._process.poll() is None

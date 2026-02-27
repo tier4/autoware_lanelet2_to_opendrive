@@ -49,7 +49,7 @@ class ScenarioRecorder:
         import cv2
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         writer = cv2.VideoWriter(
             str(output_path),
             fourcc,

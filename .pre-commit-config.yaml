@@ -26,11 +26,20 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+  - repo: local
     hooks:
       - id: mypy
-        args: [--ignore-missing-imports]
+        name: mypy
+        entry: uv run mypy
+        language: system
+        args:
+          - --ignore-missing-imports
+          - autoware_lanelet2_to_opendrive/src
+          - autoware_lanelet2_to_opendrive/test
+          - autoware_carla_scenario/src
+          - autoware_carla_scenario/test
+        pass_filenames: false
+        always_run: true
 
   - repo: local
     hooks:
