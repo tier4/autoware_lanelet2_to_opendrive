@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -71,27 +72,41 @@ class CarlaServerManager:
             raise RuntimeError(f"CARLA executable not found: {exe_path}")
 
         cmd = [str(exe_path)] + self.extra_args
+        # start_new_session=True puts CarlaUE5.sh and all its children
+        # (the actual UE5 binary) into a new process group so that
+        # stop() can kill the entire group with os.killpg().
         self._process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
 
         self._wait_until_ready()
 
     def stop(self) -> None:
-        """Terminate the CARLA server process.
+        """Terminate the CARLA server process group.
 
-        Sends SIGTERM and waits up to 5 seconds; sends SIGKILL if needed.
+        CarlaUE5.sh launches the real UE5 binary as a child process.
+        Sending SIGTERM only to the shell would leave the UE5 binary running
+        as an orphan.  Instead, we send SIGTERM/SIGKILL to the *entire
+        process group* created by ``start_new_session=True`` in :meth:`start`,
+        which guarantees that the UE5 binary and any other children are also
+        terminated.
         """
         if self._process is None:
             return
-        self._process.terminate()
         try:
-            self._process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            self._process.kill()
-            self._process.wait()
+            pgid = os.getpgid(self._process.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                self._process.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGKILL)
+                self._process.wait()
+        except ProcessLookupError:
+            # Process already exited; nothing to do.
+            pass
         self._process = None
 
     def is_alive(self) -> bool:
