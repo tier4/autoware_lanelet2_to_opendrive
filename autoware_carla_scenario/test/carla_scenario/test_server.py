@@ -8,9 +8,14 @@ from autoware_carla_scenario import CarlaServerManager
 
 
 def test_start_raises_without_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """CarlaServerManager.start() raises RuntimeError when env var is missing."""
+    """CarlaServerManager.start() raises RuntimeError when env var is missing.
+
+    reuse_if_running=False forces start() to attempt launching a new process
+    (rather than reusing an already-running server), so the missing-env-var
+    guard is always reached regardless of whether CARLA is running locally.
+    """
     monkeypatch.delenv(CarlaServerManager.ENV_VAR, raising=False)
-    manager = CarlaServerManager()
+    manager = CarlaServerManager(reuse_if_running=False)
     with pytest.raises(RuntimeError, match=CarlaServerManager.ENV_VAR):
         manager.start()
 

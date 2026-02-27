@@ -9,9 +9,9 @@ How it works
 1. A ``ScenarioQueue`` and ``EgoConfig`` are created at module-import time.
 2. ``CarlaScenarioFixture`` registers the scenario into the queue and
    returns a session-scoped pytest fixture for the result.
-3. The ``example_carla_queue`` session fixture starts the CARLA server
-   (or reuses one that is already running), runs every registered scenario
-   exactly once, then tears down.
+3. ``ScenarioQueue.as_fixture()`` generates the session fixture that starts
+   the CARLA server and runs all scenarios — **auto-skip is baked in**, so
+   no manual ``pytest.skip`` guard is needed.
 4. Individual test functions receive the pre-computed ``ScenarioResult``
    and make assertions on it — CARLA is never restarted between tests.
 
@@ -22,15 +22,10 @@ To run only these tests::
 
 from __future__ import annotations
 
-import os
-from collections.abc import Generator
-
 import carla
-import pytest
 
 from autoware_carla_scenario import (
     CarlaScenarioFixture,
-    CarlaServerManager,
     EgoConfig,
     ScenarioQueue,
 )
@@ -56,30 +51,8 @@ spawn_and_idle_result = CarlaScenarioFixture(
     queue=_queue,
 ).as_fixture(queue_fixture="example_carla_queue")
 
-
-# ---------------------------------------------------------------------------
-# Session fixture — starts CARLA once, runs all scenarios, then tears down.
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="session")
-def example_carla_queue() -> Generator[ScenarioQueue, None, None]:
-    """Start CARLA, execute every registered scenario, yield the queue.
-
-    Skips the entire module if ``CARLA_UE5_EXECUTABLE`` is not set or if
-    the CARLA session cannot be established.
-    """
-    if not os.environ.get(CarlaServerManager.ENV_VAR):
-        pytest.skip(
-            f"Environment variable '{CarlaServerManager.ENV_VAR}' is not set. "
-            "Skipping CARLA integration tests."
-        )
-    try:
-        with _queue:
-            _queue.run_all()
-            yield _queue
-    except Exception as exc:
-        pytest.skip(f"CARLA session failed: {exc}")
+# Session fixture with auto-skip — no manual pytest.skip guard needed.
+example_carla_queue = _queue.as_fixture("example_carla_queue")
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import List, Optional
 
@@ -183,6 +185,66 @@ class ScenarioQueue:
         self._runner = None
         if self._owns_server:
             self._server.stop()
+
+    # ------------------------------------------------------------------
+    # pytest fixture factory
+    # ------------------------------------------------------------------
+
+    def as_fixture(
+        self, fixture_name: str = "carla_queue"
+    ) -> Callable[[], Generator["ScenarioQueue", None, None]]:
+        """Return a session-scoped pytest fixture that manages this queue.
+
+        The generated fixture automatically skips when
+        ``CARLA_UE5_EXECUTABLE`` is not set, so callers do not need to
+        add a manual ``pytest.skip`` guard.
+
+        Args:
+            fixture_name: Name under which the fixture is registered.
+                Defaults to ``"carla_queue"``.
+
+        Returns:
+            A ``@pytest.fixture(scope="session")``-decorated function.
+            Assign it to a module-level name in ``conftest.py`` or a test
+            file so that pytest discovers it.
+
+        Example::
+
+            # conftest.py
+            from autoware_carla_scenario import CarlaScenarioFixture, EgoConfig, ScenarioQueue
+            import carla
+
+            ego = EgoConfig(
+                transform=carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5)),
+                vehicle_type="vehicle.tesla.model3",
+            )
+            _queue = ScenarioQueue(map_name="Town01")
+            carla_queue  = _queue.as_fixture()              # auto-skip baked in
+            my_result    = CarlaScenarioFixture(MyScenario, ego, queue=_queue).as_fixture()
+
+            # test_my.py
+            def test_passes(my_result):
+                assert my_result.passed
+        """
+        import pytest
+
+        queue = self
+
+        @pytest.fixture(scope="session", name=fixture_name)
+        def _queue_fixture() -> Generator["ScenarioQueue", None, None]:
+            if not os.environ.get(CarlaServerManager.ENV_VAR):
+                pytest.skip(
+                    f"Environment variable '{CarlaServerManager.ENV_VAR}' is not set. "
+                    "Skipping CARLA integration tests."
+                )
+            try:
+                with queue:
+                    queue.run_all()
+                    yield queue
+            except Exception as exc:
+                pytest.skip(f"CARLA session failed: {exc}")
+
+        return _queue_fixture
 
     # ------------------------------------------------------------------
     # Context manager
