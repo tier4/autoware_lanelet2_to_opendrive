@@ -7,7 +7,7 @@ repos:
       - id: check-yaml
         exclude: 'mkdocs\.yml$'
       - id: check-added-large-files
-        exclude: '\.(osm|png)$'
+        exclude: '\.(osm|png|whl)$'
       - id: check-merge-conflict
       - id: check-toml
       - id: debug-statements
