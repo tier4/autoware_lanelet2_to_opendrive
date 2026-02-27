@@ -1,38 +1,12 @@
-[project]
-name = "autoware-lanelet2-to-opendrive"
-version = "1.17.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }
-]
-requires-python = ">=3.10,<3.11"
-dependencies = [
-    "lanelet2>=1.2.2",
-    "lanelet2-python-api-for-autoware",
-    "scipy>=1.9.0",
-    "lxml>=5.2.2",
-    "mgrs>=1.5.0",
-    "tqdm>=4.67.1",
-    "pyyaml>=6.0.0",
-    "hydra-core>=1.3.2",
-    "asam-qc-opendrive>=1.0.0",
-    "carla>=0.10.0",
+[tool.uv.workspace]
+members = [
+    "autoware_lanelet2_to_opendrive",
+    "autoware_carla_scenario",
 ]
 
 [tool.uv.sources]
 lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", rev = "7745347645fd04aa8e4230cfa8793e253aad6753" }
 carla = { path = "carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" }
-
-[build-system]
-requires = ["uv_build>=0.9.7,<0.10.0"]
-build-backend = "uv_build"
-
-[project.scripts]
-convert = "autoware_lanelet2_to_opendrive.main:main"
-preprocess-lanelet = "autoware_lanelet2_to_opendrive.preprocess_lanelet:main"
-analyze = "autoware_lanelet2_to_opendrive.analyze_xodr:main"
-carla-import-test = "autoware_lanelet2_to_opendrive.carla_import_test:main"
 
 [dependency-groups]
 dev = [
@@ -52,11 +26,11 @@ dev = [
     "weasyprint>=68.0",
 ]
 
-[tool.uv.workspace]
-members = ["autoware_carla_scenario"]
-
 [tool.pytest.ini_options]
-testpaths = ["test", "autoware_carla_scenario/test"]
+testpaths = [
+    "autoware_lanelet2_to_opendrive/test",
+    "autoware_carla_scenario/test",
+]
 addopts = "--testmon"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

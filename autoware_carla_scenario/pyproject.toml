@@ -14,9 +14,6 @@ dependencies = [
     "pytest>=9.0.1",
 ]
 
-[tool.uv.sources]
-carla = { path = "../carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" }
-
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
