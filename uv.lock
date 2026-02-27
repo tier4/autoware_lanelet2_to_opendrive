@@ -7,6 +7,12 @@ resolution-markers = [
     "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 
+[manifest]
+members = [
+    "autoware-carla-scenario",
+    "autoware-lanelet2-to-opendrive",
+]
+
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -56,6 +62,27 @@ wheels = [
 ]
 
 [[package]]
+name = "autoware-carla-scenario"
+version = "0.1.0"
+source = { editable = "autoware_carla_scenario" }
+dependencies = [
+    { name = "carla" },
+    { name = "numpy" },
+    { name = "opencv-python" },
+    { name = "pytest" },
+    { name = "pyxodr" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "carla", path = "carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" },
+    { name = "numpy", specifier = ">=1.21" },
+    { name = "opencv-python", specifier = ">=4.8" },
+    { name = "pytest", specifier = ">=9.0.1" },
+    { name = "pyxodr", specifier = ">=0.1.0" },
+]
+
+[[package]]
 name = "autoware-lanelet2-to-opendrive"
 version = "1.17.0"
 source = { editable = "." }
@@ -67,8 +94,6 @@ dependencies = [
     { name = "lanelet2-python-api-for-autoware" },
     { name = "lxml" },
     { name = "mgrs" },
-    { name = "opencv-python" },
-    { name = "pyxodr" },
     { name = "pyyaml" },
     { name = "scipy" },
     { name = "tqdm" },
@@ -101,8 +126,6 @@ requires-dist = [
     { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
     { name = "lxml", specifier = ">=5.2.2" },
     { name = "mgrs", specifier = ">=1.5.0" },
-    { name = "opencv-python", specifier = ">=4.8" },
-    { name = "pyxodr", specifier = ">=0.1.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "scipy", specifier = ">=1.9.0" },
     { name = "tqdm", specifier = ">=4.67.1" },

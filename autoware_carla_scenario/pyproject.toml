@@ -1,0 +1,22 @@
+[project]
+name = "autoware-carla-scenario"
+version = "0.1.0"
+description = "CARLA scenario testing framework for Autoware"
+authors = [
+    { name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }
+]
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "carla>=0.10.0",
+    "pyxodr>=0.1.0",
+    "opencv-python>=4.8",
+    "numpy>=1.21",
+    "pytest>=9.0.1",
+]
+
+[tool.uv.sources]
+carla = { path = "../carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" }
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"

@@ -18,8 +18,6 @@ dependencies = [
     "hydra-core>=1.3.2",
     "asam-qc-opendrive>=1.0.0",
     "carla>=0.10.0",
-    "pyxodr>=0.1.0",
-    "opencv-python>=4.8",
 ]
 
 [tool.uv.sources]
@@ -54,7 +52,11 @@ dev = [
     "weasyprint>=68.0",
 ]
 
+[tool.uv.workspace]
+members = ["autoware_carla_scenario"]
+
 [tool.pytest.ini_options]
+testpaths = ["test", "autoware_carla_scenario/test"]
 addopts = "--testmon"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
