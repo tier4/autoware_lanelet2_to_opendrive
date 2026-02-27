@@ -2,103 +2,117 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
-from pathlib import Path
-from typing import Optional, Type
+from collections.abc import Callable
+from typing import Type
 
 import pytest
 
-from .carla_autoware_scenario import CarlaAutowareScenario
 from .conditions import ScenarioResult
 from .scenario_base import BaseScenario, EgoConfig
-from .server import CarlaServerManager
+from .scenario_queue import ScenarioQueue
 
 
 class CarlaScenarioFixture:
-    """Helper that wraps a scenario class into a reusable pytest fixture.
+    """Registers a scenario into a :class:`ScenarioQueue` and generates a fixture.
 
-    Example::
+    The scenario instance is created and added to the queue **at construction
+    time** (i.e. when the conftest.py module is imported, before any fixture
+    executes).  This ensures that all scenarios are registered before the
+    session-scoped *queue_fixture* starts the CARLA server and calls
+    :meth:`~ScenarioQueue.run_all`.
 
-        # conftest.py
-        from autoware_carla_scenario import CarlaScenarioFixture, EgoConfig
+    Typical usage::
+
+        # tests/my_tests/conftest.py
+        import os
+        import pytest
         import carla
+        from autoware_carla_scenario import (
+            CarlaScenarioFixture,
+            CarlaServerManager,
+            EgoConfig,
+            ScenarioQueue,
+        )
+        from .my_scenarios import MyScenario, AnotherScenario
 
         ego = EgoConfig(
             transform=carla.Transform(carla.Location(x=0, y=0, z=0)),
             vehicle_type="vehicle.tesla.model3",
         )
-        my_result = CarlaScenarioFixture(
-            MyScenario, ego, map_name="Town01"
-        ).as_fixture()
 
-        # test_my_scenario.py
+        # 1. Create the queue (no server started yet)
+        _queue = ScenarioQueue(map_name="Town01")
+
+        # 2. Register scenarios at import time
+        my_result     = CarlaScenarioFixture(MyScenario,     ego, queue=_queue).as_fixture()
+        another_result = CarlaScenarioFixture(AnotherScenario, ego, queue=_queue).as_fixture()
+
+        # 3. Session fixture that starts CARLA and runs every scenario once
+        @pytest.fixture(scope="session")
+        def carla_queue():
+            if not os.environ.get(CarlaServerManager.ENV_VAR):
+                pytest.skip("CARLA_UE5_EXECUTABLE not set")
+            with _queue:
+                _queue.run_all()
+                yield _queue
+
+        # tests/my_tests/test_my.py
         def test_passes(my_result):
             assert my_result.passed
+
+        def test_another(another_result):
+            assert another_result.passed
+
+    The ``carla_queue`` session fixture starts the server and runs **all**
+    registered scenarios exactly once.  Individual result fixtures simply
+    fetch their pre-computed :class:`~autoware_carla_scenario.ScenarioResult`
+    from the queue — CARLA is never restarted between tests.
     """
 
     def __init__(
         self,
         scenario_cls: Type[BaseScenario],
         ego_config: EgoConfig,
-        xodr_path: Optional[Path] = None,
-        map_name: Optional[str] = None,
-        timeout_seconds: float = 60.0,
-        output_dir: Path = Path("scenario_outputs"),
+        queue: ScenarioQueue,
     ) -> None:
-        """Create the fixture helper.
-
-        Either *xodr_path* or *map_name* must be provided so the runner can
-        load a map before running the scenario.
+        """Register the scenario into *queue*.
 
         Args:
             scenario_cls: The :class:`BaseScenario` subclass to instantiate.
             ego_config: Ego vehicle spawn configuration.
-            xodr_path: Path to an OpenDRIVE map file (optional).
-            map_name: Built-in CARLA map name, e.g. ``"Town01"`` (optional).
-            timeout_seconds: Per-scenario timeout in seconds.
-            output_dir: Directory where MP4 recordings are stored.
+            queue: The :class:`ScenarioQueue` that will execute this scenario.
+                   :meth:`~ScenarioQueue.add` is called immediately so that the
+                   scenario is registered before any fixture runs.
         """
-        if xodr_path is None and map_name is None:
-            raise ValueError("Provide either xodr_path or map_name.")
+        self._scenario = scenario_cls(ego_config)
+        self._queue = queue
+        queue.add(self._scenario)
 
-        self._scenario_cls = scenario_cls
-        self._ego_config = ego_config
-        self._xodr_path = xodr_path
-        self._map_name = map_name
-        self._timeout_seconds = timeout_seconds
-        self._output_dir = output_dir
+    def as_fixture(
+        self, queue_fixture: str = "carla_queue"
+    ) -> Callable[..., ScenarioResult]:
+        """Return a session-scoped pytest fixture for this scenario's result.
 
-    def as_fixture(self) -> Callable[[], ScenarioResult]:
-        """Return a zero-argument pytest fixture function.
+        The generated fixture depends on *queue_fixture* (default:
+        ``"carla_queue"``), which must be a session-scoped fixture that starts
+        the server, calls :meth:`~ScenarioQueue.run_all`, and yields the queue.
+        The dependency is resolved via :meth:`pytest.FixtureRequest.getfixturevalue`
+        so the queue always runs before any individual result is accessed.
 
-        The fixture starts a ``CarlaServerManager`` as a context manager,
-        creates a :class:`CarlaAutowareScenario` runner, loads the map, and
-        yields the :class:`ScenarioResult` returned by :meth:`run_scenario`.
+        Args:
+            queue_fixture: Name of the session-scoped fixture that drives the
+                queue.  Override if you use a custom fixture name.
 
         Returns:
-            A function decorated with ``@pytest.fixture``.
+            A function decorated with ``@pytest.fixture(scope="session")``.
         """
-        scenario_cls = self._scenario_cls
-        ego_config = self._ego_config
-        xodr_path = self._xodr_path
-        map_name = self._map_name
-        timeout_seconds = self._timeout_seconds
-        output_dir = self._output_dir
+        scenario = self._scenario
+        queue = self._queue
 
-        @pytest.fixture
-        def _fixture() -> Generator[ScenarioResult, None, None]:
-            with CarlaServerManager() as server:
-                runner = CarlaAutowareScenario(
-                    server,
-                    timeout_seconds=timeout_seconds,
-                    output_dir=output_dir,
-                )
-                if xodr_path is not None:
-                    runner.load_map_from_xodr(xodr_path)
-                else:
-                    runner.load_map_by_name(map_name)  # type: ignore[arg-type]
-
-                scenario = scenario_cls(ego_config)
-                yield runner.run_scenario(scenario)
+        @pytest.fixture(scope="session")
+        def _fixture(request: pytest.FixtureRequest) -> ScenarioResult:
+            # Trigger the queue fixture (starts server + run_all) if not yet done.
+            request.getfixturevalue(queue_fixture)
+            return queue.result_for(scenario)
 
         return _fixture

@@ -1,53 +1,192 @@
-"""Sequential scenario queue for running multiple scenarios."""
+"""Scenario queue bound to a CarlaServerManager."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List
+from pathlib import Path
+from typing import List, Optional
 
+from .carla_autoware_scenario import CarlaAutowareScenario
 from .conditions import ScenarioResult
 from .scenario_base import BaseScenario
-
-if TYPE_CHECKING:
-    from .carla_autoware_scenario import CarlaAutowareScenario
+from .server import CarlaServerManager
 
 
 class ScenarioQueue:
-    """Collects scenarios and runs them sequentially via a :class:`CarlaAutowareScenario`.
+    """Owns a :class:`CarlaServerManager` and runs scenarios sequentially.
 
-    Example::
+    The queue acts as a context manager that starts the CARLA server on
+    entry and stops it on exit.  All scenarios must be :meth:`add`-ed
+    *before* calling :meth:`run_all`.
 
-        queue = ScenarioQueue()
+    When used together with :class:`~autoware_carla_scenario.CarlaScenarioFixture`,
+    scenarios are registered at module import time so the full list is known
+    before the session fixture starts the server.
+
+    Example – minimal usage::
+
+        queue = ScenarioQueue(map_name="Town01")
         queue.add(MyScenario(ego_config))
         queue.add(AnotherScenario(ego_config))
-        results = queue.run_all(runner)
+
+        with queue:
+            results = queue.run_all()
+
+    Example – with an externally-managed server::
+
+        with CarlaServerManager() as server:
+            queue = ScenarioQueue(server=server, map_name="Town01")
+            queue.add(MyScenario(ego_config))
+            results = queue.run_all()
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        server: Optional[CarlaServerManager] = None,
+        *,
+        xodr_path: Optional[Path] = None,
+        map_name: Optional[str] = None,
+        host: str = "localhost",
+        port: int = 2000,
+        timeout_seconds: float = 60.0,
+        output_dir: Path = Path("scenario_outputs"),
+        server_extra_args: Optional[List[str]] = None,
+    ) -> None:
+        """Create a scenario queue.
+
+        Args:
+            server: An externally-managed :class:`CarlaServerManager`.  When
+                provided the queue borrows it (does not start/stop it).  When
+                *None* a new manager is created and owned by this queue.
+            xodr_path: OpenDRIVE map file to load on start (optional).
+            map_name: Built-in CARLA map name to load on start (optional).
+            host: CARLA RPC host.
+            port: CARLA RPC port.
+            timeout_seconds: Default per-scenario timeout.
+            output_dir: Directory for MP4 recordings.
+            server_extra_args: Extra CLI arguments for CarlaUE5.sh (only used
+                when the queue creates its own server).
+        """
+        if server is not None:
+            self._server = server
+            self._owns_server = False
+        else:
+            self._server = CarlaServerManager(
+                host=host,
+                port=port,
+                extra_args=server_extra_args,
+            )
+            self._owns_server = True
+
+        self._xodr_path = xodr_path
+        self._map_name = map_name
+        self._host = host
+        self._port = port
+        self._timeout_seconds = timeout_seconds
+        self._output_dir = output_dir
+
         self._scenarios: List[BaseScenario] = []
+        self._results: List[ScenarioResult] = []
+        self._scenario_results: dict[int, ScenarioResult] = {}
+        self._runner: Optional[CarlaAutowareScenario] = None
+
+    # ------------------------------------------------------------------
+    # Scenario registration
+    # ------------------------------------------------------------------
 
     def add(self, scenario: BaseScenario) -> None:
         """Append a scenario to the queue.
 
         Args:
-            scenario: A scenario instance to enqueue.
+            scenario: A :class:`BaseScenario` instance to enqueue.
         """
         self._scenarios.append(scenario)
 
-    def run_all(self, runner: "CarlaAutowareScenario") -> List[ScenarioResult]:
-        """Execute every scenario in order and collect results.
+    # ------------------------------------------------------------------
+    # Execution
+    # ------------------------------------------------------------------
 
-        Args:
-            runner: The :class:`CarlaAutowareScenario` that executes each scenario.
+    def run_all(self) -> List[ScenarioResult]:
+        """Execute every registered scenario in order.
+
+        Must be called while the queue is started (inside the context manager
+        or after :meth:`start`).
 
         Returns:
-            A list of :class:`ScenarioResult` objects in the same order as the
-            enqueued scenarios.
+            A list of :class:`ScenarioResult` objects in registration order.
+
+        Raises:
+            RuntimeError: If called before :meth:`start` / outside the context
+                manager.
         """
+        if self._runner is None:
+            raise RuntimeError(
+                "ScenarioQueue must be started before run_all(). "
+                "Use the context manager ('with queue:') or call start() first."
+            )
         results: List[ScenarioResult] = []
         for scenario in self._scenarios:
-            result = runner.run_scenario(scenario)
+            result = self._runner.run_scenario(scenario)
+            self._scenario_results[id(scenario)] = result
             results.append(result)
+        self._results = results
         return results
+
+    def result_for(self, scenario: BaseScenario) -> ScenarioResult:
+        """Return the :class:`ScenarioResult` for a specific scenario instance.
+
+        Args:
+            scenario: The exact scenario object that was passed to :meth:`add`.
+
+        Returns:
+            The scenario's execution result.
+
+        Raises:
+            KeyError: If no result exists for *scenario* (run_all not called yet).
+        """
+        key = id(scenario)
+        if key not in self._scenario_results:
+            raise KeyError(
+                f"No result found for {type(scenario).__name__}. "
+                "Has run_all() been called?"
+            )
+        return self._scenario_results[key]
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Start the server (if owned) and initialise the runner."""
+        if self._owns_server:
+            self._server.start()
+        self._runner = CarlaAutowareScenario(
+            self._server,
+            host=self._host,
+            port=self._port,
+            timeout_seconds=self._timeout_seconds,
+            output_dir=self._output_dir,
+        )
+        if self._xodr_path is not None:
+            self._runner.load_map_from_xodr(self._xodr_path)
+        elif self._map_name is not None:
+            self._runner.load_map_by_name(self._map_name)
+
+    def stop(self) -> None:
+        """Stop the server if owned by this queue."""
+        self._runner = None
+        if self._owns_server:
+            self._server.stop()
+
+    # ------------------------------------------------------------------
+    # Context manager
+    # ------------------------------------------------------------------
+
+    def __enter__(self) -> "ScenarioQueue":
+        self.start()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.stop()
 
     def __len__(self) -> int:
         return len(self._scenarios)
