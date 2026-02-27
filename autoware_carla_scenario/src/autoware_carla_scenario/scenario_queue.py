@@ -156,9 +156,16 @@ class ScenarioQueue:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Start the server (if owned) and initialise the runner."""
-        if self._owns_server:
-            self._server.start()
+        """Ensure the CARLA server is running, then initialise the runner.
+
+        :meth:`CarlaServerManager.start` is called unconditionally so that
+        the server is always reachable by the time the map is loaded.
+        When the server is already running (``reuse_if_running=True``, the
+        default) the call is effectively a no-op — it just records that the
+        server was reused and returns immediately.  Only the queue that
+        *owns* its server will stop it in :meth:`stop`.
+        """
+        self._server.start()
         self._runner = CarlaAutowareScenario(
             self._server,
             host=self._host,
