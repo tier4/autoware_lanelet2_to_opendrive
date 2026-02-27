@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import signal
 import subprocess
@@ -111,6 +112,9 @@ class CarlaServerManager:
             start_new_session=True,
         )
         self._reused = False
+        # Guarantee cleanup even if __exit__ / stop() is never called explicitly
+        # (e.g. pytest interrupted by Ctrl-C or an unhandled exception).
+        atexit.register(self.stop)
         self._wait_until_ready()
 
     def stop(self) -> None:
@@ -138,6 +142,7 @@ class CarlaServerManager:
             # Process already exited; nothing to do.
             pass
         self._process = None
+        atexit.unregister(self.stop)
 
     def is_alive(self) -> bool:
         """Return True if the server is reachable (regardless of who started it)."""
