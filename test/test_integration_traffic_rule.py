@@ -81,24 +81,23 @@ def test_full_conversion_lht(lanelet_map):
     # Check first lane section
     first_section = lane_section_elems[0]
 
-    # LHT should have right lanes only (same structure as RHT)
-    # The road@rule attribute indicates left-hand traffic
-    right_elem = first_section.find("right")
-    assert right_elem is not None
-    right_lane_elems = right_elem.findall("lane")
-    assert len(right_lane_elems) == 2
-
-    # Check lane IDs are negative
-    right_lane_ids = [int(lane.get("id")) for lane in right_lane_elems]
-    assert all(lane_id < 0 for lane_id in right_lane_ids)
-    assert -1 in right_lane_ids
-    assert -2 in right_lane_ids
-
-    # LHT should have no left lanes
+    # LHT should have left lanes with positive IDs (+1, +2, ...)
     left_elem = first_section.find("left")
-    if left_elem is not None:
-        left_lane_elems = left_elem.findall("lane")
-        assert len(left_lane_elems) == 0
+    assert left_elem is not None
+    left_lane_elems = left_elem.findall("lane")
+    assert len(left_lane_elems) == 2
+
+    # Check lane IDs are positive
+    left_lane_ids = [int(lane.get("id")) for lane in left_lane_elems]
+    assert all(lane_id > 0 for lane_id in left_lane_ids)
+    assert 1 in left_lane_ids
+    assert 2 in left_lane_ids
+
+    # LHT should have no right lanes
+    right_elem = first_section.find("right")
+    if right_elem is not None:
+        right_lane_elems = right_elem.findall("lane")
+        assert len(right_lane_elems) == 0
 
 
 def test_reference_line_geometry_rht(lanelet_map):
@@ -246,11 +245,11 @@ def test_lht_lane_widths_are_reasonable(lanelet_map):
     assert len(road.lanes.lane_sections) > 0, "Road should have lane sections"
     lane_section = road.lanes.lane_sections[0]
 
-    # Verify right lanes exist (LHT uses right lanes like RHT)
-    assert len(lane_section.right_lanes) > 0, "LHT should have right lanes"
+    # Verify left lanes exist (LHT places driving lanes in the left section)
+    assert len(lane_section.left_lanes) > 0, "LHT should have left lanes"
 
     # Check each lane's width
-    for lane_id, lane in lane_section.right_lanes.items():
+    for lane_id, lane in lane_section.left_lanes.items():
         # Get width polynomial
         assert len(lane.widths) > 0, f"Lane {lane_id} has no width entries"
 
@@ -290,8 +289,8 @@ def test_lht_lane_widths_consistency(lanelet_map):
     assert len(road.lanes.lane_sections) > 0, "Road should have lane sections"
     lane_section = road.lanes.lane_sections[0]
 
-    # Check width consistency for each lane (LHT uses right lanes like RHT)
-    for lane_id, lane in lane_section.right_lanes.items():
+    # Check width consistency for each lane (LHT places driving lanes in left section)
+    for lane_id, lane in lane_section.left_lanes.items():
         assert len(lane.widths) > 0, f"Lane {lane_id} has no width entries"
 
         # Check each width segment
