@@ -6,11 +6,12 @@ import lanelet2
 import lxml.etree as ET
 
 from .signal import Signal, Controller, ControlEntry
+from .enums import TrafficRule
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
 from ..config import COORDINATE_OFFSET
 
 if TYPE_CHECKING:
-    pass
+    from .road import Road
 
 
 @dataclass
@@ -124,6 +125,11 @@ class SignalsAndControllers:
         signal_id_counter = 0
         controller_id_counter = 0
 
+        # Pre-build a dict for O(1) road lookup inside the signal loop.
+        road_id_to_road: Dict[int, "Road"] = (
+            {road.id: road for road in roads} if roads is not None else {}
+        )
+
         for lanelet2_traffic_light_id, (
             traffic_light,
             lanelet_ids,
@@ -179,9 +185,7 @@ class SignalsAndControllers:
                 )
 
                 # Find the corresponding Road object (reused for lane IDs and elevation)
-                matching_road = None
-                if roads is not None:
-                    matching_road = next((r for r in roads if r.id == road_id), None)
+                matching_road: Optional["Road"] = road_id_to_road.get(road_id)
 
                 # Determine lane IDs for the validity element.
                 # Use the road's lanelet-to-lane mapping so that the IDs are correct
@@ -260,7 +264,7 @@ class SignalsAndControllers:
     @staticmethod
     def _get_signal_lane_ids(
         road_lanelets_with_signal: List[int],
-        matching_road: Optional[object],
+        matching_road: Optional["Road"],
     ) -> List[int]:
         """Return lane IDs for the validity element of a signal.
 
@@ -280,21 +284,18 @@ class SignalsAndControllers:
             List of integer lane IDs to use in the validity element.
         """
         if matching_road is not None:
-            lanelet_to_lane = matching_road.get_lanelet_to_lane_mapping()  # type: ignore[attr-defined]
+            lanelet_to_lane = matching_road.get_lanelet_to_lane_mapping()
             mapped = [
-                lanelet_to_lane[ll_id]
+                lane_id
                 for ll_id in road_lanelets_with_signal
-                if ll_id in lanelet_to_lane
+                if (lane_id := lanelet_to_lane.get(ll_id)) is not None
             ]
             if mapped:
                 return mapped
 
             # Lane mapping exists but the specific lanelets were not found —
             # fall back to the innermost lane for the road's traffic rule.
-            from .enums import TrafficRule
-
-            rule = getattr(matching_road, "rule", None)
-            if rule == TrafficRule.LHT:
+            if matching_road.rule == TrafficRule.LHT:
                 return [1]
 
         # Default: RHT innermost lane
