@@ -6,11 +6,12 @@ import lanelet2
 import lxml.etree as ET
 
 from .signal import Signal, Controller, ControlEntry
+from .enums import TrafficRule
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
 from ..config import COORDINATE_OFFSET
 
 if TYPE_CHECKING:
-    pass
+    from .road import Road
 
 
 @dataclass
@@ -124,6 +125,11 @@ class SignalsAndControllers:
         signal_id_counter = 0
         controller_id_counter = 0
 
+        # Pre-build a dict for O(1) road lookup inside the signal loop.
+        road_id_to_road: Dict[int, "Road"] = (
+            {road.id: road for road in roads} if roads is not None else {}
+        )
+
         for lanelet2_traffic_light_id, (
             traffic_light,
             lanelet_ids,
@@ -178,19 +184,25 @@ class SignalsAndControllers:
                     road_lanelet_mapping=road_lanelet_mapping,
                 )
 
-                # Determine lane IDs (negative for right lanes in OpenDRIVE)
-                lane_ids = [-1]  # Simplified: assume rightmost lane
+                # Find the corresponding Road object (reused for lane IDs and elevation)
+                matching_road: Optional["Road"] = road_id_to_road.get(road_id)
+
+                # Determine lane IDs for the validity element.
+                # Use the road's lanelet-to-lane mapping so that the IDs are correct
+                # for both RHT (negative IDs) and LHT (positive IDs).
+                lane_ids: List[int] = SignalsAndControllers._get_signal_lane_ids(
+                    road_lanelets_with_signal=road_lanelets_with_signal,
+                    matching_road=matching_road,
+                )
 
                 # Calculate road elevation at signal position
                 road_elevation_at_s = None
-                if roads is not None:
-                    # Find the corresponding Road object
-                    matching_road = next((r for r in roads if r.id == road_id), None)
-                    if matching_road:
-                        # Use the Road's public method to get elevation at position s
-                        # Note: elevation_profile already contains absolute inertial z-coordinates
-                        # (elevation_offset was added to 'a' coefficient in get_elevation_profile)
-                        road_elevation_at_s = matching_road.get_elevation_at_s(s)
+                if matching_road is not None:
+                    # Use the Road's public method to get elevation at position s.
+                    # Note: elevation_profile already contains absolute inertial
+                    # z-coordinates (elevation_offset was added to 'a' coefficient
+                    # in get_elevation_profile).
+                    road_elevation_at_s = matching_road.get_elevation_at_s(s)
 
                 # Create Signal object
                 signal = Signal.construct_from_lanelet2_traffic_signal(
@@ -248,6 +260,46 @@ class SignalsAndControllers:
             f"SignalsAndControllers(signals={len(self.signals)}, "
             f"controllers={len(self.controllers)})"
         )
+
+    @staticmethod
+    def _get_signal_lane_ids(
+        road_lanelets_with_signal: List[int],
+        matching_road: Optional["Road"],
+    ) -> List[int]:
+        """Return lane IDs for the validity element of a signal.
+
+        Looks up the actual lane IDs for the lanelets that carry the signal,
+        using the road's lanelet-to-lane mapping.  This is correct for both
+        RHT (negative IDs, right section) and LHT (positive IDs, left section).
+
+        Falls back to a traffic-rule-aware default when the road or mapping is
+        unavailable.
+
+        Args:
+            road_lanelets_with_signal: Lanelet IDs in this road that have the
+                traffic light regulatory element attached.
+            matching_road: Road object for this road_id, or None if not available.
+
+        Returns:
+            List of integer lane IDs to use in the validity element.
+        """
+        if matching_road is not None:
+            lanelet_to_lane = matching_road.get_lanelet_to_lane_mapping()
+            mapped = [
+                lane_id
+                for ll_id in road_lanelets_with_signal
+                if (lane_id := lanelet_to_lane.get(ll_id)) is not None
+            ]
+            if mapped:
+                return mapped
+
+            # Lane mapping exists but the specific lanelets were not found —
+            # fall back to the innermost lane for the road's traffic rule.
+            if matching_road.rule == TrafficRule.LHT:
+                return [1]
+
+        # Default: RHT innermost lane
+        return [-1]
 
     @staticmethod
     def _calculate_signal_position(

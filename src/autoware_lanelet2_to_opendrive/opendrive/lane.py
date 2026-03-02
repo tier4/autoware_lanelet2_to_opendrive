@@ -191,18 +191,22 @@ class Lane:
             rule=rule,
         )
 
-        # Use appropriate boundary based on traffic rule for both single and multi-lane
-        # Both RHT and LHT: Reference line is left boundary (use LEFT_BOUND)
-        # The road@rule attribute indicates the traffic direction
+        # Choose the anchor boundary for width calculation based on traffic rule.
+        # RHT: reference line is at the left edge → anchor = LEFT_BOUND
+        #       Width is measured from the left (inner) boundary outward to the right.
+        # LHT: reference line is at the right edge → anchor = RIGHT_BOUND
+        #       Width is measured from the right (inner) boundary outward to the left.
+        is_lht = (rule or "RHT").upper() == "LHT"
+        width_reference = (
+            WidthReference.RIGHT_BOUND if is_lht else WidthReference.LEFT_BOUND
+        )
 
-        # Use provided width_config or create default (LEFT_BOUND for both RHT and LHT)
         if width_config is None:
-            config = WidthEstimationConfig(reference=WidthReference.LEFT_BOUND)
+            config = WidthEstimationConfig(reference=width_reference)
         else:
-            # Copy config and set reference to LEFT_BOUND for both RHT and LHT
             config = WidthEstimationConfig(
                 num_samples=width_config.num_samples,
-                reference=WidthReference.LEFT_BOUND,
+                reference=width_reference,
                 adaptive_sampling=width_config.adaptive_sampling,
                 min_samples=width_config.min_samples,
                 max_samples=width_config.max_samples,
@@ -262,6 +266,10 @@ class Lane:
         elem.set("id", str(self.lane_id))
         elem.set("type", self.lane_type.value)
         elem.set("level", "true" if self.level else "false")
+
+        # Add rule attribute if specified
+        if self.rule:
+            elem.set("rule", self.rule)
 
         # Add predecessor and successor links if available
         if self.predecessor or self.successor:
