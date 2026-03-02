@@ -267,6 +267,10 @@ class Lane:
         elem.set("type", self.lane_type.value)
         elem.set("level", "true" if self.level else "false")
 
+        # Add rule attribute if specified
+        if self.rule:
+            elem.set("rule", self.rule)
+
         # Add predecessor and successor links if available
         if self.predecessor or self.successor:
             link_elem = ET.SubElement(elem, "link")
