@@ -1,5 +1,7 @@
 """Tests for SignalsAndControllers class."""
 
+from unittest.mock import MagicMock
+
 from autoware_lanelet2_to_opendrive.opendrive import (
     SignalsAndControllers,
     Signal,
@@ -7,6 +9,7 @@ from autoware_lanelet2_to_opendrive.opendrive import (
     ControlEntry,
     SignalType,
 )
+from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
 from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
 
 
@@ -203,3 +206,67 @@ def test_multiple_signals_single_controller():
     assert len(sac.controllers) == 1
     assert len(sac) == 3
     assert len(sac.controllers[0].controls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _get_signal_lane_ids
+# ---------------------------------------------------------------------------
+
+
+def _make_road(rule: TrafficRule, mapping: dict) -> MagicMock:
+    """Return a mock Road object with the given rule and lanelet-to-lane mapping."""
+    road = MagicMock()
+    road.rule = rule
+    road.get_lanelet_to_lane_mapping.return_value = mapping
+    return road
+
+
+def test_get_signal_lane_ids_rht_from_mapping():
+    """RHT: lane IDs come from the road mapping (negative)."""
+    road = _make_road(TrafficRule.RHT, {10: -1, 11: -2})
+    result = SignalsAndControllers._get_signal_lane_ids(
+        road_lanelets_with_signal=[10, 11],
+        matching_road=road,
+    )
+    assert set(result) == {-1, -2}
+    assert all(lane_id < 0 for lane_id in result)
+
+
+def test_get_signal_lane_ids_lht_from_mapping():
+    """LHT: lane IDs come from the road mapping (positive)."""
+    road = _make_road(TrafficRule.LHT, {20: 1, 21: 2})
+    result = SignalsAndControllers._get_signal_lane_ids(
+        road_lanelets_with_signal=[20, 21],
+        matching_road=road,
+    )
+    assert set(result) == {1, 2}
+    assert all(lane_id > 0 for lane_id in result)
+
+
+def test_get_signal_lane_ids_rht_fallback_no_road():
+    """Without a road object, fall back to RHT default (-1)."""
+    result = SignalsAndControllers._get_signal_lane_ids(
+        road_lanelets_with_signal=[99],
+        matching_road=None,
+    )
+    assert result == [-1]
+
+
+def test_get_signal_lane_ids_lht_fallback_missing_lanelet():
+    """LHT: lanelets not in mapping → fall back to LHT innermost lane (+1)."""
+    road = _make_road(TrafficRule.LHT, {})  # empty mapping
+    result = SignalsAndControllers._get_signal_lane_ids(
+        road_lanelets_with_signal=[55],
+        matching_road=road,
+    )
+    assert result == [1]
+
+
+def test_get_signal_lane_ids_rht_fallback_missing_lanelet():
+    """RHT: lanelets not in mapping → fall back to RHT innermost lane (-1)."""
+    road = _make_road(TrafficRule.RHT, {})  # empty mapping
+    result = SignalsAndControllers._get_signal_lane_ids(
+        road_lanelets_with_signal=[55],
+        matching_road=road,
+    )
+    assert result == [-1]
