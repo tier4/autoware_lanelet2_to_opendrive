@@ -22,6 +22,7 @@ from .preprocess_lanelet import (
     PreprocessOperation,
     LaneletPreprocessor,
 )
+from .map_resolver import resolve_map_to_xodr
 
 __all__ = [
     "Point2D",
@@ -39,4 +40,5 @@ __all__ = [
     "LatLonOrigin",
     "PreprocessOperation",
     "LaneletPreprocessor",
+    "resolve_map_to_xodr",
 ]
