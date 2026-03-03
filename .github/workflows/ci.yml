@@ -27,7 +27,7 @@ jobs:
         precommit-continue-on-error: "true"
 
     - name: Run tests
-      run: uv run pytest test/ -v --tb=short -n auto
+      run: uv run pytest -v --tb=short -n auto
 
     - name: Check package can be built
       run: uv build
@@ -161,7 +161,7 @@ jobs:
         uv run convert \
           map=nishishinjuku \
           target=carla \
-          input_map_path=test/data/nishishinjuku.osm \
+          input_map_path=autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm \
           output_map_path=nishishinjuku_carla.xodr
 
     - name: Run CARLA import test
