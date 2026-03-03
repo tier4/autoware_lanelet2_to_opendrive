@@ -78,8 +78,8 @@ jobs:
         run: |
           bump_type="${{ steps.pr-labels.outputs.bump_type }}"
 
-          # Extract current version from pyproject.toml
-          current_version=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/' || true)
+          # Extract current version from autoware_lanelet2_to_opendrive/pyproject.toml
+          current_version=$(grep '^version = ' autoware_lanelet2_to_opendrive/pyproject.toml | sed 's/version = "\(.*\)"/\1/' || true)
 
           # Validate version extraction
           if [ -z "$current_version" ]; then
@@ -111,8 +111,8 @@ jobs:
           new_version="${major}.${minor}.${patch}"
           echo "New version: $new_version"
 
-          # Update pyproject.toml
-          sed -i "s/^version = \".*\"/version = \"$new_version\"/" pyproject.toml
+          # Update autoware_lanelet2_to_opendrive/pyproject.toml
+          sed -i "s/^version = \".*\"/version = \"$new_version\"/" autoware_lanelet2_to_opendrive/pyproject.toml
 
           # Set outputs
           echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
@@ -124,7 +124,7 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          git add pyproject.toml
+          git add autoware_lanelet2_to_opendrive/pyproject.toml
           git commit -m "chore: bump version to ${{ steps.bump-version.outputs.new_version }}"
           git push origin master
 
@@ -200,14 +200,14 @@ jobs:
           export GIT_BRANCH GIT_COMMIT VERSION
 
           # Update mkdocs.yml with version info
-          cat >> mkdocs.yml << EOF
+          cat >> autoware_lanelet2_to_opendrive/mkdocs.yml << EOF
             version_string: v${VERSION}
             git_branch: ${GIT_BRANCH}
             git_commit: ${GIT_COMMIT}
           EOF
 
           # Build HTML documentation
-          uv run mkdocs build
+          uv run mkdocs build --config-file autoware_lanelet2_to_opendrive/mkdocs.yml
 
       - name: Generate PDF documentation
         if: steps.pr-labels.outputs.bump_type != 'none'
@@ -217,19 +217,19 @@ jobs:
           export ENABLE_PDF_EXPORT
 
           # Build with PDF plugin enabled
-          uv run mkdocs build
+          uv run mkdocs build --config-file autoware_lanelet2_to_opendrive/mkdocs.yml
 
           # Copy PDF to root for easy access
-          if [ -f site/pdf/documentation.pdf ]; then
-            cp site/pdf/documentation.pdf documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          if [ -f autoware_lanelet2_to_opendrive/site/pdf/documentation.pdf ]; then
+            cp autoware_lanelet2_to_opendrive/site/pdf/documentation.pdf documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
           fi
 
       - name: Create documentation archive
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
-          cd site
-          zip -r ../documentation-v${{ steps.bump-version.outputs.new_version }}.zip .
-          cd ..
+          cd autoware_lanelet2_to_opendrive/site
+          zip -r ../../documentation-v${{ steps.bump-version.outputs.new_version }}.zip .
+          cd ../..
 
       - name: Upload HTML documentation to release
         if: steps.pr-labels.outputs.bump_type != 'none'
@@ -263,10 +263,10 @@ jobs:
           git fetch origin gh-pages --depth=1 || true
 
           # Deploy new version with mike
-          uv run mike deploy --push --update-aliases ${{ steps.bump-version.outputs.new_version }} latest
+          uv run mike deploy --push --update-aliases --config-file autoware_lanelet2_to_opendrive/mkdocs.yml ${{ steps.bump-version.outputs.new_version }} latest
 
           # Set latest as default version
-          uv run mike set-default --push latest
+          uv run mike set-default --push --config-file autoware_lanelet2_to_opendrive/mkdocs.yml latest
 
       - name: No version bump needed
         if: steps.pr-labels.outputs.bump_type == 'none'
