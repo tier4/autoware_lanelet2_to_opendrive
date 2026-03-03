@@ -127,6 +127,11 @@ class CarlaServerManager:
         Sending SIGTERM only to the shell would leave the UE5 binary running
         as an orphan.  Instead, we send SIGTERM/SIGKILL to the *entire
         process group* created by ``start_new_session=True`` in :meth:`start`.
+
+        After the direct child (CarlaUE5.sh) exits, the UE5 binary and its
+        worker processes may still be shutting down.  We therefore poll the
+        process group with signal 0 and send SIGKILL if it has not fully
+        disappeared within the grace period.
         """
         if self._reused or self._process is None:
             return
@@ -138,6 +143,15 @@ class CarlaServerManager:
             except subprocess.TimeoutExpired:
                 os.killpg(pgid, signal.SIGKILL)
                 self._process.wait()
+
+            # Wait for all processes in the group (UE5 binary, worker threads,
+            # etc.) to finish.  CarlaUE5.sh may exit before the UE5 binary
+            # completes its cleanup, so we poll the group explicitly.
+            if not self._wait_for_pgid_exit(pgid, timeout=5.0):
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
         except ProcessLookupError:
             # Process already exited; nothing to do.
             pass
@@ -166,6 +180,22 @@ class CarlaServerManager:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _wait_for_pgid_exit(self, pgid: int, timeout: float) -> bool:
+        """Poll until the process group is fully gone or *timeout* expires.
+
+        Uses signal 0 (existence check, no real signal delivered) on the
+        group.  Returns ``True`` if the group has disappeared, ``False`` if
+        it still exists when the timeout elapses.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(pgid, 0)  # raises ProcessLookupError if gone
+                time.sleep(0.1)
+            except (ProcessLookupError, PermissionError):
+                return True
+        return False
 
     def _ping(self) -> bool:
         """Try to connect to the CARLA RPC port; return True on success."""
