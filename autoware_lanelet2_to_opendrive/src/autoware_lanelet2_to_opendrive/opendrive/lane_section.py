@@ -138,9 +138,18 @@ class LaneSection:
         # Create lanes and collect them for road mark assignment
         lanes_built: List["Lane"] = []
 
-        # Create lanes based on traffic rule (RHT and LHT use the same structure)
-        for i, lanelet in enumerate(sorted_lanelets):
-            lane_id = -(i + 1)  # -1, -2, -3, ...
+        # For RHT: lanes are in the right section with negative IDs (-1, -2, ...)
+        #   sorted_lanelets[0] = innermost (adjacent to reference line) → lane -1
+        # For LHT: lanes are in the left section with positive IDs (+1, +2, ...)
+        #   sorted_lanelets[-1] = innermost (adjacent to reference line) → lane +1
+        #   Iteration is reversed so the innermost lanelet gets the smallest positive ID.
+        is_lht = traffic_rule_normalized == "LHT"
+        lanelets_ordered = (
+            list(reversed(sorted_lanelets)) if is_lht else sorted_lanelets
+        )
+
+        for i, lanelet in enumerate(lanelets_ordered):
+            lane_id = (i + 1) if is_lht else -(i + 1)
             lane = Lane.construct_from_lanelet(
                 lanelet_map,
                 lanelet,
@@ -149,20 +158,23 @@ class LaneSection:
                 reference_line_spline=reference_line_spline,
             )
             lane.lane_id = lane_id
-            lane_section._add_right_lane(lane)
+            if is_lht:
+                lane_section._add_left_lane(lane)
+            else:
+                lane_section._add_right_lane(lane)
             lanes_built.append(lane)
 
         # Assign road marks based on lane-change permission.
         #
-        # In OpenDRIVE, the road mark on a negative-ID lane describes its INNER
-        # (left/center-side) boundary:
-        #   lane -1  road mark  = boundary between center (0) and lane -1
-        #   lane -2  road mark  = boundary between lane -1 and lane -2
-        #   lane -(i+1) road mark = boundary between lane -i and lane -(i+1)
+        # In OpenDRIVE, the road mark on a lane describes its INNER (center-side) boundary:
+        #   RHT – lane -(i+1) road mark = boundary between lane -i and lane -(i+1)
+        #   LHT – lane +(i+1) road mark = boundary between lane +i and lane +(i+1)
         #
         # Therefore:
-        #   i == 0  (lane -1, innermost): center line — always solid, no lane change
-        #   i  > 0  (lane -(i+1)): check whether sorted_lanelets[i-1] can change right
+        #   i == 0 (innermost lane): center line — always solid, no lane change
+        #   i  > 0: check whether lanelets_ordered[i-1] can change outward
+        #     RHT outward = right  → routing_graph.right(lanelets_ordered[i-1])
+        #     LHT outward = left   → routing_graph.left(lanelets_ordered[i-1])
         for i, lane in enumerate(lanes_built):
             if i == 0:
                 # Innermost lane: road mark describes the center-to-lane boundary.
@@ -170,9 +182,13 @@ class LaneSection:
                 mark_type = RoadMarkType.SOLID
                 lane_change = RoadMarkLaneChange.NONE
             else:
-                # Lane -(i+1): road mark describes the boundary between lane -i and
-                # lane -(i+1).  Check whether the i-th lanelet can change rightward.
-                can_change = routing_graph.right(sorted_lanelets[i - 1]) is not None
+                # Check whether the previous (more inner) lanelet can change outward.
+                if is_lht:
+                    can_change = routing_graph.left(lanelets_ordered[i - 1]) is not None
+                else:
+                    can_change = (
+                        routing_graph.right(lanelets_ordered[i - 1]) is not None
+                    )
                 mark_type = RoadMarkType.BROKEN if can_change else RoadMarkType.SOLID
                 lane_change = (
                     RoadMarkLaneChange.BOTH if can_change else RoadMarkLaneChange.NONE

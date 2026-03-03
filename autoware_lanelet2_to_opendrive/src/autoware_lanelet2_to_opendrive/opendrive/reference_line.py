@@ -105,16 +105,20 @@ class ReferenceLine:
 
         # Select reference lanelet and boundary based on traffic rule
         if traffic_rule_normalized == "RHT":
-            # RHT: Use leftmost lanelet's left boundary
+            # RHT: Use leftmost lanelet's left boundary.
+            # All lanes extend to the right (negative IDs) from this line.
             reference_lanelet = sorted_lanelets[0]
             border = "left"
             boundary = reference_lanelet.leftBound
         else:  # LHT
-            # LHT: Use leftmost lanelet's left boundary (same as RHT for consistent structure)
-            # The road@rule attribute indicates left-hand traffic direction
-            reference_lanelet = sorted_lanelets[0]
-            border = "left"
-            boundary = reference_lanelet.leftBound
+            # LHT: Use rightmost (innermost) lanelet's right boundary.
+            # In LHT, traffic is on the left side of the road.  The innermost lane is
+            # adjacent to the road centre divider, whose edge is the rightBound of the
+            # rightmost lanelet.  All lanes extend to the left (positive IDs) from
+            # this line, matching the OpenDRIVE convention for LHT roads.
+            reference_lanelet = sorted_lanelets[-1]
+            border = "right"
+            boundary = reference_lanelet.rightBound
 
         # Log reference line selection
         logger.debug(f"Traffic rule: {traffic_rule_normalized}")

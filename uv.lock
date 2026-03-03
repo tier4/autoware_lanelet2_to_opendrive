@@ -102,7 +102,7 @@ requires-dist = [
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "1.17.0"
+version = "1.18.1"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },
