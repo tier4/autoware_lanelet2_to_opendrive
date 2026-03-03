@@ -12,6 +12,7 @@ dependencies = [
     "opencv-python>=4.8",
     "numpy>=1.21",
     "pytest>=9.0.1",
+    "python-dotenv>=1.2.2",
 ]
 
 [build-system]

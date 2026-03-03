@@ -10,6 +10,10 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
+
 
 class CarlaServerManager:
     """Start and stop a CARLA UE5 server process.
