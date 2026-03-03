@@ -12,10 +12,10 @@ Standalone (no pytest)::
     from autoware_carla_scenario.examples.spawn_and_idle import SpawnAndIdleScenario
 
     ego = EgoConfig(
-        transform=carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5)),
-        vehicle_type="vehicle.tesla.model3",
+        spawn_index=0,
+        vehicle_type="vehicle.fuso.mitsubishi",
     )
-    queue = ScenarioQueue(map_name="Town01")
+    queue = ScenarioQueue(map_name="Town10HD_Opt")
     queue.add(SpawnAndIdleScenario(ego))
 
     with queue:
@@ -32,8 +32,6 @@ import argparse
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-import carla as _carla
 
 from autoware_carla_scenario import BaseScenario, EgoConfig, ScenarioQueue
 
@@ -85,15 +83,30 @@ class SpawnAndIdleScenario(BaseScenario):
 def main() -> None:
     """Run SpawnAndIdleScenario as a standalone script.
 
-    Example::
+    Three map-loading modes are supported:
 
-        uv run spawn-and-idle
-        uv run spawn-and-idle --map Town02
+    * ``--map`` only — load a built-in CARLA map by name::
+
+        uv run spawn-and-idle --map Town10HD_Opt
+
+    * ``--xodr`` only — generate a world directly from an OpenDRIVE file
+      (no CARLA mesh/texture assets)::
+
         uv run spawn-and-idle --xodr /path/to/map.xodr
-        uv run spawn-and-idle --x 50.0 --y -20.0 --z 0.5
+
+    * ``--xodr`` + ``--map`` — overwrite mode: copy *xodr* to the path given
+      by the ``<MAP_NAME_PATH>`` environment variable, then load the built-in
+      map (retains full CARLA assets).
+      The env-var name is derived from the map name by converting CamelCase to
+      ``UPPER_SNAKE_CASE_PATH`` (e.g. ``NishishinjyukuMap`` →
+      ``NISHISHINJYUKU_MAP_PATH``)::
+
+        export NISHISHINJYUKU_MAP_PATH=/opt/carla/.../NishishinjyukuMap.xodr
+        uv run spawn-and-idle --xodr /path/to/my.xodr --map NishishinjyukuMap
     """
     parser = argparse.ArgumentParser(
-        description="Run the SpawnAndIdle example scenario against a running CARLA server."
+        description="Run the SpawnAndIdle example scenario against a running CARLA server.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--host", default="localhost", help="CARLA server host (default: localhost)"
@@ -101,34 +114,43 @@ def main() -> None:
     parser.add_argument(
         "--port", type=int, default=2000, help="CARLA server port (default: 2000)"
     )
-
-    map_group = parser.add_mutually_exclusive_group()
-    map_group.add_argument(
-        "--map", default="Town01", help="Built-in CARLA map name (default: Town01)"
+    parser.add_argument(
+        "--map",
+        default=None,
+        help=(
+            "Built-in CARLA map name (e.g. Town10HD_Opt). "
+            "Used alone to load by name, or together with --xodr for overwrite mode."
+        ),
     )
-    map_group.add_argument(
-        "--xodr", type=Path, default=None, help="Path to an OpenDRIVE (.xodr) map file"
+    parser.add_argument(
+        "--xodr",
+        type=Path,
+        default=None,
+        help=(
+            "Path to an OpenDRIVE (.xodr) file. "
+            "Used alone to generate a world, or together with --map for overwrite mode."
+        ),
     )
-
     parser.add_argument(
         "--vehicle",
-        default="vehicle.tesla.model3",
-        help="CARLA blueprint ID for the ego vehicle (default: vehicle.tesla.model3)",
+        default="vehicle.fuso.mitsubishi",
+        help="CARLA blueprint ID for the ego vehicle (default: vehicle.fuso.mitsubishi)",
     )
     parser.add_argument(
-        "--x", type=float, default=0.0, help="Ego spawn X (default: 0.0)"
-    )
-    parser.add_argument(
-        "--y", type=float, default=0.0, help="Ego spawn Y (default: 0.0)"
-    )
-    parser.add_argument(
-        "--z", type=float, default=0.5, help="Ego spawn Z (default: 0.5)"
+        "--spawn-index",
+        type=int,
+        default=0,
+        help="Index into the map's spawn point list (default: 0)",
     )
 
     args = parser.parse_args()
 
+    # Validate: at least one of --map or --xodr must be given
+    if args.map is None and args.xodr is None:
+        parser.error("At least one of --map or --xodr must be specified.")
+
     ego = EgoConfig(
-        transform=_carla.Transform(_carla.Location(x=args.x, y=args.y, z=args.z)),
+        spawn_index=args.spawn_index,
         vehicle_type=args.vehicle,
     )
 
@@ -136,7 +158,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         xodr_path=args.xodr,
-        map_name=None if args.xodr else args.map,
+        map_name=args.map,
     )
     queue.add(SpawnAndIdleScenario(ego))
 

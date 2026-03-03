@@ -64,7 +64,7 @@ def _make_ego_config() -> EgoConfig:
 
     return EgoConfig(
         transform=carla.Transform(carla.Location(x=0, y=0, z=0)),
-        vehicle_type="vehicle.tesla.model3",
+        vehicle_type="vehicle.fuso.mitsubishi",
     )
 
 

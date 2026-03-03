@@ -50,10 +50,10 @@ class _ImmediateScenario(BaseScenario):
 
 _INTEGRATION_EGO = EgoConfig(
     transform=_carla.Transform(_carla.Location(x=0.0, y=0.0, z=0.0)),
-    vehicle_type="vehicle.tesla.model3",
+    vehicle_type="vehicle.fuso.mitsubishi",
 )
 
-_queue = ScenarioQueue(map_name="Town01")
+_queue = ScenarioQueue(map_name="Town10HD_Opt")
 
 # Register integration scenarios.  Add more CarlaScenarioFixture calls here
 # as needed; they will all run in the same CARLA session.

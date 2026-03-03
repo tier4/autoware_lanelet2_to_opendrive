@@ -26,7 +26,7 @@ class ScenarioQueue:
 
     Example – minimal usage::
 
-        queue = ScenarioQueue(map_name="Town01")
+        queue = ScenarioQueue(map_name="Town10HD_Opt")
         queue.add(MyScenario(ego_config))
         queue.add(AnotherScenario(ego_config))
 
@@ -36,7 +36,7 @@ class ScenarioQueue:
     Example – with an externally-managed server::
 
         with CarlaServerManager() as server:
-            queue = ScenarioQueue(server=server, map_name="Town01")
+            queue = ScenarioQueue(server=server, map_name="Town10HD_Opt")
             queue.add(MyScenario(ego_config))
             results = queue.run_all()
     """
@@ -59,8 +59,15 @@ class ScenarioQueue:
             server: An externally-managed :class:`CarlaServerManager`.  When
                 provided the queue borrows it (does not start/stop it).  When
                 *None* a new manager is created and owned by this queue.
-            xodr_path: OpenDRIVE map file to load on start (optional).
+            xodr_path: OpenDRIVE map file path (optional).  Behaviour depends
+                on whether *map_name* is also provided:
+
+                * *xodr_path* only → ``generate_opendrive_world`` (no built-in assets).
+                * *xodr_path* + *map_name* → overwrite mode: the file at
+                  ``<MAP_NAME_PATH>`` env var is replaced with *xodr_path*,
+                  then the map is loaded by name (retains full CARLA assets).
             map_name: Built-in CARLA map name to load on start (optional).
+                Used alone or together with *xodr_path* (see above).
             host: CARLA RPC host.
             port: CARLA RPC port.
             timeout_seconds: Default per-scenario timeout.
@@ -175,7 +182,9 @@ class ScenarioQueue:
             timeout_seconds=self._timeout_seconds,
             output_dir=self._output_dir,
         )
-        if self._xodr_path is not None:
+        if self._xodr_path is not None and self._map_name is not None:
+            self._runner.load_map_by_overwriting_xodr(self._xodr_path, self._map_name)
+        elif self._xodr_path is not None:
             self._runner.load_map_from_xodr(self._xodr_path)
         elif self._map_name is not None:
             self._runner.load_map_by_name(self._map_name)
@@ -216,9 +225,9 @@ class ScenarioQueue:
 
             ego = EgoConfig(
                 transform=carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5)),
-                vehicle_type="vehicle.tesla.model3",
+                vehicle_type="vehicle.fuso.mitsubishi",
             )
-            _queue = ScenarioQueue(map_name="Town01")
+            _queue = ScenarioQueue(map_name="Town10HD_Opt")
             carla_queue  = _queue.as_fixture()              # auto-skip baked in
             my_result    = CarlaScenarioFixture(MyScenario, ego, queue=_queue).as_fixture()
 

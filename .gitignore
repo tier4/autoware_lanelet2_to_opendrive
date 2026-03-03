@@ -21,3 +21,6 @@ outputs/
 
 # MkDocs build output
 site/
+
+# Scenario output
+scenario_outputs

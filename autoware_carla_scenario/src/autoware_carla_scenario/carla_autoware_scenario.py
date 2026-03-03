@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
@@ -11,6 +14,29 @@ from .ego import EgoVehicle
 from .recording import ScenarioRecorder
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
+
+
+def _map_name_to_env_var(map_name: str) -> str:
+    """Convert a CamelCase map name to an UPPER_SNAKE_CASE environment variable name.
+
+    A ``_PATH`` suffix is appended so callers can use the variable to locate
+    the ``.xodr`` file inside the CARLA installation.
+
+    Examples::
+
+        _map_name_to_env_var("NishishinjyukuMap")  # -> "NISHISHINJYUKU_MAP_PATH"
+        _map_name_to_env_var("Town01")             # -> "TOWN01_PATH"
+        _map_name_to_env_var("Town10HD_Opt")       # -> "TOWN10_HD_OPT_PATH"
+
+    Args:
+        map_name: CamelCase CARLA map name.
+
+    Returns:
+        The derived environment variable name.
+    """
+    # Insert underscore between a lowercase/digit and the following uppercase letter
+    snake = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", map_name)
+    return snake.upper() + "_PATH"
 
 
 class CarlaAutowareScenario:
@@ -23,7 +49,7 @@ class CarlaAutowareScenario:
 
         with CarlaServerManager() as server:
             runner = CarlaAutowareScenario(server)
-            runner.load_map_by_name("Town01")
+            runner.load_map_by_name("Town10HD_Opt")
             result = runner.run_scenario(MyScenario(ego_config))
             assert result.passed
     """
@@ -73,12 +99,66 @@ class CarlaAutowareScenario:
             self._client.get_world().get_settings(),
         )
 
+    def load_map_by_overwriting_xodr(self, xodr_path: Path, map_name: str) -> None:
+        """Load a built-in CARLA map after overwriting its internal ``.xodr`` file.
+
+        The destination path is read from an environment variable derived from
+        *map_name* by converting CamelCase to ``UPPER_SNAKE_CASE_PATH``
+        (e.g. ``NishishinjyukuMap`` → ``NISHISHINJYUKU_MAP_PATH``).
+
+        This allows using the full CARLA map assets (meshes, textures, etc.)
+        while replacing only the road network definition.
+
+        Args:
+            xodr_path: Path to the ``.xodr`` file that will overwrite the
+                internal map file.
+            map_name: Built-in CARLA map name (e.g. ``"NishishinjyukuMap"``).
+                Must exist in the server's available maps.
+
+        Raises:
+            RuntimeError: If the derived environment variable is not set.
+            FileNotFoundError: If *xodr_path* does not exist.
+        """
+        env_var = _map_name_to_env_var(map_name)
+        dest_str = os.environ.get(env_var)
+        if not dest_str:
+            raise RuntimeError(
+                f"Environment variable '{env_var}' is not set. "
+                f"Set it to the path of the internal .xodr file for map '{map_name}' "
+                f"inside the CARLA installation "
+                f"(e.g. /opt/carla/CarlaUE5/Content/Carla/Maps/{map_name}.xodr)."
+            )
+        dest = Path(dest_str)
+        shutil.copy2(xodr_path, dest)
+        self.load_map_by_name(map_name)
+
     def load_map_by_name(self, map_name: str) -> None:
-        """Load a built-in CARLA map by name (e.g. ``"Town01"``).
+        """Load a built-in CARLA map by name (e.g. ``"Town10HD_Opt"``).
+
+        Available maps are checked before loading.  Both short names
+        (``"Town10HD_Opt"``) and full asset paths (``"/Game/Carla/Maps/Town10HD_Opt"``)
+        are accepted.
 
         Args:
             map_name: Name of the CARLA map asset.
+
+        Raises:
+            ValueError: If *map_name* is not found in the server's available
+                maps, with the full list of valid names included in the message.
         """
+        available: list[str] = self._client.get_available_maps()
+
+        # Accept either a full asset path or the short name (last path segment).
+        def _matches(candidate: str) -> bool:
+            return candidate == map_name or candidate.split("/")[-1] == map_name
+
+        if not any(_matches(m) for m in available):
+            short_names = sorted(m.split("/")[-1] for m in available)
+            raise ValueError(
+                f"Map {map_name!r} is not available on the CARLA server. "
+                f"Available maps: {short_names}"
+            )
+
         self._world = self._client.load_world(map_name)
 
     # ------------------------------------------------------------------

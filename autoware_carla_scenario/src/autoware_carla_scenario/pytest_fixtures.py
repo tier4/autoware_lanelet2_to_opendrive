@@ -37,11 +37,11 @@ class CarlaScenarioFixture:
 
         ego = EgoConfig(
             transform=carla.Transform(carla.Location(x=0, y=0, z=0)),
-            vehicle_type="vehicle.tesla.model3",
+            vehicle_type="vehicle.fuso.mitsubishi",
         )
 
         # 1. Create the queue (no server started yet)
-        _queue = ScenarioQueue(map_name="Town01")
+        _queue = ScenarioQueue(map_name="Town10HD_Opt")
 
         # 2. Register scenarios at import time
         my_result     = CarlaScenarioFixture(MyScenario,     ego, queue=_queue).as_fixture()

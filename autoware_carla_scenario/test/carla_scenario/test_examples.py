@@ -38,10 +38,10 @@ from autoware_carla_scenario.examples.spawn_and_idle import SpawnAndIdleScenario
 
 _ego = EgoConfig(
     transform=carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5)),
-    vehicle_type="vehicle.tesla.model3",
+    vehicle_type="vehicle.fuso.mitsubishi",
 )
 
-_queue = ScenarioQueue(map_name="Town01")
+_queue = ScenarioQueue(map_name="Town10HD_Opt")
 
 # Each CarlaScenarioFixture call registers one scenario and returns a
 # session-scoped pytest fixture that holds its ScenarioResult.

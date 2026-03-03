@@ -25,7 +25,7 @@ def _make_ego_config() -> EgoConfig:
 
     return EgoConfig(
         transform=carla.Transform(carla.Location(x=0, y=0, z=0)),
-        vehicle_type="vehicle.tesla.model3",
+        vehicle_type="vehicle.fuso.mitsubishi",
     )
 
 
@@ -56,7 +56,7 @@ def _make_queue_with_mock_runner() -> tuple[ScenarioQueue, MagicMock]:
         mock_runner = MagicMock(spec=CarlaAutowareScenario)
         mock_runner_cls.return_value = mock_runner
 
-        queue = ScenarioQueue(map_name="Town01")
+        queue = ScenarioQueue(map_name="Town10HD_Opt")
         queue.start()  # sets self._runner to mock_runner
 
     return queue, mock_runner
