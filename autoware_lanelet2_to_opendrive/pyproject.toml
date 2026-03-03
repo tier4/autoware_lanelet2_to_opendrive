@@ -2,7 +2,7 @@
 name = "autoware-lanelet2-to-opendrive"
 version = "1.18.1"
 description = "Convert Lanelet2 map format to OpenDRIVE format for Autoware"
-readme = "../README.md"
+readme = "README.md"
 authors = [
     { name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }
 ]
