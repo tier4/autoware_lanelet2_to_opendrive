@@ -30,7 +30,9 @@ jobs:
       run: uv run pytest -v --tb=short -n auto
 
     - name: Check package can be built
-      run: uv build
+      run: |
+        uv build --package autoware-lanelet2-to-opendrive
+        uv build --package autoware-carla-scenario
 
   lint-and-format:
     runs-on: ubuntu-22.04
