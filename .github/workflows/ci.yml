@@ -106,11 +106,11 @@ jobs:
         # Get git info
         GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
         GIT_COMMIT=$(git rev-parse --short HEAD)
-        VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+        VERSION=$(grep '^version = ' autoware_lanelet2_to_opendrive/pyproject.toml | sed 's/version = "\(.*\)"/\1/')
         export GIT_BRANCH GIT_COMMIT VERSION
 
         # Update mkdocs.yml with version info
-        cat >> mkdocs.yml << EOF
+        cat >> autoware_lanelet2_to_opendrive/mkdocs.yml << EOF
           version_string: v${VERSION}
           git_branch: ${GIT_BRANCH}
           git_commit: ${GIT_COMMIT}
@@ -118,14 +118,14 @@ jobs:
 
         # Build documentation (--strict treats warnings as errors)
         # Use mkdocs.ci.yml to exclude with-pdf plugin (avoids PDF WARNING in strict mode)
-        uv run mkdocs build --strict --config-file mkdocs.ci.yml
+        uv run mkdocs build --strict --config-file autoware_lanelet2_to_opendrive/mkdocs.ci.yml
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v4
       if: success()
       with:
         name: documentation
-        path: site/
+        path: autoware_lanelet2_to_opendrive/site/
         retention-days: 7
 
   check-src-changes:
