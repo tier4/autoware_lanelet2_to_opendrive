@@ -28,9 +28,14 @@ With pytest — see ``test/carla_scenario/test_examples.py``.
 
 from __future__ import annotations
 
+import argparse
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from autoware_carla_scenario import BaseScenario, EgoConfig
+import carla as _carla
+
+from autoware_carla_scenario import BaseScenario, EgoConfig, ScenarioQueue
 
 if TYPE_CHECKING:
     import carla
@@ -75,3 +80,73 @@ class SpawnAndIdleScenario(BaseScenario):
         """Return ``True`` after :attr:`DONE_AFTER_TICKS` ticks."""
         self._ticks += 1
         return self._ticks >= self.DONE_AFTER_TICKS
+
+
+def main() -> None:
+    """Run SpawnAndIdleScenario as a standalone script.
+
+    Example::
+
+        uv run spawn-and-idle
+        uv run spawn-and-idle --map Town02
+        uv run spawn-and-idle --xodr /path/to/map.xodr
+        uv run spawn-and-idle --x 50.0 --y -20.0 --z 0.5
+    """
+    parser = argparse.ArgumentParser(
+        description="Run the SpawnAndIdle example scenario against a running CARLA server."
+    )
+    parser.add_argument(
+        "--host", default="localhost", help="CARLA server host (default: localhost)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=2000, help="CARLA server port (default: 2000)"
+    )
+
+    map_group = parser.add_mutually_exclusive_group()
+    map_group.add_argument(
+        "--map", default="Town01", help="Built-in CARLA map name (default: Town01)"
+    )
+    map_group.add_argument(
+        "--xodr", type=Path, default=None, help="Path to an OpenDRIVE (.xodr) map file"
+    )
+
+    parser.add_argument(
+        "--vehicle",
+        default="vehicle.tesla.model3",
+        help="CARLA blueprint ID for the ego vehicle (default: vehicle.tesla.model3)",
+    )
+    parser.add_argument(
+        "--x", type=float, default=0.0, help="Ego spawn X (default: 0.0)"
+    )
+    parser.add_argument(
+        "--y", type=float, default=0.0, help="Ego spawn Y (default: 0.0)"
+    )
+    parser.add_argument(
+        "--z", type=float, default=0.5, help="Ego spawn Z (default: 0.5)"
+    )
+
+    args = parser.parse_args()
+
+    ego = EgoConfig(
+        transform=_carla.Transform(_carla.Location(x=args.x, y=args.y, z=args.z)),
+        vehicle_type=args.vehicle,
+    )
+
+    queue = ScenarioQueue(
+        host=args.host,
+        port=args.port,
+        xodr_path=args.xodr,
+        map_name=None if args.xodr else args.map,
+    )
+    queue.add(SpawnAndIdleScenario(ego))
+
+    with queue:
+        results = queue.run_all()
+
+    result = results[0]
+    print(result)
+    sys.exit(0 if result.passed else 1)
+
+
+if __name__ == "__main__":
+    main()
