@@ -59,16 +59,6 @@ class TestGetConverterCommitHash:
             result = _get_converter_commit_hash()
         assert result == "unknown"
 
-    def test_returns_unknown_when_no_git_dir(self) -> None:
-        # Verify "unknown" is returned when git itself errors out,
-        # which covers the CalledProcessError branch regardless of .git presence.
-        with patch(
-            "subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, "git"),
-        ):
-            result = _get_converter_commit_hash()
-        assert result == "unknown"
-
 
 # ---------------------------------------------------------------------------
 # resolve_map_to_xodr – .xodr passthrough

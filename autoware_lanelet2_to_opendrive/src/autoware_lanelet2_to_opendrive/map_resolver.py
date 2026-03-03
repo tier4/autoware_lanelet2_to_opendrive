@@ -128,7 +128,23 @@ def _convert_lanelet2_to_xodr_cached(
         config = ConversionConfig()
 
     # ------------------------------------------------------------------
-    # Determine coordinate origin
+    # Build cache key and check for a hit
+    # (origin is deferred until after the hit check – not needed on hits)
+    # ------------------------------------------------------------------
+    source_sha256 = _sha256_of_file(lanelet2_path)
+    converter_commit = _get_converter_commit_hash()
+    cache_key = f"{source_sha256[:16]}_{converter_commit[:12]}"
+
+    cache_dir = _CACHE_DIR / cache_key
+    cached_xodr = cache_dir / "map.xodr"
+    cache_info_file = cache_dir / "cache_info.json"
+
+    if cached_xodr.exists() and cache_info_file.exists():
+        logger.info("Cache hit – reusing converted OpenDRIVE map: %s", cached_xodr)
+        return cached_xodr
+
+    # ------------------------------------------------------------------
+    # Determine coordinate origin (only needed on cache miss)
     # ------------------------------------------------------------------
     from .projection import latlon_to_lanelet2_origin, mgrs_to_lanelet2_origin
 
@@ -144,21 +160,6 @@ def _convert_lanelet2_to_xodr_cached(
         )
 
     # ------------------------------------------------------------------
-    # Build cache key and check for a hit
-    # ------------------------------------------------------------------
-    source_sha256 = _sha256_of_file(lanelet2_path)
-    converter_commit = _get_converter_commit_hash()
-    cache_key = f"{source_sha256[:16]}_{converter_commit[:12]}"
-
-    cache_dir = _CACHE_DIR / cache_key
-    cached_xodr = cache_dir / "map.xodr"
-    cache_info_file = cache_dir / "cache_info.json"
-
-    if cached_xodr.exists() and cache_info_file.exists():
-        logger.info("Cache hit – reusing converted OpenDRIVE map: %s", cached_xodr)
-        return cached_xodr
-
-    # ------------------------------------------------------------------
     # Load Lanelet2 map and convert
     # ------------------------------------------------------------------
     logger.info("Converting Lanelet2 map to OpenDRIVE: %s", lanelet2_path)
@@ -171,7 +172,7 @@ def _convert_lanelet2_to_xodr_cached(
     from .opendrive.opendrive import save_opendrive_to_file
 
     projector = MGRSProjector(origin)
-    lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
+    lanelet_map = lanelet2.io.load(lanelet2_path, projector)
 
     opendrive, _ = convert_lanelet2_to_opendrive(lanelet_map, config, effective_mgrs)
 
@@ -181,10 +182,8 @@ def _convert_lanelet2_to_xodr_cached(
     cache_dir.mkdir(parents=True, exist_ok=True)
     save_opendrive_to_file(opendrive, cached_xodr)
 
-    xodr_sha256 = _sha256_of_file(cached_xodr)
     cache_info: dict = {
         "source_sha256": source_sha256,
-        "xodr_sha256": xodr_sha256,
         "converter_commit": converter_commit,
         "source_path": str(lanelet2_path),
     }
