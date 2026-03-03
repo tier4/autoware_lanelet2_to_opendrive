@@ -22,7 +22,7 @@ from .preprocess_lanelet import (
     PreprocessOperation,
     LaneletPreprocessor,
 )
-from .scenario_utils import resolve_map_to_xodr
+from .map_resolver import resolve_map_to_xodr
 
 __all__ = [
     "Point2D",

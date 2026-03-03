@@ -1,4 +1,4 @@
-"""Unit tests for scenario_utils – map resolution and /tmp caching."""
+"""Unit tests for map_resolver – map resolution and /tmp caching."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from autoware_lanelet2_to_opendrive.scenario_utils import (
+from autoware_lanelet2_to_opendrive.map_resolver import (
     _CACHE_DIR,
     _convert_lanelet2_to_xodr_cached,
     _get_converter_commit_hash,
@@ -92,7 +92,7 @@ class TestResolveMapToXodrPassthrough:
         xodr = tmp_path / "map.xodr"
         xodr.write_text("<OpenDRIVE/>")
         with patch(
-            "autoware_lanelet2_to_opendrive.scenario_utils._convert_lanelet2_to_xodr_cached"
+            "autoware_lanelet2_to_opendrive.map_resolver._convert_lanelet2_to_xodr_cached"
         ) as mock_convert:
             resolve_map_to_xodr(xodr)
             mock_convert.assert_not_called()
@@ -111,7 +111,7 @@ class TestResolveMapToXodrConversion:
         expected.write_text("<OpenDRIVE/>")
 
         with patch(
-            "autoware_lanelet2_to_opendrive.scenario_utils._convert_lanelet2_to_xodr_cached",
+            "autoware_lanelet2_to_opendrive.map_resolver._convert_lanelet2_to_xodr_cached",
             return_value=expected,
         ) as mock_convert:
             result = resolve_map_to_xodr(osm)
@@ -126,7 +126,7 @@ class TestResolveMapToXodrConversion:
         expected.write_text("<OpenDRIVE/>")
 
         with patch(
-            "autoware_lanelet2_to_opendrive.scenario_utils._convert_lanelet2_to_xodr_cached",
+            "autoware_lanelet2_to_opendrive.map_resolver._convert_lanelet2_to_xodr_cached",
             return_value=expected,
         ) as mock_convert:
             result = resolve_map_to_xodr(bin_file)
@@ -147,7 +147,7 @@ class TestResolveMapToXodrConversion:
         expected.write_text("<OpenDRIVE/>")
 
         with patch(
-            "autoware_lanelet2_to_opendrive.scenario_utils._convert_lanelet2_to_xodr_cached",
+            "autoware_lanelet2_to_opendrive.map_resolver._convert_lanelet2_to_xodr_cached",
             return_value=expected,
         ) as mock_convert:
             resolve_map_to_xodr(osm, config=config, mgrs_code="54SUE")
@@ -188,11 +188,11 @@ class TestCacheHit:
 
         with (
             patch(
-                "autoware_lanelet2_to_opendrive.scenario_utils._sha256_of_file",
+                "autoware_lanelet2_to_opendrive.map_resolver._sha256_of_file",
                 return_value=fake_sha,
             ),
             patch(
-                "autoware_lanelet2_to_opendrive.scenario_utils._get_converter_commit_hash",
+                "autoware_lanelet2_to_opendrive.map_resolver._get_converter_commit_hash",
                 return_value=fake_commit,
             ),
         ):
@@ -222,11 +222,11 @@ class TestCacheHit:
         # network/IO-heavy code was executed (lanelet2 module untouched).
         with (
             patch(
-                "autoware_lanelet2_to_opendrive.scenario_utils._sha256_of_file",
+                "autoware_lanelet2_to_opendrive.map_resolver._sha256_of_file",
                 return_value=fake_sha,
             ),
             patch(
-                "autoware_lanelet2_to_opendrive.scenario_utils._get_converter_commit_hash",
+                "autoware_lanelet2_to_opendrive.map_resolver._get_converter_commit_hash",
                 return_value=fake_commit,
             ),
         ):
