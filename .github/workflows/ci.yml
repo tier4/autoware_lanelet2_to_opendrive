@@ -139,7 +139,7 @@ jobs:
       with:
         filters: |
           src:
-            - 'src/autoware_lanelet2_to_opendrive/**'
+            - 'autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/**'
 
   carla-import-test:
     needs: check-src-changes
