@@ -102,7 +102,10 @@ class TestMapManagerSingleton:
         with (
             patch("lanelet2.io.load", return_value=MagicMock()),
             patch("lanelet2.io.Origin", return_value=MagicMock()),
-            patch("lanelet2.projection.UtmProjector", return_value=MagicMock()),
+            patch(
+                "autoware_carla_scenario.coordinate.map_manager.MGRSProjector",
+                return_value=MagicMock(),
+            ),
             patch(
                 "autoware_carla_scenario.coordinate.map_manager.RoadNetwork",
                 return_value=MagicMock(),

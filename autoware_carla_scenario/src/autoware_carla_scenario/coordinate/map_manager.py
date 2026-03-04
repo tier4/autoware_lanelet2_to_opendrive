@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Optional
 
 import lanelet2.io
-import lanelet2.projection
+from autoware_lanelet2_extension_python.projection import MGRSProjector
 from pyxodr.road_objects.network import RoadNetwork
 
 
@@ -92,7 +92,7 @@ class MapManager:
 
         # Load Lanelet2 map using the same origin as the XODR
         origin = lanelet2.io.Origin(lat, lon)
-        projector = lanelet2.projection.UtmProjector(origin)
+        projector = MGRSProjector(origin)
         self._lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
 
         # Load OpenDRIVE road network (pyxodr takes a file path, not content)
