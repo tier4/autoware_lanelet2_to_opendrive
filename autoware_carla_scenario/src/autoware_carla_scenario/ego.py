@@ -10,6 +10,7 @@ import numpy as np
 if TYPE_CHECKING:
     import carla
 
+from .constants import EGO_ROLE_NAME
 from .scenario_base import EgoConfig
 
 
@@ -78,7 +79,7 @@ class EgoVehicle:
         vehicle_bp = bp_lib.find(config.vehicle_type)
         if vehicle_bp is None:
             raise RuntimeError(f"Blueprint not found: {config.vehicle_type}")
-        vehicle_bp.set_attribute("role_name", "Ego")
+        vehicle_bp.set_attribute("role_name", EGO_ROLE_NAME)
 
         # try_spawn_actor returns None on collision / out-of-bounds instead of
         # raising an opaque std::exception like spawn_actor does.

@@ -8,6 +8,7 @@ Public API re-exported for convenience::
         CarlaServerManager,
         BaseCondition,
         BaseScenario,
+        CollisionCondition,
         EgoConfig,
         EgoVehicle,
         ScenarioQueue,
@@ -18,7 +19,12 @@ Public API re-exported for convenience::
 """
 
 from .carla_autoware_scenario import CarlaAutowareScenario
-from .conditions import BaseCondition, ScenarioResult, TimeoutCondition
+from .conditions import (
+    BaseCondition,
+    CollisionCondition,
+    ScenarioResult,
+    TimeoutCondition,
+)
 from .ego import EgoVehicle
 from .pytest_fixtures import CarlaScenarioFixture
 from .recording import ScenarioRecorder
@@ -32,6 +38,7 @@ __all__ = [
     "CarlaServerManager",
     "BaseCondition",
     "BaseScenario",
+    "CollisionCondition",
     "EgoConfig",
     "EgoVehicle",
     "ScenarioQueue",
