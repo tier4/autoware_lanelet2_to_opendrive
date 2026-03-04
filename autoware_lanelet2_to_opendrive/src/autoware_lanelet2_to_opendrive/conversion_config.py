@@ -23,9 +23,20 @@ class WidthReference(Enum):
 class OriginSpec:
     """Coordinate origin specification for map conversion.
 
-    Supports multiple origin specification methods:
-    - MGRS grid code (mgrs_code)
-    - Latitude/Longitude coordinates (lat/lon)
+    Exactly one of the following combinations must be set:
+
+    * ``mgrs_code`` only – the origin is the south-west corner of the MGRS
+      grid square (e.g. ``"54SUE"``).  The geoReference PROJ string is
+      derived from the grid square's lat/lon.
+    * ``lat`` + ``lon`` – the origin is given directly as WGS84 decimal
+      degrees.  Use this when an MGRS offset has been applied (the offset
+      shifts the origin away from the grid square corner) or when a lat/lon
+      origin is preferred.  The geoReference PROJ string uses these values
+      directly.
+    * ``mgrs_code`` + ``lat`` + ``lon`` – all three fields set. This occurs
+      when an MGRS grid is specified together with an offset: the lat/lon
+      hold the offset-adjusted position while ``mgrs_code`` retains the
+      grid zone for reference. The geoReference uses ``lat``/``lon``.
     """
 
     mgrs_code: Optional[str] = None
