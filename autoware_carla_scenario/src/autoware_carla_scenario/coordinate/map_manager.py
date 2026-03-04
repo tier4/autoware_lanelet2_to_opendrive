@@ -112,12 +112,14 @@ class MapManager:
         return self._lanelet_map
 
     @property
-    def road_network(self):  # type: ignore[return]
-        """The loaded pyxodr.RoadNetwork instance."""
+    def road_network(self) -> RoadNetwork:
+        """The loaded pyxodr.RoadNetwork instance (roads are pre-loaded)."""
         if self._road_network is None:
             raise RuntimeError(
                 "MapManager is not initialized. Call initialize() first."
             )
+        if not self._road_network.road_ids_to_object:
+            self._road_network.get_roads()
         return self._road_network
 
     @property

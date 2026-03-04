@@ -125,11 +125,6 @@ def _lanelet2_to_carla(pose: Lanelet2Pose) -> CarlaWorldPose:
 def _opendrive_to_carla(pose: OpenDrivePose) -> CarlaWorldPose:
     """Convert an OpenDRIVE (s, t) pose to CARLA world coordinates."""
     mm = MapManager.get_instance()
-
-    # Ensure road objects are loaded
-    if not mm.road_network.road_ids_to_object:
-        mm.road_network.get_roads()
-
     road = mm.road_network.road_ids_to_object[pose.road_id]
     ref_line: np.ndarray = road.reference_line  # shape (N, 2)
 
@@ -165,10 +160,6 @@ def _carla_to_opendrive(pose: CarlaWorldPose) -> OpenDrivePose:
     od_x = pose.x
     od_y = -pose.y
     od_heading = -math.radians(pose.yaw)
-
-    # Ensure road objects are loaded
-    if not mm.road_network.road_ids_to_object:
-        mm.road_network.get_roads()
 
     best_road_id: str = ""
     best_s: float = 0.0
@@ -263,12 +254,7 @@ def _interpolate_at_s(
     ys = np.array([p[1] for p in points])
     zs = np.array([p[2] for p in points])
 
-    arc = np.zeros(len(points))
-    for i in range(1, len(points)):
-        dx = xs[i] - xs[i - 1]
-        dy = ys[i] - ys[i - 1]
-        arc[i] = arc[i - 1] + math.sqrt(dx * dx + dy * dy)
-
+    arc = _compute_arc_lengths_2d(np.column_stack([xs, ys]))
     s_clamped = float(np.clip(s, arc[0], arc[-1]))
 
     x = float(np.interp(s_clamped, arc, xs))
@@ -329,12 +315,7 @@ def _project_to_centerline(
     xs = np.array([p[0] for p in points])
     ys = np.array([p[1] for p in points])
 
-    arc = np.zeros(len(points))
-    for i in range(1, len(points)):
-        dx = xs[i] - xs[i - 1]
-        dy = ys[i] - ys[i - 1]
-        arc[i] = arc[i - 1] + math.sqrt(dx * dx + dy * dy)
-
+    arc = _compute_arc_lengths_2d(np.column_stack([xs, ys]))
     dists = np.sqrt((xs - x) ** 2 + (ys - y) ** 2)
     idx = int(np.argmin(dists))
     s = float(arc[idx])
@@ -348,28 +329,25 @@ def _project_to_centerline(
 
 
 def _normalize_angle(angle: float) -> float:
-    """Normalize angle to [−π, π]."""
-    while angle > math.pi:
-        angle -= 2.0 * math.pi
-    while angle < -math.pi:
-        angle += 2.0 * math.pi
-    return angle
+    """Normalize angle to (−π, π]."""
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
 def _find_lane_at_t(road, s: float, t: float) -> int:
     """Find the lane ID at lateral offset t for a given s on a road.
 
-    Iterates lane sections to find which lane's cumulative width range
-    contains |t|, then returns the signed lane_id.
+    Returns the first lane on the correct side (positive t = left lanes with
+    positive IDs; negative t = right lanes with negative IDs).  Lane ID is
+    context-only information, so a best-effort match is sufficient.
 
-    Returns 0 if no lane sections are found or no matching lane is found.
+    Returns 0 if no lane sections are found.
     """
     lane_sections = road.lane_sections
     if not lane_sections:
         return 0
 
-    # Find the lane section that covers s
-    active_section = None
+    # Find the lane section covering s (assumes sections are sorted by s)
+    active_section = lane_sections[0]
     for section in lane_sections:
         s_start = float(section.lane_section_xml.attrib.get("s", 0.0))
         if s_start <= s:
@@ -377,38 +355,8 @@ def _find_lane_at_t(road, s: float, t: float) -> int:
         else:
             break
 
-    if active_section is None:
-        active_section = lane_sections[0]
-
-    # Determine side (positive t = left, negative t = right)
-    lanes = active_section.lanes
-    abs_t = abs(t)
     is_left = t >= 0.0
-
-    cumulative = 0.0
-    for lane in lanes:
-        lane_id: int = lane.id
-        if is_left and lane_id <= 0:
-            continue
-        if not is_left and lane_id >= 0:
-            continue
-
-        # Estimate lane width from the centre_line extents if available
-        try:
-            centre_line: np.ndarray = lane.centre_line  # shape (N, 3)
-            if len(centre_line) >= 2:
-                # Approximate width as distance from reference line at midpoint
-                mid = len(centre_line) // 2
-                width = abs(float(np.linalg.norm(centre_line[mid, :2])))
-                if cumulative <= abs_t < cumulative + width:
-                    return lane_id
-                cumulative += width
-        except AttributeError:
-            # Fall back: return the first lane on the correct side
-            return lane_id
-
-    # Default: return the outermost lane on the correct side
-    for lane in lanes:
+    for lane in active_section.lanes:
         if is_left and lane.id > 0:
             return lane.id
         if not is_left and lane.id < 0:
