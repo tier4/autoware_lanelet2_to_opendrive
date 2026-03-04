@@ -25,6 +25,8 @@ from typing import Union, overload
 
 import numpy as np
 
+# autoware_lanelet2_extension_python must be imported before lanelet2
+from autoware_lanelet2_extension_python.projection import MGRSProjector as _  # noqa: F401
 import lanelet2.core
 import lanelet2.geometry
 
@@ -142,9 +144,11 @@ def _opendrive_to_carla(pose: OpenDrivePose) -> CarlaWorldPose:
     x = x_ref + pose.t * (-math.sin(total_heading))
     y = y_ref + pose.t * math.cos(total_heading)
 
-    # Convert right-hand (North=+y) → CARLA left-hand (South=+y)
+    # XODR coords are relative to geoReference origin; add MGRS offset to get
+    # absolute MGRS coords (= Lanelet2 local UTM coords), then flip y for CARLA.
+    offset_x, offset_y = mm.mgrs_offset
     carla_yaw_deg = -math.degrees(total_heading)
-    return CarlaWorldPose(x=x, y=-y, z=z_ref, yaw=carla_yaw_deg)
+    return CarlaWorldPose(x=x + offset_x, y=-(y + offset_y), z=z_ref, yaw=carla_yaw_deg)
 
 
 # ---------------------------------------------------------------------------
@@ -156,9 +160,10 @@ def _carla_to_opendrive(pose: CarlaWorldPose) -> OpenDrivePose:
     """Convert a CARLA world pose to the nearest OpenDRIVE (s, t) pose."""
     mm = MapManager.get_instance()
 
-    # Convert CARLA left-hand → OpenDRIVE/Lanelet2 right-hand
-    od_x = pose.x
-    od_y = -pose.y
+    # Convert CARLA left-hand → absolute MGRS → XODR (relative to geoRef origin)
+    offset_x, offset_y = mm.mgrs_offset
+    od_x = pose.x - offset_x
+    od_y = -pose.y - offset_y
     od_heading = -math.radians(pose.yaw)
 
     best_road_id: str = ""

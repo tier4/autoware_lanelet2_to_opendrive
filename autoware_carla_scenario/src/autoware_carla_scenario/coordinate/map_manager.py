@@ -2,6 +2,17 @@
 
 Only one LaneletMap and one RoadNetwork instance exist at any time.
 Use MapManager.get_instance() to access the singleton.
+
+Coordinate note
+---------------
+MGRSProjector returns *absolute* MGRS coordinates, while the OpenDRIVE reference
+line stores coordinates *relative* to the geoReference origin (lat_0, lon_0).
+The MGRS offset corrects for this:
+
+    xodr_xy = mgrs_xy - mgrs_offset
+    mgrs_xy = xodr_xy + mgrs_offset
+
+where ``mgrs_offset = MGRSProjector.forward(lat_0, lon_0)``.
 """
 
 from __future__ import annotations
@@ -10,8 +21,11 @@ import re
 from pathlib import Path
 from typing import Any, ClassVar, Optional
 
-import lanelet2.io
+# autoware_lanelet2_extension_python must be imported before lanelet2 to register
+# Autoware-specific regulatory elements (road_marking, detection_area, etc.)
 from autoware_lanelet2_extension_python.projection import MGRSProjector
+import lanelet2.core
+import lanelet2.io
 from pyxodr.road_objects.network import RoadNetwork
 
 
@@ -26,12 +40,16 @@ class MapManager:
         # Access loaded maps
         lmap = mm.lanelet_map
         rnet = mm.road_network
+
+        # MGRS ↔ XODR coordinate offset
+        ox, oy = mm.mgrs_offset
     """
 
     _instance: ClassVar[Optional["MapManager"]] = None
     _lanelet_map: Optional[Any]
     _road_network: Optional[RoadNetwork]
     _geo_origin: Optional[tuple[float, float, float]]
+    _mgrs_offset: Optional[tuple[float, float]]
 
     def __new__(cls) -> "MapManager":
         if cls._instance is None:
@@ -39,6 +57,7 @@ class MapManager:
             cls._instance._lanelet_map = None
             cls._instance._road_network = None
             cls._instance._geo_origin = None
+            cls._instance._mgrs_offset = None
         return cls._instance
 
     @classmethod
@@ -95,6 +114,12 @@ class MapManager:
         projector = MGRSProjector(origin)
         self._lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
 
+        # Compute MGRS offset: forward-project the geoReference origin.
+        # MGRSProjector returns absolute MGRS coords, while XODR stores coords
+        # relative to the geoReference origin, so we need this correction.
+        fwd = projector.forward(lanelet2.core.GPSPoint(lat, lon, alt))
+        self._mgrs_offset = (fwd.x, fwd.y)
+
         # Load OpenDRIVE road network (pyxodr takes a file path, not content)
         self._road_network = RoadNetwork(str(xodr_path))
 
@@ -130,6 +155,19 @@ class MapManager:
                 "MapManager is not initialized. Call initialize() first."
             )
         return self._geo_origin
+
+    @property
+    def mgrs_offset(self) -> tuple[float, float]:
+        """(offset_x, offset_y) to convert between MGRS and XODR coordinates.
+
+        xodr_xy = mgrs_xy - mgrs_offset
+        mgrs_xy = xodr_xy + mgrs_offset
+        """
+        if self._mgrs_offset is None:
+            raise RuntimeError(
+                "MapManager is not initialized. Call initialize() first."
+            )
+        return self._mgrs_offset
 
 
 # ------------------------------------------------------------------
