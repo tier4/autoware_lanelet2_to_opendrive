@@ -877,12 +877,10 @@ def convert_lanelet2_to_opendrive(
             - OpenDRIVE object representing the converted map
             - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
     """
-    from dataclasses import replace
-
     # Merge legacy mgrs_code argument into config.origin so the converter has
     # a single, consistent source of truth for the MGRS grid code.
     if mgrs_code is not None:
-        config = replace(config, origin=replace(config.origin, mgrs_code=mgrs_code))
+        config = config.with_mgrs_code(mgrs_code)
 
     converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config)
     return converter.convert()

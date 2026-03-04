@@ -4,7 +4,7 @@ This module provides dataclass-based configuration objects to replace functions
 with many parameters, improving type safety and API clarity.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
@@ -162,6 +162,14 @@ class ConversionConfig:
             raise ValueError(
                 f"traffic_rule must be 'RHT' or 'LHT', got '{self.traffic_rule}'"
             )
+
+    def with_mgrs_code(self, mgrs_code: str) -> "ConversionConfig":
+        """Return a copy of this config with ``origin.mgrs_code`` set.
+
+        Used to merge a legacy ``mgrs_code`` argument into the config so the
+        converter always has a single, consistent source of truth.
+        """
+        return replace(self, origin=replace(self.origin, mgrs_code=mgrs_code))
 
 
 @dataclass

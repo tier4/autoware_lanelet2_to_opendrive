@@ -150,13 +150,9 @@ def _convert_lanelet2_to_xodr_cached(
 
     # Merge the separate mgrs_code argument (legacy API) into config.origin so
     # that the converter has a single, consistent source of truth.
-    from dataclasses import replace
-
     effective_mgrs = mgrs_code or config.origin.mgrs_code
-    if effective_mgrs is not None and config.origin.mgrs_code != effective_mgrs:
-        config = replace(
-            config, origin=replace(config.origin, mgrs_code=effective_mgrs)
-        )
+    if effective_mgrs is not None:
+        config = config.with_mgrs_code(effective_mgrs)
 
     if effective_mgrs is not None:
         origin = mgrs_to_lanelet2_origin(effective_mgrs)
