@@ -10,6 +10,7 @@ Public API re-exported for convenience::
         BaseScenario,
         CarlaWorldPose,
         CollisionCondition,
+        EntityInAreaCondition,
         EgoConfig,
         EgoVehicle,
         Lanelet2Pose,
@@ -29,6 +30,7 @@ from .carla_autoware_scenario import CarlaAutowareScenario
 from .conditions import (
     BaseCondition,
     CollisionCondition,
+    EntityInAreaCondition,
     ScenarioResult,
     TimeoutCondition,
 )
@@ -56,6 +58,7 @@ __all__ = [
     "BaseScenario",
     "CarlaWorldPose",
     "CollisionCondition",
+    "EntityInAreaCondition",
     "EgoConfig",
     "EgoVehicle",
     "Lanelet2Pose",
