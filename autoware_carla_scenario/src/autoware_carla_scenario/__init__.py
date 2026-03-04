@@ -8,13 +8,20 @@ Public API re-exported for convenience::
         CarlaServerManager,
         BaseCondition,
         BaseScenario,
+        CarlaWorldPose,
         CollisionCondition,
         EgoConfig,
         EgoVehicle,
+        Lanelet2Pose,
+        MapManager,
+        OpenDrivePose,
         ScenarioQueue,
         ScenarioRecorder,
         ScenarioResult,
         TimeoutCondition,
+        to_carla_world,
+        to_lanelet2,
+        to_opendrive,
     )
 """
 
@@ -24,6 +31,15 @@ from .conditions import (
     CollisionCondition,
     ScenarioResult,
     TimeoutCondition,
+)
+from .coordinate import (
+    CarlaWorldPose,
+    Lanelet2Pose,
+    MapManager,
+    OpenDrivePose,
+    to_carla_world,
+    to_lanelet2,
+    to_opendrive,
 )
 from .ego import EgoVehicle
 from .pytest_fixtures import CarlaScenarioFixture
@@ -38,11 +54,18 @@ __all__ = [
     "CarlaServerManager",
     "BaseCondition",
     "BaseScenario",
+    "CarlaWorldPose",
     "CollisionCondition",
     "EgoConfig",
     "EgoVehicle",
+    "Lanelet2Pose",
+    "MapManager",
+    "OpenDrivePose",
     "ScenarioQueue",
     "ScenarioRecorder",
     "ScenarioResult",
     "TimeoutCondition",
+    "to_carla_world",
+    "to_lanelet2",
+    "to_opendrive",
 ]

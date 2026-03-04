@@ -7,7 +7,7 @@ repos:
       - id: check-yaml
         exclude: 'mkdocs\.yml$'
       - id: check-added-large-files
-        exclude: '\.(osm|png|whl)$'
+        exclude: '\.(osm|xodr|png|whl)$'
       - id: check-merge-conflict
       - id: check-toml
       - id: debug-statements
@@ -43,9 +43,19 @@ repos:
 
   - repo: local
     hooks:
-      - id: pytest
-        name: pytest
-        entry: uv run pytest --no-testmon
+      # Run each package's tests in a separate process to avoid a crash in
+      # the lanelet2 C++ bindings that occurs when both suites run together
+      # and the interpreter shuts down with multiple LaneletMap instances alive.
+      - id: pytest-lanelet2
+        name: pytest (autoware_lanelet2_to_opendrive)
+        entry: uv run pytest --no-testmon autoware_lanelet2_to_opendrive/test
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
+      - id: pytest-carla
+        name: pytest (autoware_carla_scenario)
+        entry: uv run pytest --no-testmon autoware_carla_scenario/test
         language: system
         types: [python]
         pass_filenames: false
