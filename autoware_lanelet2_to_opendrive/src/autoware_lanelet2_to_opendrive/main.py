@@ -557,13 +557,14 @@ class _Lanelet2ToOpenDRIVEConverter:
                 ):
                     continue
 
-                # Check that refers contains a stop_sign linestring
-                has_stop_sign = False
+                # Check that refers contains a stop_sign linestring and
+                # extract ref_line (stop line) IDs in a single parameters access
                 try:
                     params = reg_elem.parameters
-                    refers_key = "refers"
-                    if refers_key in params:
-                        for refers_ls in params[refers_key]:
+
+                    has_stop_sign = False
+                    if "refers" in params:
+                        for refers_ls in params["refers"]:
                             ls_attrs = (
                                 refers_ls.attributes
                                 if hasattr(refers_ls, "attributes")
@@ -575,18 +576,9 @@ class _Lanelet2ToOpenDRIVEConverter:
                             ):
                                 has_stop_sign = True
                                 break
-                except Exception:
-                    pass
 
-                if not has_stop_sign:
-                    continue
-
-                # Get the ref_line (stop line)
-                try:
-                    params = reg_elem.parameters
-                    ref_line_key = "ref_line"
-                    if ref_line_key in params:
-                        for rl in params[ref_line_key]:
+                    if has_stop_sign and "ref_line" in params:
+                        for rl in params["ref_line"]:
                             stop_sign_stop_line_ids.add(rl.id)
                 except Exception:
                     pass
@@ -651,6 +643,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             else {}
         )
         resolved_stop_sign_ids: Set[int] = stop_sign_stop_line_ids or set()
+        stop_line_294_count = 0
+        stop_sign_206_count = 0
 
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
@@ -675,12 +669,14 @@ class _Lanelet2ToOpenDRIVEConverter:
 
             road_objects.setdefault(best_road.id, []).append(obj)
 
-            # Create stop line Signal (type 294) when traffic light associations exist
-            if ls.id in resolved_tl_signal_ids:
-                tl_signal_ids = resolved_tl_signal_ids[ls.id]
-                stop_line_signal = Signal(
+            def _make_signal(
+                signal_type: int,
+                name: str,
+                dependencies: Optional[List[Dependency]] = None,
+            ) -> Signal:
+                return Signal(
                     id=stop_line_signal_id_counter,
-                    name=f"StopLine_{ls.id}",
+                    name=name,
                     s=obj.s,
                     t=obj.t,
                     z_offset=obj.z_offset,
@@ -690,12 +686,21 @@ class _Lanelet2ToOpenDRIVEConverter:
                     orientation="-" if obj.t < 0 else "+",
                     dynamic="no",
                     country="OpenDRIVE",
-                    type=SignalType.STOP_LINE,
+                    type=signal_type,
                     subtype=-1,
                     value=-1.0,
                     text="",
                     height=0.0,
                     width=obj.length,
+                    dependencies=dependencies,
+                )
+
+            # Create stop line Signal (type 294) when traffic light associations exist
+            if ls.id in resolved_tl_signal_ids:
+                tl_signal_ids = resolved_tl_signal_ids[ls.id]
+                stop_line_signal = _make_signal(
+                    signal_type=SignalType.STOP_LINE,
+                    name=f"StopLine_{ls.id}",
                     dependencies=[
                         Dependency(id=tl_sig_id, type="trafficLight")
                         for tl_sig_id in tl_signal_ids
@@ -712,42 +717,22 @@ class _Lanelet2ToOpenDRIVEConverter:
                     )
 
                 stop_line_signal_id_counter += 1
+                stop_line_294_count += 1
 
             # Create StopSign signal (type 206) for stop lines referenced by
             # a traffic_sign regulatory element with a stop_sign refers member
             if ls.id in resolved_stop_sign_ids:
-                stop_sign_signal = Signal(
-                    id=stop_line_signal_id_counter,
+                stop_sign_signal = _make_signal(
+                    signal_type=SignalType.STOP_SIGN,
                     name=f"StopSign_{ls.id}",
-                    s=obj.s,
-                    t=obj.t,
-                    z_offset=obj.z_offset,
-                    h_offset=0.0,
-                    roll=0.0,
-                    pitch=0.0,
-                    orientation="-" if obj.t < 0 else "+",
-                    dynamic="no",
-                    country="OpenDRIVE",
-                    type=SignalType.STOP_SIGN,
-                    subtype=-1,
-                    value=-1.0,
-                    text="",
-                    height=0.0,
-                    width=obj.length,
                 )
                 road_stop_line_signals.setdefault(best_road.id, []).append(
                     stop_sign_signal
                 )
                 stop_line_signal_id_counter += 1
+                stop_sign_206_count += 1
 
         stop_line_count = sum(len(v) for v in road_objects.values())
-        all_signals = [sig for sigs in road_stop_line_signals.values() for sig in sigs]
-        stop_line_294_count = sum(
-            1 for sig in all_signals if sig.type == SignalType.STOP_LINE
-        )
-        stop_sign_206_count = sum(
-            1 for sig in all_signals if sig.type == SignalType.STOP_SIGN
-        )
         print(
             f"Assigned {stop_line_count} stop line objects to {len(road_objects)} roads"
         )
