@@ -722,3 +722,91 @@ def test_signal_no_dependencies_no_elements():
     xml = signal.to_xml()
     assert xml.find("dependency") is None
     assert xml.find("reference") is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for StopSign signal (type 206)
+# ---------------------------------------------------------------------------
+
+
+def test_signal_type_stop_sign():
+    """Test that STOP_SIGN type constant is defined as 206."""
+    assert SignalType.STOP_SIGN == 206
+
+
+def test_stop_sign_signal_creation():
+    """Test StopSign signal creation with type 206."""
+    signal = Signal(
+        id=500,
+        name="StopSign_12345",
+        s=10.0,
+        t=-2.5,
+        z_offset=0.0,
+        orientation="-",
+        dynamic="no",
+        country="OpenDRIVE",
+        type=SignalType.STOP_SIGN,
+        subtype=-1,
+        value=-1.0,
+        height=0.0,
+        width=3.5,
+    )
+
+    assert signal.id == 500
+    assert signal.name == "StopSign_12345"
+    assert signal.type == 206
+    assert signal.dynamic == "no"
+    assert signal.orientation == "-"
+
+
+def test_stop_sign_signal_to_xml():
+    """Test StopSign signal XML output has correct type attribute."""
+    signal = Signal(
+        id=501,
+        name="StopSign_67890",
+        s=25.0,
+        t=-1.0,
+        orientation="-",
+        dynamic="no",
+        country="OpenDRIVE",
+        type=SignalType.STOP_SIGN,
+        subtype=-1,
+        validities=[Validity(from_lane=-1, to_lane=-1)],
+    )
+
+    xml = signal.to_xml()
+    xml_string = ET.tostring(xml, encoding="unicode", pretty_print=True)
+
+    assert xml.get("type") == "206"
+    assert xml.get("dynamic") == "no"
+    assert xml.get("name") == "StopSign_67890"
+
+    # Should have validity but no dependencies (standalone stop sign)
+    validity_elem = xml.find("validity")
+    assert validity_elem is not None
+    assert xml.find("dependency") is None
+    assert xml.find("reference") is None
+
+    assert 'type="206"' in xml_string
+
+
+def test_stop_sign_signal_has_no_dependencies():
+    """Test that StopSign signals have no traffic light dependencies."""
+    signal = Signal(
+        id=502,
+        name="StopSign_100",
+        s=5.0,
+        t=-3.0,
+        orientation="-",
+        dynamic="no",
+        country="OpenDRIVE",
+        type=SignalType.STOP_SIGN,
+        subtype=-1,
+    )
+
+    assert signal.dependencies is None
+    assert signal.references is None
+
+    xml = signal.to_xml()
+    assert len(xml.findall("dependency")) == 0
+    assert len(xml.findall("reference")) == 0

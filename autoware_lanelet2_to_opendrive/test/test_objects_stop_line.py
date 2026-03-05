@@ -395,3 +395,19 @@ def test_stop_lines_extracted_from_real_map(lanelet_map):
     ]
     # The nishisinjyuku.osm test map should have a significant number of stop lines
     assert len(stop_lines) > 0, "Expected stop_line linestrings in the test map"
+
+
+def test_stop_sign_stop_line_ids_from_real_map(lanelet_map):
+    """Test that _build_stop_sign_stop_line_ids finds stop sign stop lines."""
+    from autoware_lanelet2_to_opendrive.conversion_config import ConversionConfig
+    from autoware_lanelet2_to_opendrive.main import _Lanelet2ToOpenDRIVEConverter
+
+    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, ConversionConfig())
+    stop_sign_sl_ids = converter._build_stop_sign_stop_line_ids()
+
+    # The nishishinjuku.osm test map has 4 stop sign regulatory elements
+    # with ref_line stop lines: ways 1784, 1401, 301355, 3002425
+    expected_ids = {1784, 1401, 301355, 3002425}
+    assert (
+        stop_sign_sl_ids == expected_ids
+    ), f"Expected stop sign stop line IDs {expected_ids}, got {stop_sign_sl_ids}"
