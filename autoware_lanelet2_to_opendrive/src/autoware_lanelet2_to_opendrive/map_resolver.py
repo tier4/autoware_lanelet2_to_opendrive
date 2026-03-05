@@ -148,7 +148,12 @@ def _convert_lanelet2_to_xodr_cached(
     # ------------------------------------------------------------------
     from .projection import latlon_to_lanelet2_origin, mgrs_to_lanelet2_origin
 
+    # Merge the separate mgrs_code argument (legacy API) into config.origin so
+    # that the converter has a single, consistent source of truth.
     effective_mgrs = mgrs_code or config.origin.mgrs_code
+    if effective_mgrs is not None:
+        config = config.with_mgrs_code(effective_mgrs)
+
     if effective_mgrs is not None:
         origin = mgrs_to_lanelet2_origin(effective_mgrs)
     elif config.origin.lat is not None and config.origin.lon is not None:
@@ -174,7 +179,8 @@ def _convert_lanelet2_to_xodr_cached(
     projector = MGRSProjector(origin)
     lanelet_map = lanelet2.io.load(lanelet2_path, projector)
 
-    opendrive, _ = convert_lanelet2_to_opendrive(lanelet_map, config, effective_mgrs)
+    # mgrs_code is already in config.origin.mgrs_code (merged above).
+    opendrive, _ = convert_lanelet2_to_opendrive(lanelet_map, config)
 
     # ------------------------------------------------------------------
     # Persist to cache

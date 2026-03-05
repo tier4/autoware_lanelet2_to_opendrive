@@ -4,7 +4,7 @@ This module provides dataclass-based configuration objects to replace functions
 with many parameters, improving type safety and API clarity.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
@@ -23,9 +23,20 @@ class WidthReference(Enum):
 class OriginSpec:
     """Coordinate origin specification for map conversion.
 
-    Supports multiple origin specification methods:
-    - MGRS grid code (mgrs_code)
-    - Latitude/Longitude coordinates (lat/lon)
+    Exactly one of the following combinations must be set:
+
+    * ``mgrs_code`` only – the origin is the south-west corner of the MGRS
+      grid square (e.g. ``"54SUE"``).  The geoReference PROJ string is
+      derived from the grid square's lat/lon.
+    * ``lat`` + ``lon`` – the origin is given directly as WGS84 decimal
+      degrees.  Use this when an MGRS offset has been applied (the offset
+      shifts the origin away from the grid square corner) or when a lat/lon
+      origin is preferred.  The geoReference PROJ string uses these values
+      directly.
+    * ``mgrs_code`` + ``lat`` + ``lon`` – all three fields set. This occurs
+      when an MGRS grid is specified together with an offset: the lat/lon
+      hold the offset-adjusted position while ``mgrs_code`` retains the
+      grid zone for reference. The geoReference uses ``lat``/``lon``.
     """
 
     mgrs_code: Optional[str] = None
@@ -151,6 +162,14 @@ class ConversionConfig:
             raise ValueError(
                 f"traffic_rule must be 'RHT' or 'LHT', got '{self.traffic_rule}'"
             )
+
+    def with_mgrs_code(self, mgrs_code: str) -> "ConversionConfig":
+        """Return a copy of this config with ``origin.mgrs_code`` set.
+
+        Used to merge a legacy ``mgrs_code`` argument into the config so the
+        converter always has a single, consistent source of truth.
+        """
+        return replace(self, origin=replace(self.origin, mgrs_code=mgrs_code))
 
 
 @dataclass

@@ -101,19 +101,19 @@ class _Lanelet2ToOpenDRIVEConverter:
         self,
         lanelet_map: lanelet2.core.LaneletMap,
         config: ConversionConfig,
-        mgrs_code: Optional[str] = None,
     ):
         """
         Initialize the converter.
 
         Args:
             lanelet_map: Loaded Lanelet2 map
-            config: ConversionConfig object containing all conversion parameters
-            mgrs_code: Optional MGRS code for generating geoReference PROJ string
+            config: ConversionConfig object containing all conversion parameters.
+                The geoReference PROJ string is derived from ``config.origin``:
+                lat/lon are used when available (e.g. when an MGRS offset is
+                applied), otherwise ``config.origin.mgrs_code`` is used.
         """
         self.lanelet_map = lanelet_map
         self.config = config
-        self.mgrs_code = mgrs_code
 
     def _build_regular_roads(
         self,
@@ -677,20 +677,25 @@ class _Lanelet2ToOpenDRIVEConverter:
         Returns:
             OpenDRIVE object
         """
-        # Generate PROJ string for geoReference
+        # Generate PROJ string for geoReference.
+        #
+        # Priority:
+        #   1. lat/lon  – most precise; set when an MGRS offset is applied or
+        #                 when the origin was specified directly as lat/lon.
+        #   2. mgrs_code – fallback; used when only the MGRS grid square is
+        #                  known (origin = south-west corner of the square).
         if self.config.origin.lat is not None and self.config.origin.lon is not None:
             geo_reference_proj = latlon_to_proj_string(
                 self.config.origin.lat, self.config.origin.lon
             )
-            print(f"Using geoReference (from origin lat/lon): {geo_reference_proj}")
-        elif self.mgrs_code is not None:
-            geo_reference_proj = mgrs_to_proj_string(self.mgrs_code)
-            print(f"Using geoReference (from MGRS code): {geo_reference_proj}")
         elif self.config.origin.mgrs_code is not None:
             geo_reference_proj = mgrs_to_proj_string(self.config.origin.mgrs_code)
-            print(f"Using geoReference (from config MGRS code): {geo_reference_proj}")
         else:
-            raise ValueError("Must provide either origin lat/lon or MGRS code")
+            raise ValueError(
+                "Cannot generate geoReference: config.origin must have lat/lon "
+                "or mgrs_code set."
+            )
+        logger.info("geoReference (PROJ string): %s", geo_reference_proj)
 
         # Create header
         header = Header(
@@ -714,7 +719,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             controllers=signals_and_controllers.controllers,
         )
 
-        print("\nConversion completed successfully!")
+        logger.info("Conversion completed successfully!")
 
         # Save to file if output path is provided
         if self.config.output_path:
@@ -857,16 +862,27 @@ def convert_lanelet2_to_opendrive(
 
     Args:
         lanelet_map: Loaded Lanelet2 map
-        config: ConversionConfig object containing all conversion parameters
-        mgrs_code: Optional MGRS code for generating geoReference PROJ string.
-            If not provided, will be derived from config.origin.
+        config: ConversionConfig object containing all conversion parameters.
+            The geoReference PROJ string is derived from ``config.origin``:
+            lat/lon are preferred (set when an MGRS offset is applied or when
+            the origin was specified as lat/lon); ``config.origin.mgrs_code``
+            is used as a fallback.
+        mgrs_code: Deprecated.  Pass the MGRS code via
+            ``config.origin.mgrs_code`` instead.  When provided here it
+            overrides ``config.origin.mgrs_code`` so that callers using the
+            old API continue to work.
 
     Returns:
         Tuple of:
             - OpenDRIVE object representing the converted map
             - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
     """
-    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config, mgrs_code)
+    # Merge legacy mgrs_code argument into config.origin so the converter has
+    # a single, consistent source of truth for the MGRS grid code.
+    if mgrs_code is not None:
+        config = config.with_mgrs_code(mgrs_code)
+
+    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config)
     return converter.convert()
 
 
@@ -1159,11 +1175,9 @@ def preprocess_and_convert_with_hydra(
         stopline=stopline_config,
     )
 
-    opendrive, mapping = convert_lanelet2_to_opendrive(
-        lanelet_map,
-        conversion_config,
-        mgrs_code=mgrs_code,
-    )
+    # mgrs_code is already stored in conversion_config.origin.mgrs_code;
+    # no need to pass it as a separate argument.
+    opendrive, mapping = convert_lanelet2_to_opendrive(lanelet_map, conversion_config)
 
     logger.info("Conversion completed successfully!")
     logger.info(
