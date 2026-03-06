@@ -424,6 +424,10 @@ class SignalType:
     TRAFFIC_LIGHT_PEDESTRIAN = 1000002  # Pedestrian traffic light
     TRAFFIC_LIGHT_ARROW = 1000003  # Arrow traffic light
 
+    # Yield sign (type 205 corresponds to German StVO sign 205 - "Vorfahrt gewähren")
+    # Used in OpenDRIVE to represent yield signs at intersections
+    YIELD_SIGN = 205
+
     # Stop sign (type 206 corresponds to German StVO sign 206 - "Halt! Vorfahrt gewähren")
     # Used in OpenDRIVE to represent mandatory stop signs at intersections
     STOP_SIGN = 206
