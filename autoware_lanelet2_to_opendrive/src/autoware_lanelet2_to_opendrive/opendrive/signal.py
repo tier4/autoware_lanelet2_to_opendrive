@@ -424,6 +424,10 @@ class SignalType:
     TRAFFIC_LIGHT_PEDESTRIAN = 1000002  # Pedestrian traffic light
     TRAFFIC_LIGHT_ARROW = 1000003  # Arrow traffic light
 
+    # Stop sign (type 206 corresponds to German StVO sign 206 - "Halt! Vorfahrt gewähren")
+    # Used in OpenDRIVE to represent mandatory stop signs at intersections
+    STOP_SIGN = 206
+
     # Stop line (type 294 corresponds to German StVO sign 294 - stop line)
     # Used in OpenDRIVE to represent painted stop lines with signal dependencies
     STOP_LINE = 294

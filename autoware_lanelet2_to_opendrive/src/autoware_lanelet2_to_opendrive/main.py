@@ -4,7 +4,7 @@
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 import tempfile
 import logging
 from datetime import datetime
@@ -524,10 +524,72 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return stop_line_to_tl_ids
 
+    def _build_stop_sign_stop_line_ids(self) -> Set[int]:
+        """Build a set of stop line linestring IDs associated with stop signs.
+
+        Iterates through all regulatory elements with ``subtype="traffic_sign"``
+        that reference a linestring with ``type="traffic_sign", subtype="stop_sign"``
+        (via the ``refers`` role).  The stop line is found via the ``ref_line``
+        (``stopLine``) attribute of that regulatory element.
+
+        Per Autoware vector map spec, a 一時停止 regulatory element has:
+        - refers → Linestring(type="traffic_sign", subtype="stop_sign")
+        - ref_line → Linestring(type="stop_line")
+
+        Returns:
+            Set of stop line linestring IDs that belong to stop sign REs.
+        """
+        stop_sign_stop_line_ids: Set[int] = set()
+        seen_re_ids: set = set()
+
+        for lanelet in self.lanelet_map.laneletLayer:
+            for reg_elem in lanelet.regulatoryElements:
+                if reg_elem.id in seen_re_ids:
+                    continue
+                seen_re_ids.add(reg_elem.id)
+
+                # Check subtype == "traffic_sign"
+                attrs = reg_elem.attributes if hasattr(reg_elem, "attributes") else None
+                if not (
+                    attrs is not None
+                    and "subtype" in attrs
+                    and attrs["subtype"] == "traffic_sign"
+                ):
+                    continue
+
+                # Check that refers contains a stop_sign linestring and
+                # extract ref_line (stop line) IDs in a single parameters access
+                try:
+                    params = reg_elem.parameters
+
+                    has_stop_sign = False
+                    if "refers" in params:
+                        for refers_ls in params["refers"]:
+                            ls_attrs = (
+                                refers_ls.attributes
+                                if hasattr(refers_ls, "attributes")
+                                else None
+                            )
+                            if ls_attrs is not None and (
+                                "subtype" in ls_attrs
+                                and ls_attrs["subtype"] == "stop_sign"
+                            ):
+                                has_stop_sign = True
+                                break
+
+                    if has_stop_sign and "ref_line" in params:
+                        for rl in params["ref_line"]:
+                            stop_sign_stop_line_ids.add(rl.id)
+                except Exception:
+                    pass
+
+        return stop_sign_stop_line_ids
+
     def _extract_and_assign_stop_lines(
         self,
         all_roads: List[Road],
         stop_line_to_tl_signal_ids: Optional[Dict[int, List[int]]] = None,
+        stop_sign_stop_line_ids: Optional[Set[int]] = None,
         starting_signal_id: int = 0,
     ) -> Dict[int, List[int]]:
         """Extract stop line linestrings and assign them as objects to nearest roads.
@@ -536,14 +598,19 @@ class _Lanelet2ToOpenDRIVEConverter:
         1. Finds the nearest road within a distance threshold
         2. Constructs a StopLineObject with position and heading
         3. Extends the road's objects list with the new object
-        4. If traffic light associations exist, also creates a Signal (type 294)
+        4. If traffic light associations exist, creates a Signal (type 294)
            with dependency elements referencing the associated traffic lights
+        5. If associated with a stop sign regulatory element, creates a Signal
+           (type 206 / StopSign)
 
         Args:
             all_roads: All roads (regular + connecting) to search and assign to.
             stop_line_to_tl_signal_ids: Mapping from stop line lanelet2 ID to list
                 of OpenDRIVE traffic light signal IDs. If provided (and not in CARLA
                 mode), stop line Signal elements are created with dependency references.
+            stop_sign_stop_line_ids: Set of stop line linestring IDs that are
+                associated with stop sign regulatory elements.  These will produce
+                StopSign signals (type 206).
             starting_signal_id: Starting ID for generated stop line signals.
 
         Returns:
@@ -575,6 +642,9 @@ class _Lanelet2ToOpenDRIVEConverter:
             )
             else {}
         )
+        resolved_stop_sign_ids: Set[int] = stop_sign_stop_line_ids or set()
+        stop_line_294_count = 0
+        stop_sign_206_count = 0
 
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
@@ -599,12 +669,14 @@ class _Lanelet2ToOpenDRIVEConverter:
 
             road_objects.setdefault(best_road.id, []).append(obj)
 
-            # Create stop line Signal (type 294) when traffic light associations exist
-            if ls.id in resolved_tl_signal_ids:
-                tl_signal_ids = resolved_tl_signal_ids[ls.id]
-                stop_line_signal = Signal(
+            def _make_signal(
+                signal_type: int,
+                name: str,
+                dependencies: Optional[List[Dependency]] = None,
+            ) -> Signal:
+                return Signal(
                     id=stop_line_signal_id_counter,
-                    name=f"StopLine_{ls.id}",
+                    name=name,
                     s=obj.s,
                     t=obj.t,
                     z_offset=obj.z_offset,
@@ -614,12 +686,21 @@ class _Lanelet2ToOpenDRIVEConverter:
                     orientation="-" if obj.t < 0 else "+",
                     dynamic="no",
                     country="OpenDRIVE",
-                    type=SignalType.STOP_LINE,
+                    type=signal_type,
                     subtype=-1,
                     value=-1.0,
                     text="",
                     height=0.0,
                     width=obj.length,
+                    dependencies=dependencies,
+                )
+
+            # Create stop line Signal (type 294) when traffic light associations exist
+            if ls.id in resolved_tl_signal_ids:
+                tl_signal_ids = resolved_tl_signal_ids[ls.id]
+                stop_line_signal = _make_signal(
+                    signal_type=SignalType.STOP_LINE,
+                    name=f"StopLine_{ls.id}",
                     dependencies=[
                         Dependency(id=tl_sig_id, type="trafficLight")
                         for tl_sig_id in tl_signal_ids
@@ -636,16 +717,34 @@ class _Lanelet2ToOpenDRIVEConverter:
                     )
 
                 stop_line_signal_id_counter += 1
+                stop_line_294_count += 1
+
+            # Create StopSign signal (type 206) for stop lines referenced by
+            # a traffic_sign regulatory element with a stop_sign refers member
+            if ls.id in resolved_stop_sign_ids:
+                stop_sign_signal = _make_signal(
+                    signal_type=SignalType.STOP_SIGN,
+                    name=f"StopSign_{ls.id}",
+                )
+                road_stop_line_signals.setdefault(best_road.id, []).append(
+                    stop_sign_signal
+                )
+                stop_line_signal_id_counter += 1
+                stop_sign_206_count += 1
 
         stop_line_count = sum(len(v) for v in road_objects.values())
-        stop_line_signal_count = sum(len(v) for v in road_stop_line_signals.values())
         print(
             f"Assigned {stop_line_count} stop line objects to {len(road_objects)} roads"
         )
-        if stop_line_signal_count > 0:
+        if stop_line_294_count > 0:
             print(
-                f"Created {stop_line_signal_count} stop line signals "
+                f"Created {stop_line_294_count} stop line signals (type 294) "
                 f"with traffic light dependencies"
+            )
+        if stop_sign_206_count > 0:
+            print(
+                f"Created {stop_sign_206_count} stop sign signals (type 206) "
+                f"for stop lines without traffic lights"
             )
 
         for road in all_roads:
@@ -806,11 +905,20 @@ class _Lanelet2ToOpenDRIVEConverter:
             if resolved_signal_ids:
                 stop_line_to_tl_signal_ids[sl_id] = resolved_signal_ids
 
+        # Step 6.6b: Build stop sign stop line IDs
+        stop_sign_stop_line_ids = self._build_stop_sign_stop_line_ids()
+        if stop_sign_stop_line_ids:
+            print(
+                f"Found {len(stop_sign_stop_line_ids)} stop lines "
+                f"associated with stop sign regulatory elements"
+            )
+
         # Step 6.7: Extract stop lines and assign as road objects (with signal dependencies)
         next_signal_id = len(signals_and_controllers.signals)
         tl_signal_to_stop_line_signal_ids = self._extract_and_assign_stop_lines(
             all_roads,
             stop_line_to_tl_signal_ids,
+            stop_sign_stop_line_ids,
             next_signal_id,
         )
 
