@@ -810,3 +810,81 @@ def test_stop_sign_signal_has_no_dependencies():
     xml = signal.to_xml()
     assert len(xml.findall("dependency")) == 0
     assert len(xml.findall("reference")) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for YieldSign signal (type 205)
+# ---------------------------------------------------------------------------
+
+
+def test_signal_type_yield_sign():
+    """Test that YIELD_SIGN type constant is defined as 205."""
+    assert SignalType.YIELD_SIGN == 205
+
+
+def test_yield_sign_signal_creation():
+    """Test YieldSign signal creation with type 205 and XML output."""
+    signal = Signal(
+        id=600,
+        name="YieldSign_1409",
+        s=12.0,
+        t=-2.0,
+        z_offset=0.0,
+        orientation="-",
+        dynamic="no",
+        country="OpenDRIVE",
+        type=SignalType.YIELD_SIGN,
+        subtype=-1,
+        value=-1.0,
+        height=0.0,
+        width=3.5,
+    )
+
+    assert signal.id == 600
+    assert signal.name == "YieldSign_1409"
+    assert signal.type == 205
+    assert signal.dynamic == "no"
+
+    xml = signal.to_xml()
+    xml_string = ET.tostring(xml, encoding="unicode", pretty_print=True)
+
+    assert xml.get("type") == "205"
+    assert xml.get("name") == "YieldSign_1409"
+    assert 'type="205"' in xml_string
+    # Standalone yield sign has no dependencies
+    assert xml.find("dependency") is None
+
+
+def test_road_marking_stop_line_with_yield_dependency():
+    """Test StopLine (type 294) with yieldSign dependency."""
+    signal = Signal(
+        id=601,
+        name="StopLine_1409",
+        s=12.0,
+        t=-2.0,
+        z_offset=0.0,
+        orientation="-",
+        dynamic="no",
+        country="OpenDRIVE",
+        type=SignalType.STOP_LINE,
+        subtype=-1,
+        value=-1.0,
+        height=0.0,
+        width=3.5,
+        dependencies=[Dependency(id=600, type="yieldSign")],
+    )
+
+    assert signal.type == 294
+    assert len(signal.dependencies) == 1
+    assert signal.dependencies[0].id == 600
+    assert signal.dependencies[0].type == "yieldSign"
+
+    xml = signal.to_xml()
+    xml_string = ET.tostring(xml, encoding="unicode", pretty_print=True)
+
+    assert xml.get("type") == "294"
+    dep_elems = xml.findall("dependency")
+    assert len(dep_elems) == 1
+    assert dep_elems[0].get("id") == "600"
+    assert dep_elems[0].get("type") == "yieldSign"
+    assert 'type="yieldSign"' in xml_string

@@ -585,12 +585,60 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return stop_sign_stop_line_ids
 
+    def _build_road_marking_stop_line_ids(self) -> Set[int]:
+        """Build a set of stop line linestring IDs from road_marking regulatory elements.
+
+        Iterates through all regulatory elements with ``subtype="road_marking"``
+        and collects the IDs of linestrings with ``type="stop_line"`` from the
+        ``refers`` role.
+
+        Returns:
+            Set of stop line linestring IDs that belong to road_marking REs.
+        """
+        road_marking_stop_line_ids: Set[int] = set()
+        seen_re_ids: set = set()
+
+        for lanelet in self.lanelet_map.laneletLayer:
+            for reg_elem in lanelet.regulatoryElements:
+                if reg_elem.id in seen_re_ids:
+                    continue
+                seen_re_ids.add(reg_elem.id)
+
+                attrs = reg_elem.attributes if hasattr(reg_elem, "attributes") else None
+                if not (
+                    attrs is not None
+                    and "subtype" in attrs
+                    and attrs["subtype"] == "road_marking"
+                ):
+                    continue
+
+                try:
+                    params = reg_elem.parameters
+                    if "refers" in params:
+                        for refers_ls in params["refers"]:
+                            ls_attrs = (
+                                refers_ls.attributes
+                                if hasattr(refers_ls, "attributes")
+                                else None
+                            )
+                            if (
+                                ls_attrs is not None
+                                and "type" in ls_attrs
+                                and ls_attrs["type"] == "stop_line"
+                            ):
+                                road_marking_stop_line_ids.add(refers_ls.id)
+                except Exception:
+                    pass
+
+        return road_marking_stop_line_ids
+
     def _extract_and_assign_stop_lines(
         self,
         all_roads: List[Road],
         stop_line_to_tl_signal_ids: Optional[Dict[int, List[int]]] = None,
         stop_sign_stop_line_ids: Optional[Set[int]] = None,
         starting_signal_id: int = 0,
+        road_marking_stop_line_ids: Optional[Set[int]] = None,
     ) -> Dict[int, List[int]]:
         """Extract stop line linestrings and assign them as objects to nearest roads.
 
@@ -602,6 +650,9 @@ class _Lanelet2ToOpenDRIVEConverter:
            with dependency elements referencing the associated traffic lights
         5. If associated with a stop sign regulatory element, creates a Signal
            (type 206 / StopSign)
+        6. If associated with a road_marking regulatory element (and not already
+           handled by traffic_light), creates a YieldSign (type 205) and a
+           StopLine (type 294) with yieldSign dependency
 
         Args:
             all_roads: All roads (regular + connecting) to search and assign to.
@@ -612,6 +663,9 @@ class _Lanelet2ToOpenDRIVEConverter:
                 associated with stop sign regulatory elements.  These will produce
                 StopSign signals (type 206).
             starting_signal_id: Starting ID for generated stop line signals.
+            road_marking_stop_line_ids: Set of stop line linestring IDs from
+                road_marking regulatory elements.  These produce YieldSign (205)
+                and StopLine (294) signal pairs.
 
         Returns:
             Dictionary mapping traffic light signal ID to list of stop line signal IDs,
@@ -643,8 +697,11 @@ class _Lanelet2ToOpenDRIVEConverter:
             else {}
         )
         resolved_stop_sign_ids: Set[int] = stop_sign_stop_line_ids or set()
+        resolved_road_marking_ids: Set[int] = road_marking_stop_line_ids or set()
         stop_line_294_count = 0
         stop_sign_206_count = 0
+        yield_sign_205_count = 0
+        road_marking_294_count = 0
 
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
@@ -732,6 +789,37 @@ class _Lanelet2ToOpenDRIVEConverter:
                 stop_line_signal_id_counter += 1
                 stop_sign_206_count += 1
 
+            # Create YieldSign (type 205) + StopLine (type 294) for road marking
+            # stop lines.  Skip if already handled by traffic_light (avoids
+            # duplicate type=294).
+            if (
+                ls.id in resolved_road_marking_ids
+                and ls.id not in resolved_tl_signal_ids
+            ):
+                # 1. YieldSign signal (type 205)
+                yield_sign_signal = _make_signal(
+                    signal_type=SignalType.YIELD_SIGN,
+                    name=f"YieldSign_{ls.id}",
+                )
+                road_stop_line_signals.setdefault(best_road.id, []).append(
+                    yield_sign_signal
+                )
+                yield_sign_id = stop_line_signal_id_counter
+                stop_line_signal_id_counter += 1
+                yield_sign_205_count += 1
+
+                # 2. StopLine signal (type 294) with dependency to YieldSign
+                rm_stop_line_signal = _make_signal(
+                    signal_type=SignalType.STOP_LINE,
+                    name=f"StopLine_{ls.id}",
+                    dependencies=[Dependency(id=yield_sign_id, type="yieldSign")],
+                )
+                road_stop_line_signals.setdefault(best_road.id, []).append(
+                    rm_stop_line_signal
+                )
+                stop_line_signal_id_counter += 1
+                road_marking_294_count += 1
+
         stop_line_count = sum(len(v) for v in road_objects.values())
         print(
             f"Assigned {stop_line_count} stop line objects to {len(road_objects)} roads"
@@ -745,6 +833,12 @@ class _Lanelet2ToOpenDRIVEConverter:
             print(
                 f"Created {stop_sign_206_count} stop sign signals (type 206) "
                 f"for stop lines without traffic lights"
+            )
+        if yield_sign_205_count > 0:
+            print(
+                f"Created {yield_sign_205_count} yield sign signals (type 205) "
+                f"and {road_marking_294_count} stop line signals (type 294) "
+                f"for road marking stop lines"
             )
 
         for road in all_roads:
@@ -913,6 +1007,14 @@ class _Lanelet2ToOpenDRIVEConverter:
                 f"associated with stop sign regulatory elements"
             )
 
+        # Step 6.6c: Build road marking stop line IDs
+        road_marking_stop_line_ids = self._build_road_marking_stop_line_ids()
+        if road_marking_stop_line_ids:
+            print(
+                f"Found {len(road_marking_stop_line_ids)} stop lines "
+                f"associated with road marking regulatory elements"
+            )
+
         # Step 6.7: Extract stop lines and assign as road objects (with signal dependencies)
         next_signal_id = len(signals_and_controllers.signals)
         tl_signal_to_stop_line_signal_ids = self._extract_and_assign_stop_lines(
@@ -920,6 +1022,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             stop_line_to_tl_signal_ids,
             stop_sign_stop_line_ids,
             next_signal_id,
+            road_marking_stop_line_ids=road_marking_stop_line_ids,
         )
 
         # Step 6.8: Add back-references to traffic light signals pointing to stop lines

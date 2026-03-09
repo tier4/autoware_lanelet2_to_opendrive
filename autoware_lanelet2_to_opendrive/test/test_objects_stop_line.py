@@ -411,3 +411,39 @@ def test_stop_sign_stop_line_ids_from_real_map(lanelet_map):
     assert (
         stop_sign_sl_ids == expected_ids
     ), f"Expected stop sign stop line IDs {expected_ids}, got {stop_sign_sl_ids}"
+
+
+# ---------------------------------------------------------------------------
+# Integration tests – road marking stop lines (real map)
+# ---------------------------------------------------------------------------
+
+
+def test_road_marking_stop_line_ids_from_real_map(lanelet_map):
+    """Test that _build_road_marking_stop_line_ids finds road marking stop lines."""
+    from autoware_lanelet2_to_opendrive.conversion_config import ConversionConfig
+    from autoware_lanelet2_to_opendrive.main import _Lanelet2ToOpenDRIVEConverter
+
+    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, ConversionConfig())
+    rm_sl_ids = converter._build_road_marking_stop_line_ids()
+
+    # The nishishinjuku.osm test map has 32 road_marking regulatory elements
+    # referring to 30 unique stop_line linestrings
+    assert (
+        len(rm_sl_ids) == 30
+    ), f"Expected 30 road marking stop line IDs, got {len(rm_sl_ids)}"
+
+
+def test_road_marking_no_overlap_with_stop_sign(lanelet_map):
+    """Test that road marking stop line IDs do not overlap with stop sign IDs."""
+    from autoware_lanelet2_to_opendrive.conversion_config import ConversionConfig
+    from autoware_lanelet2_to_opendrive.main import _Lanelet2ToOpenDRIVEConverter
+
+    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, ConversionConfig())
+    rm_sl_ids = converter._build_road_marking_stop_line_ids()
+    ss_sl_ids = converter._build_stop_sign_stop_line_ids()
+
+    overlap = rm_sl_ids & ss_sl_ids
+    assert len(overlap) == 0, (
+        f"Road marking and stop sign stop line IDs should not overlap, "
+        f"but found overlap: {overlap}"
+    )
