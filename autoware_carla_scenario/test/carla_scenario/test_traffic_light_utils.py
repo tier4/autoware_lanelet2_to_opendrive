@@ -96,50 +96,67 @@ class TestFindNearestTrafficLight:
     def test_returns_nearest(self) -> None:
         tl_close = _FakeTrafficLight(1.0, 0.0)
         tl_far = _FakeTrafficLight(100.0, 0.0)
+        world = _FakeWorld([tl_far, tl_close])
         origin = _FakeLocation(0.0, 0.0, 0.0)
 
-        nearest, dist = find_nearest_traffic_light([tl_far, tl_close], origin)
+        nearest, dist = find_nearest_traffic_light(world, origin)
 
         assert nearest is tl_close
         assert dist == pytest.approx(1.0)
 
     def test_all_beyond_max_distance(self) -> None:
         tl = _FakeTrafficLight(200.0, 0.0)
+        world = _FakeWorld([tl])
         origin = _FakeLocation(0.0, 0.0, 0.0)
 
-        nearest, dist = find_nearest_traffic_light([tl], origin, max_distance=50.0)
+        nearest, dist = find_nearest_traffic_light(world, origin, max_distance=50.0)
 
         assert nearest is None
         assert dist == float("inf")
 
-    def test_empty_list(self) -> None:
+    def test_empty_world(self) -> None:
+        world = _FakeWorld([])
         origin = _FakeLocation(0.0, 0.0, 0.0)
 
-        nearest, dist = find_nearest_traffic_light([], origin)
+        nearest, dist = find_nearest_traffic_light(world, origin)
 
         assert nearest is None
         assert dist == float("inf")
 
     def test_custom_max_distance(self) -> None:
         tl = _FakeTrafficLight(10.0, 0.0)
+        world = _FakeWorld([tl])
         origin = _FakeLocation(0.0, 0.0, 0.0)
 
-        nearest, dist = find_nearest_traffic_light([tl], origin, max_distance=5.0)
+        nearest, dist = find_nearest_traffic_light(world, origin, max_distance=5.0)
         assert nearest is None
 
-        nearest, dist = find_nearest_traffic_light([tl], origin, max_distance=15.0)
+        nearest, dist = find_nearest_traffic_light(world, origin, max_distance=15.0)
         assert nearest is tl
 
     def test_multiple_lights_selects_closest(self) -> None:
         tl_a = _FakeTrafficLight(5.0, 0.0)
         tl_b = _FakeTrafficLight(3.0, 0.0)
         tl_c = _FakeTrafficLight(8.0, 0.0)
+        world = _FakeWorld([tl_a, tl_b, tl_c])
         origin = _FakeLocation(0.0, 0.0, 0.0)
 
-        nearest, dist = find_nearest_traffic_light([tl_a, tl_b, tl_c], origin)
+        nearest, dist = find_nearest_traffic_light(world, origin)
 
         assert nearest is tl_b
         assert dist == pytest.approx(3.0)
+
+    def test_ignores_non_traffic_light_actors(self) -> None:
+        tl = _FakeTrafficLight(1.0, 0.0)
+        non_tl = _FakeTrafficLight(0.5, 0.0)
+        non_tl.type_id = "vehicle.car"
+        world = _FakeWorld([non_tl, tl])
+        origin = _FakeLocation(0.0, 0.0, 0.0)
+
+        nearest, dist = find_nearest_traffic_light(world, origin)
+
+        assert nearest is tl
+        assert dist == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------

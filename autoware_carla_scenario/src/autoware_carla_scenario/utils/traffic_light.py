@@ -13,14 +13,17 @@ if TYPE_CHECKING:
 
 
 def find_nearest_traffic_light(
-    traffic_lights: list["carla.TrafficLight"],
+    world: "carla.World",
     location: Union[AnyPose, "carla.Location"],
     max_distance: float = 150.0,
 ) -> Tuple[Optional["carla.TrafficLight"], float]:
     """Return the nearest traffic light to *location* within *max_distance*.
 
+    All ``traffic.traffic_light`` actors are retrieved from *world*
+    automatically.
+
     Args:
-        traffic_lights: List of CARLA traffic light actors to search.
+        world: The CARLA world instance used to enumerate traffic lights.
         location: The reference position to measure distances from.
             Accepts any pose type (``Lanelet2Pose``, ``OpenDrivePose``,
             ``CarlaWorldPose``) or a raw ``carla.Location``.
@@ -35,10 +38,12 @@ def find_nearest_traffic_light(
     nearest: Optional["carla.TrafficLight"] = None
     nearest_dist = float("inf")
 
-    for tl in traffic_lights:
-        dist: float = tl.get_transform().location.distance(loc)
+    for actor in world.get_actors():
+        if not actor.type_id.startswith("traffic.traffic_light"):
+            continue
+        dist: float = actor.get_transform().location.distance(loc)
         if dist < nearest_dist and dist < max_distance:
-            nearest = tl
+            nearest = actor
             nearest_dist = dist
 
     return nearest, nearest_dist
