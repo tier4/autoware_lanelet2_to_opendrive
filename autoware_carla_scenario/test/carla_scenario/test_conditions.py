@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unittest.mock
 from typing import Optional
 from unittest.mock import MagicMock
 
@@ -10,11 +11,12 @@ import pytest
 from autoware_carla_scenario import (
     BaseCondition,
     EntityInAreaCondition,
+    EntityLanePositionCondition,
     ScenarioResult,
     TimeoutCondition,
 )
 from autoware_carla_scenario.conditions.entity_in_area import _point_in_polygon_2d
-from autoware_carla_scenario.coordinate.poses import CarlaWorldPose
+from autoware_carla_scenario.coordinate.poses import CarlaWorldPose, OpenDrivePose
 
 
 class AlwaysPassCondition(BaseCondition):
@@ -269,3 +271,80 @@ class TestEntityInAreaCondition:
 
         world_out = _make_world_with_actor("npc1", x=5.0, y=5.0)
         assert condition.check(world_out, elapsed=2.0) is None
+
+
+# ---------------------------------------------------------------------------
+# EntityLanePositionCondition – unit tests (no CARLA required)
+# ---------------------------------------------------------------------------
+
+
+class TestEntityLanePositionCondition:
+    def test_entity_on_matching_road_lane_returns_pass(self) -> None:
+        """Condition triggers when entity is on the specified road and lane."""
+        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is not None
+        assert result.passed is True
+        assert "npc1" in result.message
+        assert "'1'" in result.message
+        assert "-1" in result.message
+        assert result.elapsed_seconds == pytest.approx(5.0)
+
+    def test_entity_on_different_road_returns_none(self) -> None:
+        """Condition does not trigger when entity is on a different road."""
+        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="2", lane_id=-1, s=10.0, t=-1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=1.0)
+
+        assert result is None
+
+    def test_entity_on_different_lane_returns_none(self) -> None:
+        """Condition does not trigger when entity is on a different lane."""
+        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-2, s=10.0, t=-3.0)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=1.0)
+
+        assert result is None
+
+    def test_entity_not_found_returns_none(self) -> None:
+        """Condition returns None when the entity does not exist in the world."""
+        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        world = _make_world_with_actor("other_actor", x=100.0, y=200.0)
+
+        result = condition.check(world, elapsed=1.0)
+        assert result is None
+
+    def test_result_elapsed_seconds(self) -> None:
+        """Elapsed time is correctly recorded in the result."""
+        condition = EntityLanePositionCondition("npc1", road_id="5", lane_id=1)
+        world = _make_world_with_actor("npc1", x=0.0, y=0.0)
+
+        fake_od_pose = OpenDrivePose(road_id="5", lane_id=1, s=0.0, t=1.0)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=42.5)
+
+        assert result is not None
+        assert result.elapsed_seconds == pytest.approx(42.5)

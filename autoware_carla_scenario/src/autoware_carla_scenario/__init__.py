@@ -11,6 +11,7 @@ Public API re-exported for convenience::
         CarlaWorldPose,
         CollisionCondition,
         EntityInAreaCondition,
+        EntityLanePositionCondition,
         EgoConfig,
         EgoVehicle,
         Lanelet2Pose,
@@ -31,6 +32,7 @@ from .conditions import (
     BaseCondition,
     CollisionCondition,
     EntityInAreaCondition,
+    EntityLanePositionCondition,
     ScenarioResult,
     TimeoutCondition,
 )
@@ -59,6 +61,7 @@ __all__ = [
     "CarlaWorldPose",
     "CollisionCondition",
     "EntityInAreaCondition",
+    "EntityLanePositionCondition",
     "EgoConfig",
     "EgoVehicle",
     "Lanelet2Pose",
