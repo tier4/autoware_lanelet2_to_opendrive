@@ -348,3 +348,36 @@ class TestEntityLanePositionCondition:
 
         assert result is not None
         assert result.elapsed_seconds == pytest.approx(42.5)
+
+    def test_lane_id_none_matches_any_lane_on_same_road(self) -> None:
+        """When lane_id is None, any lane on the matching road triggers pass."""
+        condition = EntityLanePositionCondition("npc1", road_id="1")
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-3, s=5.0, t=-2.0)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=3.0)
+
+        assert result is not None
+        assert result.passed is True
+        assert "npc1" in result.message
+        assert "'1'" in result.message
+        assert "any lane" in result.message
+        assert result.elapsed_seconds == pytest.approx(3.0)
+
+    def test_lane_id_none_different_road_returns_none(self) -> None:
+        """When lane_id is None, a different road still returns None."""
+        condition = EntityLanePositionCondition("npc1", road_id="1")
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="2", lane_id=-1, s=5.0, t=-2.0)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=1.0)
+
+        assert result is None
