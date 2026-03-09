@@ -5,23 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional, Tuple, Union
 
 from ..coordinate.map_manager import MapManager
-from ..coordinate.poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
-from ..coordinate.transform import to_carla_world
+from ..coordinate.poses import AnyPose
+from ..coordinate.transform import to_carla_location
 
 if TYPE_CHECKING:
     import carla
-
-
-def _to_carla_location(pose: Union[AnyPose, "carla.Location"]) -> "carla.Location":
-    """Convert an AnyPose or carla.Location to a carla.Location."""
-    if isinstance(pose, (Lanelet2Pose, OpenDrivePose)):
-        pose = to_carla_world(pose)
-    if isinstance(pose, CarlaWorldPose):
-        import carla  # noqa: PLC0415
-
-        return carla.Location(x=pose.x, y=pose.y, z=pose.z)
-    # Assume carla.Location
-    return pose
 
 
 def find_nearest_traffic_light(
@@ -43,7 +31,7 @@ def find_nearest_traffic_light(
         A ``(traffic_light, distance)`` tuple.  If no traffic light is found
         within *max_distance*, returns ``(None, float('inf'))``.
     """
-    loc = _to_carla_location(location)
+    loc = to_carla_location(location)
     nearest: Optional["carla.TrafficLight"] = None
     nearest_dist = float("inf")
 

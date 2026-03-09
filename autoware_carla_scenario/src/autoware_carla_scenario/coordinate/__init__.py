@@ -20,7 +20,7 @@ Usage::
 
 from .map_manager import MapManager
 from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
-from .transform import to_carla_world, to_lanelet2, to_opendrive
+from .transform import to_carla_location, to_carla_world, to_lanelet2, to_opendrive
 
 __all__ = [
     "AnyPose",
@@ -28,6 +28,7 @@ __all__ = [
     "Lanelet2Pose",
     "OpenDrivePose",
     "MapManager",
+    "to_carla_location",
     "to_carla_world",
     "to_lanelet2",
     "to_opendrive",

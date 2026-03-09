@@ -21,7 +21,7 @@ Key transforms
 from __future__ import annotations
 
 import math
-from typing import Union, overload
+from typing import TYPE_CHECKING, Union, overload
 
 import numpy as np
 
@@ -31,12 +31,38 @@ import lanelet2.core
 import lanelet2.geometry
 
 from .map_manager import MapManager
-from .poses import CarlaWorldPose, Lanelet2Pose, OpenDrivePose
+from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
+
+if TYPE_CHECKING:
+    import carla
 
 
 # ---------------------------------------------------------------------------
 # Public API (overloaded)
 # ---------------------------------------------------------------------------
+
+
+def to_carla_location(pose: Union[AnyPose, "carla.Location"]) -> "carla.Location":
+    """Convert any pose type to a ``carla.Location``.
+
+    Accepts ``Lanelet2Pose``, ``OpenDrivePose``, ``CarlaWorldPose``, or a raw
+    ``carla.Location``.  Lanelet2/OpenDRIVE poses are first converted to CARLA
+    world coordinates via :func:`to_carla_world`.
+
+    Args:
+        pose: The source pose or location.
+
+    Returns:
+        A ``carla.Location`` instance.
+    """
+    if isinstance(pose, (Lanelet2Pose, OpenDrivePose)):
+        pose = to_carla_world(pose)
+    if isinstance(pose, CarlaWorldPose):
+        import carla as _carla  # noqa: PLC0415
+
+        return _carla.Location(x=pose.x, y=pose.y, z=pose.z)
+    # Assume carla.Location
+    return pose
 
 
 @overload
