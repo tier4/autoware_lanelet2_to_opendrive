@@ -726,6 +726,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
             road_objects.setdefault(best_road.id, []).append(obj)
 
+            # Use half of road width at s for signal t coordinate
+            signal_t = best_road.get_half_width_at_s(obj.s)
+
             def _make_signal(
                 signal_type: int,
                 name: str,
@@ -735,12 +738,12 @@ class _Lanelet2ToOpenDRIVEConverter:
                     id=stop_line_signal_id_counter,
                     name=name,
                     s=obj.s,
-                    t=obj.t,
+                    t=signal_t,
                     z_offset=obj.z_offset,
                     h_offset=0.0,
                     roll=0.0,
                     pitch=0.0,
-                    orientation="-" if obj.t < 0 else "+",
+                    orientation="-" if signal_t < 0 else "+",
                     dynamic="no",
                     country="OpenDRIVE",
                     type=signal_type,

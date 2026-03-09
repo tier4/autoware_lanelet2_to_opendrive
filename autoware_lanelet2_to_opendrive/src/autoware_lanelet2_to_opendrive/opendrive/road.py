@@ -194,6 +194,58 @@ class Road:
 
         return road_elevation_at_s
 
+    def get_half_width_at_s(self, s: float) -> float:
+        """Calculate half of the innermost lane width at a given s-coordinate.
+
+        Evaluates the width of the innermost driving lane (lane 1 for LHT,
+        lane -1 for RHT) at position s and returns half of it. This places
+        the signal at the lateral center of the innermost lane.
+
+        Args:
+            s: Position along the road reference line (s-coordinate) in meters.
+
+        Returns:
+            Signed half-width value. Positive for LHT, negative for RHT.
+            Returns 0.0 if the road has no lanes.
+        """
+        if self.lanes is None or not self.lanes.lane_sections:
+            return 0.0
+
+        # Find the lane section that contains this s coordinate
+        active_section = self.lanes.lane_sections[0]
+        for section in self.lanes.lane_sections:
+            if section.s_offset <= s:
+                active_section = section
+            else:
+                break
+
+        def _eval_width(widths, s_pos: float) -> float:
+            """Evaluate cubic polynomial width at s_pos."""
+            result = 0.0
+            for w in widths:
+                if w.s_offset <= s_pos:
+                    ds = s_pos - w.s_offset
+                    result = w.a + w.b * ds + w.c * ds * ds + w.d * ds * ds * ds
+                else:
+                    break
+            return result
+
+        # s relative to the lane section start
+        s_local = s - active_section.s_offset
+
+        # Use the innermost lane (closest to reference line) width / 2
+        if active_section.left_lanes:
+            innermost = active_section.left_lanes.get(1)
+            if innermost is not None and innermost.widths:
+                return _eval_width(innermost.widths, s_local) / 2.0
+
+        if active_section.right_lanes:
+            innermost = active_section.right_lanes.get(-1)
+            if innermost is not None and innermost.widths:
+                return -(_eval_width(innermost.widths, s_local) / 2.0)
+
+        return 0.0
+
     def set_lane_links(self, context: LaneLinksContext) -> None:
         """Set lane predecessor and successor links based on lanelet connections.
 

@@ -176,16 +176,17 @@ class SignalsAndControllers:
                 if not road_lanelets_with_signal:
                     continue
 
+                # Find the corresponding Road object (reused for lane IDs, elevation, and width)
+                matching_road: Optional["Road"] = road_id_to_road.get(road_id)
+
                 # Calculate s, t coordinates from traffic light geometry
                 s, t = SignalsAndControllers._calculate_signal_position(
                     traffic_light=traffic_light,
                     road_id=road_id,
                     lanelet_map=lanelet_map,
                     road_lanelet_mapping=road_lanelet_mapping,
+                    road=matching_road,
                 )
-
-                # Find the corresponding Road object (reused for lane IDs and elevation)
-                matching_road: Optional["Road"] = road_id_to_road.get(road_id)
 
                 # Determine lane IDs for the validity element.
                 # Use the road's lanelet-to-lane mapping so that the IDs are correct
@@ -307,20 +308,27 @@ class SignalsAndControllers:
         road_id: int,
         lanelet_map: lanelet2.core.LaneletMap,
         road_lanelet_mapping: RoadLaneletMapping,
+        road: Optional["Road"] = None,
     ) -> tuple[float, float]:
         """
         Calculate s,t coordinates for a traffic signal on a road.
+
+        The s coordinate is calculated by projecting the signal position onto
+        the road reference line (Frenet s). The t coordinate is set to half
+        the total lane width at that s position, placing the signal at the
+        lateral center of the driving lanes.
 
         Args:
             traffic_light: Lanelet2 TrafficLight regulatory element
             road_id: ID of the road the signal is on
             lanelet_map: Lanelet2 map containing the lanelets
             road_lanelet_mapping: Mapping between roads and lanelets
+            road: Optional Road object for computing lane width at s
 
         Returns:
             Tuple of (s, t) coordinates where:
                 s: arc length along road reference line
-                t: lateral offset from reference line (negative = right side)
+                t: half of total lane width at s (signed by lane side)
         """
         # Get traffic light geometry (position)
         traffic_light_geometry = traffic_light.trafficLights
@@ -371,9 +379,15 @@ class SignalsAndControllers:
             )
             spline = reference_line.centerline_2d
 
-            # Use cartesian_to_frenet to convert 3D position to s,t coordinates
-            # Note: 2D spline (z=0) works fine for XY-based Frenet conversion
-            s, t = spline.cartesian_to_frenet(x, y, z)
+            # Use cartesian_to_frenet to get s coordinate only
+            s, _frenet_t = spline.cartesian_to_frenet(x, y, z)
+
+            # Use half of total lane width at s for t
+            if road is not None:
+                t = road.get_half_width_at_s(s)
+            else:
+                t = _frenet_t
+
             return (s, t)
         except Exception as e:
             # If conversion fails, log warning and return default position
