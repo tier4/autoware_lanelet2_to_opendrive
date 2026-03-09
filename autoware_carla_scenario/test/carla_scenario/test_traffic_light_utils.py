@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -39,11 +39,19 @@ class _FakeTransform:
 class _FakeTrafficLight:
     """Minimal traffic light stub."""
 
-    def __init__(self, x: float, y: float, z: float = 0.0) -> None:
+    def __init__(
+        self,
+        x: float,
+        y: float,
+        z: float = 0.0,
+        opendrive_id: str = "",
+    ) -> None:
         self._transform = _FakeTransform(location=_FakeLocation(x, y, z))
         self._state: object = None
         self._frozen: bool = False
         self._group: List["_FakeTrafficLight"] = [self]
+        self._opendrive_id = opendrive_id
+        self.type_id = "traffic.traffic_light"
 
     def get_transform(self) -> _FakeTransform:
         return self._transform
@@ -51,11 +59,24 @@ class _FakeTrafficLight:
     def get_group_traffic_lights(self) -> List["_FakeTrafficLight"]:
         return self._group
 
+    def get_opendrive_id(self) -> str:
+        return self._opendrive_id
+
     def set_state(self, state: object) -> None:
         self._state = state
 
     def freeze(self, frozen: bool) -> None:
         self._frozen = frozen
+
+
+class _FakeWorld:
+    """Minimal CARLA world stub."""
+
+    def __init__(self, actors: List[_FakeTrafficLight]) -> None:
+        self._actors = actors
+
+    def get_actors(self) -> List[_FakeTrafficLight]:
+        return self._actors
 
 
 def _make_group(*lights: _FakeTrafficLight) -> List[_FakeTrafficLight]:
@@ -127,42 +148,64 @@ class TestFindNearestTrafficLight:
 
 
 class TestSetGroupTrafficLightState:
-    def test_sets_state_on_all_group_members(self) -> None:
-        tl1 = _FakeTrafficLight(0.0, 0.0)
-        tl2 = _FakeTrafficLight(10.0, 0.0)
-        _make_group(tl1, tl2)
+    _PATCH_TARGET = (
+        "autoware_carla_scenario.utils.traffic_light._get_signal_ids_for_controller"
+    )
+
+    def test_sets_state_on_all_matching_signals(self) -> None:
+        tl1 = _FakeTrafficLight(0.0, 0.0, opendrive_id="sig_1")
+        tl2 = _FakeTrafficLight(10.0, 0.0, opendrive_id="sig_2")
+        world = _FakeWorld([tl1, tl2])
 
         state = MagicMock(name="Green")
-        set_group_traffic_light_state(tl1, state)
+        with patch(self._PATCH_TARGET, return_value=["sig_1", "sig_2"]):
+            set_group_traffic_light_state(world, 100, state)
 
         assert tl1._state is state
         assert tl2._state is state
 
     def test_freezes_all_by_default(self) -> None:
-        tl1 = _FakeTrafficLight(0.0, 0.0)
-        tl2 = _FakeTrafficLight(10.0, 0.0)
-        _make_group(tl1, tl2)
+        tl1 = _FakeTrafficLight(0.0, 0.0, opendrive_id="sig_1")
+        tl2 = _FakeTrafficLight(10.0, 0.0, opendrive_id="sig_2")
+        world = _FakeWorld([tl1, tl2])
 
-        set_group_traffic_light_state(tl1, MagicMock())
+        with patch(self._PATCH_TARGET, return_value=["sig_1", "sig_2"]):
+            set_group_traffic_light_state(world, 100, MagicMock())
 
         assert tl1._frozen is True
         assert tl2._frozen is True
 
     def test_freeze_false(self) -> None:
-        tl1 = _FakeTrafficLight(0.0, 0.0)
-        tl2 = _FakeTrafficLight(10.0, 0.0)
-        _make_group(tl1, tl2)
+        tl1 = _FakeTrafficLight(0.0, 0.0, opendrive_id="sig_1")
+        tl2 = _FakeTrafficLight(10.0, 0.0, opendrive_id="sig_2")
+        world = _FakeWorld([tl1, tl2])
 
-        set_group_traffic_light_state(tl1, MagicMock(), freeze=False)
+        with patch(self._PATCH_TARGET, return_value=["sig_1", "sig_2"]):
+            set_group_traffic_light_state(world, 100, MagicMock(), freeze=False)
 
         assert tl1._frozen is False
         assert tl2._frozen is False
 
-    def test_single_light_group(self) -> None:
-        tl = _FakeTrafficLight(0.0, 0.0)
+    def test_only_matching_signals_affected(self) -> None:
+        tl1 = _FakeTrafficLight(0.0, 0.0, opendrive_id="sig_1")
+        tl2 = _FakeTrafficLight(10.0, 0.0, opendrive_id="sig_other")
+        world = _FakeWorld([tl1, tl2])
         state = MagicMock(name="Red")
 
-        set_group_traffic_light_state(tl, state)
+        with patch(self._PATCH_TARGET, return_value=["sig_1"]):
+            set_group_traffic_light_state(world, 100, state)
 
-        assert tl._state is state
-        assert tl._frozen is True
+        assert tl1._state is state
+        assert tl1._frozen is True
+        assert tl2._state is None
+        assert tl2._frozen is False
+
+    def test_no_signals_found(self) -> None:
+        tl = _FakeTrafficLight(0.0, 0.0, opendrive_id="sig_1")
+        world = _FakeWorld([tl])
+
+        with patch(self._PATCH_TARGET, return_value=[]):
+            set_group_traffic_light_state(world, 999, MagicMock())
+
+        assert tl._state is None
+        assert tl._frozen is False
