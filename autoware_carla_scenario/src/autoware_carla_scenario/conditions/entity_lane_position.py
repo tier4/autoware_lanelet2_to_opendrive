@@ -20,6 +20,9 @@ class EntityLanePositionCondition(BaseCondition):
     condition triggers when the resulting ``road_id`` and ``lane_id`` match the
     specified values.
 
+    When ``lane_id`` is ``None``, only the ``road_id`` is checked; the entity may
+    be on any lane of that road.
+
     .. note::
         :class:`~autoware_carla_scenario.coordinate.map_manager.MapManager` must be
         initialised before the first call to :meth:`check`, since the conversion from
@@ -29,13 +32,14 @@ class EntityLanePositionCondition(BaseCondition):
         entity_name: The ``role_name`` attribute of the actor to track.
         road_id: The OpenDRIVE road ID that the entity must be on.
         lane_id: The OpenDRIVE lane ID that the entity must be on.
+            If ``None``, any lane on the specified road is accepted.
     """
 
     def __init__(
         self,
         entity_name: str,
         road_id: str,
-        lane_id: int,
+        lane_id: Optional[int] = None,
     ) -> None:
         self._entity_name = entity_name
         self._road_id = road_id
@@ -65,13 +69,20 @@ class EntityLanePositionCondition(BaseCondition):
         carla_pose = CarlaWorldPose(x=loc.x, y=loc.y, z=loc.z)
         od_pose = to_opendrive(carla_pose)
 
-        if od_pose.road_id == self._road_id and od_pose.lane_id == self._lane_id:
-            return ScenarioResult(
-                passed=True,
-                message=(
-                    f"Entity '{self._entity_name}' is on road '{self._road_id}'"
-                    f" lane {self._lane_id} at {elapsed:.2f}s"
-                ),
-                elapsed_seconds=elapsed,
-            )
-        return None
+        if od_pose.road_id != self._road_id:
+            return None
+
+        if self._lane_id is not None and od_pose.lane_id != self._lane_id:
+            return None
+
+        lane_desc = "(any lane)" if self._lane_id is None else f"lane {self._lane_id}"
+        msg = (
+            f"Entity '{self._entity_name}' is on road '{self._road_id}'"
+            f" {lane_desc} at {elapsed:.2f}s"
+        )
+
+        return ScenarioResult(
+            passed=True,
+            message=msg,
+            elapsed_seconds=elapsed,
+        )
