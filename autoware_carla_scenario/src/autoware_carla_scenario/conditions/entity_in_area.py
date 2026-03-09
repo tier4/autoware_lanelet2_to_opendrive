@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 import cv2
 import numpy as np
 
-from ..coordinate.poses import CarlaWorldPose, Lanelet2Pose, OpenDrivePose
+from ..coordinate.poses import AnyPose, CarlaWorldPose
 from ..coordinate.transform import to_carla_world
 from .base import BaseCondition, ScenarioResult
 
 if TYPE_CHECKING:
     import carla
-
-AnyPose = Union[Lanelet2Pose, OpenDrivePose, CarlaWorldPose]
 
 
 def _point_in_polygon_2d(

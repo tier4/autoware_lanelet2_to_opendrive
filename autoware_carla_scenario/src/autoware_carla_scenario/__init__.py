@@ -21,9 +21,13 @@ Public API re-exported for convenience::
         ScenarioRecorder,
         ScenarioResult,
         TimeoutCondition,
+        to_carla_location,
         to_carla_world,
         to_lanelet2,
         to_opendrive,
+        find_nearest_traffic_light,
+        lanelet2_traffic_light_id_to_opendrive_controller_id,
+        set_group_traffic_light_state,
     )
 """
 
@@ -41,6 +45,7 @@ from .coordinate import (
     Lanelet2Pose,
     MapManager,
     OpenDrivePose,
+    to_carla_location,
     to_carla_world,
     to_lanelet2,
     to_opendrive,
@@ -51,6 +56,11 @@ from .recording import ScenarioRecorder
 from .scenario_base import BaseScenario, EgoConfig
 from .scenario_queue import ScenarioQueue
 from .server import CarlaServerManager
+from .utils import (
+    find_nearest_traffic_light,
+    lanelet2_traffic_light_id_to_opendrive_controller_id,
+    set_group_traffic_light_state,
+)
 
 __all__ = [
     "CarlaAutowareScenario",
@@ -71,7 +81,11 @@ __all__ = [
     "ScenarioRecorder",
     "ScenarioResult",
     "TimeoutCondition",
+    "to_carla_location",
     "to_carla_world",
     "to_lanelet2",
     "to_opendrive",
+    "find_nearest_traffic_light",
+    "lanelet2_traffic_light_id_to_opendrive_controller_id",
+    "set_group_traffic_light_state",
 ]
