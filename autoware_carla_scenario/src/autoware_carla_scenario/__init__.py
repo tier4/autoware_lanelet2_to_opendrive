@@ -24,6 +24,8 @@ Public API re-exported for convenience::
         to_carla_world,
         to_lanelet2,
         to_opendrive,
+        find_nearest_traffic_light,
+        set_group_traffic_light_state,
     )
 """
 
@@ -51,6 +53,7 @@ from .recording import ScenarioRecorder
 from .scenario_base import BaseScenario, EgoConfig
 from .scenario_queue import ScenarioQueue
 from .server import CarlaServerManager
+from .utils import find_nearest_traffic_light, set_group_traffic_light_state
 
 __all__ = [
     "CarlaAutowareScenario",
@@ -74,4 +77,6 @@ __all__ = [
     "to_carla_world",
     "to_lanelet2",
     "to_opendrive",
+    "find_nearest_traffic_light",
+    "set_group_traffic_light_state",
 ]
