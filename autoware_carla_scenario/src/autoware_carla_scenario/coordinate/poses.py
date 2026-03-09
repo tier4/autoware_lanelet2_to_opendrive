@@ -9,7 +9,7 @@ Three coordinate systems:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     import carla  # noqa: F401  (type stubs only)
@@ -90,3 +90,7 @@ class CarlaWorldPose:
             pitch=t.rotation.pitch,
             yaw=t.rotation.yaw,
         )
+
+
+AnyPose = Union[Lanelet2Pose, OpenDrivePose, CarlaWorldPose]
+"""Union of all supported pose types for coordinate transformations."""

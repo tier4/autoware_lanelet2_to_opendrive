@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple, Union
+
+from ..coordinate.poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
+from ..coordinate.transform import to_carla_world
 
 if TYPE_CHECKING:
     import carla
 
 
+def _to_carla_location(pose: Union[AnyPose, "carla.Location"]) -> "carla.Location":
+    """Convert an AnyPose or carla.Location to a carla.Location."""
+    if isinstance(pose, (Lanelet2Pose, OpenDrivePose)):
+        pose = to_carla_world(pose)
+    if isinstance(pose, CarlaWorldPose):
+        import carla  # noqa: PLC0415
+
+        return carla.Location(x=pose.x, y=pose.y, z=pose.z)
+    # Assume carla.Location
+    return pose
+
+
 def find_nearest_traffic_light(
     traffic_lights: list["carla.TrafficLight"],
-    location: "carla.Location",
+    location: Union[AnyPose, "carla.Location"],
     max_distance: float = 150.0,
 ) -> Tuple[Optional["carla.TrafficLight"], float]:
     """Return the nearest traffic light to *location* within *max_distance*.
@@ -18,6 +33,8 @@ def find_nearest_traffic_light(
     Args:
         traffic_lights: List of CARLA traffic light actors to search.
         location: The reference position to measure distances from.
+            Accepts any pose type (``Lanelet2Pose``, ``OpenDrivePose``,
+            ``CarlaWorldPose``) or a raw ``carla.Location``.
         max_distance: Maximum search radius in metres.  Traffic lights
             farther than this are ignored.
 
@@ -25,11 +42,12 @@ def find_nearest_traffic_light(
         A ``(traffic_light, distance)`` tuple.  If no traffic light is found
         within *max_distance*, returns ``(None, float('inf'))``.
     """
+    loc = _to_carla_location(location)
     nearest: Optional["carla.TrafficLight"] = None
     nearest_dist = float("inf")
 
     for tl in traffic_lights:
-        dist: float = tl.get_transform().location.distance(location)
+        dist: float = tl.get_transform().location.distance(loc)
         if dist < nearest_dist and dist < max_distance:
             nearest = tl
             nearest_dist = dist

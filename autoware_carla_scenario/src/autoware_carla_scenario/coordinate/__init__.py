@@ -19,10 +19,11 @@ Usage::
 """
 
 from .map_manager import MapManager
-from .poses import CarlaWorldPose, Lanelet2Pose, OpenDrivePose
+from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
 from .transform import to_carla_world, to_lanelet2, to_opendrive
 
 __all__ = [
+    "AnyPose",
     "CarlaWorldPose",
     "Lanelet2Pose",
     "OpenDrivePose",
