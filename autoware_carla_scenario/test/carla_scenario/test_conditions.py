@@ -13,6 +13,7 @@ from autoware_carla_scenario import (
     EntityInAreaCondition,
     EntityLanePositionCondition,
     ScenarioResult,
+    StandstillCondition,
     TimeoutCondition,
 )
 from autoware_carla_scenario.conditions.entity_in_area import _point_in_polygon_2d
@@ -381,3 +382,103 @@ class TestEntityLanePositionCondition:
             result = condition.check(world, elapsed=1.0)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# StandstillCondition – unit tests (no CARLA required)
+# ---------------------------------------------------------------------------
+
+
+def _make_world_with_velocity(
+    role_name: str,
+    vx: float,
+    vy: float,
+    vz: float = 0.0,
+) -> MagicMock:
+    """Return a MagicMock CARLA world with a single actor having the given velocity."""
+    velocity = MagicMock()
+    velocity.x = vx
+    velocity.y = vy
+    velocity.z = vz
+
+    actor = MagicMock()
+    actor.attributes = {"role_name": role_name}
+    actor.get_velocity.return_value = velocity
+
+    world = MagicMock()
+    world.get_actors.return_value = [actor]
+    return world
+
+
+class TestStandstillCondition:
+    def test_returns_none_before_duration(self) -> None:
+        condition = StandstillCondition("ego", duration=3.0)
+        world = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
+        assert condition.check(world, elapsed=0.0) is None
+        assert condition.check(world, elapsed=2.9) is None
+
+    def test_returns_pass_after_duration(self) -> None:
+        condition = StandstillCondition("ego", duration=3.0)
+        world = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
+        condition.check(world, elapsed=0.0)
+        result = condition.check(world, elapsed=3.0)
+        assert result is not None
+        assert result.passed is True
+        assert "ego" in result.message
+
+    def test_timer_resets_when_moving(self) -> None:
+        condition = StandstillCondition("ego", duration=2.0)
+        world_stop = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
+        world_move = _make_world_with_velocity("ego", vx=5.0, vy=0.0)
+
+        # Stand still from t=0 to t=1
+        condition.check(world_stop, elapsed=0.0)
+        assert condition.check(world_stop, elapsed=1.0) is None
+
+        # Start moving at t=1.5 → timer resets
+        assert condition.check(world_move, elapsed=1.5) is None
+
+        # Stand still again from t=2
+        condition.check(world_stop, elapsed=2.0)
+        assert condition.check(world_stop, elapsed=3.0) is None  # only 1s
+        result = condition.check(world_stop, elapsed=4.0)  # 2s standstill
+        assert result is not None
+        assert result.passed is True
+
+    def test_speed_below_threshold_counts(self) -> None:
+        condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.5)
+        # Speed = sqrt(0.3^2 + 0.3^2) ≈ 0.42 < 0.5
+        world = _make_world_with_velocity("ego", vx=0.3, vy=0.3)
+        condition.check(world, elapsed=0.0)
+        result = condition.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_speed_above_threshold_no_trigger(self) -> None:
+        condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.1)
+        world = _make_world_with_velocity("ego", vx=1.0, vy=0.0)
+        condition.check(world, elapsed=0.0)
+        assert condition.check(world, elapsed=5.0) is None
+
+    def test_entity_not_found_returns_none(self) -> None:
+        condition = StandstillCondition("ego", duration=1.0)
+        world = _make_world_with_velocity("other", vx=0.0, vy=0.0)
+        assert condition.check(world, elapsed=0.0) is None
+
+    def test_invalid_duration_raises(self) -> None:
+        with pytest.raises(ValueError, match="duration must be positive"):
+            StandstillCondition("ego", duration=0.0)
+        with pytest.raises(ValueError, match="duration must be positive"):
+            StandstillCondition("ego", duration=-1.0)
+
+    def test_invalid_speed_threshold_raises(self) -> None:
+        with pytest.raises(ValueError, match="speed_threshold must be non-negative"):
+            StandstillCondition("ego", duration=1.0, speed_threshold=-0.1)
+
+    def test_elapsed_seconds_in_result(self) -> None:
+        condition = StandstillCondition("ego", duration=1.0)
+        world = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
+        condition.check(world, elapsed=10.0)
+        result = condition.check(world, elapsed=11.0)
+        assert result is not None
+        assert result.elapsed_seconds == pytest.approx(11.0)
