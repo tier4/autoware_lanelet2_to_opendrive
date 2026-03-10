@@ -1,73 +1,47 @@
-"""MP4 recording of scenario camera frames."""
+"""Scenario recording using CARLA's native recorder."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import TYPE_CHECKING, Optional
 
-import numpy as np
+if TYPE_CHECKING:
+    import carla
 
 
 class ScenarioRecorder:
-    """Collects RGB frames and saves them as an MP4 video file.
+    """Records simulation using CARLA's built-in recorder.
 
-    Uses ``cv2.VideoWriter`` from the *opencv-python* package.
+    The native recorder captures the full simulation state (actor transforms,
+    traffic lights, etc.) into a binary log that can be replayed inside CARLA
+    with ``client.replay_file()``.
+
+    Example::
+
+        recorder = ScenarioRecorder()
+        recorder.start(client, Path("output/scenario.log"))
+        # ... run simulation ...
+        recorder.stop(client)
     """
 
-    def __init__(
-        self,
-        fps: float = 20.0,
-        resolution: Tuple[int, int] = (1280, 720),
-    ) -> None:
-        """Initialize the recorder.
+    def __init__(self) -> None:
+        self._recording_path: Optional[Path] = None
+
+    def start(self, client: "carla.Client", output_path: Path) -> None:
+        """Start recording the simulation.
 
         Args:
-            fps: Frames per second for the output video.
-            resolution: Output video resolution as (width, height).
+            client: The CARLA client instance.
+            output_path: Destination file path for the recording log.
         """
-        self.fps = fps
-        self.resolution = resolution
-        self._frames: List[np.ndarray] = []
-
-    def add_frame(self, image: np.ndarray) -> None:
-        """Append a single RGB frame to the internal buffer.
-
-        Args:
-            image: RGB image as a NumPy array (H×W×3, uint8).
-        """
-        self._frames.append(image)
-
-    def save(self, output_path: Path) -> None:
-        """Write all buffered frames to an MP4 file.
-
-        The frames are converted from RGB to BGR before encoding because
-        OpenCV's :class:`cv2.VideoWriter` expects BGR byte order.
-
-        Args:
-            output_path: Destination file path (will be created/overwritten).
-        """
-        import cv2
-
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
-        writer = cv2.VideoWriter(
-            str(output_path),
-            fourcc,
-            self.fps,
-            self.resolution,
-        )
-        try:
-            for frame in self._frames:
-                # Resize to target resolution if needed
-                h, w = frame.shape[:2]
-                tw, th = self.resolution
-                if (w, h) != (tw, th):
-                    frame = cv2.resize(frame, (tw, th))
-                bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                writer.write(bgr)
-        finally:
-            writer.release()
+        self._recording_path = output_path
+        client.start_recorder(str(output_path))
 
-    def clear(self) -> None:
-        """Discard all buffered frames."""
-        self._frames.clear()
+    def stop(self, client: "carla.Client") -> None:
+        """Stop the recording.
+
+        Args:
+            client: The CARLA client instance.
+        """
+        client.stop_recorder()

@@ -9,7 +9,6 @@ requires-python = ">=3.10,<3.11"
 dependencies = [
     "carla>=0.10.0",
     "pyxodr>=0.1.0",
-    "opencv-python>=4.8",
     "numpy>=1.21",
     "pytest>=9.0.1",
     "python-dotenv>=1.2.2",
