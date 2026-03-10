@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, List, Optional
 
 from .conditions import BaseCondition
+from .entity._spawn import validate_exclusive_spawn_params
 
 if TYPE_CHECKING:
     import carla
@@ -28,12 +29,7 @@ class EgoConfig:
     spawn_index: Optional[int] = None
 
     def __post_init__(self) -> None:
-        if self.transform is None and self.spawn_index is None:
-            raise ValueError("Either 'transform' or 'spawn_index' must be provided.")
-        if self.transform is not None and self.spawn_index is not None:
-            raise ValueError(
-                "Only one of 'transform' or 'spawn_index' may be provided."
-            )
+        validate_exclusive_spawn_params(self.transform, self.spawn_index)
 
 
 class BaseScenario(ABC):

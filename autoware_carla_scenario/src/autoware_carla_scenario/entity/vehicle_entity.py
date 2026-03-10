@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import carla
 
+from ._spawn import spawn_vehicle_actor, validate_exclusive_spawn_params
+
 
 @dataclass
 class VehicleEntityConfig:
@@ -27,12 +29,7 @@ class VehicleEntityConfig:
     autopilot: bool = False
 
     def __post_init__(self) -> None:
-        if self.transform is None and self.spawn_index is None:
-            raise ValueError("Either 'transform' or 'spawn_index' must be provided.")
-        if self.transform is not None and self.spawn_index is not None:
-            raise ValueError(
-                "Only one of 'transform' or 'spawn_index' may be provided."
-            )
+        validate_exclusive_spawn_params(self.transform, self.spawn_index)
 
 
 class VehicleEntity:
@@ -85,47 +82,13 @@ class VehicleEntity:
             RuntimeError: If the vehicle could not be spawned at the
                 requested location.
         """
-        bp_lib = world.get_blueprint_library()
-
-        available_vehicles = sorted(bp.id for bp in bp_lib.filter("vehicle.*"))
-        if self._config.vehicle_type not in available_vehicles:
-            raise ValueError(
-                f"Vehicle blueprint {self._config.vehicle_type!r} is not available. "
-                f"Available vehicles: {available_vehicles}"
-            )
-
-        spawn_points = world.get_map().get_spawn_points()
-        if self._config.spawn_index is not None:
-            if self._config.spawn_index >= len(spawn_points):
-                raise ValueError(
-                    f"Spawn index {self._config.spawn_index} is out of range. "
-                    f"The map has {len(spawn_points)} spawn points "
-                    f"(valid indices: 0\u2013{len(spawn_points) - 1})."
-                )
-            transform = spawn_points[self._config.spawn_index]
-        else:
-            transform = self._config.transform  # type: ignore[assignment]
-
-        vehicle_bp = bp_lib.find(self._config.vehicle_type)
-        vehicle_bp.set_attribute("role_name", self._config.role_name)
-
-        actor = world.try_spawn_actor(vehicle_bp, transform)
-        if actor is None:
-            suggestions = "\n".join(
-                f"  [{i}] x={sp.location.x:.1f}, y={sp.location.y:.1f}, "
-                f"z={sp.location.z:.1f}"
-                for i, sp in enumerate(spawn_points[:5])
-            )
-            raise RuntimeError(
-                f"Failed to spawn NPC vehicle '{self._config.role_name}' at "
-                f"x={transform.location.x}, "
-                f"y={transform.location.y}, "
-                f"z={transform.location.z}. "
-                "The location may be occupied or out of map bounds. "
-                f"Try one of these spawn points:\n{suggestions}"
-            )
-
-        self._vehicle = actor
+        self._vehicle = spawn_vehicle_actor(
+            world,
+            self._config.vehicle_type,
+            self._config.role_name,
+            self._config.transform,
+            self._config.spawn_index,
+        )
 
         if self._config.autopilot:
             self._vehicle.set_autopilot(True)
