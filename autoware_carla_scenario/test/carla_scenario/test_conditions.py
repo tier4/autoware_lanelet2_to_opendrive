@@ -17,6 +17,7 @@ from autoware_carla_scenario import (
     OrCondition,
     ScenarioResult,
     StandstillCondition,
+    StickyCondition,
     TimeoutCondition,
 )
 from autoware_carla_scenario.conditions.entity_in_area import _point_in_polygon_2d
@@ -660,3 +661,129 @@ class TestStandstillCondition:
         result = condition.check(world, elapsed=11.0)
         assert result is not None
         assert result.elapsed_seconds == pytest.approx(11.0)
+
+
+# ---------------------------------------------------------------------------
+# StickyCondition – unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestStickyCondition:
+    def test_passes_through_none(self) -> None:
+        """When inner returns None, StickyCondition also returns None."""
+        cond = StickyCondition(AlwaysNoneCondition())
+        assert cond.check(MagicMock(), elapsed=1.0) is None
+
+    def test_passes_through_fail(self) -> None:
+        """When inner returns a failure, StickyCondition forwards it without latching."""
+        cond = StickyCondition(AlwaysFailCondition())
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is False
+
+    def test_does_not_latch_fail(self) -> None:
+        """A failure result is not latched — next check still delegates."""
+
+        class FailThenNone(BaseCondition):
+            def __init__(self) -> None:
+                self._called = False
+
+            def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+                if not self._called:
+                    self._called = True
+                    return ScenarioResult(
+                        passed=False, message="fail", elapsed_seconds=elapsed
+                    )
+                return None
+
+        cond = StickyCondition(FailThenNone())
+        r1 = cond.check(MagicMock(), elapsed=1.0)
+        assert r1 is not None and r1.passed is False
+        # Second call should return None (not the latched failure)
+        assert cond.check(MagicMock(), elapsed=2.0) is None
+
+    def test_latches_pass_result(self) -> None:
+        """Once inner passes, StickyCondition returns the same result forever."""
+
+        class PassOnce(BaseCondition):
+            def __init__(self) -> None:
+                self._called = False
+
+            def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+                if not self._called:
+                    self._called = True
+                    return ScenarioResult(
+                        passed=True, message="first pass", elapsed_seconds=elapsed
+                    )
+                return None  # Would return None after first call
+
+        cond = StickyCondition(PassOnce())
+        r1 = cond.check(MagicMock(), elapsed=1.0)
+        assert r1 is not None and r1.passed is True
+        assert r1.message == "first pass"
+
+        # Inner would return None now, but sticky keeps the latched result
+        r2 = cond.check(MagicMock(), elapsed=5.0)
+        assert r2 is not None and r2.passed is True
+        assert r2.message == "first pass"
+        assert r2.elapsed_seconds == pytest.approx(1.0)
+
+    def test_inner_not_called_after_latch(self) -> None:
+        """Once latched, the inner condition is never called again."""
+        spy = MagicMock(spec=BaseCondition)
+        spy.check.return_value = ScenarioResult(
+            passed=True, message="ok", elapsed_seconds=0.0
+        )
+        cond = StickyCondition(spy)
+        cond.check(MagicMock(), elapsed=0.0)  # triggers latch
+        spy.check.reset_mock()
+
+        cond.check(MagicMock(), elapsed=1.0)  # should not call inner
+        spy.check.assert_not_called()
+
+    def test_with_and_condition(self) -> None:
+        """StickyCondition works correctly inside AndCondition for route checks."""
+        cond = AndCondition(
+            [
+                StickyCondition(AlwaysPassCondition()),
+                StickyCondition(AlwaysPassCondition()),
+            ]
+        )
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_and_with_mixed_sticky_timing(self) -> None:
+        """AndCondition passes when all sticky children have triggered at least once."""
+
+        class CountedCondition(BaseCondition):
+            """Pass on the Nth check, None otherwise."""
+
+            def __init__(self, trigger_at: int) -> None:
+                self._count = 0
+                self._trigger_at = trigger_at
+
+            def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+                self._count += 1
+                if self._count >= self._trigger_at:
+                    return ScenarioResult(
+                        passed=True,
+                        message=f"triggered at call {self._count}",
+                        elapsed_seconds=elapsed,
+                    )
+                return None
+
+        # First condition triggers immediately, second triggers on 3rd check
+        cond = AndCondition(
+            [
+                StickyCondition(CountedCondition(trigger_at=1)),
+                StickyCondition(CountedCondition(trigger_at=3)),
+            ]
+        )
+        world = MagicMock()
+
+        assert cond.check(world, elapsed=1.0) is None  # 2nd not ready
+        assert cond.check(world, elapsed=2.0) is None  # 2nd not ready
+        result = cond.check(world, elapsed=3.0)  # both now triggered
+        assert result is not None
+        assert result.passed is True

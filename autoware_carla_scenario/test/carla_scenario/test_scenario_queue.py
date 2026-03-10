@@ -8,10 +8,10 @@ import pytest
 
 from autoware_carla_scenario import (
     BaseScenario,
-    CarlaAutowareScenario,
     EgoConfig,
     ScenarioQueue,
     ScenarioResult,
+    ScenarioRunner,
     SpawnTransform,
 )
 
@@ -50,11 +50,11 @@ def _make_queue_with_mock_runner() -> tuple[ScenarioQueue, MagicMock]:
             "autoware_carla_scenario.scenario_queue.CarlaServerManager"
         ) as mock_server_cls,
         patch(
-            "autoware_carla_scenario.scenario_queue.CarlaAutowareScenario"
+            "autoware_carla_scenario.scenario_queue.ScenarioRunner"
         ) as mock_runner_cls,
     ):
         mock_server_cls.return_value = MagicMock()
-        mock_runner = MagicMock(spec=CarlaAutowareScenario)
+        mock_runner = MagicMock(spec=ScenarioRunner)
         mock_runner_cls.return_value = mock_runner
 
         queue = ScenarioQueue(map_name="Town10HD_Opt")
@@ -171,7 +171,7 @@ class TestScenarioQueueUnit:
 
     def test_stop_does_not_call_server_stop_when_borrowed(self) -> None:
         mock_server = MagicMock()
-        with patch("autoware_carla_scenario.scenario_queue.CarlaAutowareScenario"):
+        with patch("autoware_carla_scenario.scenario_queue.ScenarioRunner"):
             queue = ScenarioQueue(server=mock_server)
             queue.start()
             queue.stop()
@@ -183,7 +183,7 @@ class TestScenarioQueueUnit:
             patch(
                 "autoware_carla_scenario.scenario_queue.CarlaServerManager"
             ) as mock_server_cls,
-            patch("autoware_carla_scenario.scenario_queue.CarlaAutowareScenario"),
+            patch("autoware_carla_scenario.scenario_queue.ScenarioRunner"),
         ):
             mock_server = MagicMock()
             mock_server_cls.return_value = mock_server

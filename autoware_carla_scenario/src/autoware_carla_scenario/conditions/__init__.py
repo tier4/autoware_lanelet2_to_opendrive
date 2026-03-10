@@ -2,7 +2,7 @@
 
 from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 from .collision import CollisionCondition
-from .composite import AndCondition, OrCondition
+from .composite import AndCondition, OrCondition, StickyCondition
 from .elapsed_time import ElapsedTimeCondition
 from .entity_in_area import EntityInAreaCondition
 from .entity_lane_position import EntityLanePositionCondition
@@ -20,5 +20,6 @@ __all__ = [
     "OrCondition",
     "ScenarioResult",
     "StandstillCondition",
+    "StickyCondition",
     "TimeoutCondition",
 ]

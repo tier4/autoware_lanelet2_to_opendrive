@@ -92,6 +92,31 @@ def _get_signal_ids_for_controller(controller_id: int) -> list[str]:
     return []
 
 
+def set_all_traffic_lights_state(
+    world: "carla.World",
+    state: "carla.TrafficLightState",
+    *,
+    freeze: bool = True,
+) -> int:
+    """Set every traffic light in the world to *state*.
+
+    Args:
+        world: The CARLA world instance.
+        state: The desired :class:`carla.TrafficLightState`
+            (e.g. ``carla.TrafficLightState.Green``).
+        freeze: If ``True`` (default), freeze every light so that the
+            CARLA traffic manager does not override the state.
+
+    Returns:
+        The number of traffic lights that were updated.
+    """
+    traffic_lights = world.get_actors().filter("traffic.traffic_light*")
+    for tl in traffic_lights:
+        tl.set_state(state)
+        tl.freeze(freeze)
+    return len(traffic_lights)
+
+
 def set_group_traffic_light_state(
     world: "carla.World",
     controller_id: int,

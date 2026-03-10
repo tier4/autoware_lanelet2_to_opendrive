@@ -87,16 +87,11 @@ class SpawnAndIdleScenario(BaseScenario):
 def main() -> None:
     """Run SpawnAndIdleScenario as a standalone script.
 
-    Three map-loading modes are supported:
+    Two map-loading modes are supported:
 
     * ``--map`` only — load a built-in CARLA map by name::
 
         uv run spawn-and-idle --map Town10HD_Opt
-
-    * ``--xodr`` only — generate a world directly from an OpenDRIVE file
-      (no CARLA mesh/texture assets)::
-
-        uv run spawn-and-idle --xodr /path/to/map.xodr
 
     * ``--xodr`` + ``--map`` — overwrite mode: copy *xodr* to the path given
       by the ``<MAP_NAME_PATH>`` environment variable, then load the built-in
@@ -120,11 +115,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--map",
-        default=None,
-        help=(
-            "Built-in CARLA map name (e.g. Town10HD_Opt). "
-            "Used alone to load by name, or together with --xodr for overwrite mode."
-        ),
+        required=True,
+        help="Built-in CARLA map name (e.g. Town10HD_Opt).",
     )
     parser.add_argument(
         "--xodr",
@@ -132,7 +124,7 @@ def main() -> None:
         default=None,
         help=(
             "Path to an OpenDRIVE (.xodr) file. "
-            "Used alone to generate a world, or together with --map for overwrite mode."
+            "Overwrites the built-in map's .xodr before loading."
         ),
     )
     parser.add_argument(
@@ -148,10 +140,6 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-
-    # Validate: at least one of --map or --xodr must be given
-    if args.map is None and args.xodr is None:
-        parser.error("At least one of --map or --xodr must be specified.")
 
     ego = EgoConfig(
         spawn_location=SpawnPointIndex(args.spawn_index),

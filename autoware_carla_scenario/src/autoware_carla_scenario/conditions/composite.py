@@ -1,4 +1,4 @@
-"""Composite conditions that combine child conditions with AND/OR logic."""
+"""Composite conditions that combine child conditions with AND/OR/Sticky logic."""
 
 from __future__ import annotations
 
@@ -8,6 +8,51 @@ from .base import BaseCondition, ScenarioResult
 
 if TYPE_CHECKING:
     import carla
+
+
+class StickyCondition(BaseCondition):
+    """Wrapper that latches a child condition after its first passing result.
+
+    Once the wrapped condition returns a :class:`ScenarioResult` with
+    ``passed=True``, the result is stored and returned on every subsequent
+    call — the inner condition is never re-evaluated.
+
+    This is useful for verifying that an entity *visited* a state at some point,
+    even if it has since moved on.  Combine multiple sticky conditions with
+    :class:`AndCondition` to assert that an entity traversed a specific
+    sequence of states::
+
+        pass_cond = AndCondition([
+            StickyCondition(EntityLanePositionCondition("npc", road_id="10")),
+            StickyCondition(EntityLanePositionCondition("npc", road_id="20")),
+        ])
+
+    Args:
+        condition: The child condition to wrap.
+    """
+
+    def __init__(self, condition: BaseCondition) -> None:
+        self._condition = condition
+        self._latched_result: Optional[ScenarioResult] = None
+
+    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+        """Return the latched result if available, otherwise delegate to the child.
+
+        Args:
+            world: The CARLA world instance.
+            elapsed: Elapsed time in seconds since the scenario started.
+
+        Returns:
+            The latched :class:`ScenarioResult` if the child previously passed,
+            otherwise the child's current result (which may be ``None``).
+        """
+        if self._latched_result is not None:
+            return self._latched_result
+
+        result = self._condition.check(world, elapsed)
+        if result is not None and result.passed:
+            self._latched_result = result
+        return result
 
 
 class AndCondition(BaseCondition):

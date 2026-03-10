@@ -3,7 +3,7 @@
 Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
-        CarlaAutowareScenario,
+        ScenarioRunner,
         CarlaScenarioFixture,
         CarlaServerManager,
         AndCondition,
@@ -16,6 +16,7 @@ Public API re-exported for convenience::
         EntityLanePositionCondition,
         OrCondition,
         StandstillCondition,
+        StickyCondition,
         EgoConfig,
         EgoVehicle,
         Lanelet2Pose,
@@ -31,6 +32,7 @@ Public API re-exported for convenience::
         find_nearest_traffic_light,
         frame_of,
         lanelet2_traffic_light_id_to_opendrive_controller_id,
+        set_all_traffic_lights_state,
         set_group_traffic_light_state,
         # Entity
         SpawnLocation,
@@ -51,7 +53,7 @@ Public API re-exported for convenience::
     )
 """
 
-from .carla_autoware_scenario import CarlaAutowareScenario
+from .scenario_runner import ScenarioRunner
 from .conditions import (
     AndCondition,
     BaseCondition,
@@ -62,6 +64,7 @@ from .conditions import (
     OrCondition,
     ScenarioResult,
     StandstillCondition,
+    StickyCondition,
     TimeoutCondition,
 )
 from .coordinate import (
@@ -101,11 +104,12 @@ from .server import CarlaServerManager
 from .utils import (
     find_nearest_traffic_light,
     lanelet2_traffic_light_id_to_opendrive_controller_id,
+    set_all_traffic_lights_state,
     set_group_traffic_light_state,
 )
 
 __all__ = [
-    "CarlaAutowareScenario",
+    "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",
     "AndCondition",
@@ -118,6 +122,7 @@ __all__ = [
     "EntityLanePositionCondition",
     "OrCondition",
     "StandstillCondition",
+    "StickyCondition",
     "EgoConfig",
     "EgoVehicle",
     "SpawnLocation",
@@ -138,6 +143,7 @@ __all__ = [
     "find_nearest_traffic_light",
     "frame_of",
     "lanelet2_traffic_light_id_to_opendrive_controller_id",
+    "set_all_traffic_lights_state",
     "set_group_traffic_light_state",
     # Kinematics
     "CoordinateFrame",

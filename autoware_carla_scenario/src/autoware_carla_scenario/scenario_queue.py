@@ -7,8 +7,9 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import List, Optional
 
-from .carla_autoware_scenario import CarlaAutowareScenario
+from .scenario_runner import ScenarioRunner
 from .conditions import ScenarioResult
+from .coordinate.map_manager import MapManager
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
 
@@ -23,6 +24,7 @@ class ScenarioQueue:
     When used together with :class:`~autoware_carla_scenario.CarlaScenarioFixture`,
     scenarios are registered at module import time so the full list is known
     before the session fixture starts the server.
+
 
     Example – minimal usage::
 
@@ -46,6 +48,7 @@ class ScenarioQueue:
         server: Optional[CarlaServerManager] = None,
         *,
         xodr_path: Optional[Path] = None,
+        lanelet2_path: Optional[Path] = None,
         map_name: Optional[str] = None,
         host: str = "localhost",
         port: int = 2000,
@@ -59,15 +62,15 @@ class ScenarioQueue:
             server: An externally-managed :class:`CarlaServerManager`.  When
                 provided the queue borrows it (does not start/stop it).  When
                 *None* a new manager is created and owned by this queue.
-            xodr_path: OpenDRIVE map file path (optional).  Behaviour depends
-                on whether *map_name* is also provided:
-
-                * *xodr_path* only → ``generate_opendrive_world`` (no built-in assets).
-                * *xodr_path* + *map_name* → overwrite mode: the file at
-                  ``<MAP_NAME_PATH>`` env var is replaced with *xodr_path*,
-                  then the map is loaded by name (retains full CARLA assets).
+            xodr_path: OpenDRIVE map file path (optional).  Must be used
+                together with *map_name*: the file at the
+                ``<MAP_NAME_PATH>`` env var is replaced with *xodr_path*,
+                then the map is loaded by name (retains full CARLA assets).
+            lanelet2_path: Lanelet2 map file path (optional).  When provided
+                together with *xodr_path*, :class:`MapManager` is initialised
+                so that coordinate transforms (Lanelet2 ↔ OpenDRIVE) work.
             map_name: Built-in CARLA map name to load on start (optional).
-                Used alone or together with *xodr_path* (see above).
+                Used alone or together with *xodr_path*.
             host: CARLA RPC host.
             port: CARLA RPC port.
             timeout_seconds: Default per-scenario timeout.
@@ -87,6 +90,7 @@ class ScenarioQueue:
             self._owns_server = True
 
         self._xodr_path = xodr_path
+        self._lanelet2_path = lanelet2_path
         self._map_name = map_name
         self._host = host
         self._port = port
@@ -96,7 +100,7 @@ class ScenarioQueue:
         self._scenarios: List[BaseScenario] = []
         self._results: List[ScenarioResult] = []
         self._scenario_results: dict[int, ScenarioResult] = {}
-        self._runner: Optional[CarlaAutowareScenario] = None
+        self._runner: Optional[ScenarioRunner] = None
 
     # ------------------------------------------------------------------
     # Scenario registration
@@ -175,19 +179,31 @@ class ScenarioQueue:
         *owns* its server will stop it in :meth:`stop`.
         """
         self._server.start()
-        self._runner = CarlaAutowareScenario(
+        self._runner = ScenarioRunner(
             self._server,
             host=self._host,
             port=self._port,
             timeout_seconds=self._timeout_seconds,
             output_dir=self._output_dir,
         )
+        if self._xodr_path is not None and self._map_name is None:
+            raise ValueError(
+                "xodr_path requires map_name: standalone OpenDRIVE mode is not "
+                "supported. Provide map_name together with xodr_path to use "
+                "overwrite mode (retains full CARLA assets)."
+            )
         if self._xodr_path is not None and self._map_name is not None:
             self._runner.load_map_by_overwriting_xodr(self._xodr_path, self._map_name)
-        elif self._xodr_path is not None:
-            self._runner.load_map_from_xodr(self._xodr_path)
         elif self._map_name is not None:
             self._runner.load_map_by_name(self._map_name)
+
+        # Initialise MapManager when both map files are available
+        if self._xodr_path is not None and self._lanelet2_path is not None:
+            MapManager.reset()
+            MapManager.get_instance().initialize(
+                xodr_path=self._xodr_path,
+                lanelet2_path=self._lanelet2_path,
+            )
 
     def stop(self) -> None:
         """Stop the server if owned by this queue."""
