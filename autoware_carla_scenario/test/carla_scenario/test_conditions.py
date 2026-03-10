@@ -11,11 +11,15 @@ import pytest
 from autoware_carla_scenario import (
     AndCondition,
     BaseCondition,
+    ComparisonRule,
     ElapsedTimeCondition,
     EntityInAreaCondition,
     EntityLanePositionCondition,
     OrCondition,
     ScenarioResult,
+    SpeedCondition,
+    SpeedCoordinateSystem,
+    SpeedDirection,
     StandstillCondition,
     StickyCondition,
     TimeoutCondition,
@@ -787,3 +791,342 @@ class TestStickyCondition:
         result = cond.check(world, elapsed=3.0)  # both now triggered
         assert result is not None
         assert result.passed is True
+
+
+# ---------------------------------------------------------------------------
+# SpeedCondition – unit tests (no CARLA required)
+# ---------------------------------------------------------------------------
+
+
+def _make_world_with_entity_frame(
+    target_name: str,
+    target_vx: float,
+    target_vy: float,
+    ref_name: str,
+    ref_fwd_x: float,
+    ref_fwd_y: float,
+) -> MagicMock:
+    """Return a mock world with a target actor (velocity) and reference actor (transform)."""
+    target_vel = MagicMock()
+    target_vel.x, target_vel.y, target_vel.z = target_vx, target_vy, 0.0
+    target = MagicMock()
+    target.attributes = {"role_name": target_name}
+    target.get_velocity.return_value = target_vel
+
+    ref_fwd = MagicMock()
+    ref_fwd.x, ref_fwd.y, ref_fwd.z = ref_fwd_x, ref_fwd_y, 0.0
+    ref_transform = MagicMock()
+    ref_transform.get_forward_vector.return_value = ref_fwd
+    ref = MagicMock()
+    ref.attributes = {"role_name": ref_name}
+    ref.get_transform.return_value = ref_transform
+
+    world = MagicMock()
+    world.get_actors.return_value = [target, ref]
+    return world
+
+
+class TestSpeedConditionMagnitude:
+    """SpeedCondition with SpeedDirection.MAGNITUDE."""
+
+    def test_speed_above_threshold_greater_than(self) -> None:
+        cond = SpeedCondition("ego", value=5.0, rule=ComparisonRule.GREATER_THAN)
+        # speed = sqrt(10^2 + 0^2) = 10.0
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_speed_below_threshold_greater_than(self) -> None:
+        cond = SpeedCondition("ego", value=15.0, rule=ComparisonRule.GREATER_THAN)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+    def test_speed_equal_threshold_greater_than(self) -> None:
+        cond = SpeedCondition("ego", value=10.0, rule=ComparisonRule.GREATER_THAN)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+    def test_less_than(self) -> None:
+        cond = SpeedCondition("ego", value=15.0, rule=ComparisonRule.LESS_THAN)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        result = cond.check(world, elapsed=2.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_less_than_not_met(self) -> None:
+        cond = SpeedCondition("ego", value=5.0, rule=ComparisonRule.LESS_THAN)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+    def test_equal_to_within_tolerance(self) -> None:
+        cond = SpeedCondition(
+            "ego", value=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.01
+        )
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.005, vy=0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_equal_to_outside_tolerance(self) -> None:
+        cond = SpeedCondition(
+            "ego", value=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.001
+        )
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.1, vy=0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+    def test_greater_than_or_equal_at_boundary(self) -> None:
+        cond = SpeedCondition(
+            "ego", value=10.0, rule=ComparisonRule.GREATER_THAN_OR_EQUAL
+        )
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_less_than_or_equal_at_boundary(self) -> None:
+        cond = SpeedCondition("ego", value=10.0, rule=ComparisonRule.LESS_THAN_OR_EQUAL)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_entity_not_found(self) -> None:
+        cond = SpeedCondition("missing", value=0.0, rule=ComparisonRule.GREATER_THAN)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+    def test_message_contains_entity_name(self) -> None:
+        cond = SpeedCondition("npc1", value=5.0, rule=ComparisonRule.GREATER_THAN)
+        world = _make_world_with_actor("npc1", 0.0, 0.0, vx=10.0, vy=0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert "npc1" in result.message
+        assert "magnitude" in result.message
+
+    def test_elapsed_seconds_recorded(self) -> None:
+        cond = SpeedCondition("ego", value=0.0, rule=ComparisonRule.GREATER_THAN)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
+        result = cond.check(world, elapsed=42.5)
+        assert result is not None
+        assert result.elapsed_seconds == pytest.approx(42.5)
+
+    def test_3d_magnitude(self) -> None:
+        """Magnitude uses all three velocity components."""
+        cond = SpeedCondition("ego", value=5.0, rule=ComparisonRule.GREATER_THAN)
+        # speed = sqrt(3^2 + 4^2 + 0^2) = 5.0 — not greater than 5.0
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=3.0, vy=4.0, vz=0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+
+class TestSpeedConditionWorld:
+    """SpeedCondition with SpeedCoordinateSystem.WORLD."""
+
+    def test_longitudinal_returns_x_component(self) -> None:
+        cond = SpeedCondition(
+            "ego",
+            value=5.0,
+            rule=ComparisonRule.GREATER_THAN,
+            direction=SpeedDirection.LONGITUDINAL,
+            coordinate_system=SpeedCoordinateSystem.WORLD,
+        )
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=3.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+        assert "longitudinal" in result.message
+
+    def test_lateral_returns_y_component(self) -> None:
+        cond = SpeedCondition(
+            "ego",
+            value=5.0,
+            rule=ComparisonRule.GREATER_THAN,
+            direction=SpeedDirection.LATERAL,
+            coordinate_system=SpeedCoordinateSystem.WORLD,
+        )
+        # vy = 8.0 > 5.0
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=8.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+        assert "lateral" in result.message
+
+    def test_longitudinal_negative_velocity(self) -> None:
+        """Negative x-velocity is less than zero."""
+        cond = SpeedCondition(
+            "ego",
+            value=0.0,
+            rule=ComparisonRule.LESS_THAN,
+            direction=SpeedDirection.LONGITUDINAL,
+            coordinate_system=SpeedCoordinateSystem.WORLD,
+        )
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=-3.0, vy=0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+
+class TestSpeedConditionEntity:
+    """SpeedCondition with SpeedCoordinateSystem.ENTITY."""
+
+    def test_entity_frame_requires_reference_name(self) -> None:
+        with pytest.raises(ValueError, match="reference_entity_name is required"):
+            SpeedCondition(
+                "ego",
+                value=5.0,
+                rule=ComparisonRule.GREATER_THAN,
+                direction=SpeedDirection.LONGITUDINAL,
+                coordinate_system=SpeedCoordinateSystem.ENTITY,
+            )
+
+    def test_reference_entity_not_found(self) -> None:
+        cond = SpeedCondition(
+            "npc",
+            value=0.0,
+            rule=ComparisonRule.GREATER_THAN,
+            direction=SpeedDirection.LONGITUDINAL,
+            coordinate_system=SpeedCoordinateSystem.ENTITY,
+            reference_entity_name="missing_ref",
+        )
+        # World only has "npc", no "missing_ref"
+        world = _make_world_with_actor("npc", 0.0, 0.0, vx=10.0, vy=0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+    def test_longitudinal_entity_facing_east_moving_east(self) -> None:
+        """Entity facing East, target moving East → longitudinal = vx."""
+        cond = SpeedCondition(
+            "npc",
+            value=5.0,
+            rule=ComparisonRule.GREATER_THAN,
+            direction=SpeedDirection.LONGITUDINAL,
+            coordinate_system=SpeedCoordinateSystem.ENTITY,
+            reference_entity_name="ref",
+        )
+        # ref faces East (fwd=(1,0)), npc moves East at 10 m/s
+        world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 1.0, 0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_lateral_entity_facing_east_moving_north(self) -> None:
+        """Entity facing East, target moving North → lateral positive (left).
+
+        In CARLA: North = -y.  Left of East = North.
+        velocity = (0, -5), left_unit = (0, -1) → lateral = 5.
+        """
+        cond = SpeedCondition(
+            "npc",
+            value=3.0,
+            rule=ComparisonRule.GREATER_THAN,
+            direction=SpeedDirection.LATERAL,
+            coordinate_system=SpeedCoordinateSystem.ENTITY,
+            reference_entity_name="ref",
+        )
+        # ref faces East (fwd=(1,0)), npc moves North (vy=-5 in CARLA)
+        world = _make_world_with_entity_frame("npc", 0.0, -5.0, "ref", 1.0, 0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_lateral_entity_facing_east_moving_south(self) -> None:
+        """Entity facing East, target moving South → lateral negative (right).
+
+        In CARLA: South = +y.  Right of East = South.
+        velocity = (0, 5), left_unit = (0, -1) → lateral = -5.
+        """
+        cond = SpeedCondition(
+            "npc",
+            value=0.0,
+            rule=ComparisonRule.LESS_THAN,
+            direction=SpeedDirection.LATERAL,
+            coordinate_system=SpeedCoordinateSystem.ENTITY,
+            reference_entity_name="ref",
+        )
+        world = _make_world_with_entity_frame("npc", 0.0, 5.0, "ref", 1.0, 0.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_longitudinal_entity_facing_north_moving_east(self) -> None:
+        """Ref facing North (fwd=(0,-1)), target moving East (vx=10).
+
+        Longitudinal = dot((10,0), (0,-1)) = 0.
+        """
+        cond = SpeedCondition(
+            "npc",
+            value=0.0,
+            rule=ComparisonRule.EQUAL_TO,
+            direction=SpeedDirection.LONGITUDINAL,
+            coordinate_system=SpeedCoordinateSystem.ENTITY,
+            reference_entity_name="ref",
+            tolerance=0.01,
+        )
+        world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 0.0, -1.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_lateral_entity_facing_north_moving_east(self) -> None:
+        """Ref facing North (fwd=(0,-1)), target moving East (vx=10).
+
+        Left of North = West = (-1, 0).
+        left_unit = (fwd.y, -fwd.x) = (-1, 0).
+        Lateral = dot((10,0), (-1,0)) = -10 (moving right).
+        """
+        cond = SpeedCondition(
+            "npc",
+            value=-5.0,
+            rule=ComparisonRule.LESS_THAN,
+            direction=SpeedDirection.LATERAL,
+            coordinate_system=SpeedCoordinateSystem.ENTITY,
+            reference_entity_name="ref",
+        )
+        world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 0.0, -1.0)
+        result = cond.check(world, elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_magnitude_ignores_coordinate_system(self) -> None:
+        """MAGNITUDE direction uses scalar speed regardless of coordinate system."""
+        cond = SpeedCondition(
+            "npc",
+            value=5.0,
+            rule=ComparisonRule.GREATER_THAN,
+            direction=SpeedDirection.MAGNITUDE,
+            coordinate_system=SpeedCoordinateSystem.ENTITY,
+            reference_entity_name="ref",
+        )
+        # speed = sqrt(3^2 + 4^2) = 5.0 — not > 5.0
+        world = _make_world_with_entity_frame("npc", 3.0, 4.0, "ref", 1.0, 0.0)
+        assert cond.check(world, elapsed=1.0) is None
+
+
+class TestSpeedConditionValidation:
+    """Constructor validation for SpeedCondition."""
+
+    def test_negative_tolerance_raises(self) -> None:
+        with pytest.raises(ValueError, match="tolerance must be non-negative"):
+            SpeedCondition(
+                "ego", value=5.0, rule=ComparisonRule.GREATER_THAN, tolerance=-1.0
+            )
+
+    def test_entity_frame_without_reference_raises(self) -> None:
+        with pytest.raises(ValueError, match="reference_entity_name is required"):
+            SpeedCondition(
+                "ego",
+                value=5.0,
+                rule=ComparisonRule.GREATER_THAN,
+                direction=SpeedDirection.LATERAL,
+                coordinate_system=SpeedCoordinateSystem.ENTITY,
+            )
+
+    def test_world_frame_without_reference_is_valid(self) -> None:
+        """WORLD coordinate system does not require reference_entity_name."""
+        cond = SpeedCondition(
+            "ego",
+            value=5.0,
+            rule=ComparisonRule.GREATER_THAN,
+            direction=SpeedDirection.LONGITUDINAL,
+            coordinate_system=SpeedCoordinateSystem.WORLD,
+        )
+        assert cond is not None
