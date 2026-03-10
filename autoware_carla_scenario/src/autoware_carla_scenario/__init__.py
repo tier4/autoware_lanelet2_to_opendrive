@@ -14,6 +14,7 @@ Public API re-exported for convenience::
         EntityInAreaCondition,
         EntityLanePositionCondition,
         OrCondition,
+        StandstillCondition,
         EgoConfig,
         EgoVehicle,
         Lanelet2Pose,
@@ -53,6 +54,7 @@ from .conditions import (
     EntityLanePositionCondition,
     OrCondition,
     ScenarioResult,
+    StandstillCondition,
     TimeoutCondition,
 )
 from .coordinate import (
@@ -101,6 +103,7 @@ __all__ = [
     "EntityInAreaCondition",
     "EntityLanePositionCondition",
     "OrCondition",
+    "StandstillCondition",
     "EgoConfig",
     "EgoVehicle",
     "Lanelet2Pose",
