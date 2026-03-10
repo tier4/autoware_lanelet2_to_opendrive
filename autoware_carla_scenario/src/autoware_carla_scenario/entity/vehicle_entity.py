@@ -22,7 +22,6 @@ class VehicleEntityConfig:
     role_name: str
     spawn_location: SpawnLocation
     vehicle_type: str = "vehicle.fuso.mitsubishi"
-    autopilot: bool = False
 
 
 class VehicleEntity:
@@ -81,10 +80,6 @@ class VehicleEntity:
             self._config.role_name,
             self._config.spawn_location,
         )
-
-        if self._config.autopilot:
-            self._vehicle.set_autopilot(True)
-
         return self._vehicle
 
     def destroy(self) -> None:

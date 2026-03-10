@@ -71,7 +71,7 @@ class IntersectionPassingScenario(BaseScenario):
     The scenario:
 
     1. Converts lanelet 242 (s=0) to CARLA world coordinates for the spawn.
-    2. Spawns an NPC vehicle with autopilot enabled.
+    2. Spawns an NPC vehicle and enables autopilot after a short delay.
     3. Sets every traffic light in the world to green so the NPC proceeds
        without stopping.
     4. Registers a pass condition: an :class:`AndCondition` of sticky
@@ -120,7 +120,6 @@ class IntersectionPassingScenario(BaseScenario):
             role_name=self.NPC_ROLE_NAME,
             spawn_location=SpawnTransform(nearest_sp),
             vehicle_type="vehicle.fuso.mitsubishi",
-            autopilot=False,
         )
         self._npc = VehicleEntity(npc_config)
         self._npc.spawn(world)
