@@ -3,7 +3,7 @@
 Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
-        CarlaAutowareScenario,
+        ScenarioRunner,
         CarlaScenarioFixture,
         CarlaServerManager,
         AndCondition,
@@ -53,7 +53,7 @@ Public API re-exported for convenience::
     )
 """
 
-from .carla_autoware_scenario import CarlaAutowareScenario
+from .scenario_runner import ScenarioRunner
 from .conditions import (
     AndCondition,
     BaseCondition,
@@ -109,7 +109,7 @@ from .utils import (
 )
 
 __all__ = [
-    "CarlaAutowareScenario",
+    "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",
     "AndCondition",

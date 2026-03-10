@@ -36,13 +36,23 @@ class BaseScenario(ABC):
     The ego vehicle is mandatory and must be provided via *ego_config*.
     """
 
-    def __init__(self, ego_config: EgoConfig) -> None:
+    #: Default random seed for deterministic simulation.
+    #: Override per-instance via ``random_seed`` keyword argument.
+    DEFAULT_RANDOM_SEED: int = 0
+
+    def __init__(
+        self, ego_config: EgoConfig, *, random_seed: int = DEFAULT_RANDOM_SEED
+    ) -> None:
         """Initialize the scenario with an ego vehicle configuration.
 
         Args:
             ego_config: Spawn configuration for the ego vehicle.
+            random_seed: Seed for the CARLA TrafficManager random device.
+                Using a fixed seed ensures deterministic NPC behaviour across
+                runs.  Defaults to :attr:`DEFAULT_RANDOM_SEED` (``0``).
         """
         self.ego_config = ego_config
+        self.random_seed = random_seed
         self._pre_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._pass_conditions: List[BaseCondition] = []

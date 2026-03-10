@@ -38,7 +38,7 @@ def _map_name_to_env_var(map_name: str) -> str:
     return snake.upper() + "_PATH"
 
 
-class CarlaAutowareScenario:
+class ScenarioRunner:
     """Orchestrates scenario execution: map loading, tick loop, and recording.
 
     A single instance can run multiple scenarios sequentially. Each call to
@@ -47,7 +47,7 @@ class CarlaAutowareScenario:
     Example::
 
         with CarlaServerManager() as server:
-            runner = CarlaAutowareScenario(server)
+            runner = ScenarioRunner(server)
             runner.load_map_by_name("Town10HD_Opt")
             result = runner.run_scenario(MyScenario(ego_config))
             assert result.passed
@@ -153,14 +153,15 @@ class CarlaAutowareScenario:
         """Execute a single scenario from setup to teardown.
 
         Steps:
-        1. Call ``scenario.setup(world)``
-        2. Spawn the ego vehicle
-        3. Start the CARLA native recorder
-        4. Register the default timeout fail condition
-        5. Run the tick loop
-        6. Stop the recorder
-        7. Destroy the ego vehicle
-        8. Return the :class:`ScenarioResult`
+        1. Enable synchronous mode on World and TrafficManager
+        2. Seed the TrafficManager with ``scenario.random_seed``
+        3. Call ``scenario.setup(world)``
+        4. Spawn the ego vehicle
+        5. Start the CARLA native recorder
+        6. Register the default timeout fail condition
+        7. Run the tick loop
+        8. Stop the recorder and destroy the ego vehicle
+        9. Restore original World / TrafficManager settings
 
         Args:
             scenario: The scenario to run.
@@ -180,6 +181,13 @@ class CarlaAutowareScenario:
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = 0.05  # 20 Hz
         world.apply_settings(settings)
+
+        # Configure TrafficManager for deterministic behaviour.
+        # Must be synchronous with the world and seeded before any
+        # set_autopilot() call so NPC decisions are reproducible.
+        tm = self._client.get_trafficmanager()
+        tm.set_synchronous_mode(True)
+        tm.set_random_device_seed(scenario.random_seed)
 
         ego = EgoVehicle()
         recording_started = False
@@ -249,7 +257,8 @@ class CarlaAutowareScenario:
                 self._client.stop_recorder()
             ego.destroy()
 
-            # Restore original world settings
+            # Restore original world and TrafficManager settings
+            tm.set_synchronous_mode(original_synchronous)
             settings.synchronous_mode = original_synchronous
             settings.fixed_delta_seconds = original_delta
             world.apply_settings(settings)

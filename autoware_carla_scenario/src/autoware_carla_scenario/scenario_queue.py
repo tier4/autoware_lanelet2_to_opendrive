@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import List, Optional
 
-from .carla_autoware_scenario import CarlaAutowareScenario
+from .scenario_runner import ScenarioRunner
 from .conditions import ScenarioResult
 from .coordinate.map_manager import MapManager
 from .scenario_base import BaseScenario
@@ -24,6 +24,7 @@ class ScenarioQueue:
     When used together with :class:`~autoware_carla_scenario.CarlaScenarioFixture`,
     scenarios are registered at module import time so the full list is known
     before the session fixture starts the server.
+
 
     Example – minimal usage::
 
@@ -99,7 +100,7 @@ class ScenarioQueue:
         self._scenarios: List[BaseScenario] = []
         self._results: List[ScenarioResult] = []
         self._scenario_results: dict[int, ScenarioResult] = {}
-        self._runner: Optional[CarlaAutowareScenario] = None
+        self._runner: Optional[ScenarioRunner] = None
 
     # ------------------------------------------------------------------
     # Scenario registration
@@ -178,7 +179,7 @@ class ScenarioQueue:
         *owns* its server will stop it in :meth:`stop`.
         """
         self._server.start()
-        self._runner = CarlaAutowareScenario(
+        self._runner = ScenarioRunner(
             self._server,
             host=self._host,
             port=self._port,
