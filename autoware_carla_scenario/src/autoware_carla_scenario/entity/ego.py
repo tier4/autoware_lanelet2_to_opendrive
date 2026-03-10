@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import carla
 
-from .constants import EGO_ROLE_NAME
-from .scenario_base import EgoConfig
+from ..constants import EGO_ROLE_NAME
+from ..scenario_base import EgoConfig
 
 
 class EgoVehicle:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .conditions import ScenarioResult, TimeoutCondition
-from .ego import EgoVehicle
+from .entity import EgoVehicle
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
 
