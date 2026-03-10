@@ -21,11 +21,11 @@ class ScenarioRecorder:
         recorder = ScenarioRecorder()
         recorder.start(client, Path("output/scenario.log"))
         # ... run simulation ...
-        recorder.stop(client)
+        recorder.stop()
     """
 
     def __init__(self) -> None:
-        self._recording_path: Optional[Path] = None
+        self._client: Optional["carla.Client"] = None
 
     def start(self, client: "carla.Client", output_path: Path) -> None:
         """Start recording the simulation.
@@ -35,13 +35,14 @@ class ScenarioRecorder:
             output_path: Destination file path for the recording log.
         """
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._recording_path = output_path
+        self._client = client
         client.start_recorder(str(output_path))
 
-    def stop(self, client: "carla.Client") -> None:
+    def stop(self) -> None:
         """Stop the recording.
 
-        Args:
-            client: The CARLA client instance.
+        Safe to call even if :meth:`start` was never called.
         """
-        client.stop_recorder()
+        if self._client is not None:
+            self._client.stop_recorder()
+            self._client = None

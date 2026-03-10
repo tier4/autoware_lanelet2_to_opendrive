@@ -259,7 +259,7 @@ class CarlaAutowareScenario:
                 )
 
         finally:
-            recorder.stop(self._client)
+            recorder.stop()
             ego.destroy()
 
             # Restore original world settings
