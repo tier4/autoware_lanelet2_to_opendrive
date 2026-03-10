@@ -83,21 +83,6 @@ class CarlaAutowareScenario:
     # Map loading
     # ------------------------------------------------------------------
 
-    def load_map_from_xodr(self, xodr_path: Path) -> None:
-        """Load a map from an OpenDRIVE file.
-
-        Uses ``pyxodr`` to parse the file and
-        ``carla.Client.generate_opendrive_world`` to instantiate it.
-
-        Args:
-            xodr_path: Path to the ``.xodr`` file.
-        """
-        xodr_content = xodr_path.read_text(encoding="utf-8")
-        self._world = self._client.generate_opendrive_world(
-            xodr_content,
-            self._client.get_world().get_settings(),
-        )
-
     def load_map_by_overwriting_xodr(self, xodr_path: Path, map_name: str) -> None:
         """Load a built-in CARLA map after overwriting its internal ``.xodr`` file.
 

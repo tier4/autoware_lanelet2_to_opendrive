@@ -21,7 +21,7 @@ class VehicleEntityConfig:
 
     role_name: str
     spawn_location: SpawnLocation
-    vehicle_type: str = "vehicle.tesla.model3"
+    vehicle_type: str = "vehicle.fuso.mitsubishi"
     autopilot: bool = False
 
 
