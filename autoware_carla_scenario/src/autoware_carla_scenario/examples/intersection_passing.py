@@ -55,7 +55,7 @@ EXPECTED_ROUTE_LANELET_IDS: list[int] = [460, 265]
 
 #: Timeout in seconds — if the NPC has not completed the route by this time the
 #: scenario fails.
-SCENARIO_TIMEOUT_SECONDS: float = 120.0
+SCENARIO_TIMEOUT_SECONDS: float = 5.0
 
 
 def _lanelet_start_road_id(lanelet_id: int) -> str:
