@@ -30,6 +30,7 @@ class EgoVehicle:
     def __init__(self) -> None:
         self._vehicle: Optional["carla.Actor"] = None
         self._camera: Optional["carla.Actor"] = None
+        self._world: Optional["carla.World"] = None
         self._frame_queue: queue.Queue[np.ndarray] = queue.Queue()
 
     # ------------------------------------------------------------------
@@ -98,6 +99,7 @@ class EgoVehicle:
                 f"Try one of these spawn points:\n{suggestions}"
             )
         self._vehicle = actor
+        self._world = world
 
         # Attach rear RGB camera
         camera_bp = bp_lib.find("sensor.camera.rgb")
@@ -130,6 +132,17 @@ class EgoVehicle:
                 break
         return frames
 
+    def update_spectator(self) -> None:
+        """Move the world spectator to match the RGB camera position.
+
+        Should be called once per tick so the CARLA viewport follows the ego
+        vehicle from the same angle as the recording camera.
+        """
+        if self._world is None or self._camera is None:
+            return
+        spectator = self._world.get_spectator()
+        spectator.set_transform(self._camera.get_transform())
+
     def destroy(self) -> None:
         """Stop the camera and destroy both actors."""
         if self._camera is not None:
@@ -139,6 +152,7 @@ class EgoVehicle:
         if self._vehicle is not None:
             self._vehicle.destroy()
             self._vehicle = None
+        self._world = None
 
     # ------------------------------------------------------------------
     # Private helpers

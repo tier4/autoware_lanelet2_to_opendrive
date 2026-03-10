@@ -223,6 +223,9 @@ class CarlaAutowareScenario:
                 for cb in scenario._post_tick_callbacks:
                     cb(world)
 
+                # Move spectator to match the RGB camera viewpoint
+                ego.update_spectator()
+
                 # Collect camera frames
                 for frame in ego.get_camera_frames():
                     recorder.add_frame(frame)
