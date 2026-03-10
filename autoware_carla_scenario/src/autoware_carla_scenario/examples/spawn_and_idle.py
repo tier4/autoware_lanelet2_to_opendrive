@@ -7,12 +7,11 @@ Typical usage
 -------------
 Standalone (no pytest)::
 
-    import carla
-    from autoware_carla_scenario import EgoConfig, ScenarioQueue
+    from autoware_carla_scenario import EgoConfig, ScenarioQueue, SpawnPointIndex
     from autoware_carla_scenario.examples.spawn_and_idle import SpawnAndIdleScenario
 
     ego = EgoConfig(
-        spawn_index=0,
+        spawn_location=SpawnPointIndex(0),
         vehicle_type="vehicle.fuso.mitsubishi",
     )
     queue = ScenarioQueue(map_name="Town10HD_Opt")
@@ -33,7 +32,12 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from autoware_carla_scenario import BaseScenario, EgoConfig, ScenarioQueue
+from autoware_carla_scenario import (
+    BaseScenario,
+    EgoConfig,
+    ScenarioQueue,
+    SpawnPointIndex,
+)
 
 if TYPE_CHECKING:
     import carla
@@ -150,7 +154,7 @@ def main() -> None:
         parser.error("At least one of --map or --xodr must be specified.")
 
     ego = EgoConfig(
-        spawn_index=args.spawn_index,
+        spawn_location=SpawnPointIndex(args.spawn_index),
         vehicle_type=args.vehicle,
     )
 

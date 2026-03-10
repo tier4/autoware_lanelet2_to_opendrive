@@ -8,28 +8,21 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import carla
 
-from ._spawn import spawn_vehicle_actor, validate_exclusive_spawn_params
+from ._spawn import SpawnLocation, spawn_vehicle_actor
 
 
 @dataclass
 class VehicleEntityConfig:
     """Configuration for spawning an NPC vehicle entity.
 
-    Exactly one of *transform* or *spawn_index* must be provided.
-
-    * ``transform``: an explicit :class:`carla.Transform` for the spawn pose.
-    * ``spawn_index``: index into the map's ``get_spawn_points()`` list.
-      The transform is resolved at spawn time so a world connection is required.
+    *spawn_location* determines where the vehicle is placed — either an
+    explicit :class:`SpawnTransform` or a :class:`SpawnPointIndex`.
     """
 
     role_name: str
+    spawn_location: SpawnLocation
     vehicle_type: str = "vehicle.tesla.model3"
-    transform: Optional["carla.Transform"] = None
-    spawn_index: Optional[int] = None
     autopilot: bool = False
-
-    def __post_init__(self) -> None:
-        validate_exclusive_spawn_params(self.transform, self.spawn_index)
 
 
 class VehicleEntity:
@@ -86,8 +79,7 @@ class VehicleEntity:
             world,
             self._config.vehicle_type,
             self._config.role_name,
-            self._config.transform,
-            self._config.spawn_index,
+            self._config.spawn_location,
         )
 
         if self._config.autopilot:

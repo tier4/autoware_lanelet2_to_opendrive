@@ -12,6 +12,7 @@ from autoware_carla_scenario import (
     BaseScenario,
     EgoConfig,
     ScenarioResult,
+    SpawnTransform,
 )
 
 
@@ -63,7 +64,7 @@ def _make_ego_config() -> EgoConfig:
     import carla
 
     return EgoConfig(
-        transform=carla.Transform(carla.Location(x=0, y=0, z=0)),
+        spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0, y=0, z=0))),
         vehicle_type="vehicle.fuso.mitsubishi",
     )
 

@@ -32,11 +32,12 @@ class CarlaScenarioFixture:
             CarlaServerManager,
             EgoConfig,
             ScenarioQueue,
+            SpawnTransform,
         )
         from .my_scenarios import MyScenario, AnotherScenario
 
         ego = EgoConfig(
-            transform=carla.Transform(carla.Location(x=0, y=0, z=0)),
+            spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0, y=0, z=0))),
             vehicle_type="vehicle.fuso.mitsubishi",
         )
 

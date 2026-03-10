@@ -42,8 +42,7 @@ class EgoVehicle:
             world,
             config.vehicle_type,
             EGO_ROLE_NAME,
-            config.transform,
-            config.spawn_index,
+            config.spawn_location,
         )
         return self._vehicle
 

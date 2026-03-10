@@ -25,6 +25,7 @@ from autoware_carla_scenario import (
     CarlaScenarioFixture,
     EgoConfig,
     ScenarioQueue,
+    SpawnTransform,
 )
 
 
@@ -49,7 +50,9 @@ class _ImmediateScenario(BaseScenario):
 # ---------------------------------------------------------------------------
 
 _INTEGRATION_EGO = EgoConfig(
-    transform=_carla.Transform(_carla.Location(x=0.0, y=0.0, z=0.0)),
+    spawn_location=SpawnTransform(
+        _carla.Transform(_carla.Location(x=0.0, y=0.0, z=0.0))
+    ),
     vehicle_type="vehicle.fuso.mitsubishi",
 )
 

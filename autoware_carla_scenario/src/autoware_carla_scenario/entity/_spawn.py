@@ -2,33 +2,36 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     import carla
 
 
-def validate_exclusive_spawn_params(
-    transform: Optional["carla.Transform"],
-    spawn_index: Optional[int],
-) -> None:
-    """Validate that exactly one of *transform* or *spawn_index* is provided.
+@dataclass(frozen=True)
+class SpawnTransform:
+    """Spawn at an explicit :class:`carla.Transform`."""
 
-    Raises:
-        ValueError: If neither or both are provided.
-    """
-    if transform is None and spawn_index is None:
-        raise ValueError("Either 'transform' or 'spawn_index' must be provided.")
-    if transform is not None and spawn_index is not None:
-        raise ValueError("Only one of 'transform' or 'spawn_index' may be provided.")
+    value: "carla.Transform"
+
+
+@dataclass(frozen=True)
+class SpawnPointIndex:
+    """Spawn at a map spawn-point by index."""
+
+    value: int
+
+
+SpawnLocation = Union[SpawnTransform, SpawnPointIndex]
+"""Where to place a vehicle.  Exactly one variant must be chosen."""
 
 
 def spawn_vehicle_actor(
     world: "carla.World",
     vehicle_type: str,
     role_name: str,
-    transform: Optional["carla.Transform"],
-    spawn_index: Optional[int],
+    spawn_location: SpawnLocation,
 ) -> "carla.Actor":
     """Spawn a vehicle actor in the CARLA world.
 
@@ -39,16 +42,15 @@ def spawn_vehicle_actor(
         world: The CARLA world instance.
         vehicle_type: CARLA blueprint ID (e.g. ``"vehicle.tesla.model3"``).
         role_name: Value for the ``role_name`` actor attribute.
-        transform: Explicit spawn pose, or ``None`` to use *spawn_index*.
-        spawn_index: Index into the map's spawn-point list, or ``None`` to
-            use *transform*.
+        spawn_location: Where to place the vehicle — either an explicit
+            :class:`SpawnTransform` or a :class:`SpawnPointIndex`.
 
     Returns:
         The spawned vehicle actor.
 
     Raises:
-        ValueError: If the blueprint is unavailable or *spawn_index* is out
-            of range.
+        ValueError: If the blueprint is unavailable or the spawn index is
+            out of range.
         RuntimeError: If the actor could not be placed at the location.
     """
     bp_lib = world.get_blueprint_library()
@@ -65,17 +67,17 @@ def spawn_vehicle_actor(
     # Resolve spawn transform.  Only fetch spawn points when needed so that
     # the explicit-transform path avoids the get_map() RPC call.
     spawn_points = None
-    if spawn_index is not None:
+    if isinstance(spawn_location, SpawnPointIndex):
         spawn_points = world.get_map().get_spawn_points()
-        if spawn_index >= len(spawn_points):
+        if spawn_location.value >= len(spawn_points):
             raise ValueError(
-                f"Spawn index {spawn_index} is out of range. "
+                f"Spawn index {spawn_location.value} is out of range. "
                 f"The map has {len(spawn_points)} spawn points "
                 f"(valid indices: 0\u2013{len(spawn_points) - 1})."
             )
-        resolved_transform = spawn_points[spawn_index]
+        resolved_transform = spawn_points[spawn_location.value]
     else:
-        resolved_transform = transform  # type: ignore[assignment]
+        resolved_transform = spawn_location.value
 
     vehicle_bp = bp_lib.find(vehicle_type)
     if vehicle_bp is None:

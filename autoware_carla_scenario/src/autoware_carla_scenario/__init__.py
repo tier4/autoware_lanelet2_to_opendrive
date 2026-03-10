@@ -32,6 +32,9 @@ Public API re-exported for convenience::
         lanelet2_traffic_light_id_to_opendrive_controller_id,
         set_group_traffic_light_state,
         # Entity
+        SpawnLocation,
+        SpawnPointIndex,
+        SpawnTransform,
         VehicleEntity,
         VehicleEntityConfig,
         # Kinematics
@@ -72,7 +75,14 @@ from .coordinate import (
     to_lanelet2,
     to_opendrive,
 )
-from .entity import EgoVehicle, VehicleEntity, VehicleEntityConfig
+from .entity import (
+    EgoVehicle,
+    SpawnLocation,
+    SpawnPointIndex,
+    SpawnTransform,
+    VehicleEntity,
+    VehicleEntityConfig,
+)
 from .kinematics import (
     AbsoluteAcceleration,
     AbsoluteVelocity,
@@ -107,6 +117,9 @@ __all__ = [
     "StandstillCondition",
     "EgoConfig",
     "EgoVehicle",
+    "SpawnLocation",
+    "SpawnPointIndex",
+    "SpawnTransform",
     "VehicleEntity",
     "VehicleEntityConfig",
     "Lanelet2Pose",
