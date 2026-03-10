@@ -11,7 +11,6 @@ from typing import Optional
 
 from .conditions import ScenarioResult, TimeoutCondition
 from .ego import EgoVehicle
-from .recording import ScenarioRecorder
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
 
@@ -69,7 +68,7 @@ class CarlaAutowareScenario:
             host: CARLA server hostname.
             port: CARLA server RPC port.
             timeout_seconds: Default timeout applied to every scenario.
-            output_dir: Directory where MP4 recordings are saved.
+            output_dir: Directory where CARLA recording logs are saved.
         """
         import carla
 
@@ -171,11 +170,12 @@ class CarlaAutowareScenario:
         Steps:
         1. Call ``scenario.setup(world)``
         2. Spawn the ego vehicle
-        3. Register the default timeout fail condition
-        4. Run the tick loop
-        5. Save the MP4 recording
-        6. Destroy the ego vehicle
-        7. Return the :class:`ScenarioResult`
+        3. Start the CARLA native recorder
+        4. Register the default timeout fail condition
+        5. Run the tick loop
+        6. Stop the recorder
+        7. Destroy the ego vehicle
+        8. Return the :class:`ScenarioResult`
 
         Args:
             scenario: The scenario to run.
@@ -197,12 +197,19 @@ class CarlaAutowareScenario:
         world.apply_settings(settings)
 
         ego = EgoVehicle()
-        recorder = ScenarioRecorder()
+        recording_started = False
         result: Optional[ScenarioResult] = None
 
         try:
             scenario.setup(world)
             ego.spawn(world, scenario.ego_config)
+
+            # Start native CARLA recorder
+            scenario_name = type(scenario).__name__
+            output_path = self.output_dir / f"{scenario_name}.log"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            self._client.start_recorder(str(output_path))
+            recording_started = True
 
             # Register default timeout fail condition
             scenario.register_fail_condition(TimeoutCondition(self.timeout_seconds))
@@ -222,13 +229,6 @@ class CarlaAutowareScenario:
                 # Post-tick callbacks
                 for cb in scenario._post_tick_callbacks:
                     cb(world)
-
-                # Move spectator to match the RGB camera viewpoint
-                ego.update_spectator()
-
-                # Collect camera frames
-                for frame in ego.get_camera_frames():
-                    recorder.add_frame(frame)
 
                 # Check pass conditions
                 for condition in scenario._pass_conditions:
@@ -260,14 +260,8 @@ class CarlaAutowareScenario:
                 )
 
         finally:
-            # Save recording
-            scenario_name = type(scenario).__name__
-            output_path = self.output_dir / f"{scenario_name}.mp4"
-            try:
-                recorder.save(output_path)
-            except Exception:
-                pass  # Recording failure must not shadow the scenario result
-
+            if recording_started:
+                self._client.stop_recorder()
             ego.destroy()
 
             # Restore original world settings

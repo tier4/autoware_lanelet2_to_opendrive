@@ -21,7 +21,6 @@ Public API re-exported for convenience::
         MapManager,
         OpenDrivePose,
         ScenarioQueue,
-        ScenarioRecorder,
         ScenarioResult,
         TimeoutCondition,
         to_carla_location,
@@ -81,7 +80,6 @@ from .kinematics import (
     Vector3,
 )
 from .pytest_fixtures import CarlaScenarioFixture
-from .recording import ScenarioRecorder
 from .scenario_base import BaseScenario, EgoConfig
 from .scenario_queue import ScenarioQueue
 from .server import CarlaServerManager
@@ -110,7 +108,6 @@ __all__ = [
     "MapManager",
     "OpenDrivePose",
     "ScenarioQueue",
-    "ScenarioRecorder",
     "ScenarioResult",
     "TimeoutCondition",
     "to_carla_location",
