@@ -9,9 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from autoware_carla_scenario import (
+    AndCondition,
     BaseCondition,
     EntityInAreaCondition,
     EntityLanePositionCondition,
+    OrCondition,
     ScenarioResult,
     TimeoutCondition,
 )
@@ -381,3 +383,138 @@ class TestEntityLanePositionCondition:
             result = condition.check(world, elapsed=1.0)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Composite helpers
+# ---------------------------------------------------------------------------
+
+
+class AlwaysFailCondition(BaseCondition):
+    """Test helper: always returns a failing result."""
+
+    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+        return ScenarioResult(
+            passed=False, message="Always fails", elapsed_seconds=elapsed
+        )
+
+
+# ---------------------------------------------------------------------------
+# AndCondition – unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestAndCondition:
+    def test_all_pass_returns_pass(self) -> None:
+        cond = AndCondition([AlwaysPassCondition(), AlwaysPassCondition()])
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+        assert "AND" in result.message
+
+    def test_one_none_returns_none(self) -> None:
+        cond = AndCondition([AlwaysPassCondition(), AlwaysNoneCondition()])
+        assert cond.check(MagicMock(), elapsed=1.0) is None
+
+    def test_all_none_returns_none(self) -> None:
+        cond = AndCondition([AlwaysNoneCondition(), AlwaysNoneCondition()])
+        assert cond.check(MagicMock(), elapsed=1.0) is None
+
+    def test_one_fail_returns_fail_immediately(self) -> None:
+        cond = AndCondition([AlwaysFailCondition(), AlwaysPassCondition()])
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is False
+
+    def test_fail_short_circuits(self) -> None:
+        """Fail result stops evaluation — second condition is never checked."""
+        spy = MagicMock(spec=BaseCondition)
+        cond = AndCondition([AlwaysFailCondition(), spy])
+        cond.check(MagicMock(), elapsed=1.0)
+        spy.check.assert_not_called()
+
+    def test_none_short_circuits(self) -> None:
+        """None result stops evaluation — second condition is never checked."""
+        spy = MagicMock(spec=BaseCondition)
+        cond = AndCondition([AlwaysNoneCondition(), spy])
+        cond.check(MagicMock(), elapsed=1.0)
+        spy.check.assert_not_called()
+
+    def test_three_conditions_all_pass(self) -> None:
+        cond = AndCondition(
+            [AlwaysPassCondition(), AlwaysPassCondition(), AlwaysPassCondition()]
+        )
+        result = cond.check(MagicMock(), elapsed=2.0)
+        assert result is not None
+        assert result.passed is True
+        assert result.elapsed_seconds == pytest.approx(2.0)
+
+    def test_message_combines_children(self) -> None:
+        cond = AndCondition([AlwaysPassCondition(), AlwaysPassCondition()])
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.message.count("Always passes") == 2
+
+    def test_fewer_than_two_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least 2"):
+            AndCondition([AlwaysPassCondition()])
+        with pytest.raises(ValueError, match="at least 2"):
+            AndCondition([])
+
+
+# ---------------------------------------------------------------------------
+# OrCondition – unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestOrCondition:
+    def test_first_pass_returns_pass(self) -> None:
+        cond = OrCondition([AlwaysPassCondition(), AlwaysNoneCondition()])
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_second_pass_returns_pass(self) -> None:
+        cond = OrCondition([AlwaysNoneCondition(), AlwaysPassCondition()])
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_all_none_returns_none(self) -> None:
+        cond = OrCondition([AlwaysNoneCondition(), AlwaysNoneCondition()])
+        assert cond.check(MagicMock(), elapsed=1.0) is None
+
+    def test_fail_result_is_returned(self) -> None:
+        cond = OrCondition([AlwaysFailCondition(), AlwaysNoneCondition()])
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is False
+
+    def test_first_match_short_circuits(self) -> None:
+        """First non-None result stops evaluation — second is never checked."""
+        spy = MagicMock(spec=BaseCondition)
+        cond = OrCondition([AlwaysPassCondition(), spy])
+        cond.check(MagicMock(), elapsed=1.0)
+        spy.check.assert_not_called()
+
+    def test_three_conditions(self) -> None:
+        cond = OrCondition(
+            [AlwaysNoneCondition(), AlwaysNoneCondition(), AlwaysPassCondition()]
+        )
+        result = cond.check(MagicMock(), elapsed=3.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_fewer_than_two_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least 2"):
+            OrCondition([AlwaysPassCondition()])
+        with pytest.raises(ValueError, match="at least 2"):
+            OrCondition([])
+
+    def test_nested_and_in_or(self) -> None:
+        """OrCondition can contain AndCondition for complex logic."""
+        inner_and = AndCondition([AlwaysPassCondition(), AlwaysPassCondition()])
+        cond = OrCondition([AlwaysNoneCondition(), inner_and])
+        result = cond.check(MagicMock(), elapsed=1.0)
+        assert result is not None
+        assert result.passed is True
