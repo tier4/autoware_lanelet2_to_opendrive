@@ -22,6 +22,7 @@ class VehicleEntityConfig:
     role_name: str
     spawn_location: SpawnLocation
     vehicle_type: str = "vehicle.fuso.mitsubishi"
+    initial_speed_kmh: float = 0.0
 
 
 class VehicleEntity:
@@ -74,12 +75,22 @@ class VehicleEntity:
             RuntimeError: If the vehicle could not be spawned at the
                 requested location.
         """
+        import carla as _carla
+
         self._vehicle = spawn_vehicle_actor(
             world,
             self._config.vehicle_type,
             self._config.role_name,
             self._config.spawn_location,
         )
+
+        if self._config.initial_speed_kmh > 0.0:
+            speed_ms = self._config.initial_speed_kmh / 3.6
+            fwd = self._vehicle.get_transform().get_forward_vector()
+            self._vehicle.set_target_velocity(
+                _carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
+            )
+
         return self._vehicle
 
     def destroy(self) -> None:

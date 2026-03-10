@@ -120,6 +120,7 @@ class IntersectionPassingScenario(BaseScenario):
             role_name=self.NPC_ROLE_NAME,
             spawn_location=SpawnTransform(nearest_sp),
             vehicle_type="vehicle.fuso.mitsubishi",
+            initial_speed_kmh=5.0,
         )
         self._npc = VehicleEntity(npc_config)
         self._npc.spawn(world)
