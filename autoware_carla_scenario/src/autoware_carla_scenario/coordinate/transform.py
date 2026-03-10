@@ -4,18 +4,22 @@ All cross-system conversions (Lanelet2 ↔ OpenDRIVE) go through CARLA world coo
 as an intermediate representation, which avoids the need for an explicit lanelet-to-road
 ID mapping.
 
-Coordinate axes
----------------
-Lanelet2 local UTM (right-hand):  x=East, y=North, z=Up
-OpenDRIVE world   (right-hand):   x=East, y=North, z=Up  ← same origin as Lanelet2
-CARLA world       (left-hand):    x=East, y=South, z=Up
+Coordinate systems
+------------------
+Lanelet2 (MGRS absolute, right-hand):  x=East, y=North, z=Up
+OpenDRIVE / CARLA (XODR-relative):     origin = geoReference (lat_0, lon_0)
+CARLA world (left-hand):               x≈East, y≈South, z=Up  (y flipped from XODR)
 
-Key transforms
---------------
-  carla_x = ll2_x
-  carla_y = −ll2_y          (flip North→South)
-  carla_z = ll2_z
-  carla_yaw_deg = −degrees(ll2_heading_rad)   (right-hand → left-hand)
+Key relationships
+-----------------
+  mgrs_xy  = xodr_xy + mgrs_offset
+  carla_x  = xodr_x                     (same origin as XODR)
+  carla_y  = −xodr_y                    (flip North→South)
+  carla_z  = xodr_z
+
+  carla_x  = ll2_x − mgrs_offset_x     (MGRS absolute → XODR relative)
+  carla_y  = −(ll2_y − mgrs_offset_y)   (MGRS absolute → XODR relative, then flip)
+  carla_yaw_deg = −degrees(heading_rad)  (right-hand → left-hand)
 """
 
 from __future__ import annotations
@@ -140,9 +144,17 @@ def _lanelet2_to_carla(pose: Lanelet2Pose) -> CarlaWorldPose:
     x = x_cl + pose.t * (-math.sin(total_heading))
     y = y_cl + pose.t * math.cos(total_heading)
 
-    # Convert right-hand (North=+y) → CARLA left-hand (South=+y)
+    # Lanelet2 centerline uses MGRS absolute coords; CARLA world uses
+    # XODR-relative coords.  Subtract the MGRS offset for x/y, and the
+    # vertical offset for z (Lanelet2 stores absolute elevation).
+    offset_x, offset_y = mm.mgrs_offset
     carla_yaw_deg = -math.degrees(total_heading)
-    return CarlaWorldPose(x=x, y=-y, z=z_cl, yaw=carla_yaw_deg)
+    return CarlaWorldPose(
+        x=x - offset_x,
+        y=-(y - offset_y),
+        z=z_cl - mm.z_offset,
+        yaw=carla_yaw_deg,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +182,10 @@ def _opendrive_to_carla(pose: OpenDrivePose) -> CarlaWorldPose:
     x = x_ref + pose.t * (-math.sin(total_heading))
     y = y_ref + pose.t * math.cos(total_heading)
 
-    # XODR coords are relative to geoReference origin; add MGRS offset to get
-    # absolute MGRS coords (= Lanelet2 local UTM coords), then flip y for CARLA.
-    offset_x, offset_y = mm.mgrs_offset
+    # XODR coords are already in CARLA's coordinate frame (same origin);
+    # just flip y for CARLA's left-hand system (South=+y).
     carla_yaw_deg = -math.degrees(total_heading)
-    return CarlaWorldPose(x=x + offset_x, y=-(y + offset_y), z=z_ref, yaw=carla_yaw_deg)
+    return CarlaWorldPose(x=x, y=-y, z=z_ref, yaw=carla_yaw_deg)
 
 
 # ---------------------------------------------------------------------------
@@ -186,10 +197,9 @@ def _carla_to_opendrive(pose: CarlaWorldPose) -> OpenDrivePose:
     """Convert a CARLA world pose to the nearest OpenDRIVE (s, t) pose."""
     mm = MapManager.get_instance()
 
-    # Convert CARLA left-hand → absolute MGRS → XODR (relative to geoRef origin)
-    offset_x, offset_y = mm.mgrs_offset
-    od_x = pose.x - offset_x
-    od_y = -pose.y - offset_y
+    # CARLA world coords share the same origin as XODR; just flip y back.
+    od_x = pose.x
+    od_y = -pose.y
     od_heading = -math.radians(pose.yaw)
 
     best_road_id: str = ""
@@ -242,9 +252,11 @@ def _carla_to_lanelet2(pose: CarlaWorldPose) -> Lanelet2Pose:
     """Convert a CARLA world pose to the nearest Lanelet2 Frenet pose."""
     mm = MapManager.get_instance()
 
-    # Convert CARLA left-hand → Lanelet2 right-hand
-    ll2_x = pose.x
-    ll2_y = -pose.y
+    # CARLA world uses XODR-relative coords; Lanelet2 uses MGRS absolute.
+    # Add the MGRS offset for x/y, and the vertical offset for z.
+    offset_x, offset_y = mm.mgrs_offset
+    ll2_x = pose.x + offset_x
+    ll2_y = -pose.y + offset_y
     ll2_heading = -math.radians(pose.yaw)
 
     query = lanelet2.core.BasicPoint2d(ll2_x, ll2_y)

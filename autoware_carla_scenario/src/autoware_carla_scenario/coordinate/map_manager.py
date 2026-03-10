@@ -50,6 +50,7 @@ class MapManager:
     _road_network: Optional[RoadNetwork]
     _geo_origin: Optional[tuple[float, float, float]]
     _mgrs_offset: Optional[tuple[float, float]]
+    _z_offset: Optional[float]
 
     def __new__(cls) -> "MapManager":
         if cls._instance is None:
@@ -58,6 +59,7 @@ class MapManager:
             cls._instance._road_network = None
             cls._instance._geo_origin = None
             cls._instance._mgrs_offset = None
+            cls._instance._z_offset = None
         return cls._instance
 
     @classmethod
@@ -123,6 +125,11 @@ class MapManager:
         # Load OpenDRIVE road network (pyxodr takes a file path, not content)
         self._road_network = RoadNetwork(str(xodr_path))
 
+        # Compute vertical offset: Lanelet2 z (MGRS absolute elevation) minus
+        # XODR z (elevation relative to geoReference origin).  This is constant
+        # across the map and lets us convert z between the two systems.
+        self._z_offset = self._compute_z_offset()
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -168,6 +175,77 @@ class MapManager:
                 "MapManager is not initialized. Call initialize() first."
             )
         return self._mgrs_offset
+
+    @property
+    def z_offset(self) -> float:
+        """Vertical offset: ``lanelet2_z - xodr_z``.
+
+        Use this to convert between Lanelet2 absolute elevation and XODR/CARLA
+        relative elevation::
+
+            carla_z = lanelet2_z - z_offset
+            lanelet2_z = carla_z + z_offset
+        """
+        if self._z_offset is None:
+            raise RuntimeError(
+                "MapManager is not initialized. Call initialize() first."
+            )
+        return self._z_offset
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _compute_z_offset(self) -> float:
+        """Compute ``lanelet2_z − xodr_z`` by sampling one reference point.
+
+        Takes the first lanelet centerline point, finds the nearest XODR road
+        reference-line point at the same (x, y), and returns the difference
+        in their z coordinates.  The offset is assumed constant across the map.
+        """
+        import numpy as np
+
+        # Sample the first available lanelet centerline point
+        assert self._lanelet_map is not None
+        for lanelet in self._lanelet_map.laneletLayer:
+            ref_pt = lanelet.centerline[0]
+            break
+        else:
+            return 0.0
+
+        ll2_z = ref_pt.z
+        # Convert Lanelet2 MGRS (x, y) → XODR-relative (x, y)
+        assert self._mgrs_offset is not None
+        xodr_x = ref_pt.x - self._mgrs_offset[0]
+        xodr_y = ref_pt.y - self._mgrs_offset[1]
+
+        # Ensure roads are loaded
+        assert self._road_network is not None
+        if not self._road_network.road_ids_to_object:
+            self._road_network.get_roads()
+
+        # Find the nearest road reference-line point and read its z
+        best_z = 0.0
+        best_dist = float("inf")
+        query = np.array([xodr_x, xodr_y])
+
+        for road in self._road_network.road_ids_to_object.values():
+            ref_line = road.reference_line  # shape (N, 2)
+            if len(ref_line) < 2:
+                continue
+            dists = np.linalg.norm(ref_line - query, axis=1)
+            min_idx = int(np.argmin(dists))
+            dist = float(dists[min_idx])
+            if dist < best_dist:
+                best_dist = dist
+                z_coords = road.z_coordinates
+                deltas = np.diff(ref_line, axis=0)
+                seg_lengths = np.linalg.norm(deltas, axis=1)
+                arc = np.zeros(len(ref_line))
+                arc[1:] = np.cumsum(seg_lengths)
+                best_z = float(np.interp(arc[min_idx], arc, z_coords))
+
+        return ll2_z - best_z
 
 
 # ------------------------------------------------------------------
