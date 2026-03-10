@@ -1,4 +1,4 @@
-"""Base classes for scenario pass/fail conditions."""
+"""Base classes and helpers for scenario pass/fail conditions."""
 
 from __future__ import annotations
 
@@ -8,6 +8,25 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     import carla
+
+
+def find_actor_by_role_name(
+    world: "carla.World", role_name: str
+) -> Optional["carla.Actor"]:
+    """Find a single actor by its ``role_name`` attribute.
+
+    Args:
+        world: The CARLA world instance.
+        role_name: The ``role_name`` attribute value to search for.
+
+    Returns:
+        The matching actor, or ``None`` if no actor with that role name exists.
+    """
+    actors = world.get_actors()
+    return next(
+        (a for a in actors if a.attributes.get("role_name") == role_name),
+        None,
+    )
 
 
 @dataclass

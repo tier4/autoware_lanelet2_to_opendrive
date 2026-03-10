@@ -9,7 +9,7 @@ import numpy as np
 
 from ..coordinate.poses import AnyPose, CarlaWorldPose
 from ..coordinate.transform import to_carla_world
-from .base import BaseCondition, ScenarioResult
+from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 
 if TYPE_CHECKING:
     import carla
@@ -98,11 +98,7 @@ class EntityInAreaCondition(BaseCondition):
         """
         carla_polygon = self._resolve_polygon()
 
-        actors = world.get_actors()
-        entity = next(
-            (a for a in actors if a.attributes.get("role_name") == self._entity_name),
-            None,
-        )
+        entity = find_actor_by_role_name(world, self._entity_name)
         if entity is None:
             return None
 
