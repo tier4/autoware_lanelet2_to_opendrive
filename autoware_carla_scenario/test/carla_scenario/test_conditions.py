@@ -11,6 +11,7 @@ import pytest
 from autoware_carla_scenario import (
     AndCondition,
     BaseCondition,
+    ElapsedTimeCondition,
     EntityInAreaCondition,
     EntityLanePositionCondition,
     OrCondition,
@@ -75,6 +76,49 @@ class TestTimeoutCondition:
         result = condition.check(world, elapsed=30.0)
         assert result is not None
         assert "30" in result.message
+
+
+# ---------------------------------------------------------------------------
+# ElapsedTimeCondition – unit tests (no CARLA required)
+# ---------------------------------------------------------------------------
+
+
+class TestElapsedTimeCondition:
+    def test_returns_none_before_duration(self) -> None:
+        condition = ElapsedTimeCondition(duration_seconds=10.0)
+        world = MagicMock()
+        result = condition.check(world, elapsed=5.0)
+        assert result is None
+
+    def test_returns_pass_at_duration(self) -> None:
+        condition = ElapsedTimeCondition(duration_seconds=10.0)
+        world = MagicMock()
+        result = condition.check(world, elapsed=10.0)
+        assert result is not None
+        assert result.passed is True
+        assert result.elapsed_seconds == pytest.approx(10.0)
+
+    def test_returns_pass_beyond_duration(self) -> None:
+        condition = ElapsedTimeCondition(duration_seconds=5.0)
+        world = MagicMock()
+        result = condition.check(world, elapsed=999.9)
+        assert result is not None
+        assert result.passed is True
+
+    def test_message_contains_duration_info(self) -> None:
+        condition = ElapsedTimeCondition(duration_seconds=30.0)
+        world = MagicMock()
+        result = condition.check(world, elapsed=30.0)
+        assert result is not None
+        assert "30.00" in result.message
+
+    def test_zero_duration_raises(self) -> None:
+        with pytest.raises(ValueError, match="duration_seconds must be positive"):
+            ElapsedTimeCondition(duration_seconds=0.0)
+
+    def test_negative_duration_raises(self) -> None:
+        with pytest.raises(ValueError, match="duration_seconds must be positive"):
+            ElapsedTimeCondition(duration_seconds=-5.0)
 
 
 # ---------------------------------------------------------------------------
