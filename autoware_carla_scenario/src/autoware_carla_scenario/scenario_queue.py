@@ -220,11 +220,13 @@ class ScenarioQueue:
         Example::
 
             # conftest.py
-            from autoware_carla_scenario import CarlaScenarioFixture, EgoConfig, ScenarioQueue
+            from autoware_carla_scenario import (
+                CarlaScenarioFixture, EgoConfig, ScenarioQueue, SpawnTransform,
+            )
             import carla
 
             ego = EgoConfig(
-                transform=carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5)),
+                spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5))),
                 vehicle_type="vehicle.fuso.mitsubishi",
             )
             _queue = ScenarioQueue(map_name="Town10HD_Opt")

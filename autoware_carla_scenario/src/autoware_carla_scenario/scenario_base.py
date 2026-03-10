@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List
 
 from .conditions import BaseCondition
+from .entity._spawn import SpawnLocation
 
 if TYPE_CHECKING:
     import carla
@@ -16,24 +17,13 @@ if TYPE_CHECKING:
 class EgoConfig:
     """Configuration for the ego vehicle.
 
-    Exactly one of *transform* or *spawn_index* must be provided.
-
-    * ``transform``: an explicit :class:`carla.Transform` for the spawn pose.
-    * ``spawn_index``: index into the map's ``get_spawn_points()`` list.
-      The transform is resolved at spawn time so a world connection is required.
+    *spawn_location* determines where the vehicle is placed — either a
+    :class:`SpawnTransform` (explicit pose) or a :class:`SpawnPointIndex`
+    (index into the map's spawn-point list).
     """
 
-    transform: Optional["carla.Transform"] = None
+    spawn_location: SpawnLocation
     vehicle_type: str = "vehicle.fuso.mitsubishi"
-    spawn_index: Optional[int] = None
-
-    def __post_init__(self) -> None:
-        if self.transform is None and self.spawn_index is None:
-            raise ValueError("Either 'transform' or 'spawn_index' must be provided.")
-        if self.transform is not None and self.spawn_index is not None:
-            raise ValueError(
-                "Only one of 'transform' or 'spawn_index' may be provided."
-            )
 
 
 class BaseScenario(ABC):

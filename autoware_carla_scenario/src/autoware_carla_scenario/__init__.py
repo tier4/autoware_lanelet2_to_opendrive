@@ -31,6 +31,12 @@ Public API re-exported for convenience::
         frame_of,
         lanelet2_traffic_light_id_to_opendrive_controller_id,
         set_group_traffic_light_state,
+        # Entity
+        SpawnLocation,
+        SpawnPointIndex,
+        SpawnTransform,
+        VehicleEntity,
+        VehicleEntityConfig,
         # Kinematics
         CoordinateFrame,
         FrameMismatchError,
@@ -69,7 +75,14 @@ from .coordinate import (
     to_lanelet2,
     to_opendrive,
 )
-from .ego import EgoVehicle
+from .entity import (
+    EgoVehicle,
+    SpawnLocation,
+    SpawnPointIndex,
+    SpawnTransform,
+    VehicleEntity,
+    VehicleEntityConfig,
+)
 from .kinematics import (
     AbsoluteAcceleration,
     AbsoluteVelocity,
@@ -104,6 +117,11 @@ __all__ = [
     "StandstillCondition",
     "EgoConfig",
     "EgoVehicle",
+    "SpawnLocation",
+    "SpawnPointIndex",
+    "SpawnTransform",
+    "VehicleEntity",
+    "VehicleEntityConfig",
     "Lanelet2Pose",
     "MapManager",
     "OpenDrivePose",
