@@ -18,6 +18,7 @@ Usage::
     ll2_pose   = to_lanelet2(od_pose)
 """
 
+from .frames import CoordinateFrame, FrameMismatchError, frame_of
 from .map_manager import MapManager
 from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
 from .transform import to_carla_location, to_carla_world, to_lanelet2, to_opendrive
@@ -25,9 +26,12 @@ from .transform import to_carla_location, to_carla_world, to_lanelet2, to_opendr
 __all__ = [
     "AnyPose",
     "CarlaWorldPose",
+    "CoordinateFrame",
+    "FrameMismatchError",
     "Lanelet2Pose",
     "OpenDrivePose",
     "MapManager",
+    "frame_of",
     "to_carla_location",
     "to_carla_world",
     "to_lanelet2",
