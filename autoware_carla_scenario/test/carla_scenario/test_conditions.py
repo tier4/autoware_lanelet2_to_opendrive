@@ -172,9 +172,20 @@ class TestPointInPolygon2d:
 
 
 def _make_world_with_actor(
-    role_name: str, x: float, y: float, z: float = 0.0
+    role_name: str,
+    x: float,
+    y: float,
+    z: float = 0.0,
+    *,
+    vx: float | None = None,
+    vy: float | None = None,
+    vz: float | None = None,
 ) -> MagicMock:
-    """Return a MagicMock CARLA world that contains a single actor at (x, y, z)."""
+    """Return a MagicMock CARLA world that contains a single actor.
+
+    Always stubs ``get_location`` with *(x, y, z)*.  When *vx*/*vy*/*vz* are
+    provided, ``get_velocity`` is also stubbed.
+    """
     location = MagicMock()
     location.x = x
     location.y = y
@@ -183,6 +194,13 @@ def _make_world_with_actor(
     actor = MagicMock()
     actor.attributes = {"role_name": role_name}
     actor.get_location.return_value = location
+
+    if vx is not None:
+        velocity = MagicMock()
+        velocity.x = vx
+        velocity.y = vy if vy is not None else 0.0
+        velocity.z = vz if vz is not None else 0.0
+        actor.get_velocity.return_value = velocity
 
     world = MagicMock()
     world.get_actors.return_value = [actor]
@@ -389,37 +407,16 @@ class TestEntityLanePositionCondition:
 # ---------------------------------------------------------------------------
 
 
-def _make_world_with_velocity(
-    role_name: str,
-    vx: float,
-    vy: float,
-    vz: float = 0.0,
-) -> MagicMock:
-    """Return a MagicMock CARLA world with a single actor having the given velocity."""
-    velocity = MagicMock()
-    velocity.x = vx
-    velocity.y = vy
-    velocity.z = vz
-
-    actor = MagicMock()
-    actor.attributes = {"role_name": role_name}
-    actor.get_velocity.return_value = velocity
-
-    world = MagicMock()
-    world.get_actors.return_value = [actor]
-    return world
-
-
 class TestStandstillCondition:
     def test_returns_none_before_duration(self) -> None:
         condition = StandstillCondition("ego", duration=3.0)
-        world = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         assert condition.check(world, elapsed=0.0) is None
         assert condition.check(world, elapsed=2.9) is None
 
     def test_returns_pass_after_duration(self) -> None:
         condition = StandstillCondition("ego", duration=3.0)
-        world = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         condition.check(world, elapsed=0.0)
         result = condition.check(world, elapsed=3.0)
         assert result is not None
@@ -428,8 +425,8 @@ class TestStandstillCondition:
 
     def test_timer_resets_when_moving(self) -> None:
         condition = StandstillCondition("ego", duration=2.0)
-        world_stop = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
-        world_move = _make_world_with_velocity("ego", vx=5.0, vy=0.0)
+        world_stop = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
+        world_move = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
 
         # Stand still from t=0 to t=1
         condition.check(world_stop, elapsed=0.0)
@@ -448,7 +445,7 @@ class TestStandstillCondition:
     def test_speed_below_threshold_counts(self) -> None:
         condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.5)
         # Speed = sqrt(0.3^2 + 0.3^2) ≈ 0.42 < 0.5
-        world = _make_world_with_velocity("ego", vx=0.3, vy=0.3)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.3, vy=0.3)
         condition.check(world, elapsed=0.0)
         result = condition.check(world, elapsed=1.0)
         assert result is not None
@@ -456,13 +453,13 @@ class TestStandstillCondition:
 
     def test_speed_above_threshold_no_trigger(self) -> None:
         condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.1)
-        world = _make_world_with_velocity("ego", vx=1.0, vy=0.0)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=0.0)
         condition.check(world, elapsed=0.0)
         assert condition.check(world, elapsed=5.0) is None
 
     def test_entity_not_found_returns_none(self) -> None:
         condition = StandstillCondition("ego", duration=1.0)
-        world = _make_world_with_velocity("other", vx=0.0, vy=0.0)
+        world = _make_world_with_actor("other", 0.0, 0.0, vx=0.0, vy=0.0)
         assert condition.check(world, elapsed=0.0) is None
 
     def test_invalid_duration_raises(self) -> None:
@@ -477,7 +474,7 @@ class TestStandstillCondition:
 
     def test_elapsed_seconds_in_result(self) -> None:
         condition = StandstillCondition("ego", duration=1.0)
-        world = _make_world_with_velocity("ego", vx=0.0, vy=0.0)
+        world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         condition.check(world, elapsed=10.0)
         result = condition.check(world, elapsed=11.0)
         assert result is not None

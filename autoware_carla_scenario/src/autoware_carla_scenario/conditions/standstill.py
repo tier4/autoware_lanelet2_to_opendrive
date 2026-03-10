@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING, Optional
 
-from .base import BaseCondition, ScenarioResult
+from ..kinematics import Vector3
+from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 
 if TYPE_CHECKING:
     import carla
@@ -51,16 +51,12 @@ class StandstillCondition(BaseCondition):
             :class:`ScenarioResult` with ``passed=True`` if the entity has been
             nearly stopped for at least ``duration`` seconds, ``None`` otherwise.
         """
-        actors = world.get_actors()
-        entity = next(
-            (a for a in actors if a.attributes.get("role_name") == self._entity_name),
-            None,
-        )
+        entity = find_actor_by_role_name(world, self._entity_name)
         if entity is None:
             return None
 
         velocity: carla.Vector3D = entity.get_velocity()
-        speed = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+        speed = Vector3.from_carla_vector3d(velocity).magnitude()
 
         if speed <= self._speed_threshold:
             if self._standstill_start is None:
