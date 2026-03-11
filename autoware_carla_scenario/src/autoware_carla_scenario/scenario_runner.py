@@ -198,8 +198,19 @@ class ScenarioRunner:
         result: Optional[ScenarioResult] = None
 
         try:
+            scenario_name = type(scenario).__name__
+            logger.info("[%s] === Setup start ===", scenario_name)
             scenario.setup(world)
+            logger.info("[%s] Spawning ego vehicle ...", scenario_name)
             ego_actor = ego.spawn(world, scenario.ego_config)
+            logger.info(
+                "[%s] Ego spawned: id=%d at (%.1f, %.1f, %.1f)",
+                scenario_name,
+                ego_actor.id,
+                ego_actor.get_location().x,
+                ego_actor.get_location().y,
+                ego_actor.get_location().z,
+            )
 
             # Warm-up ticks: let physics and TrafficManager stabilise
             # before the main loop begins.
@@ -230,15 +241,16 @@ class ScenarioRunner:
             _vehicle_entity_module._warmup_done = True
 
             # Start native CARLA recorder
-            scenario_name = type(scenario).__name__
             output_path = self.output_dir / f"{scenario_name}.log"
             output_path.parent.mkdir(parents=True, exist_ok=True)
             self._client.start_recorder(str(output_path))
             recording_started = True
+            logger.info("[%s] Recording to %s", scenario_name, output_path)
 
             # Register default timeout fail condition
             scenario.register_fail_condition(TimeoutCondition(self.timeout_seconds))
 
+            logger.info("[%s] === Tick loop start ===", scenario_name)
             start_time = time.monotonic()
 
             # Tick loop
@@ -293,15 +305,31 @@ class ScenarioRunner:
                 )
 
         finally:
+            logger.info("[%s] === Cleanup start ===", scenario_name)
             _vehicle_entity_module._warmup_done = False
             if recording_started:
                 self._client.stop_recorder()
+                logger.info("[%s] Recorder stopped", scenario_name)
+            logger.info("[%s] Destroying ego vehicle ...", scenario_name)
             ego.destroy()
+            logger.info("[%s] Ego destroyed", scenario_name)
 
             # Restore original world and TrafficManager settings
             tm.set_synchronous_mode(original_synchronous)
             settings.synchronous_mode = original_synchronous
             settings.fixed_delta_seconds = original_delta
             world.apply_settings(settings)
+            logger.info("[%s] World settings restored", scenario_name)
+            logger.info("[%s] === Cleanup done ===", scenario_name)
+
+        if result is not None:
+            status = "PASSED" if result.passed else "FAILED"
+            logger.info(
+                "[%s] Result: %s — %s (%.2fs)",
+                scenario_name,
+                status,
+                result.message,
+                result.elapsed_seconds,
+            )
 
         return result
