@@ -1,0 +1,251 @@
+"""Example scenario: Ego vehicle turns left at the next intersection.
+
+This scenario demonstrates :class:`~autoware_carla_scenario.TurnAction` by:
+
+1. Spawning the ego vehicle on lanelet 244, which approaches an intersection
+   with a left turn option.
+2. Setting all traffic lights to green.
+3. Registering a :class:`TurnAction` (``LEFT``) that analyses the OpenDRIVE
+   road network to find the next junction ahead of the ego, computes a left
+   turn route, and applies it via ``TrafficManager.set_path``.
+4. Verifying the ego traverses the expected post-turn OpenDRIVE roads.
+
+Typical usage
+-------------
+Standalone (no pytest)::
+
+    uv run left-turn --map NishishinjyukuMap
+
+With pytest — see ``test/carla_scenario/test_examples.py``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+import carla
+
+from autoware_carla_scenario import (
+    EGO_ROLE_NAME,
+    AndCondition,
+    BaseScenario,
+    EgoConfig,
+    ElapsedTimeCondition,
+    EntityLanePositionCondition,
+    Lanelet2Pose,
+    ScenarioQueue,
+    SpawnTransform,
+    StickyCondition,
+    TickTiming,
+    TimeoutCondition,
+    TurnAction,
+    TurnDirection,
+    find_actor_by_role_name,
+    set_all_traffic_lights_state,
+    snap_to_carla_road,
+    to_opendrive,
+)
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+#: Lanelet where the ego is spawned.  Lanelet 244 approaches an intersection
+#: with a left turn option (lanelet 242 only goes straight).
+SPAWN_LANELET_ID: int = 244
+
+#: Lanelets the ego is expected to traverse **after** the left turn.
+#: Adjust these IDs based on the target map.  The scenario converts each
+#: lanelet to its OpenDRIVE road ID and passes the check when the ego has
+#: visited every listed road.
+POST_TURN_LANELET_IDS: list[int] = [460]
+
+#: Timeout in seconds.  Left turns require more time than going straight
+#: because the vehicle decelerates, turns, and re-accelerates.
+SCENARIO_TIMEOUT_SECONDS: float = 10.0
+
+#: Initial ego speed (km/h).
+INITIAL_SPEED_KMH: float = 20.0
+
+
+def _lanelet_start_road_id(lanelet_id: int) -> str:
+    """Return the OpenDRIVE road ID at the start of a lanelet centerline."""
+    pose = Lanelet2Pose(lanelet_id=lanelet_id, s=0.0)
+    return to_opendrive(pose).road_id
+
+
+class LeftTurnScenario(BaseScenario):
+    """Spawn the ego at lanelet 244 and verify it turns left at the next junction.
+
+    The scenario:
+
+    1. Snaps a Lanelet2 pose to the CARLA road surface for the ego spawn.
+    2. Sets every traffic light to green so the ego proceeds without stopping.
+    3. Registers a :class:`TurnAction` (``LEFT``) that fires on the first tick
+       to compute a left turn route through the next junction and set it via
+       ``TrafficManager.set_path``.
+    4. Registers a pass condition: :class:`AndCondition` of sticky
+       :class:`EntityLanePositionCondition` instances for each post-turn road.
+    5. Registers a :class:`TimeoutCondition` as a fail-safe.
+    """
+
+    def __init__(
+        self,
+        ego_config: EgoConfig,
+        host: str = "localhost",
+        port: int = 2000,
+    ) -> None:
+        super().__init__(ego_config)
+        self._carla_client = carla.Client(host, port)
+
+    def setup(self, world: carla.World) -> None:
+        """Snap ego spawn, set lights green, register TurnAction and conditions."""
+        # --- Ego spawn from Lanelet2Pose ---
+        spawn_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=25.0)
+        snapped = snap_to_carla_road(spawn_pose, world)
+
+        logger.info(
+            "Snap Lanelet2Pose(lanelet_id=%d, s=%.1f) -> CARLA "
+            "(%.1f, %.1f, %.3f) yaw=%.1f",
+            spawn_pose.lanelet_id,
+            spawn_pose.s,
+            snapped.x,
+            snapped.y,
+            snapped.z,
+            snapped.yaw,
+        )
+
+        self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
+
+        # --- Spectator and logging ---
+        ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
+        self.follow_with_spectator(ego_actor)
+        self.log_actor_position(ego_actor, label="ego")
+
+        # --- Set all traffic lights to green ---
+        n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
+        logger.info("Set %d traffic lights to green", n)
+
+        # --- TurnAction: left turn at the next junction ---
+        # ElapsedTimeCondition(0.0) triggers on the first tick so the route is
+        # computed and applied before the vehicle reaches the junction.
+        turn_action = TurnAction(
+            entity_name=EGO_ROLE_NAME,
+            direction=TurnDirection.LEFT,
+            condition=ElapsedTimeCondition(0.0),
+            client=self._carla_client,
+            timing=TickTiming.PRE_TICK,
+        )
+        self.register_pre_tick(turn_action)
+
+        # --- Pass: ego reaches post-turn roads ---
+        seen: set[str] = set()
+        route_road_ids: list[str] = []
+        for ll_id in POST_TURN_LANELET_IDS:
+            rid = _lanelet_start_road_id(ll_id)
+            logger.info("Post-turn lanelet %d -> OpenDRIVE road '%s'", ll_id, rid)
+            if rid not in seen:
+                seen.add(rid)
+                route_road_ids.append(rid)
+
+        sticky_conditions = [
+            StickyCondition(
+                EntityLanePositionCondition(
+                    entity_name=EGO_ROLE_NAME,
+                    road_id=rid,
+                )
+            )
+            for rid in route_road_ids
+        ]
+
+        self.register_pass_condition(AndCondition(sticky_conditions))
+
+        # --- Fail-safe timeout ---
+        self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))
+
+    def is_done(self) -> bool:
+        """Always ``False`` — termination is driven by pass/fail conditions."""
+        return False
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Run LeftTurnScenario as a standalone script.
+
+    Requires ``--map`` (and optionally ``--xodr`` to overwrite the built-in
+    map's ``.xodr``) to load a map that contains lanelet 244.
+
+    Example::
+
+        uv run left-turn --map NishishinjyukuMap
+        uv run left-turn --map NishishinjyukuMap --xodr path/to/nishishinjuku.xodr
+    """
+    parser = argparse.ArgumentParser(
+        description="Run the left-turn example scenario.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--host", default="localhost", help="CARLA server host")
+    parser.add_argument("--port", type=int, default=2000, help="CARLA server port")
+    parser.add_argument("--map", required=True, help="Built-in CARLA map name")
+    parser.add_argument(
+        "--xodr",
+        type=Path,
+        default=None,
+        help="Path to OpenDRIVE (.xodr) file (overwrites the built-in map)",
+    )
+    parser.add_argument(
+        "--lanelet2",
+        type=Path,
+        default=None,
+        help="Path to Lanelet2 (.osm) file (required for coordinate transforms)",
+    )
+    parser.add_argument(
+        "--vehicle",
+        default="vehicle.mini.cooper",
+        help="Ego vehicle blueprint ID",
+    )
+
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
+
+    # Ego spawn location is determined in setup() via snap_to_carla_road;
+    # provide a dummy transform that will be overwritten before ego.spawn().
+    ego = EgoConfig(
+        spawn_location=SpawnTransform(
+            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
+        ),
+        vehicle_type=args.vehicle,
+        initial_speed_kmh=INITIAL_SPEED_KMH,
+    )
+
+    queue = ScenarioQueue(
+        host=args.host,
+        port=args.port,
+        xodr_path=args.xodr,
+        lanelet2_path=args.lanelet2,
+        map_name=args.map,
+    )
+    queue.add(LeftTurnScenario(ego, host=args.host, port=args.port))
+
+    with queue:
+        results = queue.run_all()
+
+    result = results[0]
+    print(result)
+    sys.exit(0 if result.passed else 1)
+
+
+if __name__ == "__main__":
+    main()

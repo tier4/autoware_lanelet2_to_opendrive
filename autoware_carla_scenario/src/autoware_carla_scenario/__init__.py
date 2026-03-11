@@ -59,6 +59,7 @@ Public API re-exported for convenience::
     )
 """
 
+from .actions import BaseAction, TickTiming, TurnAction, TurnDirection
 from .scenario_runner import ScenarioRunner
 from .conditions import (
     AndCondition,
@@ -175,4 +176,9 @@ __all__ = [
     "AbsoluteAcceleration",
     "RelativeAcceleration",
     "FrenetAcceleration",
+    # Actions
+    "BaseAction",
+    "TickTiming",
+    "TurnAction",
+    "TurnDirection",
 ]
