@@ -405,6 +405,25 @@ def _lane_width_at_ds(lane, ds: float) -> float:
     return a + b * local + c * local**2 + d * local**3
 
 
+def _find_lane_section_at_s(road, s: float):
+    """Return the active lane section covering arc length *s*.
+
+    Returns ``None`` when the road has no lane sections.
+    """
+    lane_sections = road.lane_sections
+    if not lane_sections:
+        return None
+
+    active_section = lane_sections[0]
+    for section in lane_sections:
+        s_start = float(section.lane_section_xml.attrib.get("s", 0.0))
+        if s_start <= s:
+            active_section = section
+        else:
+            break
+    return active_section
+
+
 def _lane_center_t(road, s: float, lane_id: int) -> float | None:
     """Return the *t* offset that places a point at the centre of *lane_id*.
 
@@ -419,18 +438,9 @@ def _lane_center_t(road, s: float, lane_id: int) -> float | None:
     if lane_id == 0:
         return 0.0
 
-    lane_sections = road.lane_sections
-    if not lane_sections:
+    active_section = _find_lane_section_at_s(road, s)
+    if active_section is None:
         return None
-
-    # Find the lane section covering *s*
-    active_section = lane_sections[0]
-    for section in lane_sections:
-        s_start = float(section.lane_section_xml.attrib.get("s", 0.0))
-        if s_start <= s:
-            active_section = section
-        else:
-            break
 
     section_s_start = float(active_section.lane_section_xml.attrib.get("s", 0.0))
     ds = s - section_s_start
@@ -464,18 +474,9 @@ def _find_lane_at_t(road, s: float, t: float) -> int:
 
     Returns 0 if no lane sections are found.
     """
-    lane_sections = road.lane_sections
-    if not lane_sections:
+    active_section = _find_lane_section_at_s(road, s)
+    if active_section is None:
         return 0
-
-    # Find the lane section covering s (assumes sections are sorted by s)
-    active_section = lane_sections[0]
-    for section in lane_sections:
-        s_start = float(section.lane_section_xml.attrib.get("s", 0.0))
-        if s_start <= s:
-            active_section = section
-        else:
-            break
 
     is_left = t >= 0.0
     for lane in active_section.lanes:

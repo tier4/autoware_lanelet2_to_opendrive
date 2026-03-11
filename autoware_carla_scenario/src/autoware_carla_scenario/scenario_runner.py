@@ -227,7 +227,6 @@ class ScenarioRunner:
             # Apply initial speeds after warm-up stabilisation
             scenario.set_initial_speed(ego_actor)
 
-            scenario._warmup_done = True
             _vehicle_entity_module._warmup_done = True
 
             # Start native CARLA recorder

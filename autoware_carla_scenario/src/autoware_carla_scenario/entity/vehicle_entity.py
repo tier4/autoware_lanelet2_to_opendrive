@@ -57,6 +57,11 @@ class VehicleEntity:
         return self._config.vehicle_type
 
     @property
+    def initial_speed_kmh(self) -> float:
+        """Return the configured initial speed in km/h."""
+        return self._config.initial_speed_kmh
+
+    @property
     def actor(self) -> Optional["carla.Actor"]:
         """Return the underlying CARLA actor, or ``None`` if not spawned."""
         return self._vehicle
@@ -86,8 +91,9 @@ class VehicleEntity:
         """
         if _warmup_done:
             raise RuntimeError(
-                "CARLAのNPCはSpawnしてから安定するまで5-tickほど必要です。"
-                "Spawn操作はsetup関数に記述してwarm-up前に行ってください"
+                "CARLA NPCs require ~5 ticks to stabilise after spawning. "
+                "Spawn operations must be performed in setup() before "
+                "the warm-up phase."
             )
 
         self._vehicle = spawn_vehicle_actor(

@@ -72,7 +72,6 @@ class BaseScenario(ABC):
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._pass_conditions: List[BaseCondition] = []
         self._fail_conditions: List[BaseCondition] = []
-        self._warmup_done: bool = False
 
     # ------------------------------------------------------------------
     # Abstract interface – must be implemented by subclasses
@@ -259,7 +258,7 @@ class BaseScenario(ABC):
 
         for entity in self._entities:
             if entity.actor is not None:
-                _apply(entity.actor, entity._config.initial_speed_kmh)
+                _apply(entity.actor, entity.initial_speed_kmh)
 
         if ego_actor is not None:
             _apply(ego_actor, self.ego_config.initial_speed_kmh)

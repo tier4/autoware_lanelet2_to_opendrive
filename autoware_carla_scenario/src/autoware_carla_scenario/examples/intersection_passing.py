@@ -26,6 +26,7 @@ from pathlib import Path
 import carla
 
 from autoware_carla_scenario import (
+    EGO_ROLE_NAME,
     AndCondition,
     BaseScenario,
     ComparisonRule,
@@ -37,6 +38,7 @@ from autoware_carla_scenario import (
     SpeedCondition,
     StickyCondition,
     TimeoutCondition,
+    find_actor_by_role_name,
     set_all_traffic_lights_state,
     snap_to_carla_road,
     to_opendrive,
@@ -60,9 +62,6 @@ SCENARIO_TIMEOUT_SECONDS: float = 5.0
 
 #: Minimum speed (km/h) — the scenario fails if the ego drops below this speed.
 MIN_SPEED_KMH: float = 5.0
-
-#: Ego vehicle role name used for condition matching.
-EGO_ROLE_NAME: str = "Ego"
 
 
 def _lanelet_start_road_id(lanelet_id: int) -> str:
@@ -113,7 +112,7 @@ class IntersectionPassingScenario(BaseScenario):
         self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
 
         # Use BaseScenario helpers for common post-tick patterns
-        ego_actor = lambda: self._get_ego_actor(world)  # noqa: E731
+        ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
         self.follow_with_spectator(ego_actor)
         self.log_actor_position(ego_actor, label="ego")
 
@@ -160,14 +159,6 @@ class IntersectionPassingScenario(BaseScenario):
     def is_done(self) -> bool:
         """Always ``False`` — termination is driven by pass/fail conditions."""
         return False
-
-    @staticmethod
-    def _get_ego_actor(world: carla.World) -> carla.Actor | None:
-        """Find the ego actor by role_name in the world."""
-        for actor in world.get_actors().filter("vehicle.*"):
-            if actor.attributes.get("role_name") == EGO_ROLE_NAME:
-                return actor
-        return None
 
 
 # ---------------------------------------------------------------------------
