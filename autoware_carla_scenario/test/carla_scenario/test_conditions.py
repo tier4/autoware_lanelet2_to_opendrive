@@ -126,6 +126,79 @@ class TestElapsedTimeCondition:
             ElapsedTimeCondition(duration_seconds=-5.0)
 
 
+class TestElapsedTimeConditionWithRule:
+    """ElapsedTimeCondition with explicit ComparisonRule."""
+
+    def test_greater_than(self) -> None:
+        cond = ElapsedTimeCondition(
+            duration_seconds=10.0, rule=ComparisonRule.GREATER_THAN
+        )
+        world = MagicMock()
+        assert cond.check(world, elapsed=10.0) is None  # not strictly greater
+        result = cond.check(world, elapsed=10.1)
+        assert result is not None
+        assert result.passed is True
+
+    def test_less_than(self) -> None:
+        cond = ElapsedTimeCondition(
+            duration_seconds=10.0, rule=ComparisonRule.LESS_THAN
+        )
+        world = MagicMock()
+        result = cond.check(world, elapsed=5.0)
+        assert result is not None
+        assert result.passed is True
+        assert cond.check(world, elapsed=10.0) is None
+
+    def test_equal_to_within_tolerance(self) -> None:
+        cond = ElapsedTimeCondition(
+            duration_seconds=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.01
+        )
+        world = MagicMock()
+        result = cond.check(world, elapsed=10.005)
+        assert result is not None
+        assert result.passed is True
+
+    def test_equal_to_outside_tolerance(self) -> None:
+        cond = ElapsedTimeCondition(
+            duration_seconds=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.001
+        )
+        world = MagicMock()
+        assert cond.check(world, elapsed=10.1) is None
+
+    def test_less_than_or_equal(self) -> None:
+        cond = ElapsedTimeCondition(
+            duration_seconds=10.0, rule=ComparisonRule.LESS_THAN_OR_EQUAL
+        )
+        world = MagicMock()
+        result = cond.check(world, elapsed=10.0)
+        assert result is not None
+        assert result.passed is True
+        assert cond.check(world, elapsed=10.1) is None
+
+    def test_default_rule_is_greater_than_or_equal(self) -> None:
+        """Backward compatibility: default behaves as >= (original semantics)."""
+        cond = ElapsedTimeCondition(duration_seconds=10.0)
+        world = MagicMock()
+        result = cond.check(world, elapsed=10.0)
+        assert result is not None
+        assert result.passed is True
+
+    def test_negative_tolerance_raises(self) -> None:
+        with pytest.raises(ValueError, match="tolerance must be non-negative"):
+            ElapsedTimeCondition(
+                duration_seconds=10.0,
+                rule=ComparisonRule.EQUAL_TO,
+                tolerance=-1.0,
+            )
+
+    def test_message_contains_rule_text(self) -> None:
+        cond = ElapsedTimeCondition(duration_seconds=5.0, rule=ComparisonRule.LESS_THAN)
+        world = MagicMock()
+        result = cond.check(world, elapsed=3.0)
+        assert result is not None
+        assert "less than" in result.message
+
+
 # ---------------------------------------------------------------------------
 # BaseCondition – abstract interface
 # ---------------------------------------------------------------------------

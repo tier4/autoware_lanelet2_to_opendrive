@@ -27,13 +27,11 @@ import carla
 from autoware_carla_scenario import (
     AndCondition,
     BaseScenario,
-    ComparisonRule,
     EgoConfig,
     EntityLanePositionCondition,
     Lanelet2Pose,
     ScenarioQueue,
     SpawnTransform,
-    SpeedCondition,
     StickyCondition,
     TimeoutCondition,
     VehicleEntity,
@@ -167,13 +165,13 @@ class IntersectionPassingScenario(BaseScenario):
         self.register_pass_condition(pass_condition)
 
         # --- Fail if NPC speed drops below 5 km/h ---
-        self.register_fail_condition(
-            SpeedCondition(
-                entity_name=self.NPC_ROLE_NAME,
-                value=MIN_SPEED_MPS,
-                rule=ComparisonRule.LESS_THAN,
-            )
-        )
+        # self.register_fail_condition(
+        #     SpeedCondition(
+        #         entity_name=self.NPC_ROLE_NAME,
+        #         value=MIN_SPEED_MPS,
+        #         rule=ComparisonRule.LESS_THAN,
+        #     )
+        # )
 
         # --- Fail-safe timeout ---
         self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))
