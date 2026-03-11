@@ -59,7 +59,7 @@ EXPECTED_ROUTE_LANELET_IDS: list[int] = [460, 265]
 SCENARIO_TIMEOUT_SECONDS: float = 5.0
 
 #: Minimum speed (km/h) — the scenario fails if the ego drops below this speed.
-MIN_SPEED_KMH: float = 0.0
+MIN_SPEED_KMH: float = 5.0
 
 #: Ego vehicle role name used for condition matching.
 EGO_ROLE_NAME: str = "Ego"
@@ -224,6 +224,7 @@ def main() -> None:
             carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
         ),
         vehicle_type=args.vehicle,
+        initial_speed_kmh=MIN_SPEED_KMH,
     )
 
     queue = ScenarioQueue(
