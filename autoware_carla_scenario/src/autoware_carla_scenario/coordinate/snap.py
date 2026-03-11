@@ -86,21 +86,23 @@ def _snap_lanelet2_via_opendrive(
     pose: Lanelet2Pose,
     world: "carla.World",
 ) -> CarlaWorldPose:
-    """Snap a Lanelet2 pose by round-tripping through OpenDRIVE geometry.
+    """Snap a Lanelet2 pose by projecting through OpenDRIVE geometry.
 
-    1. Convert to an approximate CARLA position via Lanelet2 centerline.
-    2. Project that position onto the nearest OpenDRIVE road to obtain
-       the correct (road_id, s, t) in the XODR coordinate system.
-    3. Re-convert the projected OpenDRIVE pose to CARLA world coordinates
-       (uses XODR geometry, which CARLA trusts).
+    1. Convert directly to OpenDRIVE (s, t) using the cached lanelet-to-road
+       mapping.  Lanelet2's reference line is the centerline; OpenDRIVE's is
+       the right boundary (LHT).  The mapping provides road_id and lane_id;
+       s and t are computed by projecting the centerline point onto the road
+       reference line.
+    2. Correct t to the lane centre.
+    3. Convert the OpenDRIVE pose to CARLA world coordinates (XODR geometry).
     4. Replace z with the nearest spawn-point elevation.
     """
     from .map_manager import MapManager  # noqa: PLC0415
     from .transform import _lane_center_t, to_carla_world, to_opendrive  # noqa: PLC0415
 
-    # Approximate CARLA position → project onto nearest OpenDRIVE road
-    carla_approx = to_carla_world(pose)
-    od_projected = to_opendrive(carla_approx)
+    # Direct Lanelet2 → OpenDRIVE (uses cached mapping for road_id/lane_id,
+    # projects centerline point onto the road reference line for s/t).
+    od_projected = to_opendrive(pose)
 
     # Correct t to the lane centre (the projected t reflects the offset
     # between the Lanelet2 centreline and the XODR reference line, which
@@ -123,13 +125,10 @@ def _snap_lanelet2_via_opendrive(
 
     logger.info(
         "Lanelet2Pose(lanelet_id=%d, s=%.2f, t=%.2f) -> "
-        "approx CARLA (%.2f, %.2f) -> "
         "OpenDrivePose(road='%s', lane=%d, s=%.2f, t=%.2f -> centre_t=%.2f)",
         pose.lanelet_id,
         pose.s,
         pose.t,
-        carla_approx.x,
-        carla_approx.y,
         od_projected.road_id,
         od_projected.lane_id,
         od_projected.s,
@@ -161,10 +160,10 @@ def _snap_lanelet2_via_opendrive(
     )
 
     logger.debug(
-        "snap (Lanelet2): approx=(%.2f, %.2f, %.2f) -> " "snapped=(%.2f, %.2f, %.2f)",
-        carla_approx.x,
-        carla_approx.y,
-        carla_approx.z,
+        "snap (Lanelet2): od=(road=%s, s=%.2f, t=%.2f) -> snapped=(%.2f, %.2f, %.2f)",
+        od_corrected.road_id,
+        od_corrected.s,
+        od_corrected.t,
         result.x,
         result.y,
         result.z,
