@@ -28,11 +28,13 @@ import carla
 from autoware_carla_scenario import (
     AndCondition,
     BaseScenario,
+    ComparisonRule,
     EgoConfig,
     EntityLanePositionCondition,
     Lanelet2Pose,
     ScenarioQueue,
     SpawnTransform,
+    SpeedCondition,
     StickyCondition,
     TimeoutCondition,
     set_all_traffic_lights_state,
@@ -55,6 +57,9 @@ EXPECTED_ROUTE_LANELET_IDS: list[int] = [460, 265]
 #: Timeout in seconds — if the ego has not completed the route by this time the
 #: scenario fails.
 SCENARIO_TIMEOUT_SECONDS: float = 5.0
+
+#: Minimum speed (km/h) — the scenario fails if the ego drops below this speed.
+MIN_SPEED_KMH: float = 5.0
 
 #: Ego vehicle role name used for condition matching.
 EGO_ROLE_NAME: str = "Ego"
@@ -139,6 +144,15 @@ class IntersectionPassingScenario(BaseScenario):
 
         pass_condition = AndCondition(sticky_conditions)
         self.register_pass_condition(pass_condition)
+
+        # --- Fail: speed drops below minimum ---
+        self.register_fail_condition(
+            SpeedCondition(
+                entity_name=EGO_ROLE_NAME,
+                value=MIN_SPEED_KMH / 3.6,
+                rule=ComparisonRule.LESS_THAN,
+            )
+        )
 
         # --- Fail-safe timeout ---
         self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))

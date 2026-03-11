@@ -260,7 +260,11 @@ class ScenarioRunner:
                 for condition in scenario._pass_conditions:
                     check = condition.check(world, elapsed)
                     if check is not None:
-                        result = check
+                        result = ScenarioResult(
+                            passed=True,
+                            message=check.message,
+                            elapsed_seconds=check.elapsed_seconds,
+                        )
                         break
 
                 if result is not None:
@@ -270,7 +274,11 @@ class ScenarioRunner:
                 for condition in scenario._fail_conditions:
                     check = condition.check(world, elapsed)
                     if check is not None:
-                        result = check
+                        result = ScenarioResult(
+                            passed=False,
+                            message=check.message,
+                            elapsed_seconds=check.elapsed_seconds,
+                        )
                         break
 
                 if result is not None:
