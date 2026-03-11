@@ -22,5 +22,8 @@ outputs/
 # MkDocs build output
 site/
 
+# Lanelet2-to-OpenDRIVE mapping cache (auto-generated next to .xodr)
+*.mapping.json
+
 # Scenario output
 scenario_outputs

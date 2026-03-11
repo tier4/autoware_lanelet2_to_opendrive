@@ -17,6 +17,7 @@ where ``mgrs_offset = MGRSProjector.forward(lat_0, lon_0)``.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any, ClassVar, Optional
@@ -27,6 +28,10 @@ from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2.core
 import lanelet2.io
 from pyxodr.road_objects.network import RoadNetwork
+
+from .road_lanelet_mapping import RoadLaneletMapping
+
+logger = logging.getLogger(__name__)
 
 
 class MapManager:
@@ -51,6 +56,7 @@ class MapManager:
     _geo_origin: Optional[tuple[float, float, float]]
     _mgrs_offset: Optional[tuple[float, float]]
     _z_offset: Optional[float]
+    _road_lanelet_mapping: Optional[RoadLaneletMapping]
 
     def __new__(cls) -> "MapManager":
         if cls._instance is None:
@@ -60,6 +66,7 @@ class MapManager:
             cls._instance._geo_origin = None
             cls._instance._mgrs_offset = None
             cls._instance._z_offset = None
+            cls._instance._road_lanelet_mapping = None
         return cls._instance
 
     @classmethod
@@ -141,6 +148,25 @@ class MapManager:
         # across the map and lets us convert z between the two systems.
         self._z_offset = self._compute_z_offset(carla_world)
 
+        # Build lanelet -> (road_id, lane_id) mapping for direct conversion.
+        try:
+            from .road_lanelet_mapping import load_or_build_mapping  # noqa: PLC0415
+
+            self._road_lanelet_mapping = load_or_build_mapping(
+                xodr_path=xodr_path,
+                osm_path=lanelet2_path,
+                lanelet_map=self.lanelet_map,
+                road_network=self.road_network,
+                mgrs_offset=self._mgrs_offset,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to build lanelet-to-road mapping; "
+                "direct Lanelet2 -> OpenDRIVE conversion unavailable",
+                exc_info=True,
+            )
+            self._road_lanelet_mapping = None
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -186,6 +212,11 @@ class MapManager:
                 "MapManager is not initialized. Call initialize() first."
             )
         return self._mgrs_offset
+
+    @property
+    def road_lanelet_mapping(self) -> Optional[RoadLaneletMapping]:
+        """The lanelet -> (road_id, lane_id) mapping, or ``None`` if unavailable."""
+        return self._road_lanelet_mapping
 
     @property
     def z_offset(self) -> float:

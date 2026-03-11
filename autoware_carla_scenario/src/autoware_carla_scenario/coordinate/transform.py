@@ -1,8 +1,9 @@
 """6-direction mutual conversion between Lanelet2, OpenDRIVE, and CARLA world coordinates.
 
-All cross-system conversions (Lanelet2 ↔ OpenDRIVE) go through CARLA world coordinates
-as an intermediate representation, which avoids the need for an explicit lanelet-to-road
-ID mapping.
+When a lanelet-to-road mapping is available (see :mod:`.road_lanelet_mapping`),
+Lanelet2 -> OpenDRIVE conversion uses a direct path that avoids the O(n) road
+search and the unnecessary CARLA y-flip.  The indirect path through CARLA world
+coordinates is kept as a fallback.
 
 Coordinate systems
 ------------------
@@ -24,8 +25,9 @@ Key relationships
 
 from __future__ import annotations
 
+import logging
 import math
-from typing import TYPE_CHECKING, Union, overload
+from typing import TYPE_CHECKING, Optional, Union, overload
 
 import numpy as np
 
@@ -39,6 +41,8 @@ from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
 
 if TYPE_CHECKING:
     import carla
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -97,11 +101,16 @@ def to_opendrive(pose: CarlaWorldPose) -> OpenDrivePose: ...
 def to_opendrive(pose: Union[Lanelet2Pose, CarlaWorldPose]) -> OpenDrivePose:
     """Convert a Lanelet2Pose or CarlaWorldPose to an OpenDrivePose.
 
-    Lanelet2 → OpenDRIVE conversion goes through CARLA world coordinates.
+    When a lanelet-to-road mapping is available, Lanelet2 -> OpenDRIVE uses a
+    direct path (no CARLA y-flip, no O(n) road search).  Falls back to the
+    indirect path through CARLA world coordinates otherwise.
     """
     if isinstance(pose, CarlaWorldPose):
         return _carla_to_opendrive(pose)
     if isinstance(pose, Lanelet2Pose):
+        direct = _lanelet2_to_opendrive_direct(pose)
+        if direct is not None:
+            return direct
         return _carla_to_opendrive(_lanelet2_to_carla(pose))
     raise TypeError(f"Unsupported pose type: {type(pose)}")
 
@@ -117,13 +126,145 @@ def to_lanelet2(pose: CarlaWorldPose) -> Lanelet2Pose: ...
 def to_lanelet2(pose: Union[OpenDrivePose, CarlaWorldPose]) -> Lanelet2Pose:
     """Convert an OpenDrivePose or CarlaWorldPose to a Lanelet2Pose.
 
-    OpenDRIVE → Lanelet2 conversion goes through CARLA world coordinates.
+    When a road-lanelet mapping is available, OpenDRIVE → Lanelet2 uses a
+    direct path (XODR + mgrs_offset, no CARLA y-flip).  Falls back to the
+    indirect path through CARLA world coordinates otherwise.
     """
     if isinstance(pose, CarlaWorldPose):
         return _carla_to_lanelet2(pose)
     if isinstance(pose, OpenDrivePose):
+        direct = _opendrive_to_lanelet2_direct(pose)
+        if direct is not None:
+            return direct
         return _carla_to_lanelet2(_opendrive_to_carla(pose))
     raise TypeError(f"Unsupported pose type: {type(pose)}")
+
+
+# ---------------------------------------------------------------------------
+# Direct: Lanelet2Pose → OpenDrivePose (no CARLA intermediate)
+# ---------------------------------------------------------------------------
+
+
+def _lanelet2_to_opendrive_direct(pose: Lanelet2Pose) -> Optional[OpenDrivePose]:
+    """Convert a Lanelet2 pose directly to OpenDRIVE using the cached mapping.
+
+    Returns ``None`` when the mapping is unavailable or the lanelet is not
+    in the mapping, signalling the caller should fall back to the indirect
+    path through CARLA world coordinates.
+    """
+    mm = MapManager.get_instance()
+    mapping = mm.road_lanelet_mapping
+    if mapping is None:
+        return None
+
+    result = mapping.lanelet_to_road_and_lane.get(pose.lanelet_id)
+    if result is None:
+        logger.debug(
+            "Lanelet %d not in mapping; falling back to indirect path",
+            pose.lanelet_id,
+        )
+        return None
+
+    road_id, lane_id = result
+
+    # Compute Lanelet2 centerline point at pose.s, then apply lateral offset
+    lanelet = mm.lanelet_map.laneletLayer[pose.lanelet_id]
+    points = [(p.x, p.y, p.z) for p in lanelet.centerline]
+    x_cl, y_cl, _z_cl, heading_cl = _interpolate_at_s(points, pose.s)
+    total_heading = heading_cl + pose.heading
+
+    x = x_cl + pose.t * (-math.sin(total_heading))
+    y = y_cl + pose.t * math.cos(total_heading)
+
+    # Convert MGRS -> XODR: subtract offset, NO y-flip
+    offset_x, offset_y = mm.mgrs_offset
+    xodr_x = x - offset_x
+    xodr_y = y - offset_y
+
+    # Project onto this ONE road's reference line
+    road = mm.road_network.road_ids_to_object[str(road_id)]
+    ref_line: np.ndarray = road.reference_line
+    if len(ref_line) < 2:
+        return None
+
+    arc_lengths = _compute_arc_lengths_2d(ref_line)
+    diffs = ref_line - np.array([xodr_x, xodr_y])
+    dists = np.linalg.norm(diffs, axis=1)
+    nearest_idx = int(np.argmin(dists))
+
+    s_road = float(arc_lengths[nearest_idx])
+    heading_ref = _heading_at_s(ref_line, arc_lengths, s_road)
+    t_road = _signed_perp_distance(xodr_x, xodr_y, ref_line, nearest_idx, heading_ref)
+    heading_diff = _normalize_angle(total_heading - heading_ref)
+
+    return OpenDrivePose(
+        road_id=str(road_id),
+        lane_id=lane_id,
+        s=s_road,
+        t=t_road,
+        heading=heading_diff,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Direct: OpenDrivePose → Lanelet2Pose (no CARLA intermediate)
+# ---------------------------------------------------------------------------
+
+
+def _opendrive_to_lanelet2_direct(pose: OpenDrivePose) -> Optional[Lanelet2Pose]:
+    """Convert an OpenDRIVE pose directly to Lanelet2 using the cached mapping.
+
+    The road reference line point at ``(s, t)`` is converted to MGRS
+    coordinates (``xodr_xy + mgrs_offset``, no y-flip) and projected onto
+    the lanelet centerline.
+
+    Returns ``None`` when the mapping is unavailable or the (road, lane)
+    pair is not in the reverse index, signalling the caller should fall
+    back to the indirect path through CARLA world coordinates.
+    """
+    mm = MapManager.get_instance()
+    mapping = mm.road_lanelet_mapping
+    if mapping is None:
+        return None
+
+    road_id_int = int(pose.road_id)
+    lanelet_id = mapping.road_lane_to_lanelet.get((road_id_int, pose.lane_id))
+    if lanelet_id is None:
+        logger.debug(
+            "Road %s lane %d not in reverse mapping; falling back to indirect path",
+            pose.road_id,
+            pose.lane_id,
+        )
+        return None
+
+    # Compute XODR world point from road reference line at (s, t)
+    road = mm.road_network.road_ids_to_object[pose.road_id]
+    ref_line: np.ndarray = road.reference_line
+    if len(ref_line) < 2:
+        return None
+
+    arc_lengths = _compute_arc_lengths_2d(ref_line)
+    x_ref = float(np.interp(pose.s, arc_lengths, ref_line[:, 0]))
+    y_ref = float(np.interp(pose.s, arc_lengths, ref_line[:, 1]))
+    heading_ref = _heading_at_s(ref_line, arc_lengths, pose.s)
+    total_heading = heading_ref + pose.heading
+
+    # Apply lateral offset t
+    xodr_x = x_ref + pose.t * (-math.sin(heading_ref))
+    xodr_y = y_ref + pose.t * math.cos(heading_ref)
+
+    # XODR → MGRS: add offset (no y-flip, both right-hand systems)
+    offset_x, offset_y = mm.mgrs_offset
+    mgrs_x = xodr_x + offset_x
+    mgrs_y = xodr_y + offset_y
+
+    # Project onto the lanelet centerline
+    lanelet = mm.lanelet_map.laneletLayer[lanelet_id]
+    points = [(p.x, p.y, p.z) for p in lanelet.centerline]
+    s_ll, t_ll, heading_cl = _project_to_centerline(points, mgrs_x, mgrs_y)
+    heading_diff = _normalize_angle(total_heading - heading_cl)
+
+    return Lanelet2Pose(lanelet_id=lanelet_id, s=s_ll, t=t_ll, heading=heading_diff)
 
 
 # ---------------------------------------------------------------------------
