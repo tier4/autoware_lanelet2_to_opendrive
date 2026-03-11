@@ -63,7 +63,7 @@ SPAWN_LANELET_ID: int = 242
 LIGHT_SWITCH_DELAY_SECONDS: float = 3.0
 
 #: Timeout in seconds — fail-safe if the scenario takes too long.
-SCENARIO_TIMEOUT_SECONDS: float = 15.0
+SCENARIO_TIMEOUT_SECONDS: float = 5.0
 
 #: Speed threshold (km/h) considered "moving".
 MOVING_SPEED_KMH: float = 1.0
