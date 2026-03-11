@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
+from .actions import BaseAction
 from .conditions import BaseCondition
 from .constants import EGO_ROLE_NAME
 from .entity._spawn import SpawnLocation
@@ -99,21 +100,27 @@ class BaseScenario(ABC):
     # Callback registration helpers
     # ------------------------------------------------------------------
 
-    def register_pre_tick(self, cb: Callable[["carla.World"], None]) -> None:
-        """Register a callback to run *before* each world tick.
+    def register_pre_tick(
+        self, cb: Union[BaseAction, Callable[["carla.World"], None]]
+    ) -> None:
+        """Register a callback or action to run *before* each world tick.
 
         Args:
-            cb: Callable that receives the CARLA world as its argument.
+            cb: A :class:`BaseAction` (whose :meth:`~BaseAction.tick` is
+                registered) or a plain callable that receives the CARLA world.
         """
-        self._pre_tick_callbacks.append(cb)
+        self._pre_tick_callbacks.append(cb.tick if isinstance(cb, BaseAction) else cb)
 
-    def register_post_tick(self, cb: Callable[["carla.World"], None]) -> None:
-        """Register a callback to run *after* each world tick.
+    def register_post_tick(
+        self, cb: Union[BaseAction, Callable[["carla.World"], None]]
+    ) -> None:
+        """Register a callback or action to run *after* each world tick.
 
         Args:
-            cb: Callable that receives the CARLA world as its argument.
+            cb: A :class:`BaseAction` (whose :meth:`~BaseAction.tick` is
+                registered) or a plain callable that receives the CARLA world.
         """
-        self._post_tick_callbacks.append(cb)
+        self._post_tick_callbacks.append(cb.tick if isinstance(cb, BaseAction) else cb)
 
     def register_entity(self, entity: VehicleEntity) -> None:
         """Register a spawned NPC vehicle entity.

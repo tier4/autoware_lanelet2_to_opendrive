@@ -34,13 +34,20 @@ def snap_to_carla_road(
 
 @overload
 def snap_to_carla_road(
+    pose: OpenDrivePose,
+    world: "carla.World",
+) -> CarlaWorldPose: ...
+
+
+@overload
+def snap_to_carla_road(
     pose: CarlaWorldPose,
     world: "carla.World",
 ) -> CarlaWorldPose: ...
 
 
 def snap_to_carla_road(
-    pose: Union[CarlaWorldPose, Lanelet2Pose],
+    pose: Union[CarlaWorldPose, Lanelet2Pose, OpenDrivePose],
     world: "carla.World",
 ) -> CarlaWorldPose:
     """Snap a pose onto the CARLA drivable surface.
@@ -51,11 +58,17 @@ def snap_to_carla_road(
     round-trip ensures the final position lies on the XODR road surface that
     CARLA trusts.
 
+    When given an :class:`OpenDrivePose`, the function uses
+    ``carla.Map.get_waypoint_xodr(road_id, lane_id, s)`` to obtain the exact
+    position on the CARLA road surface.  This is the most accurate path
+    because it uses CARLA's own OpenDRIVE projection—no spawn-point z
+    approximation is needed.
+
     When given a :class:`CarlaWorldPose`, the function uses the CARLA waypoint
     API to project x/y onto the nearest road.
 
-    In both cases z is corrected using the nearest CARLA spawn point (spawn-point
-    elevations match the physics-engine ground plane).
+    For Lanelet2 and CARLA-world inputs z is corrected using the nearest CARLA
+    spawn point (spawn-point elevations match the physics-engine ground plane).
 
     If the pose cannot be matched to any road, a warning is logged and the
     original pose (or its CARLA equivalent) is returned unchanged.
@@ -63,7 +76,7 @@ def snap_to_carla_road(
     Parameters
     ----------
     pose:
-        A Lanelet2 or CARLA world pose to snap.
+        A Lanelet2, OpenDRIVE, or CARLA world pose to snap.
     world:
         An active ``carla.World`` instance.
 
@@ -74,6 +87,8 @@ def snap_to_carla_road(
     """
     if isinstance(pose, Lanelet2Pose):
         return _snap_lanelet2_via_opendrive(pose, world)
+    if isinstance(pose, OpenDrivePose):
+        return _snap_opendrive_via_waypoint_xodr(pose, world)
     return _snap_carla_via_waypoint(pose, world)
 
 
@@ -167,6 +182,63 @@ def _snap_lanelet2_via_opendrive(
         result.x,
         result.y,
         result.z,
+    )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# OpenDrivePose path – snap via get_waypoint_xodr
+# ---------------------------------------------------------------------------
+
+
+def _snap_opendrive_via_waypoint_xodr(
+    pose: OpenDrivePose,
+    world: "carla.World",
+) -> CarlaWorldPose:
+    """Snap an OpenDRIVE pose using ``carla.Map.get_waypoint_xodr``.
+
+    This is the most accurate snap path because CARLA resolves
+    ``(road_id, lane_id, s)`` directly against its internal OpenDRIVE
+    geometry, producing exact x/y/z and yaw on the road surface.
+    """
+    carla_map = world.get_map()
+
+    waypoint = carla_map.get_waypoint_xodr(
+        int(pose.road_id),
+        pose.lane_id,
+        pose.s,
+    )
+    if waypoint is None:
+        logger.warning(
+            "get_waypoint_xodr(road=%s, lane=%d, s=%.2f) returned None; "
+            "falling back to coordinate transform",
+            pose.road_id,
+            pose.lane_id,
+            pose.s,
+        )
+        from .transform import to_carla_world  # noqa: PLC0415
+
+        return to_carla_world(pose)
+
+    tf = waypoint.transform
+    result = CarlaWorldPose(
+        x=tf.location.x,
+        y=tf.location.y,
+        z=tf.location.z,
+        yaw=tf.rotation.yaw,
+    )
+
+    logger.info(
+        "snap (OpenDRIVE): road='%s' lane=%d s=%.2f -> "
+        "CARLA (%.2f, %.2f, %.3f) yaw=%.1f",
+        pose.road_id,
+        pose.lane_id,
+        pose.s,
+        result.x,
+        result.y,
+        result.z,
+        result.yaw,
     )
 
     return result
