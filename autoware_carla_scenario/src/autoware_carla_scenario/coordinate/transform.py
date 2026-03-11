@@ -376,6 +376,85 @@ def _normalize_angle(angle: float) -> float:
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
+def _lane_width_at_ds(lane, ds: float) -> float:
+    """Return the width of *lane* at offset *ds* from the lane-section start.
+
+    Lane widths in OpenDRIVE are cubic polynomials:
+    ``width(ds) = a + b·ds + c·ds² + d·ds³``.
+    Multiple ``<width>`` elements may define piece-wise polynomials; this
+    function selects the active segment for the given *ds*.
+    """
+    width_elements = lane.lane_xml.findall("width")
+    if not width_elements:
+        return 0.0
+
+    active = width_elements[0]
+    for elem in width_elements:
+        s_offset = float(elem.attrib.get("sOffset", 0.0))
+        if s_offset <= ds:
+            active = elem
+        else:
+            break
+
+    s_offset = float(active.attrib.get("sOffset", 0.0))
+    a = float(active.attrib["a"])
+    b = float(active.attrib["b"])
+    c = float(active.attrib["c"])
+    d = float(active.attrib["d"])
+    local = ds - s_offset
+    return a + b * local + c * local**2 + d * local**3
+
+
+def _lane_center_t(road, s: float, lane_id: int) -> float | None:
+    """Return the *t* offset that places a point at the centre of *lane_id*.
+
+    OpenDRIVE measures *t* from the road reference line.  For lane −1 the
+    centre is at ``t = −(width_of_lane_−1 / 2)``; for lane −2 it is
+    ``t = −(width_of_lane_−1 + width_of_lane_−2 / 2)``; and so on for the
+    left side (positive lane IDs, positive *t*).
+
+    Returns ``None`` when the requested lane cannot be found in the active
+    lane section.
+    """
+    if lane_id == 0:
+        return 0.0
+
+    lane_sections = road.lane_sections
+    if not lane_sections:
+        return None
+
+    # Find the lane section covering *s*
+    active_section = lane_sections[0]
+    for section in lane_sections:
+        s_start = float(section.lane_section_xml.attrib.get("s", 0.0))
+        if s_start <= s:
+            active_section = section
+        else:
+            break
+
+    section_s_start = float(active_section.lane_section_xml.attrib.get("s", 0.0))
+    ds = s - section_s_start
+
+    lanes_by_id = {lane.id: lane for lane in active_section.lanes}
+
+    sign = 1.0 if lane_id > 0 else -1.0
+    target_abs = abs(lane_id)
+
+    total = 0.0
+    for abs_id in range(1, target_abs + 1):
+        current_id = abs_id if lane_id > 0 else -abs_id
+        lane = lanes_by_id.get(current_id)
+        if lane is None:
+            return None
+        width = _lane_width_at_ds(lane, ds)
+        if abs_id == target_abs:
+            total += width / 2.0
+        else:
+            total += width
+
+    return sign * total
+
+
 def _find_lane_at_t(road, s: float, t: float) -> int:
     """Find the lane ID at lateral offset t for a given s on a road.
 

@@ -14,7 +14,7 @@ import logging
 import math
 from typing import TYPE_CHECKING, Union, overload
 
-from .poses import CarlaWorldPose, Lanelet2Pose
+from .poses import CarlaWorldPose, Lanelet2Pose, OpenDrivePose
 
 if TYPE_CHECKING:
     import carla
@@ -95,16 +95,36 @@ def _snap_lanelet2_via_opendrive(
        (uses XODR geometry, which CARLA trusts).
     4. Replace z with the nearest spawn-point elevation.
     """
-    from .transform import to_carla_world, to_opendrive  # noqa: PLC0415
+    from .map_manager import MapManager  # noqa: PLC0415
+    from .transform import _lane_center_t, to_carla_world, to_opendrive  # noqa: PLC0415
 
     # Approximate CARLA position → project onto nearest OpenDRIVE road
     carla_approx = to_carla_world(pose)
     od_projected = to_opendrive(carla_approx)
 
+    # Correct t to the lane centre (the projected t reflects the offset
+    # between the Lanelet2 centreline and the XODR reference line, which
+    # does not correspond to the lane centre).
+    mm = MapManager.get_instance()
+    road = mm.road_network.road_ids_to_object[od_projected.road_id]
+    center_t = _lane_center_t(road, od_projected.s, od_projected.lane_id)
+
+    if center_t is not None:
+        corrected_t = center_t
+    else:
+        corrected_t = od_projected.t
+        logger.warning(
+            "Could not compute lane centre t for road '%s' lane %d; "
+            "using projected t=%.2f",
+            od_projected.road_id,
+            od_projected.lane_id,
+            od_projected.t,
+        )
+
     logger.info(
         "Lanelet2Pose(lanelet_id=%d, s=%.2f, t=%.2f) -> "
         "approx CARLA (%.2f, %.2f) -> "
-        "OpenDrivePose(road='%s', lane=%d, s=%.2f, t=%.2f)",
+        "OpenDrivePose(road='%s', lane=%d, s=%.2f, t=%.2f -> centre_t=%.2f)",
         pose.lanelet_id,
         pose.s,
         pose.t,
@@ -114,10 +134,19 @@ def _snap_lanelet2_via_opendrive(
         od_projected.lane_id,
         od_projected.s,
         od_projected.t,
+        corrected_t,
     )
 
-    # Re-convert via XODR geometry (position now lies on the XODR road surface)
-    carla_from_od = to_carla_world(od_projected)
+    od_corrected = OpenDrivePose(
+        road_id=od_projected.road_id,
+        lane_id=od_projected.lane_id,
+        s=od_projected.s,
+        t=corrected_t,
+        heading=od_projected.heading,
+    )
+
+    # Re-convert via XODR geometry (position now lies on the lane centre)
+    carla_from_od = to_carla_world(od_corrected)
 
     # Z correction
     snapped_z = _z_from_nearest_spawn_point(carla_from_od.x, carla_from_od.y, world)
