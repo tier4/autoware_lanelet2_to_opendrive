@@ -62,6 +62,7 @@ Public API re-exported for convenience::
 from .actions import BaseAction, TickTiming, TurnAction, TurnDirection
 from .scenario_runner import ScenarioRunner
 from .conditions import (
+    AlwaysTrueCondition,
     AndCondition,
     BaseCondition,
     CollisionCondition,
@@ -127,6 +128,7 @@ __all__ = [
     "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",
+    "AlwaysTrueCondition",
     "AndCondition",
     "BaseCondition",
     "BaseScenario",

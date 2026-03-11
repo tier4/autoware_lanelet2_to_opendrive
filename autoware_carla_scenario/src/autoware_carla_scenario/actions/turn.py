@@ -6,6 +6,8 @@ import enum
 import logging
 from typing import TYPE_CHECKING, List, Optional
 
+from typing import Optional as _Optional
+
 from ..conditions import BaseCondition
 from ..conditions.base import find_actor_by_role_name
 from .base import BaseAction, TickTiming
@@ -56,8 +58,8 @@ class TurnAction(BaseAction):
         self,
         entity_name: str,
         direction: TurnDirection,
-        condition: BaseCondition,
         client: "carla.Client",
+        condition: _Optional[BaseCondition] = None,
         timing: TickTiming = TickTiming.PRE_TICK,
         *,
         once: bool = True,

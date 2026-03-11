@@ -5,9 +5,10 @@ from __future__ import annotations
 import enum
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from ..conditions import BaseCondition
+from ..conditions.always_true import AlwaysTrueCondition
 
 if TYPE_CHECKING:
     import carla
@@ -34,7 +35,8 @@ class BaseAction(ABC):
     Args:
         condition: A :class:`BaseCondition` whose :meth:`check` is called each
             tick.  When ``check`` returns a non-``None`` result the action's
-            :meth:`execute` is invoked.
+            :meth:`execute` is invoked.  Defaults to
+            :class:`AlwaysTrueCondition` (fires unconditionally).
         timing: Whether to run on the pre-tick or post-tick phase.
         once: If ``True`` (default), the action fires at most once.  After
             ``execute`` has been called the condition is no longer evaluated.
@@ -42,12 +44,12 @@ class BaseAction(ABC):
 
     def __init__(
         self,
-        condition: BaseCondition,
+        condition: Optional[BaseCondition] = None,
         timing: TickTiming = TickTiming.POST_TICK,
         *,
         once: bool = True,
     ) -> None:
-        self._condition = condition
+        self._condition = condition if condition is not None else AlwaysTrueCondition()
         self._timing = timing
         self._once = once
         self._done = False

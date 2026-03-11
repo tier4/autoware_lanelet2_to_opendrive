@@ -33,7 +33,6 @@ from autoware_carla_scenario import (
     AndCondition,
     BaseScenario,
     EgoConfig,
-    ElapsedTimeCondition,
     EntityLanePositionCondition,
     Lanelet2Pose,
     ScenarioQueue,
@@ -132,12 +131,11 @@ class LeftTurnScenario(BaseScenario):
         logger.info("Set %d traffic lights to green", n)
 
         # --- TurnAction: left turn at the next junction ---
-        # ElapsedTimeCondition(0.0) triggers on the first tick so the route is
-        # computed and applied before the vehicle reaches the junction.
+        # No condition specified → defaults to AlwaysTrueCondition, so the
+        # action fires on the first tick (once=True by default).
         turn_action = TurnAction(
             entity_name=EGO_ROLE_NAME,
             direction=TurnDirection.LEFT,
-            condition=ElapsedTimeCondition(0.0),
             client=self._carla_client,
             timing=TickTiming.PRE_TICK,
         )
