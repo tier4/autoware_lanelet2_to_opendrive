@@ -26,7 +26,7 @@ def _make_ego_config() -> EgoConfig:
 
     return EgoConfig(
         spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0, y=0, z=0))),
-        vehicle_type="vehicle.fuso.mitsubishi",
+        vehicle_type="vehicle.mini.cooper",
     )
 
 

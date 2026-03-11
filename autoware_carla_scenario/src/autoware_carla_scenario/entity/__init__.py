@@ -14,7 +14,7 @@ Usage::
     config = VehicleEntityConfig(
         role_name="npc_vehicle_1",
         spawn_location=SpawnPointIndex(5),
-        vehicle_type="vehicle.fuso.mitsubishi",
+        vehicle_type="vehicle.mini.cooper",
     )
     npc = VehicleEntity(config)
     actor = npc.spawn(world)

@@ -12,7 +12,7 @@ Standalone (no pytest)::
 
     ego = EgoConfig(
         spawn_location=SpawnPointIndex(0),
-        vehicle_type="vehicle.fuso.mitsubishi",
+        vehicle_type="vehicle.mini.cooper",
     )
     queue = ScenarioQueue(map_name="Town10HD_Opt")
     queue.add(SpawnAndIdleScenario(ego))
@@ -129,8 +129,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--vehicle",
-        default="vehicle.fuso.mitsubishi",
-        help="CARLA blueprint ID for the ego vehicle (default: vehicle.fuso.mitsubishi)",
+        default="vehicle.mini.cooper",
+        help="CARLA blueprint ID for the ego vehicle (default: vehicle.mini.cooper)",
     )
     parser.add_argument(
         "--spawn-index",

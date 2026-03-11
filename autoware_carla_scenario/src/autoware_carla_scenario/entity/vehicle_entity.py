@@ -21,7 +21,7 @@ class VehicleEntityConfig:
 
     role_name: str
     spawn_location: SpawnLocation
-    vehicle_type: str = "vehicle.fuso.mitsubishi"
+    vehicle_type: str = "vehicle.mini.cooper"
     initial_speed_kmh: float = 0.0
 
 

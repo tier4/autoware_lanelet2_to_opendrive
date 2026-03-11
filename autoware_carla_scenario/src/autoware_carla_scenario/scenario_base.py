@@ -26,7 +26,7 @@ class EgoConfig:
     """
 
     spawn_location: SpawnLocation
-    vehicle_type: str = "vehicle.fuso.mitsubishi"
+    vehicle_type: str = "vehicle.mini.cooper"
 
 
 class BaseScenario(ABC):

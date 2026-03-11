@@ -78,7 +78,12 @@ class MapManager:
     # Initialization
     # ------------------------------------------------------------------
 
-    def initialize(self, xodr_path: Path, lanelet2_path: Path) -> None:
+    def initialize(
+        self,
+        xodr_path: Path,
+        lanelet2_path: Path,
+        carla_world: Any = None,
+    ) -> None:
         """Load both map files.
 
         Parameters
@@ -87,6 +92,12 @@ class MapManager:
             Path to the OpenDRIVE (.xodr) file.
         lanelet2_path:
             Path to the Lanelet2 map file (.osm or .xml).
+        carla_world:
+            Optional CARLA ``carla.World`` instance.  When provided, the
+            vertical offset (z_offset) is computed by averaging the
+            difference between Lanelet2 elevation and CARLA spawn-point
+            elevation across all map spawn points.  When ``None``, a
+            single-point fallback using the XODR reference line is used.
 
         Raises
         ------
@@ -128,7 +139,7 @@ class MapManager:
         # Compute vertical offset: Lanelet2 z (MGRS absolute elevation) minus
         # XODR z (elevation relative to geoReference origin).  This is constant
         # across the map and lets us convert z between the two systems.
-        self._z_offset = self._compute_z_offset()
+        self._z_offset = self._compute_z_offset(carla_world)
 
     # ------------------------------------------------------------------
     # Properties
@@ -196,16 +207,92 @@ class MapManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _compute_z_offset(self) -> float:
+    def _compute_z_offset(self, carla_world: Any = None) -> float:
+        """Compute ``lanelet2_z − carla_z``.
+
+        When *carla_world* is provided, every CARLA spawn point is projected
+        onto the nearest Lanelet2 centerline and the per-point offset
+        ``(lanelet2_z − carla_spawn_z)`` is averaged.  This yields a more
+        accurate result than single-point sampling because it smooths out
+        local interpolation noise.
+
+        When *carla_world* is ``None`` (e.g. in unit tests without a CARLA
+        connection) the legacy single-point fallback is used.
+        """
+        if carla_world is not None:
+            result = self._z_offset_from_spawn_points(carla_world)
+            if result is not None:
+                return result
+        return self._z_offset_from_reference_line()
+
+    # -- spawn-point based (preferred) ------------------------------------
+
+    def _z_offset_from_spawn_points(self, carla_world: Any) -> Optional[float]:
+        """Average ``lanelet2_z − carla_z`` over all CARLA spawn points.
+
+        Returns ``None`` when no usable spawn points are found so the caller
+        can fall back to the reference-line method.
+        """
+        import lanelet2.core
+        import lanelet2.geometry
+        import numpy as np
+
+        assert self._lanelet_map is not None
+        assert self._mgrs_offset is not None
+
+        spawn_points = carla_world.get_map().get_spawn_points()
+        if not spawn_points:
+            return None
+
+        offset_x, offset_y = self._mgrs_offset
+        offsets: list[float] = []
+
+        for sp in spawn_points:
+            # CARLA world → Lanelet2 MGRS (x, y)
+            mgrs_x = sp.location.x + offset_x
+            mgrs_y = -sp.location.y + offset_y
+
+            query = lanelet2.core.BasicPoint2d(mgrs_x, mgrs_y)
+            results = lanelet2.geometry.findNearest(
+                self._lanelet_map.laneletLayer, query, 1
+            )
+            if not results:
+                continue
+
+            dist_to_lanelet = results[0][0]
+            # Skip spawn points too far from any lanelet (off-road areas)
+            if dist_to_lanelet > 10.0:
+                continue
+
+            lanelet = results[0][1]
+
+            # Nearest centerline point → its z
+            best_d2 = float("inf")
+            ll2_z = 0.0
+            for pt in lanelet.centerline:
+                d2 = (pt.x - mgrs_x) ** 2 + (pt.y - mgrs_y) ** 2
+                if d2 < best_d2:
+                    best_d2 = d2
+                    ll2_z = pt.z
+
+            offsets.append(ll2_z - sp.location.z)
+
+        if not offsets:
+            return None
+
+        return float(np.mean(offsets))
+
+    # -- single-point fallback (for tests without CARLA) ------------------
+
+    def _z_offset_from_reference_line(self) -> float:
         """Compute ``lanelet2_z − xodr_z`` by sampling one reference point.
 
         Takes the first lanelet centerline point, finds the nearest XODR road
         reference-line point at the same (x, y), and returns the difference
-        in their z coordinates.  The offset is assumed constant across the map.
+        in their z coordinates.
         """
         import numpy as np
 
-        # Sample the first available lanelet centerline point
         assert self._lanelet_map is not None
         for lanelet in self._lanelet_map.laneletLayer:
             ref_pt = lanelet.centerline[0]
@@ -214,17 +301,14 @@ class MapManager:
             return 0.0
 
         ll2_z = ref_pt.z
-        # Convert Lanelet2 MGRS (x, y) → XODR-relative (x, y)
         assert self._mgrs_offset is not None
         xodr_x = ref_pt.x - self._mgrs_offset[0]
         xodr_y = ref_pt.y - self._mgrs_offset[1]
 
-        # Ensure roads are loaded
         assert self._road_network is not None
         if not self._road_network.road_ids_to_object:
             self._road_network.get_roads()
 
-        # Find the nearest road reference-line point and read its z
         best_z = 0.0
         best_dist = float("inf")
         query = np.array([xodr_x, xodr_y])
