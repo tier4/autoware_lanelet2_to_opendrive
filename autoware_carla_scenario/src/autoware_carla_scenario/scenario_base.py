@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, List, Optional
 
 from .conditions import BaseCondition
+from .constants import EGO_ROLE_NAME
 from .entity._spawn import SpawnLocation
+from .entity.vehicle_entity import VehicleEntityConfig
 
 if TYPE_CHECKING:
     import carla
@@ -16,17 +17,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class EgoConfig:
+class EgoConfig(VehicleEntityConfig):
     """Configuration for the ego vehicle.
 
-    *spawn_location* determines where the vehicle is placed — either a
-    :class:`SpawnTransform` (explicit pose) or a :class:`SpawnPointIndex`
-    (index into the map's spawn-point list).
+    Inherits all fields from :class:`VehicleEntityConfig` (``vehicle_type``,
+    ``initial_speed_kmh``, etc.).  The ``role_name`` is automatically set to
+    :data:`~autoware_carla_scenario.constants.EGO_ROLE_NAME`.
     """
 
-    spawn_location: SpawnLocation
-    vehicle_type: str = "vehicle.mini.cooper"
+    def __init__(
+        self,
+        spawn_location: SpawnLocation,
+        vehicle_type: str = "vehicle.mini.cooper",
+        initial_speed_kmh: float = 0.0,
+    ) -> None:
+        super().__init__(
+            role_name=EGO_ROLE_NAME,
+            spawn_location=spawn_location,
+            vehicle_type=vehicle_type,
+            initial_speed_kmh=initial_speed_kmh,
+        )
 
 
 class BaseScenario(ABC):

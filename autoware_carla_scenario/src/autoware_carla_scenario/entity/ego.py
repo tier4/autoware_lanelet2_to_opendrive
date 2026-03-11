@@ -38,12 +38,22 @@ class EgoVehicle:
             RuntimeError: If the vehicle could not be spawned at the
                 requested location.
         """
+        import carla as _carla  # noqa: PLC0415
+
         self._vehicle = spawn_vehicle_actor(
             world,
             config.vehicle_type,
             EGO_ROLE_NAME,
             config.spawn_location,
         )
+
+        if config.initial_speed_kmh > 0.0:
+            speed_ms = config.initial_speed_kmh / 3.6
+            fwd = self._vehicle.get_transform().get_forward_vector()
+            self._vehicle.set_target_velocity(
+                _carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
+            )
+
         return self._vehicle
 
     def destroy(self) -> None:
