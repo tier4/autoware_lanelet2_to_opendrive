@@ -54,15 +54,15 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-#: Lanelet where the ego is spawned.  Lanelet 216 approaches an intersection
-#: with a left turn option (lanelet 403 only goes straight).
-SPAWN_LANELET_ID: int = 216
+#: Lanelet where the ego is spawned.  Lanelet 203 approaches an intersection
+#: with a left turn option (lanelet 415 only goes straight).
+SPAWN_LANELET_ID: int = 203
 
 #: Lanelets the ego is expected to traverse **after** the left turn.
 #: Adjust these IDs based on the target map.  The scenario converts each
 #: lanelet to its OpenDRIVE road ID and passes the check when the ego has
 #: visited every listed road.
-POST_TURN_LANELET_IDS: list[int] = [402, 179]
+POST_TURN_LANELET_IDS: list[int] = [411, 207]
 
 #: Timeout in seconds.  Left turns require more time than going straight
 #: because the vehicle decelerates, turns, and re-accelerates.

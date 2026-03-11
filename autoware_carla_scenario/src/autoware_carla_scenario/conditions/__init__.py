@@ -1,5 +1,6 @@
 """Scenario pass/fail conditions for CARLA scenario testing."""
 
+from .actor_existence import ActorExistenceCondition
 from .always_true import AlwaysTrueCondition
 from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 from .collision import CollisionCondition
@@ -13,6 +14,7 @@ from .standstill import StandstillCondition
 from .timeout import TimeoutCondition
 
 __all__ = [
+    "ActorExistenceCondition",
     "AlwaysTrueCondition",
     "AndCondition",
     "BaseCondition",

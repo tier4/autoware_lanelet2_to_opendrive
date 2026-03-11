@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Optional
 
 from ..coordinate.poses import CarlaWorldPose
@@ -10,6 +11,8 @@ from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 
 if TYPE_CHECKING:
     import carla
+
+logger = logging.getLogger(__name__)
 
 
 class EntityLanePositionCondition(BaseCondition):
@@ -59,6 +62,10 @@ class EntityLanePositionCondition(BaseCondition):
         """
         entity = find_actor_by_role_name(world, self._entity_name)
         if entity is None:
+            logger.debug(
+                "EntityLanePositionCondition: actor '%s' not found",
+                self._entity_name,
+            )
             return None
 
         loc = entity.get_location()
@@ -66,15 +73,42 @@ class EntityLanePositionCondition(BaseCondition):
         od_pose = to_opendrive(carla_pose)
 
         if od_pose.road_id != self._road_id:
+            logger.debug(
+                "EntityLanePositionCondition: '%s' on road='%s' lane=%d "
+                "(want road='%s') at (%.1f, %.1f, %.1f) t=%.2fs",
+                self._entity_name,
+                od_pose.road_id,
+                od_pose.lane_id,
+                self._road_id,
+                loc.x,
+                loc.y,
+                loc.z,
+                elapsed,
+            )
             return None
 
         if self._lane_id is not None and od_pose.lane_id != self._lane_id:
+            logger.debug(
+                "EntityLanePositionCondition: '%s' on road='%s' lane=%d "
+                "(want lane=%d) at t=%.2fs",
+                self._entity_name,
+                od_pose.road_id,
+                od_pose.lane_id,
+                self._lane_id,
+                elapsed,
+            )
             return None
 
         lane_desc = "(any lane)" if self._lane_id is None else f"lane {self._lane_id}"
         msg = (
             f"Entity '{self._entity_name}' is on road '{self._road_id}'"
             f" {lane_desc} at {elapsed:.2f}s"
+        )
+        logger.info(
+            "EntityLanePositionCondition: MATCHED — '%s' on road='%s' %s",
+            self._entity_name,
+            self._road_id,
+            lane_desc,
         )
 
         return ScenarioResult(

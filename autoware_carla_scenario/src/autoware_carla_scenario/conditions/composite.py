@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from .base import BaseCondition, ScenarioResult
 
 if TYPE_CHECKING:
     import carla
+
+logger = logging.getLogger(__name__)
 
 
 class StickyCondition(BaseCondition):
@@ -52,6 +55,10 @@ class StickyCondition(BaseCondition):
         result = self._condition.check(world, elapsed)
         if result is not None and result.passed:
             self._latched_result = result
+            logger.info(
+                "StickyCondition: latched — %s",
+                result.message,
+            )
         return result
 
 

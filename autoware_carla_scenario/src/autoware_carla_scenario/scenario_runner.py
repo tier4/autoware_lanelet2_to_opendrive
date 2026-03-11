@@ -8,9 +8,16 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from .conditions import ScenarioResult, TimeoutCondition
+if TYPE_CHECKING:
+    import carla
+
+from .conditions import ActorExistenceCondition, ScenarioResult, TimeoutCondition
+from .conditions.base import find_actor_by_role_name
+from .constants import EGO_ROLE_NAME
+from .coordinate.poses import CarlaWorldPose
+from .coordinate.transform import to_opendrive
 from .entity import EgoVehicle
 from .entity import vehicle_entity as _vehicle_entity_module
 from .scenario_base import BaseScenario
@@ -40,6 +47,57 @@ def _map_name_to_env_var(map_name: str) -> str:
     # Insert underscore between a lowercase/digit and the following uppercase letter
     snake = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", map_name)
     return snake.upper() + "_PATH"
+
+
+#: Log ego OpenDRIVE position every N ticks (~1 s at 20 Hz).
+_CONDITION_LOG_INTERVAL: int = 20
+
+
+def _log_ego_opendrive_position(
+    world: "carla.World",
+    scenario_name: str,
+    elapsed: float,
+    tick_count: int,
+) -> None:
+    """Log the ego vehicle's current OpenDRIVE road/lane position."""
+    ego = find_actor_by_role_name(world, EGO_ROLE_NAME)
+    if ego is None:
+        logger.warning(
+            "[%s] tick=%d t=%.2fs ego actor NOT FOUND (destroyed?)",
+            scenario_name,
+            tick_count,
+            elapsed,
+        )
+        return
+
+    loc = ego.get_location()
+    try:
+        od = to_opendrive(CarlaWorldPose(x=loc.x, y=loc.y, z=loc.z))
+        logger.info(
+            "[%s] tick=%d t=%.2fs ego CARLA(%.1f, %.1f, %.1f) -> "
+            "OpenDRIVE road='%s' lane=%d s=%.1f",
+            scenario_name,
+            tick_count,
+            elapsed,
+            loc.x,
+            loc.y,
+            loc.z,
+            od.road_id,
+            od.lane_id,
+            od.s,
+        )
+    except (ValueError, KeyError, IndexError, RuntimeError) as exc:
+        logger.warning(
+            "[%s] tick=%d t=%.2fs ego at (%.1f, %.1f, %.1f) — "
+            "failed to convert to OpenDRIVE: %s",
+            scenario_name,
+            tick_count,
+            elapsed,
+            loc.x,
+            loc.y,
+            loc.z,
+            exc,
+        )
 
 
 class ScenarioRunner:
@@ -204,13 +262,15 @@ class ScenarioRunner:
             logger.info("[%s] Spawning ego vehicle ...", scenario_name)
             ego_actor = ego.spawn(world, scenario.ego_config)
             logger.info(
-                "[%s] Ego spawned: id=%d at (%.1f, %.1f, %.1f)",
+                "[%s] Ego spawned: id=%d blueprint=%s",
                 scenario_name,
                 ego_actor.id,
-                ego_actor.get_location().x,
-                ego_actor.get_location().y,
-                ego_actor.get_location().z,
+                ego_actor.type_id,
             )
+
+            # Register ego existence fail condition so the scenario fails
+            # immediately if the ego is destroyed (e.g. falls through map).
+            scenario.register_fail_condition(ActorExistenceCondition(EGO_ROLE_NAME))
 
             # Warm-up ticks: let physics and TrafficManager stabilise
             # before the main loop begins.
@@ -252,10 +312,12 @@ class ScenarioRunner:
 
             logger.info("[%s] === Tick loop start ===", scenario_name)
             start_time = time.monotonic()
+            tick_count = 0
 
             # Tick loop
             while not scenario.is_done():
                 elapsed = time.monotonic() - start_time
+                tick_count += 1
 
                 # Pre-tick callbacks
                 for cb in scenario._pre_tick_callbacks:
@@ -267,24 +329,50 @@ class ScenarioRunner:
                 for cb in scenario._post_tick_callbacks:
                     cb(world)
 
+                # Periodic ego OpenDRIVE position log
+                if tick_count % _CONDITION_LOG_INTERVAL == 0:
+                    _log_ego_opendrive_position(
+                        world, scenario_name, elapsed, tick_count
+                    )
+
                 # Check pass conditions
-                for condition in scenario._pass_conditions:
+                for i, condition in enumerate(scenario._pass_conditions):
                     check = condition.check(world, elapsed)
                     if check is not None:
+                        logger.info(
+                            "[%s] Pass condition [%d] SATISFIED: %s",
+                            scenario_name,
+                            i,
+                            check.message,
+                        )
                         result = ScenarioResult(
                             passed=True,
                             message=check.message,
                             elapsed_seconds=check.elapsed_seconds,
                         )
                         break
+                    if tick_count % _CONDITION_LOG_INTERVAL == 0:
+                        logger.info(
+                            "[%s] Pass condition [%d] pending at t=%.2fs (tick %d)",
+                            scenario_name,
+                            i,
+                            elapsed,
+                            tick_count,
+                        )
 
                 if result is not None:
                     break
 
                 # Check fail conditions
-                for condition in scenario._fail_conditions:
+                for i, condition in enumerate(scenario._fail_conditions):
                     check = condition.check(world, elapsed)
                     if check is not None:
+                        logger.info(
+                            "[%s] Fail condition [%d] TRIGGERED: %s",
+                            scenario_name,
+                            i,
+                            check.message,
+                        )
                         result = ScenarioResult(
                             passed=False,
                             message=check.message,
