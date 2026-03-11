@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Optional
 
 from ..kinematics import Vector3
 from .base import BaseCondition, ScenarioResult
+from .comparison import ComparisonRule, compare
 
 if TYPE_CHECKING:
     import carla
@@ -38,24 +39,6 @@ class SpeedDirection(Enum):
     LONGITUDINAL = auto()
     LATERAL = auto()
     MAGNITUDE = auto()
-
-
-class ComparisonRule(Enum):
-    """Comparison operator for condition evaluation.
-
-    Attributes:
-        GREATER_THAN: Value must be strictly greater than the threshold.
-        LESS_THAN: Value must be strictly less than the threshold.
-        EQUAL_TO: Value must be approximately equal (within tolerance).
-        GREATER_THAN_OR_EQUAL: Value must be greater than or equal.
-        LESS_THAN_OR_EQUAL: Value must be less than or equal.
-    """
-
-    GREATER_THAN = auto()
-    LESS_THAN = auto()
-    EQUAL_TO = auto()
-    GREATER_THAN_OR_EQUAL = auto()
-    LESS_THAN_OR_EQUAL = auto()
 
 
 class SpeedCoordinateSystem(Enum):
@@ -180,17 +163,7 @@ class SpeedCondition(BaseCondition):
 
     def _compare(self, actual: float) -> bool:
         """Return ``True`` if *actual* satisfies the configured rule."""
-        if self._rule == ComparisonRule.GREATER_THAN:
-            return actual > self._value
-        if self._rule == ComparisonRule.LESS_THAN:
-            return actual < self._value
-        if self._rule == ComparisonRule.EQUAL_TO:
-            return abs(actual - self._value) <= self._tolerance
-        if self._rule == ComparisonRule.GREATER_THAN_OR_EQUAL:
-            return actual >= self._value
-        if self._rule == ComparisonRule.LESS_THAN_OR_EQUAL:
-            return actual <= self._value
-        raise ValueError(f"Unknown comparison rule: {self._rule}")
+        return compare(actual, self._rule, self._value, self._tolerance)
 
     def check(self, world: carla.World, elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the entity's speed satisfies the rule.

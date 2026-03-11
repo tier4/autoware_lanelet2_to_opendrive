@@ -5,49 +5,62 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 from .base import BaseCondition, ScenarioResult
+from .comparison import ComparisonRule, compare
 
 if TYPE_CHECKING:
     import carla
 
 
 class ElapsedTimeCondition(BaseCondition):
-    """Pass condition that triggers when a specified duration has elapsed.
+    """Pass condition that triggers when elapsed time satisfies a comparison.
+
+    By default the condition fires when elapsed time **reaches or exceeds**
+    *duration_seconds* (``GREATER_THAN_OR_EQUAL``), which is backward-compatible
+    with the original behaviour.
 
     Unlike :class:`TimeoutCondition` (which returns a *failure*), this condition
     returns a *success* result, making it suitable for scenarios that should pass
     after a certain amount of time (e.g. "drive for 30 seconds without issues").
+
+    Args:
+        duration_seconds: Time threshold in seconds.  Must be positive.
+        rule: Comparison operator applied to *elapsed* vs *duration_seconds*.
+            Defaults to :attr:`ComparisonRule.GREATER_THAN_OR_EQUAL`.
+        tolerance: Tolerance for :attr:`ComparisonRule.EQUAL_TO`.
+            Defaults to ``1e-6``.
     """
 
-    def __init__(self, duration_seconds: float) -> None:
-        """Initialize the elapsed time condition.
-
-        Args:
-            duration_seconds: Number of seconds that must elapse before the
-                condition succeeds.  Must be positive.
-
-        Raises:
-            ValueError: If *duration_seconds* is not positive.
-        """
+    def __init__(
+        self,
+        duration_seconds: float,
+        rule: ComparisonRule = ComparisonRule.GREATER_THAN_OR_EQUAL,
+        tolerance: float = 1e-6,
+    ) -> None:
         if duration_seconds <= 0:
             raise ValueError("duration_seconds must be positive")
+        if tolerance < 0:
+            raise ValueError("tolerance must be non-negative")
         self.duration_seconds = duration_seconds
+        self._rule = rule
+        self._tolerance = tolerance
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
-        """Return a success result if the elapsed time reaches the duration.
+        """Return a success result if the elapsed time satisfies the rule.
 
         Args:
             world: The CARLA world instance (unused).
             elapsed: Elapsed time in seconds since the scenario started.
 
         Returns:
-            ScenarioResult with passed=True if duration reached, None otherwise.
+            ScenarioResult with passed=True if the condition is met, None otherwise.
         """
-        if elapsed >= self.duration_seconds:
+        if compare(elapsed, self._rule, self.duration_seconds, self._tolerance):
+            rule_text = self._rule.name.lower().replace("_", " ")
             return ScenarioResult(
                 passed=True,
                 message=(
-                    f"Elapsed time {elapsed:.2f}s reached target "
-                    f"duration {self.duration_seconds:.2f}s"
+                    f"Elapsed time {elapsed:.2f}s {rule_text}"
+                    f" target duration {self.duration_seconds:.2f}s"
                 ),
                 elapsed_seconds=elapsed,
             )
