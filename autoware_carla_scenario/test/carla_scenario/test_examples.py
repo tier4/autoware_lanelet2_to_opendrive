@@ -39,7 +39,7 @@ from autoware_carla_scenario.examples.spawn_and_idle import SpawnAndIdleScenario
 
 _ego = EgoConfig(
     spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5))),
-    vehicle_type="vehicle.fuso.mitsubishi",
+    vehicle_type="vehicle.mini.cooper",
 )
 
 _queue = ScenarioQueue(map_name="Town10HD_Opt")

@@ -197,12 +197,15 @@ class ScenarioQueue:
         elif self._map_name is not None:
             self._runner.load_map_by_name(self._map_name)
 
-        # Initialise MapManager when both map files are available
+        # Initialise MapManager when both map files are available.
+        # Pass the CARLA world so that spawn-point-based z_offset averaging
+        # is used instead of single-point sampling.
         if self._xodr_path is not None and self._lanelet2_path is not None:
             MapManager.reset()
             MapManager.get_instance().initialize(
                 xodr_path=self._xodr_path,
                 lanelet2_path=self._lanelet2_path,
+                carla_world=self._runner._world,
             )
 
     def stop(self) -> None:
@@ -243,7 +246,7 @@ class ScenarioQueue:
 
             ego = EgoConfig(
                 spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5))),
-                vehicle_type="vehicle.fuso.mitsubishi",
+                vehicle_type="vehicle.mini.cooper",
             )
             _queue = ScenarioQueue(map_name="Town10HD_Opt")
             carla_queue  = _queue.as_fixture()              # auto-skip baked in

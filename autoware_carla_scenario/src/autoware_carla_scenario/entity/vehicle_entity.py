@@ -10,6 +10,11 @@ if TYPE_CHECKING:
 
 from ._spawn import SpawnLocation, spawn_vehicle_actor
 
+#: Module-level flag set by :class:`~autoware_carla_scenario.scenario_runner.ScenarioRunner`
+#: after warm-up ticks complete.  When ``True``, :meth:`VehicleEntity.spawn`
+#: raises :class:`RuntimeError` to prevent spawning NPCs too late.
+_warmup_done: bool = False
+
 
 @dataclass
 class VehicleEntityConfig:
@@ -21,7 +26,7 @@ class VehicleEntityConfig:
 
     role_name: str
     spawn_location: SpawnLocation
-    vehicle_type: str = "vehicle.fuso.mitsubishi"
+    vehicle_type: str = "vehicle.mini.cooper"
     initial_speed_kmh: float = 0.0
 
 
@@ -52,6 +57,11 @@ class VehicleEntity:
         return self._config.vehicle_type
 
     @property
+    def initial_speed_kmh(self) -> float:
+        """Return the configured initial speed in km/h."""
+        return self._config.initial_speed_kmh
+
+    @property
     def actor(self) -> Optional["carla.Actor"]:
         """Return the underlying CARLA actor, or ``None`` if not spawned."""
         return self._vehicle
@@ -63,6 +73,9 @@ class VehicleEntity:
     def spawn(self, world: "carla.World") -> "carla.Actor":
         """Spawn the NPC vehicle in the CARLA world.
 
+        Must be called during :meth:`BaseScenario.setup`, **before** the
+        warm-up ticks run.  Spawning after warm-up raises :class:`RuntimeError`.
+
         Args:
             world: The CARLA world instance.
 
@@ -70,12 +83,18 @@ class VehicleEntity:
             The spawned vehicle actor.
 
         Raises:
+            RuntimeError: If called after the warm-up phase has completed.
             ValueError: If the vehicle blueprint is not available or the
                 spawn index is out of range.
             RuntimeError: If the vehicle could not be spawned at the
                 requested location.
         """
-        import carla as _carla
+        if _warmup_done:
+            raise RuntimeError(
+                "CARLA NPCs require ~5 ticks to stabilise after spawning. "
+                "Spawn operations must be performed in setup() before "
+                "the warm-up phase."
+            )
 
         self._vehicle = spawn_vehicle_actor(
             world,
@@ -83,14 +102,6 @@ class VehicleEntity:
             self._config.role_name,
             self._config.spawn_location,
         )
-
-        if self._config.initial_speed_kmh > 0.0:
-            speed_ms = self._config.initial_speed_kmh / 3.6
-            fwd = self._vehicle.get_transform().get_forward_vector()
-            self._vehicle.set_target_velocity(
-                _carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
-            )
-
         return self._vehicle
 
     def destroy(self) -> None:

@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "lanelet2>=1.2.2",
     "lanelet2-python-api-for-autoware",
+    "tqdm>=4.67.1",
 ]
 
 [build-system]

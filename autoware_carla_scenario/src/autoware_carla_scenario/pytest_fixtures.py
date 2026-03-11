@@ -38,7 +38,7 @@ class CarlaScenarioFixture:
 
         ego = EgoConfig(
             spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0, y=0, z=0))),
-            vehicle_type="vehicle.fuso.mitsubishi",
+            vehicle_type="vehicle.mini.cooper",
         )
 
         # 1. Create the queue (no server started yet)

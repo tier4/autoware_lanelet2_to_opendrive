@@ -92,6 +92,7 @@ dependencies = [
     { name = "pytest" },
     { name = "python-dotenv" },
     { name = "pyxodr" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
@@ -104,11 +105,12 @@ requires-dist = [
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyxodr", specifier = ">=0.1.0" },
+    { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "2.16.0"
+version = "2.18.0"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },

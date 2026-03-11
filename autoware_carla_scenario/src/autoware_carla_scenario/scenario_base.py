@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, List, Optional
 
 from .conditions import BaseCondition
+from .constants import EGO_ROLE_NAME
 from .entity._spawn import SpawnLocation
+from .entity.vehicle_entity import VehicleEntity, VehicleEntityConfig
 
 if TYPE_CHECKING:
     import carla
@@ -16,17 +17,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class EgoConfig:
+class EgoConfig(VehicleEntityConfig):
     """Configuration for the ego vehicle.
 
-    *spawn_location* determines where the vehicle is placed — either a
-    :class:`SpawnTransform` (explicit pose) or a :class:`SpawnPointIndex`
-    (index into the map's spawn-point list).
+    Inherits all fields from :class:`VehicleEntityConfig` (``vehicle_type``,
+    ``initial_speed_kmh``, etc.).  The ``role_name`` is automatically set to
+    :data:`~autoware_carla_scenario.constants.EGO_ROLE_NAME`.
     """
 
-    spawn_location: SpawnLocation
-    vehicle_type: str = "vehicle.fuso.mitsubishi"
+    def __init__(
+        self,
+        spawn_location: SpawnLocation,
+        vehicle_type: str = "vehicle.mini.cooper",
+        initial_speed_kmh: float = 0.0,
+    ) -> None:
+        super().__init__(
+            role_name=EGO_ROLE_NAME,
+            spawn_location=spawn_location,
+            vehicle_type=vehicle_type,
+            initial_speed_kmh=initial_speed_kmh,
+        )
 
 
 class BaseScenario(ABC):
@@ -39,6 +49,10 @@ class BaseScenario(ABC):
     #: Default random seed for deterministic simulation.
     #: Override per-instance via ``random_seed`` keyword argument.
     DEFAULT_RANDOM_SEED: int = 0
+
+    #: Number of warm-up ticks after spawn to stabilise physics and
+    #: TrafficManager before the main tick loop begins.
+    STABILIZE_TICKS: int = 5
 
     def __init__(
         self, ego_config: EgoConfig, *, random_seed: int = DEFAULT_RANDOM_SEED
@@ -53,6 +67,7 @@ class BaseScenario(ABC):
         """
         self.ego_config = ego_config
         self.random_seed = random_seed
+        self._entities: List[VehicleEntity] = []
         self._pre_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._pass_conditions: List[BaseCondition] = []
@@ -99,6 +114,18 @@ class BaseScenario(ABC):
             cb: Callable that receives the CARLA world as its argument.
         """
         self._post_tick_callbacks.append(cb)
+
+    def register_entity(self, entity: VehicleEntity) -> None:
+        """Register a spawned NPC vehicle entity.
+
+        Registered entities will have their initial speed applied after the
+        warm-up phase completes via :meth:`set_initial_speed`.
+
+        Args:
+            entity: A :class:`VehicleEntity` that has been spawned in
+                :meth:`setup`.
+        """
+        self._entities.append(entity)
 
     def register_pass_condition(self, condition: BaseCondition) -> None:
         """Register a condition that marks the scenario as *passed*.
@@ -161,37 +188,6 @@ class BaseScenario(ABC):
 
         self.register_post_tick(_follow)
 
-    def enable_autopilot_after(
-        self,
-        actor_getter: Callable[[], Optional["carla.Actor"]],
-        *,
-        delay_ticks: int = 5,
-    ) -> None:
-        """Register a post-tick callback that enables autopilot after a delay.
-
-        This gives CARLA time to stabilise after map load / actor spawn
-        before the TrafficManager builds its InMemoryMap (which blocks).
-
-        Args:
-            actor_getter: Callable returning the vehicle actor, or ``None``
-                if the actor is not (yet) available.
-            delay_ticks: Number of simulation ticks to wait.
-        """
-        state = {"count": 0, "enabled": False}
-
-        def _enable(world: "carla.World") -> None:
-            if state["enabled"]:
-                return
-            state["count"] += 1
-            if state["count"] >= delay_ticks:
-                actor = actor_getter()
-                if actor is not None:
-                    actor.set_autopilot(True)
-                    state["enabled"] = True
-                    logger.info("Autopilot enabled after %d ticks", state["count"])
-
-        self.register_post_tick(_enable)
-
     def log_actor_position(
         self,
         actor_getter: Callable[[], Optional["carla.Actor"]],
@@ -235,3 +231,34 @@ class BaseScenario(ABC):
             )
 
         self.register_post_tick(_log)
+
+    # ------------------------------------------------------------------
+    # Initial speed (called by ScenarioRunner after warm-up)
+    # ------------------------------------------------------------------
+
+    def set_initial_speed(self, ego_actor: "carla.Actor") -> None:
+        """Apply initial speed to all registered entities and the ego vehicle.
+
+        This method is called by :class:`ScenarioRunner` **after** the warm-up
+        ticks complete so that vehicles remain stationary during stabilisation.
+
+        Args:
+            ego_actor: The ego vehicle CARLA actor.
+        """
+        import carla as _carla  # noqa: PLC0415
+
+        def _apply(actor: "carla.Actor", speed_kmh: float) -> None:
+            if speed_kmh <= 0.0:
+                return
+            speed_ms = speed_kmh / 3.6
+            fwd = actor.get_transform().get_forward_vector()
+            actor.set_target_velocity(
+                _carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
+            )
+
+        for entity in self._entities:
+            if entity.actor is not None:
+                _apply(entity.actor, entity.initial_speed_kmh)
+
+        if ego_actor is not None:
+            _apply(ego_actor, self.ego_config.initial_speed_kmh)

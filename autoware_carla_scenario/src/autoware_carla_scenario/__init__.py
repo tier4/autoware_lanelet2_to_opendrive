@@ -3,6 +3,7 @@
 Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
+        EGO_ROLE_NAME,
         ScenarioRunner,
         CarlaScenarioFixture,
         CarlaServerManager,
@@ -36,6 +37,7 @@ Public API re-exported for convenience::
         find_nearest_traffic_light,
         frame_of,
         lanelet2_traffic_light_id_to_opendrive_controller_id,
+        find_actor_by_role_name,
         set_all_traffic_lights_state,
         set_group_traffic_light_state,
         # Entity
@@ -74,7 +76,9 @@ from .conditions import (
     StandstillCondition,
     StickyCondition,
     TimeoutCondition,
+    find_actor_by_role_name,
 )
+from .constants import EGO_ROLE_NAME
 from .coordinate import (
     CarlaWorldPose,
     CoordinateFrame,
@@ -83,6 +87,7 @@ from .coordinate import (
     MapManager,
     OpenDrivePose,
     frame_of,
+    snap_to_carla_road,
     to_carla_location,
     to_carla_world,
     to_lanelet2,
@@ -117,6 +122,7 @@ from .utils import (
 )
 
 __all__ = [
+    "EGO_ROLE_NAME",
     "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",
@@ -154,7 +160,9 @@ __all__ = [
     "to_opendrive",
     "find_nearest_traffic_light",
     "frame_of",
+    "snap_to_carla_road",
     "lanelet2_traffic_light_id_to_opendrive_controller_id",
+    "find_actor_by_role_name",
     "set_all_traffic_lights_state",
     "set_group_traffic_light_state",
     # Kinematics

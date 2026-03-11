@@ -1,6 +1,6 @@
-"""Example scenario: NPC vehicle passes through an intersection on expected roads.
+"""Example scenario: Ego vehicle passes through an intersection on expected roads.
 
-This scenario spawns an NPC vehicle near lanelet 242, sets all traffic lights
+This scenario spawns the ego vehicle on lanelet 242, sets all traffic lights
 to green, and verifies that the vehicle traverses the expected OpenDRIVE roads
 corresponding to lanelets 460 and 265.  Each road check uses a
 :class:`~autoware_carla_scenario.StickyCondition` so that the condition latches
@@ -22,22 +22,25 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+
 import carla
 
 from autoware_carla_scenario import (
+    EGO_ROLE_NAME,
     AndCondition,
     BaseScenario,
+    ComparisonRule,
     EgoConfig,
     EntityLanePositionCondition,
     Lanelet2Pose,
     ScenarioQueue,
     SpawnTransform,
+    SpeedCondition,
     StickyCondition,
     TimeoutCondition,
-    VehicleEntity,
-    VehicleEntityConfig,
+    find_actor_by_role_name,
     set_all_traffic_lights_state,
-    to_carla_world,
+    snap_to_carla_road,
     to_opendrive,
 )
 
@@ -47,19 +50,18 @@ logger = logging.getLogger(__name__)
 # Lanelet IDs that define the expected route
 # ---------------------------------------------------------------------------
 
-#: Lanelet where the NPC is spawned (used to derive a nearby spawn position).
+#: Lanelet where the ego is spawned.
 SPAWN_LANELET_ID: int = 242
 
-#: Ordered lanelets the NPC is expected to traverse through the intersection.
+#: Ordered lanelets the ego is expected to traverse through the intersection.
 EXPECTED_ROUTE_LANELET_IDS: list[int] = [460, 265]
 
-#: Timeout in seconds — if the NPC has not completed the route by this time the
+#: Timeout in seconds — if the ego has not completed the route by this time the
 #: scenario fails.
 SCENARIO_TIMEOUT_SECONDS: float = 5.0
 
-#: Minimum speed in m/s — if the NPC drops below this speed the scenario fails.
-#: 5 km/h ≈ 1.3889 m/s.
-MIN_SPEED_MPS: float = 5.0 / 3.6
+#: Minimum speed (km/h) — the scenario fails if the ego drops below this speed.
+MIN_SPEED_KMH: float = 5.0
 
 
 def _lanelet_start_road_id(lanelet_id: int) -> str:
@@ -70,13 +72,13 @@ def _lanelet_start_road_id(lanelet_id: int) -> str:
 
 
 class IntersectionPassingScenario(BaseScenario):
-    """Spawn an NPC near lanelet 242 and verify it crosses expected roads.
+    """Spawn the ego at lanelet 242 and verify it crosses expected roads.
 
     The scenario:
 
-    1. Converts lanelet 242 (s=0) to CARLA world coordinates for the spawn.
-    2. Spawns an NPC vehicle and enables autopilot after a short delay.
-    3. Sets every traffic light in the world to green so the NPC proceeds
+    1. Snaps a Lanelet2 pose to the CARLA road surface for the ego spawn.
+    2. Enables autopilot so the ego drives through the intersection.
+    3. Sets every traffic light in the world to green so the ego proceeds
        without stopping.
     4. Registers a pass condition: an :class:`AndCondition` of sticky
        :class:`EntityLanePositionCondition` instances, one per expected road.
@@ -85,56 +87,34 @@ class IntersectionPassingScenario(BaseScenario):
     Once all expected roads have been visited the scenario passes.
     """
 
-    NPC_ROLE_NAME: str = "npc_intersection"
-
     def __init__(self, ego_config: EgoConfig) -> None:
         super().__init__(ego_config)
-        self._npc: VehicleEntity | None = None
 
     def setup(self, world: carla.World) -> None:
-        """Spawn NPC, set lights to green, register route conditions."""
-        # --- Spawn NPC near lanelet 242 ---
-        spawn_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=0.0)
-        carla_pose = to_carla_world(spawn_pose)
+        """Snap ego spawn to CARLA road, set lights to green, register conditions."""
+        # --- Compute ego spawn from Lanelet2Pose ---
+        spawn_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=25.0)
+        snapped = snap_to_carla_road(spawn_pose, world)
 
-        # Find the nearest CARLA spawn point to the Lanelet2 target position.
-        # The exact Lanelet2 position may collide with static geometry (walls,
-        # kerbs, etc.), so we use the map's validated spawn points instead.
-        spawn_points = world.get_map().get_spawn_points()
-        target = carla.Location(x=carla_pose.x, y=carla_pose.y, z=0.0)
-        nearest_sp = min(
-            spawn_points,
-            key=lambda sp: target.distance(sp.location),
-        )
         logger.info(
-            "Target from lanelet %d: (%.1f, %.1f, %.1f) -> nearest spawn point: "
-            "(%.1f, %.1f, %.1f) yaw=%.1f  dist=%.1f m",
-            SPAWN_LANELET_ID,
-            carla_pose.x,
-            carla_pose.y,
-            carla_pose.z,
-            nearest_sp.location.x,
-            nearest_sp.location.y,
-            nearest_sp.location.z,
-            nearest_sp.rotation.yaw,
-            target.distance(nearest_sp.location),
+            "Snap Lanelet2Pose(lanelet_id=%d, s=%.1f, t=%.1f) to CARLA road: "
+            "(%.1f, %.1f, %.3f) yaw=%.1f",
+            spawn_pose.lanelet_id,
+            spawn_pose.s,
+            spawn_pose.t,
+            snapped.x,
+            snapped.y,
+            snapped.z,
+            snapped.yaw,
         )
 
-        npc_config = VehicleEntityConfig(
-            role_name=self.NPC_ROLE_NAME,
-            spawn_location=SpawnTransform(nearest_sp),
-            vehicle_type="vehicle.fuso.mitsubishi",
-            initial_speed_kmh=5.0,
-        )
-        self._npc = VehicleEntity(npc_config)
-        self._npc.spawn(world)
-        logger.info("NPC spawned near lanelet %d", SPAWN_LANELET_ID)
+        # Update ego_config so the framework spawns the ego at the snapped pose
+        self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
 
         # Use BaseScenario helpers for common post-tick patterns
-        npc_actor = lambda: self._npc.actor if self._npc else None  # noqa: E731
-        self.enable_autopilot_after(npc_actor)
-        self.follow_with_spectator(npc_actor)
-        self.log_actor_position(npc_actor, label="npc")
+        ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
+        self.follow_with_spectator(ego_actor)
+        self.log_actor_position(ego_actor, label="ego")
 
         # --- Set all traffic lights to green ---
         n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
@@ -154,7 +134,7 @@ class IntersectionPassingScenario(BaseScenario):
         sticky_conditions = [
             StickyCondition(
                 EntityLanePositionCondition(
-                    entity_name=self.NPC_ROLE_NAME,
+                    entity_name=EGO_ROLE_NAME,
                     road_id=rid,
                 )
             )
@@ -164,14 +144,14 @@ class IntersectionPassingScenario(BaseScenario):
         pass_condition = AndCondition(sticky_conditions)
         self.register_pass_condition(pass_condition)
 
-        # --- Fail if NPC speed drops below 5 km/h ---
-        # self.register_fail_condition(
-        #     SpeedCondition(
-        #         entity_name=self.NPC_ROLE_NAME,
-        #         value=MIN_SPEED_MPS,
-        #         rule=ComparisonRule.LESS_THAN,
-        #     )
-        # )
+        # --- Fail: speed drops below minimum ---
+        self.register_fail_condition(
+            SpeedCondition(
+                entity_name=EGO_ROLE_NAME,
+                value=MIN_SPEED_KMH / 3.6,
+                rule=ComparisonRule.LESS_THAN,
+            )
+        )
 
         # --- Fail-safe timeout ---
         self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))
@@ -218,11 +198,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--vehicle",
-        default="vehicle.fuso.mitsubishi",
+        default="vehicle.mini.cooper",
         help="Ego vehicle blueprint ID",
-    )
-    parser.add_argument(
-        "--spawn-index", type=int, default=0, help="Ego spawn point index"
     )
 
     args = parser.parse_args()
@@ -231,12 +208,14 @@ def main() -> None:
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
 
-    # Ego vehicle (required by framework but not the focus of this scenario)
+    # Ego spawn location is determined in setup() via snap_to_carla_road;
+    # provide a dummy transform that will be overwritten before ego.spawn().
     ego = EgoConfig(
         spawn_location=SpawnTransform(
-            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.5))
+            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
         ),
         vehicle_type=args.vehicle,
+        initial_speed_kmh=MIN_SPEED_KMH,
     )
 
     queue = ScenarioQueue(

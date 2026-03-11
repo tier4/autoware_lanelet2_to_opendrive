@@ -53,7 +53,7 @@ _INTEGRATION_EGO = EgoConfig(
     spawn_location=SpawnTransform(
         _carla.Transform(_carla.Location(x=0.0, y=0.0, z=0.0))
     ),
-    vehicle_type="vehicle.fuso.mitsubishi",
+    vehicle_type="vehicle.mini.cooper",
 )
 
 _queue = ScenarioQueue(map_name="Town10HD_Opt")

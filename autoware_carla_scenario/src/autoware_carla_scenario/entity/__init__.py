@@ -14,11 +14,11 @@ Usage::
     config = VehicleEntityConfig(
         role_name="npc_vehicle_1",
         spawn_location=SpawnPointIndex(5),
-        vehicle_type="vehicle.fuso.mitsubishi",
+        vehicle_type="vehicle.mini.cooper",
     )
     npc = VehicleEntity(config)
     actor = npc.spawn(world)
-    # Use BaseScenario.enable_autopilot_after() to enable autopilot safely
+    # Autopilot is enabled automatically by ScenarioRunner after warm-up ticks
 """
 
 from ._spawn import SpawnLocation, SpawnPointIndex, SpawnTransform

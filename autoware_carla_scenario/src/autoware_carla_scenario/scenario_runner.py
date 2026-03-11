@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -11,8 +12,11 @@ from typing import Optional
 
 from .conditions import ScenarioResult, TimeoutCondition
 from .entity import EgoVehicle
+from .entity import vehicle_entity as _vehicle_entity_module
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
+
+logger = logging.getLogger(__name__)
 
 
 def _map_name_to_env_var(map_name: str) -> str:
@@ -195,7 +199,35 @@ class ScenarioRunner:
 
         try:
             scenario.setup(world)
-            ego.spawn(world, scenario.ego_config)
+            ego_actor = ego.spawn(world, scenario.ego_config)
+
+            # Warm-up ticks: let physics and TrafficManager stabilise
+            # before the main loop begins.
+            from tqdm import tqdm  # noqa: PLC0415
+
+            for _ in tqdm(
+                range(scenario.STABILIZE_TICKS),
+                desc="Warm-up",
+                unit="tick",
+            ):
+                world.tick()
+
+            # Enable autopilot on every vehicle (all NPCs use TrafficManager)
+            n_autopilot = 0
+            for actor in world.get_actors().filter("vehicle.*"):
+                actor.set_autopilot(True)
+                n_autopilot += 1
+            if n_autopilot:
+                logger.info(
+                    "Autopilot enabled on %d vehicle(s) after %d warm-up ticks",
+                    n_autopilot,
+                    scenario.STABILIZE_TICKS,
+                )
+
+            # Apply initial speeds after warm-up stabilisation
+            scenario.set_initial_speed(ego_actor)
+
+            _vehicle_entity_module._warmup_done = True
 
             # Start native CARLA recorder
             scenario_name = type(scenario).__name__
@@ -227,7 +259,11 @@ class ScenarioRunner:
                 for condition in scenario._pass_conditions:
                     check = condition.check(world, elapsed)
                     if check is not None:
-                        result = check
+                        result = ScenarioResult(
+                            passed=True,
+                            message=check.message,
+                            elapsed_seconds=check.elapsed_seconds,
+                        )
                         break
 
                 if result is not None:
@@ -237,7 +273,11 @@ class ScenarioRunner:
                 for condition in scenario._fail_conditions:
                     check = condition.check(world, elapsed)
                     if check is not None:
-                        result = check
+                        result = ScenarioResult(
+                            passed=False,
+                            message=check.message,
+                            elapsed_seconds=check.elapsed_seconds,
+                        )
                         break
 
                 if result is not None:
@@ -253,6 +293,7 @@ class ScenarioRunner:
                 )
 
         finally:
+            _vehicle_entity_module._warmup_done = False
             if recording_started:
                 self._client.stop_recorder()
             ego.destroy()
