@@ -52,8 +52,7 @@ class ActorExistenceCondition(BaseCondition):
             return None
 
         msg = (
-            f"Actor '{self._entity_name}' not found in the world "
-            f"at {elapsed:.2f}s"
+            f"Actor '{self._entity_name}' not found in the world " f"at {elapsed:.2f}s"
         )
         logger.error(msg)
 
