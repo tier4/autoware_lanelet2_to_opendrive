@@ -27,11 +27,13 @@ import carla
 from autoware_carla_scenario import (
     AndCondition,
     BaseScenario,
+    ComparisonRule,
     EgoConfig,
     EntityLanePositionCondition,
     Lanelet2Pose,
     ScenarioQueue,
     SpawnTransform,
+    SpeedCondition,
     StickyCondition,
     TimeoutCondition,
     VehicleEntity,
@@ -56,6 +58,10 @@ EXPECTED_ROUTE_LANELET_IDS: list[int] = [460, 265]
 #: Timeout in seconds — if the NPC has not completed the route by this time the
 #: scenario fails.
 SCENARIO_TIMEOUT_SECONDS: float = 5.0
+
+#: Minimum speed in m/s — if the NPC drops below this speed the scenario fails.
+#: 5 km/h ≈ 1.3889 m/s.
+MIN_SPEED_MPS: float = 5.0 / 3.6
 
 
 def _lanelet_start_road_id(lanelet_id: int) -> str:
@@ -159,6 +165,15 @@ class IntersectionPassingScenario(BaseScenario):
 
         pass_condition = AndCondition(sticky_conditions)
         self.register_pass_condition(pass_condition)
+
+        # --- Fail if NPC speed drops below 5 km/h ---
+        self.register_fail_condition(
+            SpeedCondition(
+                entity_name=self.NPC_ROLE_NAME,
+                value=MIN_SPEED_MPS,
+                rule=ComparisonRule.LESS_THAN,
+            )
+        )
 
         # --- Fail-safe timeout ---
         self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))
