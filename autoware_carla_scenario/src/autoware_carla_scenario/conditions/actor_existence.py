@@ -1,4 +1,4 @@
-"""Fail condition that triggers when a named actor no longer exists."""
+"""Fail condition that triggers when a named actor does not exist."""
 
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 class ActorExistenceCondition(BaseCondition):
-    """Fail condition that triggers when a named actor disappears from the world.
+    """Fail condition that triggers whenever a named actor is absent from the world.
 
     On every call to :meth:`check`, the condition searches for an actor with
-    the given ``role_name``.  If the actor is **not found**, the condition
-    returns a failure result — the actor has been destroyed (e.g. fell through
-    the map, collision, or server-side cleanup).
+    the given ``role_name``.  If the actor is **not found** — whether it has
+    never spawned or has since been destroyed — the condition returns a failure
+    result immediately.
 
     This condition is typically registered as a **fail condition** so that the
     scenario terminates immediately when the ego (or any critical actor)
-    despawns unexpectedly.
+    is missing.
 
     Args:
         entity_name: The ``role_name`` attribute of the actor to monitor.
@@ -31,14 +31,12 @@ class ActorExistenceCondition(BaseCondition):
 
     def __init__(self, entity_name: str) -> None:
         self._entity_name = entity_name
-        self._was_alive = False
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
-        """Return a fail result if the actor no longer exists.
+        """Return a fail result if the actor does not exist.
 
-        The condition only triggers after the actor has been seen at least
-        once (i.e. it was alive and then disappeared).  This avoids a false
-        positive during the brief window before the actor is first spawned.
+        The condition triggers immediately whenever the actor cannot be found,
+        including before it has ever been spawned.
 
         Args:
             world: The CARLA world instance.
@@ -46,20 +44,15 @@ class ActorExistenceCondition(BaseCondition):
 
         Returns:
             :class:`ScenarioResult` with ``passed=False`` if the actor
-            previously existed but is now gone, ``None`` otherwise.
+            is not found, ``None`` otherwise.
         """
         actor = find_actor_by_role_name(world, self._entity_name)
 
         if actor is not None:
-            self._was_alive = True
-            return None
-
-        if not self._was_alive:
-            # Actor hasn't spawned yet — don't trigger
             return None
 
         msg = (
-            f"Actor '{self._entity_name}' disappeared from the world "
+            f"Actor '{self._entity_name}' not found in the world "
             f"at {elapsed:.2f}s"
         )
         logger.error(msg)
