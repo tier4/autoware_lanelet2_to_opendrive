@@ -61,6 +61,7 @@ class BaseScenario(ABC):
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._pass_conditions: List[BaseCondition] = []
         self._fail_conditions: List[BaseCondition] = []
+        self._warmup_done: bool = False
 
     # ------------------------------------------------------------------
     # Abstract interface – must be implemented by subclasses

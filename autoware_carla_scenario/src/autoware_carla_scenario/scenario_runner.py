@@ -12,6 +12,7 @@ from typing import Optional
 
 from .conditions import ScenarioResult, TimeoutCondition
 from .entity import EgoVehicle
+from .entity import vehicle_entity as _vehicle_entity_module
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
 
@@ -217,6 +218,9 @@ class ScenarioRunner:
                     scenario.STABILIZE_TICKS,
                 )
 
+            scenario._warmup_done = True
+            _vehicle_entity_module._warmup_done = True
+
             # Start native CARLA recorder
             scenario_name = type(scenario).__name__
             output_path = self.output_dir / f"{scenario_name}.log"
@@ -273,6 +277,7 @@ class ScenarioRunner:
                 )
 
         finally:
+            _vehicle_entity_module._warmup_done = False
             if recording_started:
                 self._client.stop_recorder()
             ego.destroy()

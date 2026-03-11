@@ -10,6 +10,11 @@ if TYPE_CHECKING:
 
 from ._spawn import SpawnLocation, spawn_vehicle_actor
 
+#: Module-level flag set by :class:`~autoware_carla_scenario.scenario_runner.ScenarioRunner`
+#: after warm-up ticks complete.  When ``True``, :meth:`VehicleEntity.spawn`
+#: raises :class:`RuntimeError` to prevent spawning NPCs too late.
+_warmup_done: bool = False
+
 
 @dataclass
 class VehicleEntityConfig:
@@ -63,6 +68,9 @@ class VehicleEntity:
     def spawn(self, world: "carla.World") -> "carla.Actor":
         """Spawn the NPC vehicle in the CARLA world.
 
+        Must be called during :meth:`BaseScenario.setup`, **before** the
+        warm-up ticks run.  Spawning after warm-up raises :class:`RuntimeError`.
+
         Args:
             world: The CARLA world instance.
 
@@ -70,11 +78,18 @@ class VehicleEntity:
             The spawned vehicle actor.
 
         Raises:
+            RuntimeError: If called after the warm-up phase has completed.
             ValueError: If the vehicle blueprint is not available or the
                 spawn index is out of range.
             RuntimeError: If the vehicle could not be spawned at the
                 requested location.
         """
+        if _warmup_done:
+            raise RuntimeError(
+                "CARLAのNPCはSpawnしてから安定するまで5-tickほど必要です。"
+                "Spawn操作はsetup関数に記述してwarm-up前に行ってください"
+            )
+
         import carla as _carla
 
         self._vehicle = spawn_vehicle_actor(
