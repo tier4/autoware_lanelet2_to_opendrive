@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional
 from .conditions import BaseCondition
 from .constants import EGO_ROLE_NAME
 from .entity._spawn import SpawnLocation
-from .entity.vehicle_entity import VehicleEntityConfig
+from .entity.vehicle_entity import VehicleEntity, VehicleEntityConfig
 
 if TYPE_CHECKING:
     import carla
@@ -67,6 +67,7 @@ class BaseScenario(ABC):
         """
         self.ego_config = ego_config
         self.random_seed = random_seed
+        self._entities: List[VehicleEntity] = []
         self._pre_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._pass_conditions: List[BaseCondition] = []
@@ -114,6 +115,18 @@ class BaseScenario(ABC):
             cb: Callable that receives the CARLA world as its argument.
         """
         self._post_tick_callbacks.append(cb)
+
+    def register_entity(self, entity: VehicleEntity) -> None:
+        """Register a spawned NPC vehicle entity.
+
+        Registered entities will have their initial speed applied after the
+        warm-up phase completes via :meth:`set_initial_speed`.
+
+        Args:
+            entity: A :class:`VehicleEntity` that has been spawned in
+                :meth:`setup`.
+        """
+        self._entities.append(entity)
 
     def register_pass_condition(self, condition: BaseCondition) -> None:
         """Register a condition that marks the scenario as *passed*.
@@ -219,3 +232,34 @@ class BaseScenario(ABC):
             )
 
         self.register_post_tick(_log)
+
+    # ------------------------------------------------------------------
+    # Initial speed (called by ScenarioRunner after warm-up)
+    # ------------------------------------------------------------------
+
+    def set_initial_speed(self, ego_actor: "carla.Actor") -> None:
+        """Apply initial speed to all registered entities and the ego vehicle.
+
+        This method is called by :class:`ScenarioRunner` **after** the warm-up
+        ticks complete so that vehicles remain stationary during stabilisation.
+
+        Args:
+            ego_actor: The ego vehicle CARLA actor.
+        """
+        import carla as _carla  # noqa: PLC0415
+
+        def _apply(actor: "carla.Actor", speed_kmh: float) -> None:
+            if speed_kmh <= 0.0:
+                return
+            speed_ms = speed_kmh / 3.6
+            fwd = actor.get_transform().get_forward_vector()
+            actor.set_target_velocity(
+                _carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
+            )
+
+        for entity in self._entities:
+            if entity.actor is not None:
+                _apply(entity.actor, entity._config.initial_speed_kmh)
+
+        if ego_actor is not None:
+            _apply(ego_actor, self.ego_config.initial_speed_kmh)

@@ -199,11 +199,17 @@ class ScenarioRunner:
 
         try:
             scenario.setup(world)
-            ego.spawn(world, scenario.ego_config)
+            ego_actor = ego.spawn(world, scenario.ego_config)
 
             # Warm-up ticks: let physics and TrafficManager stabilise
             # before the main loop begins.
-            for _ in range(scenario.STABILIZE_TICKS):
+            from tqdm import tqdm  # noqa: PLC0415
+
+            for _ in tqdm(
+                range(scenario.STABILIZE_TICKS),
+                desc="Warm-up",
+                unit="tick",
+            ):
                 world.tick()
 
             # Enable autopilot on every vehicle (all NPCs use TrafficManager)
@@ -217,6 +223,9 @@ class ScenarioRunner:
                     n_autopilot,
                     scenario.STABILIZE_TICKS,
                 )
+
+            # Apply initial speeds after warm-up stabilisation
+            scenario.set_initial_speed(ego_actor)
 
             scenario._warmup_done = True
             _vehicle_entity_module._warmup_done = True
