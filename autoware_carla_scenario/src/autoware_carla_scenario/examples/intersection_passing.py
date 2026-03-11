@@ -109,7 +109,6 @@ class IntersectionPassingScenario(BaseScenario):
 
         # Use BaseScenario helpers for common post-tick patterns
         ego_actor = lambda: self._get_ego_actor(world)  # noqa: E731
-        self.enable_autopilot_after(ego_actor)
         self.follow_with_spectator(ego_actor)
         self.log_actor_position(ego_actor, label="ego")
 

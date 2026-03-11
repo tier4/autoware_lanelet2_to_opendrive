@@ -40,6 +40,10 @@ class BaseScenario(ABC):
     #: Override per-instance via ``random_seed`` keyword argument.
     DEFAULT_RANDOM_SEED: int = 0
 
+    #: Number of warm-up ticks after spawn to stabilise physics and
+    #: TrafficManager before the main tick loop begins.
+    STABILIZE_TICKS: int = 5
+
     def __init__(
         self, ego_config: EgoConfig, *, random_seed: int = DEFAULT_RANDOM_SEED
     ) -> None:
@@ -160,37 +164,6 @@ class BaseScenario(ABC):
             world.get_spectator().set_transform(_carla.Transform(loc, rot))
 
         self.register_post_tick(_follow)
-
-    def enable_autopilot_after(
-        self,
-        actor_getter: Callable[[], Optional["carla.Actor"]],
-        *,
-        delay_ticks: int = 5,
-    ) -> None:
-        """Register a post-tick callback that enables autopilot after a delay.
-
-        This gives CARLA time to stabilise after map load / actor spawn
-        before the TrafficManager builds its InMemoryMap (which blocks).
-
-        Args:
-            actor_getter: Callable returning the vehicle actor, or ``None``
-                if the actor is not (yet) available.
-            delay_ticks: Number of simulation ticks to wait.
-        """
-        state = {"count": 0, "enabled": False}
-
-        def _enable(world: "carla.World") -> None:
-            if state["enabled"]:
-                return
-            state["count"] += 1
-            if state["count"] >= delay_ticks:
-                actor = actor_getter()
-                if actor is not None:
-                    actor.set_autopilot(True)
-                    state["enabled"] = True
-                    logger.info("Autopilot enabled after %d ticks", state["count"])
-
-        self.register_post_tick(_enable)
 
     def log_actor_position(
         self,

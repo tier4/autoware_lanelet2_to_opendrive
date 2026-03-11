@@ -18,7 +18,7 @@ Usage::
     )
     npc = VehicleEntity(config)
     actor = npc.spawn(world)
-    # Use BaseScenario.enable_autopilot_after() to enable autopilot safely
+    # Autopilot is enabled automatically by ScenarioRunner after warm-up ticks
 """
 
 from ._spawn import SpawnLocation, SpawnPointIndex, SpawnTransform

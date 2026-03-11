@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -13,6 +14,8 @@ from .conditions import ScenarioResult, TimeoutCondition
 from .entity import EgoVehicle
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
+
+logger = logging.getLogger(__name__)
 
 
 def _map_name_to_env_var(map_name: str) -> str:
@@ -196,6 +199,23 @@ class ScenarioRunner:
         try:
             scenario.setup(world)
             ego.spawn(world, scenario.ego_config)
+
+            # Warm-up ticks: let physics and TrafficManager stabilise
+            # before the main loop begins.
+            for _ in range(scenario.STABILIZE_TICKS):
+                world.tick()
+
+            # Enable autopilot on every vehicle (all NPCs use TrafficManager)
+            n_autopilot = 0
+            for actor in world.get_actors().filter("vehicle.*"):
+                actor.set_autopilot(True)
+                n_autopilot += 1
+            if n_autopilot:
+                logger.info(
+                    "Autopilot enabled on %d vehicle(s) after %d warm-up ticks",
+                    n_autopilot,
+                    scenario.STABILIZE_TICKS,
+                )
 
             # Start native CARLA recorder
             scenario_name = type(scenario).__name__
