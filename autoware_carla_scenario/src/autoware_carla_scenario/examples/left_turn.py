@@ -54,15 +54,15 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-#: Lanelet where the ego is spawned.  Lanelet 244 approaches an intersection
-#: with a left turn option (lanelet 242 only goes straight).
-SPAWN_LANELET_ID: int = 244
+#: Lanelet where the ego is spawned.  Lanelet 216 approaches an intersection
+#: with a left turn option (lanelet 403 only goes straight).
+SPAWN_LANELET_ID: int = 216
 
 #: Lanelets the ego is expected to traverse **after** the left turn.
 #: Adjust these IDs based on the target map.  The scenario converts each
 #: lanelet to its OpenDRIVE road ID and passes the check when the ego has
 #: visited every listed road.
-POST_TURN_LANELET_IDS: list[int] = [460]
+POST_TURN_LANELET_IDS: list[int] = [402, 179]
 
 #: Timeout in seconds.  Left turns require more time than going straight
 #: because the vehicle decelerates, turns, and re-accelerates.
@@ -104,15 +104,21 @@ class LeftTurnScenario(BaseScenario):
 
     def setup(self, world: carla.World) -> None:
         """Snap ego spawn, set lights green, register TurnAction and conditions."""
-        # --- Ego spawn from Lanelet2Pose ---
-        spawn_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=25.0)
-        snapped = snap_to_carla_road(spawn_pose, world)
+        # --- Ego spawn via OpenDRIVE pose ---
+        # Convert Lanelet2 → OpenDRIVE first, then snap via
+        # get_waypoint_xodr for accurate CARLA surface position (no
+        # spawn-point z approximation needed).
+        ll2_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=25.0)
+        od_pose = to_opendrive(ll2_pose)
+        snapped = snap_to_carla_road(od_pose, world)
 
         logger.info(
-            "Snap Lanelet2Pose(lanelet_id=%d, s=%.1f) -> CARLA "
-            "(%.1f, %.1f, %.3f) yaw=%.1f",
-            spawn_pose.lanelet_id,
-            spawn_pose.s,
+            "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
+            "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
+            SPAWN_LANELET_ID,
+            od_pose.road_id,
+            od_pose.lane_id,
+            od_pose.s,
             snapped.x,
             snapped.y,
             snapped.z,
@@ -150,6 +156,7 @@ class LeftTurnScenario(BaseScenario):
             if rid not in seen:
                 seen.add(rid)
                 route_road_ids.append(rid)
+        logger.info("Pass condition: ego visits roads %s", route_road_ids)
 
         sticky_conditions = [
             StickyCondition(
