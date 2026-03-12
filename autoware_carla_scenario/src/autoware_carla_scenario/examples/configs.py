@@ -120,9 +120,6 @@ class LaneChangeConfig:
     #: time to reach cruising speed.
     trigger_delay_seconds: float = 1.0
 
-    #: Lanelet ID of the target lane (the lane the ego should end up in).
-    target_lanelet_id: int = 0
-
     #: Fail-safe timeout in seconds.
     timeout_seconds: float = 10.0
 
