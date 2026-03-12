@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum, auto
 
 
@@ -51,3 +52,24 @@ def compare(
     if rule == ComparisonRule.LESS_THAN_OR_EQUAL:
         return actual <= value
     raise ValueError(f"Unknown comparison rule: {rule}")
+
+
+@dataclass(frozen=True)
+class ScalarComparisonRule:
+    """A comparison rule applied to a named scalar field (e.g. 's', 't').
+
+    Attributes:
+        field: Name of the scalar to compare ('s' or 't').
+        rule: The comparison operator.
+        value: The threshold value.
+        tolerance: Tolerance for EQUAL_TO comparisons.
+    """
+
+    field: str
+    rule: ComparisonRule
+    value: float
+    tolerance: float = 1e-6
+
+    def satisfied(self, actual: float) -> bool:
+        """Return True if *actual* satisfies this rule."""
+        return compare(actual, self.rule, self.value, self.tolerance)
