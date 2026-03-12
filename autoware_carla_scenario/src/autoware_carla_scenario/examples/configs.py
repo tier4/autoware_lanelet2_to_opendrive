@@ -107,6 +107,31 @@ class TrafficLightComplianceConfig:
     merging_time_seconds: float = 0.5
 
 
+@dataclass
+class TemporaryStopConfig:
+    """Parameters for the temporary-stop scenario."""
+
+    name: str = "temporary_stop"
+
+    #: Lanelet ID where the stop is expected.
+    stop_lanelet_id: int = 285
+
+    #: Longitudinal offset (m) along the lanelet centerline for the stop position.
+    stop_s: float = 0.0
+
+    #: Arc-length margin (m) around the stop position.
+    s_margin: float = 5.0
+
+    #: Maximum speed (m/s) considered as stopped.
+    speed_threshold: float = 0.1
+
+    #: Minimum consecutive seconds the entity must remain stopped.
+    stop_duration: float = 1.0
+
+    #: Fail-safe timeout in seconds.
+    timeout_seconds: float = 30.0
+
+
 # ---------------------------------------------------------------------------
 # Top-level Hydra config
 # ---------------------------------------------------------------------------
@@ -123,6 +148,6 @@ class ScenarioRunConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     map: MapConfig = field(default_factory=MapConfig)
     ego: EgoVehicleConfig = field(default_factory=EgoVehicleConfig)
-    scenario: IntersectionPassingConfig | TrafficLightComplianceConfig = field(
-        default_factory=IntersectionPassingConfig
-    )
+    scenario: (
+        IntersectionPassingConfig | TrafficLightComplianceConfig | TemporaryStopConfig
+    ) = field(default_factory=IntersectionPassingConfig)

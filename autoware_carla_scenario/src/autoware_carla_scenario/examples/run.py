@@ -51,9 +51,11 @@ from autoware_carla_scenario.conditions import ScenarioResult
 
 from .configs import (
     IntersectionPassingConfig,
+    TemporaryStopConfig,
     TrafficLightComplianceConfig,
 )
 from .intersection_passing import IntersectionPassingScenario
+from .temporary_stop import TemporaryStopScenario
 from .traffic_light_compliance import TrafficLightComplianceScenario
 
 if TYPE_CHECKING:
@@ -274,6 +276,14 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
         return ego, TrafficLightComplianceScenario(
             ego,
             config=TrafficLightComplianceConfig(**scenario_dict),
+            spawn_pose=spawn_pose,
+        )
+
+    # --- temporary_stop ---
+    if scenario_name == "temporary_stop":
+        return ego, TemporaryStopScenario(
+            ego,
+            config=TemporaryStopConfig(**scenario_dict),
             spawn_pose=spawn_pose,
         )
 
