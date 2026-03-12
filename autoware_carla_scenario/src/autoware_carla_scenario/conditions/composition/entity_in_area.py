@@ -72,7 +72,6 @@ class EntityInAreaCondition(CompositionCondition):
         if len(polygon) < 3:
             raise ValueError("polygon must have at least 3 vertices")
         super().__init__(entity_name=entity_name)
-        self._entity_name = entity_name
         self._polygon: Sequence[AnyPose] = polygon
         self._include_boundary = include_boundary
 
@@ -106,6 +105,7 @@ class EntityInAreaCondition(CompositionCondition):
         """
         carla_polygon = self._resolve_polygon()
 
+        assert self._entity_name is not None
         entity = find_actor_by_role_name(world, self._entity_name)
         if entity is None:
             return None

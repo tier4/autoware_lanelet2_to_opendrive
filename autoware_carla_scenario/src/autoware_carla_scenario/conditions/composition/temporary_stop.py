@@ -97,7 +97,6 @@ class TemporaryStopCondition(CompositionCondition):
             child = OrCondition(persistent_conditions)
 
         super().__init__(child=child, entity_name=entity_name)
-        self._entity_name = entity_name
 
     @staticmethod
     def _to_od(pose: AnyPose) -> OpenDrivePose:

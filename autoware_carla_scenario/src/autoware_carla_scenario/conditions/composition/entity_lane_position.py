@@ -61,7 +61,6 @@ class EntityLanePositionCondition(CompositionCondition):
         rules: Optional[list[ScalarComparisonRule]] = None,
     ) -> None:
         super().__init__(entity_name=entity_name)
-        self._entity_name = entity_name
         self._road_id = road_id
         self._lane_id = lane_id
         self._rules: list[ScalarComparisonRule] = rules or []
@@ -86,6 +85,7 @@ class EntityLanePositionCondition(CompositionCondition):
             :class:`ScenarioResult` with ``passed=True`` if the entity is on the
             specified road and lane and all rules are satisfied, ``None`` otherwise.
         """
+        assert self._entity_name is not None
         entity = find_actor_by_role_name(world, self._entity_name)
         if entity is None:
             return None
