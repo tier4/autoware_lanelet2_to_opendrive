@@ -55,9 +55,6 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-#: Lanelet where the ego is spawned.
-SPAWN_LANELET_ID: int = 242
-
 #: Delay in seconds before traffic lights switch from red to green.
 LIGHT_SWITCH_DELAY_SECONDS: float = 3.0
 
@@ -87,16 +84,21 @@ class TrafficLightComplianceScenario(BaseScenario):
         self,
         ego_config: EgoConfig,
         config: TrafficLightComplianceConfig | None = None,
+        spawn_pose: Lanelet2Pose | None = None,
     ) -> None:
         super().__init__(ego_config)
         self._config = config or TrafficLightComplianceConfig()
+        self._spawn_pose = spawn_pose
 
     def setup(self) -> None:
         """Snap ego spawn, set lights to red, register conditions."""
         world = self.world
         cfg = self._config
         # --- Compute ego spawn from Lanelet2Pose ---
-        spawn_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)
+        if self._spawn_pose is None:
+            msg = "spawn_pose is required for TrafficLightComplianceScenario"
+            raise ValueError(msg)
+        spawn_pose = self._spawn_pose
         snapped = snap_to_carla_road(spawn_pose, world)
 
         logger.info(

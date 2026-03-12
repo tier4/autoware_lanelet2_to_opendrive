@@ -17,3 +17,5 @@ map:
 ego:
   vehicle_type: vehicle.mini.cooper
   initial_speed_kmh: 0.0
+  spawn_lanelet_id: 242
+  spawn_s: 25.0

@@ -1,11 +1,11 @@
 # @package _global_
 scenario:
   name: intersection_passing
-  spawn_lanelet_id: 203
-  spawn_s: 25.0
   expected_route_lanelet_ids: [411, 207]
   timeout_seconds: 10.0
   turn_direction: left
 
 ego:
   initial_speed_kmh: 20.0
+  spawn_lanelet_id: 203
+  spawn_s: 25.0
