@@ -91,8 +91,9 @@ class IntersectionPassingScenario(BaseScenario):
         super().__init__(ego_config)
         self._config = config or IntersectionPassingConfig()
 
-    def setup(self, world: carla.World) -> None:
+    def setup(self) -> None:
         """Snap ego spawn to CARLA road, set lights to green, register conditions."""
+        world = self.world
         cfg = self._config
         # --- Compute ego spawn from Lanelet2Pose ---
         spawn_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)

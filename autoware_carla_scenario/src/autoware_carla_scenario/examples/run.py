@@ -91,8 +91,6 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     if scenario_name == "left_turn":
         return ego, LeftTurnScenario(
             ego,
-            host=cfg.server.host,
-            port=cfg.server.port,
             config=LeftTurnConfig(**scenario_dict),
         )
 

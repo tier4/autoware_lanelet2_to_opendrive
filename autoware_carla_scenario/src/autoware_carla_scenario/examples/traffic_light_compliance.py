@@ -90,8 +90,9 @@ class TrafficLightComplianceScenario(BaseScenario):
         super().__init__(ego_config)
         self._config = config or TrafficLightComplianceConfig()
 
-    def setup(self, world: carla.World) -> None:
+    def setup(self) -> None:
         """Snap ego spawn, set lights to red, register conditions."""
+        world = self.world
         cfg = self._config
         # --- Compute ego spawn from Lanelet2Pose ---
         spawn_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)

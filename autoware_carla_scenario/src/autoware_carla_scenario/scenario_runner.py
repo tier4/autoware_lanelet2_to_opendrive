@@ -258,7 +258,8 @@ class ScenarioRunner:
         try:
             scenario_name = type(scenario).__name__
             logger.info("[%s] === Setup start ===", scenario_name)
-            scenario.setup(world)
+            scenario.set_client(self._client)
+            scenario.setup()
             logger.info("[%s] Spawning ego vehicle ...", scenario_name)
             ego_actor = ego.spawn(world, scenario.ego_config)
             logger.info(

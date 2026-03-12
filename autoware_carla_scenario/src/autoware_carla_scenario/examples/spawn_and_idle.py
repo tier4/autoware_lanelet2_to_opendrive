@@ -27,17 +27,12 @@ With pytest — see ``test/carla_scenario/test_examples.py``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from autoware_carla_scenario import (
     BaseScenario,
     EgoConfig,
 )
 
 from .configs import SpawnAndIdleConfig
-
-if TYPE_CHECKING:
-    import carla
 
 
 class SpawnAndIdleScenario(BaseScenario):
@@ -55,7 +50,7 @@ class SpawnAndIdleScenario(BaseScenario):
     Use this as a template when writing your own scenario::
 
         class MyScenario(BaseScenario):
-            def setup(self, world: carla.World) -> None:
+            def setup(self) -> None:
                 # Spawn NPCs, set weather, register callbacks, …
                 ...
 
@@ -75,7 +70,7 @@ class SpawnAndIdleScenario(BaseScenario):
         self._config = config or SpawnAndIdleConfig()
         self._ticks: int = 0
 
-    def setup(self, world: "carla.World") -> None:
+    def setup(self) -> None:
         """No additional actors needed for this minimal scenario."""
 
     def is_done(self) -> bool:

@@ -94,16 +94,14 @@ class LeftTurnScenario(BaseScenario):
     def __init__(
         self,
         ego_config: EgoConfig,
-        host: str = "localhost",
-        port: int = 2000,
         config: LeftTurnConfig | None = None,
     ) -> None:
         super().__init__(ego_config)
         self._config = config or LeftTurnConfig()
-        self._carla_client = carla.Client(host, port)
 
-    def setup(self, world: carla.World) -> None:
+    def setup(self) -> None:
         """Snap ego spawn, set lights green, register TurnAction and conditions."""
+        world = self.world
         cfg = self._config
         # --- Ego spawn via OpenDRIVE pose ---
         # Convert Lanelet2 → OpenDRIVE first, then snap via
@@ -143,7 +141,7 @@ class LeftTurnScenario(BaseScenario):
         turn_action = TurnAction(
             entity_name=EGO_ROLE_NAME,
             direction=TurnDirection.LEFT,
-            client=self._carla_client,
+            client=self.client,
             timing=TickTiming.PRE_TICK,
         )
         self.register_pre_tick(turn_action)
