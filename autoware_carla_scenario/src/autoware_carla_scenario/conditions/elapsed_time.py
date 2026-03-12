@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 from .base import BaseCondition, ScenarioResult
-from .comparison import ComparisonRule, compare
+from .comparison import ComparisonRule, ScalarComparisonRule
 
 if TYPE_CHECKING:
     import carla
@@ -40,9 +40,14 @@ class ElapsedTimeCondition(BaseCondition):
             raise ValueError("duration_seconds must be positive")
         if tolerance < 0:
             raise ValueError("tolerance must be non-negative")
-        self.duration_seconds = duration_seconds
-        self._rule = rule
-        self._tolerance = tolerance
+        self._comparison = ScalarComparisonRule(
+            field="elapsed", rule=rule, value=duration_seconds, tolerance=tolerance
+        )
+
+    @property
+    def duration_seconds(self) -> float:
+        """The time threshold in seconds."""
+        return self._comparison.value
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a success result if the elapsed time satisfies the rule.
@@ -54,8 +59,8 @@ class ElapsedTimeCondition(BaseCondition):
         Returns:
             ScenarioResult with passed=True if the condition is met, None otherwise.
         """
-        if compare(elapsed, self._rule, self.duration_seconds, self._tolerance):
-            rule_text = self._rule.name.lower().replace("_", " ")
+        if self._comparison.satisfied(elapsed):
+            rule_text = self._comparison.rule.name.lower().replace("_", " ")
             return ScenarioResult(
                 passed=True,
                 message=(

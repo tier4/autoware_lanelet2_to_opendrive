@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 
 from ..kinematics import Vector3
 from .base import BaseCondition, ScenarioResult
-from .comparison import ComparisonRule, compare
+from .comparison import ComparisonRule, ScalarComparisonRule
 
 if TYPE_CHECKING:
     import carla
@@ -103,12 +103,12 @@ class SpeedCondition(BaseCondition):
                 "reference_entity_name is required " "when coordinate_system is ENTITY"
             )
         self._entity_name = entity_name
-        self._value = value
-        self._rule = rule
+        self._comparison = ScalarComparisonRule(
+            field="speed", rule=rule, value=value, tolerance=tolerance
+        )
         self._direction = direction
         self._coordinate_system = coordinate_system
         self._reference_entity_name = reference_entity_name
-        self._tolerance = tolerance
 
     def _extract_speed_component(
         self,
@@ -161,10 +161,6 @@ class SpeedCondition(BaseCondition):
         left_unit = Vector3(fwd_unit.y, -fwd_unit.x, 0.0)
         return vel.dot(left_unit)
 
-    def _compare(self, actual: float) -> bool:
-        """Return ``True`` if *actual* satisfies the configured rule."""
-        return compare(actual, self._rule, self._value, self._tolerance)
-
     def check(self, world: carla.World, elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the entity's speed satisfies the rule.
 
@@ -185,15 +181,15 @@ class SpeedCondition(BaseCondition):
         if speed_component is None:
             return None
 
-        if self._compare(speed_component):
-            rule_text = self._rule.name.lower().replace("_", " ")
+        if self._comparison.satisfied(speed_component):
+            rule_text = self._comparison.rule.name.lower().replace("_", " ")
             return ScenarioResult(
                 passed=True,
                 message=(
                     f"Entity '{self._entity_name}' speed"
                     f" {self._direction.name.lower()}"
                     f" ({speed_component:.2f} m/s)"
-                    f" {rule_text} {self._value:.2f} m/s"
+                    f" {rule_text} {self._comparison.value:.2f} m/s"
                 ),
                 elapsed_seconds=elapsed,
             )

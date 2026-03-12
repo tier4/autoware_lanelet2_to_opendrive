@@ -4,7 +4,7 @@ from .actor_existence import ActorExistenceCondition
 from .always_true import AlwaysTrueCondition
 from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 from .collision import CollisionCondition
-from .comparison import ComparisonRule
+from .comparison import ComparisonRule, ScalarComparisonRule
 from .composite import AndCondition, OrCondition, StickyCondition
 from .elapsed_time import ElapsedTimeCondition
 from .entity_in_area import EntityInAreaCondition
@@ -25,6 +25,7 @@ __all__ = [
     "EntityInAreaCondition",
     "EntityLanePositionCondition",
     "OrCondition",
+    "ScalarComparisonRule",
     "ScenarioResult",
     "SpeedCondition",
     "SpeedCoordinateSystem",

@@ -16,6 +16,7 @@ from autoware_carla_scenario import (
     EntityInAreaCondition,
     EntityLanePositionCondition,
     OrCondition,
+    ScalarComparisonRule,
     ScenarioResult,
     SpeedCondition,
     SpeedCoordinateSystem,
@@ -524,6 +525,183 @@ class TestEntityLanePositionCondition:
             result = condition.check(world, elapsed=1.0)
 
         assert result is None
+
+    # -- ScalarComparisonRule s/t tests --
+
+    def test_s_rule_satisfied(self) -> None:
+        """s > 30 with actual s=50 → pass."""
+        rules = [ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 30.0)]
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, rules=rules
+        )
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=-1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is not None
+        assert result.passed is True
+
+    def test_s_rule_not_satisfied(self) -> None:
+        """s > 30 with actual s=10 → None."""
+        rules = [ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 30.0)]
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, rules=rules
+        )
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is None
+
+    def test_t_rule_satisfied(self) -> None:
+        """t < 0 with actual t=-1.5 → pass."""
+        rules = [ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0)]
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, rules=rules
+        )
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is not None
+        assert result.passed is True
+
+    def test_t_rule_not_satisfied(self) -> None:
+        """t < 0 with actual t=1.5 → None."""
+        rules = [ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0)]
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, rules=rules
+        )
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is None
+
+    def test_multiple_rules_all_satisfied(self) -> None:
+        """Both s and t rules pass → pass."""
+        rules = [
+            ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 30.0),
+            ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0),
+        ]
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, rules=rules
+        )
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=-1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is not None
+        assert result.passed is True
+
+    def test_multiple_rules_one_fails(self) -> None:
+        """s passes but t fails → None."""
+        rules = [
+            ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 30.0),
+            ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0),
+        ]
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, rules=rules
+        )
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is None
+
+    def test_invalid_field_raises(self) -> None:
+        """A rule with field='z' raises ValueError."""
+        rules = [ScalarComparisonRule("z", ComparisonRule.GREATER_THAN, 0.0)]
+        with pytest.raises(ValueError, match="must be 's' or 't'"):
+            EntityLanePositionCondition("npc1", road_id="1", rules=rules)
+
+    def test_lane_id_none_without_rules_does_not_call_project(self) -> None:
+        """When lane_id is None and no rules, project_onto_road is not called."""
+        condition = EntityLanePositionCondition("npc1", road_id="1")
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=5.0, t=-2.0)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ), unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.project_onto_road",
+        ) as mock_project:
+            result = condition.check(world, elapsed=3.0)
+
+        mock_project.assert_not_called()
+        assert result is not None
+        assert result.passed is True
+
+    def test_lane_id_none_with_rules_uses_project_for_st(self) -> None:
+        """When lane_id is None with rules, project_onto_road provides s/t."""
+        rules = [ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 10.0)]
+        condition = EntityLanePositionCondition("npc1", road_id="1", rules=rules)
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        # to_opendrive confirms road_id match
+        nearest_pose = OpenDrivePose(road_id="1", lane_id=-1, s=48.0, t=-1.0)
+        # project_onto_road provides accurate s/t for rule evaluation
+        projected_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=-2.0)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=nearest_pose,
+        ), unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.project_onto_road",
+            return_value=projected_pose,
+        ) as mock_project:
+            result = condition.check(world, elapsed=3.0)
+
+        mock_project.assert_called_once()
+        assert result is not None
+        assert result.passed is True
+
+    def test_rules_none_preserves_existing_behavior(self) -> None:
+        """No rules = existing behavior unchanged."""
+        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        world = _make_world_with_actor("npc1", x=100.0, y=200.0)
+
+        fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
+        with unittest.mock.patch(
+            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            return_value=fake_od_pose,
+        ):
+            result = condition.check(world, elapsed=5.0)
+
+        assert result is not None
+        assert result.passed is True
+        assert "npc1" in result.message
+        assert "'1'" in result.message
 
 
 # ---------------------------------------------------------------------------
