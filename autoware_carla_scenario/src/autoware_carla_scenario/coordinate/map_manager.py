@@ -57,6 +57,7 @@ class MapManager:
     _mgrs_offset: Optional[tuple[float, float]]
     _z_offset: Optional[float]
     _road_lanelet_mapping: Optional[RoadLaneletMapping]
+    _carla_map: Optional[Any]
 
     def __new__(cls) -> "MapManager":
         if cls._instance is None:
@@ -67,6 +68,7 @@ class MapManager:
             cls._instance._mgrs_offset = None
             cls._instance._z_offset = None
             cls._instance._road_lanelet_mapping = None
+            cls._instance._carla_map = None
         return cls._instance
 
     @classmethod
@@ -167,6 +169,9 @@ class MapManager:
             )
             self._road_lanelet_mapping = None
 
+        # Build carla.Map for waypoint-based road/lane lookups (optional).
+        self._build_carla_map(xodr_content, xodr_path.stem, carla_world)
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -219,6 +224,15 @@ class MapManager:
         return self._road_lanelet_mapping
 
     @property
+    def carla_map(self) -> Optional[Any]:
+        """The ``carla.Map`` instance, or ``None`` if unavailable.
+
+        Used by :func:`~.transform._carla_to_opendrive_via_waypoint` to look
+        up the exact road/lane for a given world location.
+        """
+        return self._carla_map
+
+    @property
     def z_offset(self) -> float:
         """Vertical offset: ``lanelet2_z - xodr_z``.
 
@@ -237,6 +251,34 @@ class MapManager:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _build_carla_map(
+        self,
+        xodr_content: str,
+        map_name: str,
+        carla_world: Any = None,
+    ) -> None:
+        """Build and store a ``carla.Map`` for waypoint lookups.
+
+        When *carla_world* is provided its map is used directly (matches the
+        running simulation).  When no world is available (e.g. unit tests),
+        ``_carla_map`` stays ``None`` and the brute-force fallback is used
+        instead.
+
+        Failures are silently caught so that the rest of MapManager
+        initialisation is unaffected.
+        """
+        if carla_world is None:
+            return
+
+        try:
+            self._carla_map = carla_world.get_map()
+        except Exception:
+            logger.debug(
+                "Could not build carla.Map; waypoint-based lookup disabled",
+                exc_info=True,
+            )
+            self._carla_map = None
 
     def _compute_z_offset(self, carla_world: Any = None) -> float:
         """Compute ``lanelet2_z − carla_z``.

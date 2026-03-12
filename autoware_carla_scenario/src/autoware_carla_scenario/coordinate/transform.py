@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Optional, Union, overload
+from typing import TYPE_CHECKING, Any, Optional, Union, overload
 
 import numpy as np
 
@@ -335,9 +335,94 @@ def _opendrive_to_carla(pose: OpenDrivePose) -> CarlaWorldPose:
 
 
 def _carla_to_opendrive(pose: CarlaWorldPose) -> OpenDrivePose:
-    """Convert a CARLA world pose to the nearest OpenDRIVE (s, t) pose."""
-    mm = MapManager.get_instance()
+    """Convert a CARLA world pose to the nearest OpenDRIVE (s, t) pose.
 
+    Uses ``carla.Map.get_waypoint()`` when available for accurate road/lane
+    identification; falls back to brute-force reference-line search otherwise.
+    """
+    mm = MapManager.get_instance()
+    carla_map = mm.carla_map
+
+    if carla_map is not None:
+        result = _carla_to_opendrive_via_waypoint(pose, carla_map, mm)
+        if result is not None:
+            return result
+        logger.warning(
+            "Waypoint lookup failed for (%.2f, %.2f); "
+            "falling back to brute-force search",
+            pose.x,
+            pose.y,
+        )
+
+    return _carla_to_opendrive_bruteforce(pose, mm)
+
+
+def _carla_to_opendrive_via_waypoint(
+    pose: CarlaWorldPose,
+    carla_map: Any,
+    mm: MapManager,
+) -> Optional[OpenDrivePose]:
+    """Use ``carla.Map.get_waypoint()`` for accurate road/lane identification.
+
+    Returns ``None`` when the waypoint cannot be obtained or the road is not
+    present in the pyxodr ``RoadNetwork``.
+    """
+    import carla  # noqa: PLC0415
+
+    try:
+        wp = carla_map.get_waypoint(
+            carla.Location(x=pose.x, y=pose.y, z=pose.z),
+        )
+    except Exception:
+        return None
+
+    if wp is None:
+        return None
+
+    road_id = str(wp.road_id)
+    lane_id: int = wp.lane_id
+
+    if road_id not in mm.road_network.road_ids_to_object:
+        return None
+
+    road = mm.road_network.road_ids_to_object[road_id]
+    ref_line: np.ndarray = road.reference_line
+    if len(ref_line) < 2:
+        return None
+
+    # CARLA world coords share the same origin as XODR; just flip y back.
+    od_x = pose.x
+    od_y = -pose.y
+    od_heading = -math.radians(pose.yaw)
+
+    arc_lengths = _compute_arc_lengths_2d(ref_line)
+    diffs = ref_line - np.array([od_x, od_y])
+    dists = np.linalg.norm(diffs, axis=1)
+    nearest_idx = int(np.argmin(dists))
+
+    s = float(arc_lengths[nearest_idx])
+    heading_ref = _heading_at_s(ref_line, arc_lengths, s)
+    t = _signed_perp_distance(od_x, od_y, ref_line, nearest_idx, heading_ref)
+    heading_diff = _normalize_angle(od_heading - heading_ref)
+
+    return OpenDrivePose(
+        road_id=road_id,
+        lane_id=lane_id,
+        s=s,
+        t=t,
+        heading=heading_diff,
+    )
+
+
+def _carla_to_opendrive_bruteforce(
+    pose: CarlaWorldPose,
+    mm: MapManager,
+) -> OpenDrivePose:
+    """Brute-force nearest road search across all roads in the network.
+
+    Used as a fallback when ``carla.Map`` is unavailable or waypoint lookup
+    fails.
+    """
     # CARLA world coords share the same origin as XODR; just flip y back.
     od_x = pose.x
     od_y = -pose.y
