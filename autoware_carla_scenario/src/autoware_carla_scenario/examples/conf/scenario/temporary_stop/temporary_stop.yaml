@@ -1,0 +1,13 @@
+# @package _global_
+scenario:
+  name: temporary_stop
+  s_margin: 5.0
+  speed_threshold: 0.1
+  stop_duration: 0.3
+  restart_speed_kmh: 3.0
+  timeout_seconds: 5.0
+
+ego:
+  initial_speed_kmh: 0.0
+  spawn_lanelet_id: 285
+  spawn_s: 0.0
