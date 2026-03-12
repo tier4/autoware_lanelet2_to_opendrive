@@ -179,6 +179,7 @@ def _log_batch_plan(
         logger.info("  config file : %s", yaml_path)
         logger.info("  map         : %s", cfg.map.name)
         logger.info("  server      : %s:%s", cfg.server.host, cfg.server.port)
+        logger.info("  TM port     : %s", cfg.traffic_manager.port)
         logger.info(
             "  ego         : %s (%.1f km/h) spawn=lanelet:%d s:%.1f",
             cfg.ego.vehicle_type,
@@ -226,6 +227,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
     queue = ScenarioQueue(
         host=first_cfg.server.host,
         port=first_cfg.server.port,
+        tm_port=first_cfg.traffic_manager.port,
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=first_cfg.map.name,
@@ -316,6 +318,7 @@ def run_scenario(cfg: DictConfig) -> None:
     queue = ScenarioQueue(
         host=cfg.server.host,
         port=cfg.server.port,
+        tm_port=cfg.traffic_manager.port,
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=cfg.map.name,

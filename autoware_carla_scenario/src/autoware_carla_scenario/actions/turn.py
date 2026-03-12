@@ -10,6 +10,7 @@ from typing import Optional as _Optional
 
 from ..conditions import BaseCondition
 from ..conditions.base import find_actor_by_role_name
+from ..constants import DEFAULT_TM_PORT
 from .base import BaseAction, TickTiming
 
 if TYPE_CHECKING:
@@ -66,6 +67,7 @@ class TurnAction(BaseAction):
         search_distance: float = 200.0,
         waypoint_step: float = 2.0,
         post_junction_distance: float = 20.0,
+        tm_port: int = DEFAULT_TM_PORT,
     ) -> None:
         super().__init__(condition=condition, timing=timing, once=once)
         self._entity_name = entity_name
@@ -74,6 +76,7 @@ class TurnAction(BaseAction):
         self._search_distance = search_distance
         self._waypoint_step = waypoint_step
         self._post_junction_distance = post_junction_distance
+        self._tm_port = tm_port
 
     # ------------------------------------------------------------------
     # BaseAction interface
@@ -96,7 +99,7 @@ class TurnAction(BaseAction):
             )
             return
 
-        tm = self._client.get_trafficmanager()
+        tm = self._client.get_trafficmanager(self._tm_port)
         tm.set_path(actor, path)
         logger.info(
             "TurnAction: set %s turn route (%d points) for '%s'",

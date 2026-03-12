@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from .scenario_runner import ScenarioRunner
 from .conditions import ScenarioResult
+from .constants import DEFAULT_TM_PORT
 from .coordinate.map_manager import MapManager
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
@@ -52,6 +53,7 @@ class ScenarioQueue:
         map_name: Optional[str] = None,
         host: str = "localhost",
         port: int = 2000,
+        tm_port: int = DEFAULT_TM_PORT,
         timeout_seconds: float = 60.0,
         output_dir: Path = Path("scenario_outputs"),
         server_extra_args: Optional[List[str]] = None,
@@ -73,6 +75,7 @@ class ScenarioQueue:
                 Used alone or together with *xodr_path*.
             host: CARLA RPC host.
             port: CARLA RPC port.
+            tm_port: CARLA TrafficManager port.
             timeout_seconds: Default per-scenario timeout.
             output_dir: Directory for MP4 recordings.
             server_extra_args: Extra CLI arguments for CarlaUE5.sh (only used
@@ -94,6 +97,7 @@ class ScenarioQueue:
         self._map_name = map_name
         self._host = host
         self._port = port
+        self._tm_port = tm_port
         self._timeout_seconds = timeout_seconds
         self._output_dir = output_dir
 
@@ -183,6 +187,7 @@ class ScenarioQueue:
             self._server,
             host=self._host,
             port=self._port,
+            tm_port=self._tm_port,
             timeout_seconds=self._timeout_seconds,
             output_dir=self._output_dir,
         )
