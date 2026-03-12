@@ -53,30 +53,12 @@ class EgoVehicleConfig:
 
 
 @dataclass
-class LeftTurnConfig:
-    """Parameters for the left-turn scenario."""
-
-    name: str = "left_turn"
-
-    #: Lanelet where the ego is spawned (must have a left turn option).
-    spawn_lanelet_id: int = 203
-
-    #: Longitudinal offset along the lanelet centerline.
-    spawn_s: float = 25.0
-
-    #: Lanelets the ego should traverse after the left turn.
-    post_turn_lanelet_ids: list[int] = field(default_factory=lambda: [411, 207])
-
-    #: Fail-safe timeout in seconds.
-    timeout_seconds: float = 10.0
-
-    #: Initial ego speed override (km/h).
-    initial_speed_kmh: float = 20.0
-
-
-@dataclass
 class IntersectionPassingConfig:
-    """Parameters for the intersection-passing scenario."""
+    """Parameters for the intersection-passing scenario.
+
+    Supports straight-through, left-turn, and right-turn variants via the
+    optional ``turn_direction`` field.
+    """
 
     name: str = "intersection_passing"
 
@@ -93,7 +75,12 @@ class IntersectionPassingConfig:
     timeout_seconds: float = 5.0
 
     #: Minimum speed (km/h) — scenario fails if ego drops below this.
-    min_speed_kmh: float = 5.0
+    #: ``None`` disables the speed check.
+    min_speed_kmh: float | None = None
+
+    #: Turn direction at the intersection (``"left"``, ``"right"``, or
+    #: ``None`` for straight-through).
+    turn_direction: str | None = None
 
 
 @dataclass
@@ -134,6 +121,6 @@ class ScenarioRunConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     map: MapConfig = field(default_factory=MapConfig)
     ego: EgoVehicleConfig = field(default_factory=EgoVehicleConfig)
-    scenario: (
-        LeftTurnConfig | IntersectionPassingConfig | TrafficLightComplianceConfig
-    ) = field(default_factory=LeftTurnConfig)
+    scenario: IntersectionPassingConfig | TrafficLightComplianceConfig = field(
+        default_factory=IntersectionPassingConfig
+    )

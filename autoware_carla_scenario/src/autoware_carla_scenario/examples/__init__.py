@@ -3,7 +3,6 @@
 from .configs import (
     EgoVehicleConfig,
     IntersectionPassingConfig,
-    LeftTurnConfig,
     MapConfig,
     ScenarioRunConfig,
     ServerConfig,
@@ -13,7 +12,6 @@ from .configs import (
 __all__ = [
     "EgoVehicleConfig",
     "IntersectionPassingConfig",
-    "LeftTurnConfig",
     "MapConfig",
     "ScenarioRunConfig",
     "ServerConfig",

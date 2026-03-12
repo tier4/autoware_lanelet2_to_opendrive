@@ -1,17 +1,26 @@
 """Example scenario: Ego vehicle passes through an intersection on expected roads.
 
-This scenario spawns the ego vehicle on lanelet 242, sets all traffic lights
-to green, and verifies that the vehicle traverses the expected OpenDRIVE roads
-corresponding to lanelets 460 and 265.  Each road check uses a
+This scenario spawns the ego vehicle on a configurable lanelet, sets all
+traffic lights to green, and verifies that the vehicle traverses the expected
+OpenDRIVE roads.  Each road check uses a
 :class:`~autoware_carla_scenario.StickyCondition` so that the condition latches
 once the vehicle visits the road, and the conditions are combined with
 :class:`~autoware_carla_scenario.AndCondition` to assert the full route.
 
+The scenario supports an optional ``turn_direction`` (``"left"`` / ``"right"``)
+that registers a :class:`~autoware_carla_scenario.TurnAction` to steer the ego
+through the junction, and an optional ``min_speed_kmh`` that adds a
+:class:`~autoware_carla_scenario.SpeedCondition` fail condition.
+
 Typical usage
 -------------
-Standalone (no pytest)::
+Straight-through::
 
     uv run scenario scenario=intersection_passing
+
+Left turn::
+
+    uv run scenario scenario=left_turn
 
 With pytest — see ``test/carla_scenario/test_examples.py``.
 """
@@ -33,7 +42,10 @@ from autoware_carla_scenario import (
     SpawnTransform,
     SpeedCondition,
     StickyCondition,
+    TickTiming,
     TimeoutCondition,
+    TurnAction,
+    TurnDirection,
     find_actor_by_role_name,
     set_all_traffic_lights_state,
     snap_to_carla_road,
@@ -69,18 +81,27 @@ def _lanelet_start_road_id(lanelet_id: int) -> str:
     return od.road_id
 
 
+_TURN_DIRECTION_MAP: dict[str, TurnDirection] = {
+    "left": TurnDirection.LEFT,
+    "right": TurnDirection.RIGHT,
+}
+
+
 class IntersectionPassingScenario(BaseScenario):
-    """Spawn the ego at lanelet 242 and verify it crosses expected roads.
+    """Spawn the ego and verify it crosses expected roads through an intersection.
 
     The scenario:
 
     1. Snaps a Lanelet2 pose to the CARLA road surface for the ego spawn.
-    2. Enables autopilot so the ego drives through the intersection.
-    3. Sets every traffic light in the world to green so the ego proceeds
+    2. Sets every traffic light in the world to green so the ego proceeds
        without stopping.
+    3. If ``turn_direction`` is set, registers a :class:`TurnAction` to steer
+       the ego through the junction.
     4. Registers a pass condition: an :class:`AndCondition` of sticky
        :class:`EntityLanePositionCondition` instances, one per expected road.
-    5. Registers a :class:`TimeoutCondition` as a fail-safe.
+    5. If ``min_speed_kmh`` is set, registers a :class:`SpeedCondition` that
+       fails the scenario when the ego drops below the threshold.
+    6. Registers a :class:`TimeoutCondition` as a fail-safe.
 
     Once all expected roads have been visited the scenario passes.
     """
@@ -123,6 +144,18 @@ class IntersectionPassingScenario(BaseScenario):
         n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
         logger.info("Set %d traffic lights to green", n)
 
+        # --- Optional turn action ---
+        if cfg.turn_direction is not None:
+            direction = _TURN_DIRECTION_MAP[cfg.turn_direction]
+            turn_action = TurnAction(
+                entity_name=EGO_ROLE_NAME,
+                direction=direction,
+                client=self.client,
+                timing=TickTiming.PRE_TICK,
+            )
+            self.register_pre_tick(turn_action)
+            logger.info("Registered TurnAction: %s", cfg.turn_direction)
+
         # --- Build unique route road IDs from lanelet IDs ---
         seen: set[str] = set()
         route_road_ids: list[str] = []
@@ -147,14 +180,15 @@ class IntersectionPassingScenario(BaseScenario):
         pass_condition = AndCondition(sticky_conditions)
         self.register_pass_condition(pass_condition)
 
-        # --- Fail: speed drops below minimum ---
-        self.register_fail_condition(
-            SpeedCondition(
-                entity_name=EGO_ROLE_NAME,
-                value=cfg.min_speed_kmh / 3.6,
-                rule=ComparisonRule.LESS_THAN,
+        # --- Fail: speed drops below minimum (if configured) ---
+        if cfg.min_speed_kmh is not None:
+            self.register_fail_condition(
+                SpeedCondition(
+                    entity_name=EGO_ROLE_NAME,
+                    value=cfg.min_speed_kmh / 3.6,
+                    rule=ComparisonRule.LESS_THAN,
+                )
             )
-        )
 
         # --- Fail-safe timeout ---
         self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))

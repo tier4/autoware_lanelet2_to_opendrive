@@ -5,6 +5,7 @@ scenario:
   spawn_s: 25.0
   expected_route_lanelet_ids: [460, 265]
   timeout_seconds: 5.0
+  min_speed_kmh: 5.0
 
 ego:
   initial_speed_kmh: 5.0
