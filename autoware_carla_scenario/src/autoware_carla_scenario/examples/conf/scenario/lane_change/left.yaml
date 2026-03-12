@@ -5,6 +5,6 @@ scenario:
   timeout_seconds: 10.0
 
 ego:
-  initial_speed_kmh: 20.0
-  spawn_lanelet_id: 265
+  initial_speed_kmh: 1.0
+  spawn_lanelet_id: 183
   spawn_s: 10.0

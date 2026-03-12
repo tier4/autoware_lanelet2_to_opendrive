@@ -10,6 +10,7 @@ from typing import Optional as _Optional
 
 from ..conditions import BaseCondition
 from ..conditions.base import find_actor_by_role_name
+from ..constants import DEFAULT_TM_PORT
 from .base import BaseAction, TickTiming
 
 if TYPE_CHECKING:
@@ -59,11 +60,13 @@ class LaneChangeAction(BaseAction):
         timing: TickTiming = TickTiming.PRE_TICK,
         *,
         once: bool = True,
+        tm_port: int = DEFAULT_TM_PORT,
     ) -> None:
         super().__init__(condition=condition, timing=timing, once=once)
         self._entity_name = entity_name
         self._direction = direction
         self._client = client
+        self._tm_port = tm_port
 
     # ------------------------------------------------------------------
     # BaseAction interface
@@ -76,7 +79,7 @@ class LaneChangeAction(BaseAction):
             logger.warning("LaneChangeAction: actor '%s' not found", self._entity_name)
             return
 
-        tm = self._client.get_trafficmanager()
+        tm = self._client.get_trafficmanager(self._tm_port)
         tm.force_lane_change(actor, self._direction.to_carla_bool())
         logger.info(
             "LaneChangeAction: forced %s lane change for '%s'",

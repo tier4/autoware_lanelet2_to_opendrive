@@ -170,29 +170,23 @@ class LaneSection:
         #   RHT – lane -(i+1) road mark = boundary between lane -i and lane -(i+1)
         #   LHT – lane +(i+1) road mark = boundary between lane +i and lane +(i+1)
         #
-        # Therefore:
-        #   i == 0 (innermost lane): center line — always solid, no lane change
-        #   i  > 0: check whether lanelets_ordered[i-1] can change outward
-        #     RHT outward = right  → routing_graph.right(lanelets_ordered[i-1])
-        #     LHT outward = left   → routing_graph.left(lanelets_ordered[i-1])
+        # For every lane (including i == 0, the innermost), we check whether
+        # the lanelet at position i can change outward:
+        #   RHT outward = right  → routing_graph.right(lanelets_ordered[i])
+        #   LHT outward = left   → routing_graph.left(lanelets_ordered[i])
+        #
+        # When the innermost lanelet permits outward lane changes, the road
+        # mark must reflect that (laneChange="both") so that simulators like
+        # CARLA do not block the manoeuvre.
         for i, lane in enumerate(lanes_built):
-            if i == 0:
-                # Innermost lane: road mark describes the center-to-lane boundary.
-                # The center lane is a reference line (type="none"), so no lane change.
-                mark_type = RoadMarkType.SOLID
-                lane_change = RoadMarkLaneChange.NONE
+            if is_lht:
+                can_change = routing_graph.left(lanelets_ordered[i]) is not None
             else:
-                # Check whether the previous (more inner) lanelet can change outward.
-                if is_lht:
-                    can_change = routing_graph.left(lanelets_ordered[i - 1]) is not None
-                else:
-                    can_change = (
-                        routing_graph.right(lanelets_ordered[i - 1]) is not None
-                    )
-                mark_type = RoadMarkType.BROKEN if can_change else RoadMarkType.SOLID
-                lane_change = (
-                    RoadMarkLaneChange.BOTH if can_change else RoadMarkLaneChange.NONE
-                )
+                can_change = routing_graph.right(lanelets_ordered[i]) is not None
+            mark_type = RoadMarkType.BROKEN if can_change else RoadMarkType.SOLID
+            lane_change = (
+                RoadMarkLaneChange.BOTH if can_change else RoadMarkLaneChange.NONE
+            )
             lane._add_road_mark(
                 RoadMark(
                     s_offset=0.0,
