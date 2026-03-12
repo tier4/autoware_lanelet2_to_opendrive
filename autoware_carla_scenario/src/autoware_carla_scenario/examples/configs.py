@@ -53,19 +53,6 @@ class EgoVehicleConfig:
 
 
 @dataclass
-class SpawnAndIdleConfig:
-    """Parameters for the spawn-and-idle scenario."""
-
-    name: str = "spawn_and_idle"
-
-    #: Number of simulation ticks before the scenario ends (~2 s at 20 Hz).
-    done_after_ticks: int = 40
-
-    #: Index into the map's spawn point list.
-    spawn_index: int = 0
-
-
-@dataclass
 class LeftTurnConfig:
     """Parameters for the left-turn scenario."""
 
@@ -148,8 +135,5 @@ class ScenarioRunConfig:
     map: MapConfig = field(default_factory=MapConfig)
     ego: EgoVehicleConfig = field(default_factory=EgoVehicleConfig)
     scenario: (
-        SpawnAndIdleConfig
-        | LeftTurnConfig
-        | IntersectionPassingConfig
-        | TrafficLightComplianceConfig
-    ) = field(default_factory=SpawnAndIdleConfig)
+        LeftTurnConfig | IntersectionPassingConfig | TrafficLightComplianceConfig
+    ) = field(default_factory=LeftTurnConfig)

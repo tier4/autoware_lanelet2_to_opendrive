@@ -7,7 +7,6 @@ from .configs import (
     MapConfig,
     ScenarioRunConfig,
     ServerConfig,
-    SpawnAndIdleConfig,
     TrafficLightComplianceConfig,
 )
 
@@ -18,6 +17,5 @@ __all__ = [
     "MapConfig",
     "ScenarioRunConfig",
     "ServerConfig",
-    "SpawnAndIdleConfig",
     "TrafficLightComplianceConfig",
 ]

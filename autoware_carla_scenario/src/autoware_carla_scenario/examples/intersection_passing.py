@@ -11,7 +11,7 @@ Typical usage
 -------------
 Standalone (no pytest)::
 
-    uv run intersection-passing map.name=NishishinjyukuMap
+    uv run scenario scenario=intersection_passing map.name=NishishinjukuMap
 
 With pytest — see ``test/carla_scenario/test_examples.py``.
 """

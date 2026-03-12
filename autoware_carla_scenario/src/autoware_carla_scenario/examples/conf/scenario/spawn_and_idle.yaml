@@ -1,5 +1,0 @@
-# @package _global_
-scenario:
-  name: spawn_and_idle
-  done_after_ticks: 40
-  spawn_index: 0

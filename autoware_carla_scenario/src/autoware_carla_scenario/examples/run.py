@@ -2,17 +2,14 @@
 
 Usage examples::
 
-    # Basic: run spawn-and-idle with a specific map
-    uv run scenario scenario=spawn_and_idle map.name=Town10HD_Opt
-
-    # Select a different scenario
-    uv run scenario scenario=left_turn map.name=NishishinjyukuMap
+    # Run left-turn scenario
+    uv run scenario scenario=left_turn map.name=NishishinjukuMap
 
     # Override a target environment
     uv run scenario scenario=left_turn target=nishishinjuku
 
     # Override individual parameters
-    uv run scenario scenario=left_turn map.name=NishishinjyukuMap scenario.timeout_seconds=15.0
+    uv run scenario scenario=left_turn map.name=NishishinjukuMap scenario.timeout_seconds=15.0
 
     # Override server connection
     uv run scenario scenario=left_turn map.name=X server.host=192.168.1.100 server.port=3000
@@ -33,19 +30,16 @@ from autoware_carla_scenario import (
     BaseScenario,
     EgoConfig,
     ScenarioQueue,
-    SpawnPointIndex,
     SpawnTransform,
 )
 
 from .configs import (
     IntersectionPassingConfig,
     LeftTurnConfig,
-    SpawnAndIdleConfig,
     TrafficLightComplianceConfig,
 )
 from .intersection_passing import IntersectionPassingScenario
 from .left_turn import LeftTurnScenario
-from .spawn_and_idle import SpawnAndIdleScenario
 from .traffic_light_compliance import TrafficLightComplianceScenario
 
 if TYPE_CHECKING:
@@ -65,18 +59,6 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     """Instantiate the correct scenario class based on ``cfg.scenario.name``."""
     scenario_name: str = cfg.scenario.name
     scenario_dict = _to_dict(cfg.scenario)
-
-    # --- spawn_and_idle ---
-    if scenario_name == "spawn_and_idle":
-        spawn_index = int(cfg.scenario.get("spawn_index", 0))
-        ego = EgoConfig(
-            spawn_location=SpawnPointIndex(spawn_index),
-            vehicle_type=cfg.ego.vehicle_type,
-            initial_speed_kmh=float(cfg.ego.initial_speed_kmh),
-        )
-        return ego, SpawnAndIdleScenario(
-            ego, config=SpawnAndIdleConfig(**scenario_dict)
-        )
 
     # For lanelet-based scenarios, use a dummy spawn that setup() overwrites.
     ego = EgoConfig(
