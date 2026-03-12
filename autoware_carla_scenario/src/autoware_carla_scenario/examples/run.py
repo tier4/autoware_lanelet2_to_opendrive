@@ -3,19 +3,19 @@
 Usage examples::
 
     # Run intersection-passing scenario (straight-through)
-    uv run scenario scenario=intersection_passing
+    uv run scenario scenario=intersection_passing/straight
 
     # Run left-turn variant (uses intersection_passing with turn_direction=left)
-    uv run scenario scenario=left_turn
+    uv run scenario scenario=intersection_passing/left_turn
 
     # Select a different map
-    uv run scenario scenario=intersection_passing map=nishishinjuku
+    uv run scenario scenario=intersection_passing/straight map=nishishinjuku
 
     # Override individual parameters
-    uv run scenario scenario=intersection_passing scenario.timeout_seconds=15.0
+    uv run scenario scenario=intersection_passing/straight scenario.timeout_seconds=15.0
 
     # Override server connection
-    uv run scenario scenario=intersection_passing server.host=192.168.1.100 server.port=3000
+    uv run scenario scenario=intersection_passing/straight server.host=192.168.1.100 server.port=3000
 """
 
 from __future__ import annotations
