@@ -116,16 +116,18 @@ class IntersectionPassingScenario(BaseScenario):
         """Snap ego spawn to CARLA road, set lights to green, register conditions."""
         world = self.world
         cfg = self._config
-        # --- Compute ego spawn from Lanelet2Pose ---
-        spawn_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)
-        snapped = snap_to_carla_road(spawn_pose, world)
+        # --- Compute ego spawn from Lanelet2Pose via OpenDrivePose ---
+        ll2_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)
+        od_pose = to_opendrive(ll2_pose)
+        snapped = snap_to_carla_road(od_pose, world)
 
         logger.info(
-            "Snap Lanelet2Pose(lanelet_id=%d, s=%.1f, t=%.1f) to CARLA road: "
-            "(%.1f, %.1f, %.3f) yaw=%.1f",
-            spawn_pose.lanelet_id,
-            spawn_pose.s,
-            spawn_pose.t,
+            "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
+            "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
+            cfg.spawn_lanelet_id,
+            od_pose.road_id,
+            od_pose.lane_id,
+            od_pose.s,
             snapped.x,
             snapped.y,
             snapped.z,
