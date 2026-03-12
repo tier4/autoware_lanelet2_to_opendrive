@@ -16,6 +16,8 @@ dependencies = [
     "lanelet2>=1.2.2",
     "lanelet2-python-api-for-autoware",
     "tqdm>=4.67.1",
+    "hydra-core>=1.3.2",
+    "omegaconf>=2.3.0",
 ]
 
 [build-system]
@@ -23,7 +25,4 @@ requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
 
 [project.scripts]
-spawn-and-idle = "autoware_carla_scenario.examples.spawn_and_idle:main"
-intersection-passing = "autoware_carla_scenario.examples.intersection_passing:main"
-traffic-light-compliance = "autoware_carla_scenario.examples.traffic_light_compliance:main"
-left-turn = "autoware_carla_scenario.examples.left_turn:main"
+scenario = "autoware_carla_scenario.examples.run:main"

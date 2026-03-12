@@ -34,7 +34,7 @@ def _map_name_to_env_var(map_name: str) -> str:
 
     Examples::
 
-        _map_name_to_env_var("NishishinjyukuMap")  # -> "NISHISHINJYUKU_MAP_PATH"
+        _map_name_to_env_var("NishishinjukuMap")  # -> "NISHISHINJUKU_MAP_PATH"
         _map_name_to_env_var("Town01")             # -> "TOWN01_PATH"
         _map_name_to_env_var("Town10HD_Opt")       # -> "TOWN10_HD_OPT_PATH"
 
@@ -150,7 +150,7 @@ class ScenarioRunner:
 
         The destination path is read from an environment variable derived from
         *map_name* by converting CamelCase to ``UPPER_SNAKE_CASE_PATH``
-        (e.g. ``NishishinjyukuMap`` → ``NISHISHINJYUKU_MAP_PATH``).
+        (e.g. ``NishishinjukuMap`` → ``NISHISHINJUKU_MAP_PATH``).
 
         This allows using the full CARLA map assets (meshes, textures, etc.)
         while replacing only the road network definition.
@@ -158,7 +158,7 @@ class ScenarioRunner:
         Args:
             xodr_path: Path to the ``.xodr`` file that will overwrite the
                 internal map file.
-            map_name: Built-in CARLA map name (e.g. ``"NishishinjyukuMap"``).
+            map_name: Built-in CARLA map name (e.g. ``"NishishinjukuMap"``).
                 Must exist in the server's available maps.
 
         Raises:
@@ -258,7 +258,8 @@ class ScenarioRunner:
         try:
             scenario_name = type(scenario).__name__
             logger.info("[%s] === Setup start ===", scenario_name)
-            scenario.setup(world)
+            scenario.set_client(self._client)
+            scenario.setup()
             logger.info("[%s] Spawning ego vehicle ...", scenario_name)
             ego_actor = ego.spawn(world, scenario.ego_config)
             logger.info(

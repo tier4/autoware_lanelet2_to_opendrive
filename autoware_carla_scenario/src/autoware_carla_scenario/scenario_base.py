@@ -68,6 +68,7 @@ class BaseScenario(ABC):
         """
         self.ego_config = ego_config
         self.random_seed = random_seed
+        self._client: Optional["carla.Client"] = None
         self._entities: List[VehicleEntity] = []
         self._pre_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
@@ -75,15 +76,53 @@ class BaseScenario(ABC):
         self._fail_conditions: List[BaseCondition] = []
 
     # ------------------------------------------------------------------
+    # Client injection
+    # ------------------------------------------------------------------
+
+    def set_client(self, client: "carla.Client") -> None:
+        """Inject the CARLA client used by this scenario.
+
+        Called by :class:`ScenarioRunner` before :meth:`setup`.
+
+        Args:
+            client: The CARLA client instance.
+        """
+        self._client = client
+
+    @property
+    def client(self) -> "carla.Client":
+        """Return the injected CARLA client.
+
+        Raises:
+            RuntimeError: If :meth:`set_client` has not been called yet.
+        """
+        if self._client is None:
+            raise RuntimeError(
+                "CARLA client not set. "
+                "Call set_client() before accessing the client property."
+            )
+        return self._client
+
+    @property
+    def world(self) -> "carla.World":
+        """Return the current CARLA world from the injected client.
+
+        Raises:
+            RuntimeError: If :meth:`set_client` has not been called yet.
+        """
+        return self.client.get_world()
+
+    # ------------------------------------------------------------------
     # Abstract interface – must be implemented by subclasses
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def setup(self, world: "carla.World") -> None:
+    def setup(self) -> None:
         """Set up the scenario actors and environment.
 
-        Args:
-            world: The CARLA world instance.
+        The CARLA world is available via :attr:`world` (which calls
+        ``self.client.get_world()``).  :meth:`set_client` is guaranteed
+        to have been called before this method.
         """
         ...
 

@@ -29,7 +29,7 @@ class _SimpleScenario(BaseScenario):
         self.setup_called = False
         self.call_log: List[str] = []
 
-    def setup(self, world: object) -> None:
+    def setup(self) -> None:
         self.setup_called = True
 
     def is_done(self) -> bool:
@@ -77,8 +77,8 @@ def _make_ego_config() -> EgoConfig:
 class TestBaseScenario:
     def test_setup_is_called(self) -> None:
         scenario = _SimpleScenario(_make_ego_config())
-        world = MagicMock()
-        scenario.setup(world)
+        scenario.set_client(MagicMock())
+        scenario.setup()
         assert scenario.setup_called
 
     def test_register_pre_tick_appends_callback(self) -> None:

@@ -37,7 +37,7 @@ from autoware_carla_scenario import (
 class _ImmediateScenario(BaseScenario):
     """Scenario that completes immediately (is_done returns True on first call)."""
 
-    def setup(self, world: object) -> None:  # type: ignore[override]
+    def setup(self) -> None:
         pass
 
     def is_done(self) -> bool:

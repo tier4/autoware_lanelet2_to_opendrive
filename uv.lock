@@ -85,9 +85,11 @@ version = "0.1.0"
 source = { editable = "autoware_carla_scenario" }
 dependencies = [
     { name = "carla" },
+    { name = "hydra-core" },
     { name = "lanelet2" },
     { name = "lanelet2-python-api-for-autoware" },
     { name = "numpy" },
+    { name = "omegaconf" },
     { name = "opencv-python" },
     { name = "pytest" },
     { name = "python-dotenv" },
@@ -98,9 +100,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "carla", path = "carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" },
+    { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "lanelet2", specifier = ">=1.2.2" },
     { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
     { name = "numpy", specifier = ">=1.21" },
+    { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "opencv-python", specifier = ">=4.8" },
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
@@ -110,7 +114,7 @@ requires-dist = [
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "2.21.0"
+version = "2.22.0"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },

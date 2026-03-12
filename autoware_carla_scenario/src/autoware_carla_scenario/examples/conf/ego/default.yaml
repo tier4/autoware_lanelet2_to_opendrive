@@ -1,0 +1,4 @@
+# @package _global_
+ego:
+  vehicle_type: vehicle.mini.cooper
+  initial_speed_kmh: 0.0

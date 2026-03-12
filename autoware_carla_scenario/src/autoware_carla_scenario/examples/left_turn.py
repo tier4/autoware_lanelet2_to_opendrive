@@ -14,17 +14,14 @@ Typical usage
 -------------
 Standalone (no pytest)::
 
-    uv run left-turn --map NishishinjyukuMap
+    uv run scenario scenario=left_turn
 
 With pytest — see ``test/carla_scenario/test_examples.py``.
 """
 
 from __future__ import annotations
 
-import argparse
 import logging
-import sys
-from pathlib import Path
 
 import carla
 
@@ -35,7 +32,6 @@ from autoware_carla_scenario import (
     EgoConfig,
     EntityLanePositionCondition,
     Lanelet2Pose,
-    ScenarioQueue,
     SpawnTransform,
     StickyCondition,
     TickTiming,
@@ -47,6 +43,8 @@ from autoware_carla_scenario import (
     snap_to_carla_road,
     to_opendrive,
 )
+
+from .configs import LeftTurnConfig
 
 logger = logging.getLogger(__name__)
 
@@ -96,26 +94,27 @@ class LeftTurnScenario(BaseScenario):
     def __init__(
         self,
         ego_config: EgoConfig,
-        host: str = "localhost",
-        port: int = 2000,
+        config: LeftTurnConfig | None = None,
     ) -> None:
         super().__init__(ego_config)
-        self._carla_client = carla.Client(host, port)
+        self._config = config or LeftTurnConfig()
 
-    def setup(self, world: carla.World) -> None:
+    def setup(self) -> None:
         """Snap ego spawn, set lights green, register TurnAction and conditions."""
+        world = self.world
+        cfg = self._config
         # --- Ego spawn via OpenDRIVE pose ---
         # Convert Lanelet2 → OpenDRIVE first, then snap via
         # get_waypoint_xodr for accurate CARLA surface position (no
         # spawn-point z approximation needed).
-        ll2_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=25.0)
+        ll2_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)
         od_pose = to_opendrive(ll2_pose)
         snapped = snap_to_carla_road(od_pose, world)
 
         logger.info(
             "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
             "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
-            SPAWN_LANELET_ID,
+            cfg.spawn_lanelet_id,
             od_pose.road_id,
             od_pose.lane_id,
             od_pose.s,
@@ -142,7 +141,7 @@ class LeftTurnScenario(BaseScenario):
         turn_action = TurnAction(
             entity_name=EGO_ROLE_NAME,
             direction=TurnDirection.LEFT,
-            client=self._carla_client,
+            client=self.client,
             timing=TickTiming.PRE_TICK,
         )
         self.register_pre_tick(turn_action)
@@ -150,7 +149,7 @@ class LeftTurnScenario(BaseScenario):
         # --- Pass: ego reaches post-turn roads ---
         seen: set[str] = set()
         route_road_ids: list[str] = []
-        for ll_id in POST_TURN_LANELET_IDS:
+        for ll_id in cfg.post_turn_lanelet_ids:
             rid = _lanelet_start_road_id(ll_id)
             logger.info("Post-turn lanelet %d -> OpenDRIVE road '%s'", ll_id, rid)
             if rid not in seen:
@@ -171,86 +170,8 @@ class LeftTurnScenario(BaseScenario):
         self.register_pass_condition(AndCondition(sticky_conditions))
 
         # --- Fail-safe timeout ---
-        self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))
+        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
 
     def is_done(self) -> bool:
         """Always ``False`` — termination is driven by pass/fail conditions."""
         return False
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-
-def main() -> None:
-    """Run LeftTurnScenario as a standalone script.
-
-    Requires ``--map`` (and optionally ``--xodr`` to overwrite the built-in
-    map's ``.xodr``) to load a map that contains lanelet 244.
-
-    Example::
-
-        uv run left-turn --map NishishinjyukuMap
-        uv run left-turn --map NishishinjyukuMap --xodr path/to/nishishinjuku.xodr
-    """
-    parser = argparse.ArgumentParser(
-        description="Run the left-turn example scenario.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument("--host", default="localhost", help="CARLA server host")
-    parser.add_argument("--port", type=int, default=2000, help="CARLA server port")
-    parser.add_argument("--map", required=True, help="Built-in CARLA map name")
-    parser.add_argument(
-        "--xodr",
-        type=Path,
-        default=None,
-        help="Path to OpenDRIVE (.xodr) file (overwrites the built-in map)",
-    )
-    parser.add_argument(
-        "--lanelet2",
-        type=Path,
-        default=None,
-        help="Path to Lanelet2 (.osm) file (required for coordinate transforms)",
-    )
-    parser.add_argument(
-        "--vehicle",
-        default="vehicle.mini.cooper",
-        help="Ego vehicle blueprint ID",
-    )
-
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
-    )
-
-    # Ego spawn location is determined in setup() via snap_to_carla_road;
-    # provide a dummy transform that will be overwritten before ego.spawn().
-    ego = EgoConfig(
-        spawn_location=SpawnTransform(
-            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
-        ),
-        vehicle_type=args.vehicle,
-        initial_speed_kmh=INITIAL_SPEED_KMH,
-    )
-
-    queue = ScenarioQueue(
-        host=args.host,
-        port=args.port,
-        xodr_path=args.xodr,
-        lanelet2_path=args.lanelet2,
-        map_name=args.map,
-    )
-    queue.add(LeftTurnScenario(ego, host=args.host, port=args.port))
-
-    with queue:
-        results = queue.run_all()
-
-    result = results[0]
-    print(result)
-    sys.exit(0 if result.passed else 1)
-
-
-if __name__ == "__main__":
-    main()

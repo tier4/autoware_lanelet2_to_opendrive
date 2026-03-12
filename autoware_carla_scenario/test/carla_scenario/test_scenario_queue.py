@@ -33,7 +33,7 @@ def _make_ego_config() -> EgoConfig:
 class _NullScenario(BaseScenario):
     """Minimal scenario: setup is a no-op, is_done always returns True."""
 
-    def setup(self, world: object) -> None:
+    def setup(self) -> None:
         pass
 
     def is_done(self) -> bool:

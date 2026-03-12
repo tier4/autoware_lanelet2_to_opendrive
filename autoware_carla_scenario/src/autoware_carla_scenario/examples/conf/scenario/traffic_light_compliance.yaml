@@ -1,0 +1,11 @@
+# @package _global_
+scenario:
+  name: traffic_light_compliance
+  spawn_lanelet_id: 242
+  spawn_s: 15.0
+  light_switch_delay_seconds: 3.0
+  timeout_seconds: 5.0
+  moving_speed_kmh: 1.0
+
+ego:
+  initial_speed_kmh: 0.0
