@@ -6,7 +6,9 @@ traffic lights to green, and registers a
 via TrafficManager when the trigger condition is met.
 
 The pass condition verifies that the ego reaches the expected destination
-road (the adjacent lane's OpenDRIVE road) within the timeout.
+lane (identified by OpenDRIVE road ID **and** lane ID) within the timeout.
+Since a lane change stays on the same road and only changes the lane ID,
+both road_id and lane_id are checked.
 
 Typical usage
 -------------
@@ -65,7 +67,8 @@ class LaneChangeScenario(BaseScenario):
     2. Sets every traffic light in the world to green.
     3. Registers a :class:`LaneChangeAction` triggered after a configurable
        delay so the ego reaches cruising speed first.
-    4. Registers a pass condition: the ego must reach the target road.
+    4. Registers a pass condition: the ego must reach the target lane
+       (same road, different lane ID).
     5. Registers a :class:`TimeoutCondition` as a fail-safe.
     """
 
@@ -133,18 +136,23 @@ class LaneChangeScenario(BaseScenario):
             cfg.trigger_delay_seconds,
         )
 
-        # --- Pass condition: ego reaches target road ---
+        # --- Pass condition: ego reaches target lane ---
+        # A lane change stays on the same OpenDRIVE road; only the lane ID
+        # changes.  We resolve both road_id and lane_id from the target
+        # lanelet so the condition is precise.
         target_od = to_opendrive(Lanelet2Pose(lanelet_id=cfg.target_lanelet_id, s=0.0))
         logger.info(
-            "Target lanelet %d -> OpenDRIVE road '%s'",
+            "Target lanelet %d -> OpenDRIVE road='%s' lane=%d",
             cfg.target_lanelet_id,
             target_od.road_id,
+            target_od.lane_id,
         )
         self.register_pass_condition(
             StickyCondition(
                 EntityLanePositionCondition(
                     entity_name=EGO_ROLE_NAME,
                     road_id=target_od.road_id,
+                    lane_id=target_od.lane_id,
                 )
             )
         )
