@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -30,12 +30,22 @@ def find_actor_by_role_name(
 
 
 @dataclass
+class ConditionStatus:
+    """Snapshot of a single condition's state when the scenario ended."""
+
+    label: str
+    satisfied: bool
+    message: str
+
+
+@dataclass
 class ScenarioResult:
     """Result of a scenario execution."""
 
     passed: bool
     message: str
     elapsed_seconds: float
+    condition_statuses: list[ConditionStatus] = field(default_factory=list)
 
 
 class BaseCondition(ABC):

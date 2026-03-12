@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     import carla
 
 from .conditions import EntityExistenceCondition, ScenarioResult, TimeoutCondition
-from .conditions.base import find_actor_by_role_name
+from .conditions.base import ConditionStatus, find_actor_by_role_name
 from .constants import EGO_ROLE_NAME
 from .coordinate.poses import CarlaWorldPose
 from .coordinate.transform import to_opendrive
@@ -98,6 +98,57 @@ def _log_ego_opendrive_position(
             loc.z,
             exc,
         )
+
+
+def _collect_condition_statuses(
+    scenario: "BaseScenario",
+    world: "carla.World",
+    elapsed: float,
+    scenario_name: str,
+) -> list[ConditionStatus]:
+    """Snapshot current status of all pass and fail conditions.
+
+    Each condition is checked once and the result is recorded as a
+    :class:`ConditionStatus`.  The statuses are also logged for
+    real-time visibility.
+    """
+    statuses: list[ConditionStatus] = []
+
+    for i, cond in enumerate(scenario._pass_conditions):
+        check = cond.check(world, elapsed)
+        if check is not None:
+            status = ConditionStatus(
+                label=f"pass[{i}]", satisfied=True, message=check.message
+            )
+            logger.info(
+                "[%s]   %s: OK — %s", scenario_name, status.label, status.message
+            )
+        else:
+            status = ConditionStatus(
+                label=f"pass[{i}]", satisfied=False, message="not yet satisfied"
+            )
+            logger.info("[%s]   %s: PENDING", scenario_name, status.label)
+        statuses.append(status)
+
+    for i, cond in enumerate(scenario._fail_conditions):
+        check = cond.check(world, elapsed)
+        if check is not None:
+            status = ConditionStatus(
+                label=f"fail[{i}]", satisfied=True, message=check.message
+            )
+            logger.info(
+                "[%s]   %s: TRIGGERED — %s",
+                scenario_name,
+                status.label,
+                status.message,
+            )
+        else:
+            status = ConditionStatus(
+                label=f"fail[{i}]", satisfied=False, message="not triggered"
+            )
+        statuses.append(status)
+
+    return statuses
 
 
 class ScenarioRunner:
@@ -350,6 +401,9 @@ class ScenarioRunner:
                             passed=True,
                             message=check.message,
                             elapsed_seconds=check.elapsed_seconds,
+                            condition_statuses=_collect_condition_statuses(
+                                scenario, world, elapsed, scenario_name
+                            ),
                         )
                         break
                     if tick_count % _CONDITION_LOG_INTERVAL == 0:
@@ -378,6 +432,9 @@ class ScenarioRunner:
                             passed=False,
                             message=check.message,
                             elapsed_seconds=check.elapsed_seconds,
+                            condition_statuses=_collect_condition_statuses(
+                                scenario, world, elapsed, scenario_name
+                            ),
                         )
                         break
 

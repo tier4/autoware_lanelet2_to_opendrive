@@ -2,7 +2,12 @@
 
 from .always_true import AlwaysTrueCondition
 from .and_condition import AndCondition
-from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
+from .base import (
+    BaseCondition,
+    ConditionStatus,
+    ScenarioResult,
+    find_actor_by_role_name,
+)
 from .collision import CollisionCondition
 from .comparison import ComparisonRule, ScalarComparisonRule
 from .composition import (
@@ -26,6 +31,7 @@ __all__ = [
     "AndCondition",
     "BaseCondition",
     "CollisionCondition",
+    "ConditionStatus",
     "ComparisonRule",
     "ElapsedTimeCondition",
     "EntityExistenceCondition",

@@ -108,6 +108,10 @@ class TrafficLightComplianceConfig:
     #: Speed threshold (km/h) considered "moving".
     moving_speed_kmh: float = 1.0
 
+    #: Margin (seconds) subtracted from the red phase duration when computing
+    #: the required standstill time.
+    merging_time_seconds: float = 0.5
+
 
 # ---------------------------------------------------------------------------
 # Top-level Hydra config
