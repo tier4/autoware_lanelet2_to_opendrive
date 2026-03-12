@@ -7,6 +7,7 @@ from .base import (
     ConditionStatus,
     ScenarioResult,
     find_actor_by_role_name,
+    find_actor_in_list,
 )
 from .collision import CollisionCondition
 from .comparison import ComparisonRule, ScalarComparisonRule
@@ -49,4 +50,5 @@ __all__ = [
     "TemporaryStopCondition",
     "TimeoutCondition",
     "find_actor_by_role_name",
+    "find_actor_in_list",
 ]
