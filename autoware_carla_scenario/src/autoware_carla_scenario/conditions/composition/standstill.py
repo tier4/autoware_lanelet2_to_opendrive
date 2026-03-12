@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 from ..base import BaseCondition, ScenarioResult
 from ..comparison import ComparisonRule
 from ..persistent import PersistentCondition
-from ..speed import SpeedCondition
+from .speed import SpeedCondition
 
 if TYPE_CHECKING:
     import carla

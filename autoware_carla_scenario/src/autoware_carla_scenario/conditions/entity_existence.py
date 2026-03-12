@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ActorExistenceCondition(BaseCondition):
+class EntityExistenceCondition(BaseCondition):
     """Fail condition that triggers whenever a named actor is absent from the world.
 
     On every call to :meth:`check`, the condition searches for an actor with

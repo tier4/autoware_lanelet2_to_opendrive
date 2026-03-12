@@ -9,10 +9,10 @@ from ...coordinate.transform import to_opendrive
 from ..and_condition import AndCondition
 from ..base import BaseCondition, ScenarioResult
 from ..comparison import ComparisonRule, ScalarComparisonRule
-from ..entity_lane_position import EntityLanePositionCondition
 from ..or_condition import OrCondition
 from ..persistent import PersistentCondition
-from ..speed import SpeedCondition
+from .entity_lane_position import EntityLanePositionCondition
+from .speed import SpeedCondition
 
 if TYPE_CHECKING:
     import carla

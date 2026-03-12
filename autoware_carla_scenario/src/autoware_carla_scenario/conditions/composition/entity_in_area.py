@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, List, Optional, Sequence
 import cv2
 import numpy as np
 
-from ..coordinate.poses import AnyPose, CarlaWorldPose
-from ..coordinate.transform import to_carla_world
-from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
+from ...coordinate.poses import AnyPose, CarlaWorldPose
+from ...coordinate.transform import to_carla_world
+from ..base import BaseCondition, ScenarioResult, find_actor_by_role_name
 
 if TYPE_CHECKING:
     import carla

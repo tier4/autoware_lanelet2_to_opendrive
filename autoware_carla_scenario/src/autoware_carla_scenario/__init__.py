@@ -62,7 +62,7 @@ Public API re-exported for convenience::
 from .actions import BaseAction, TickTiming, TurnAction, TurnDirection
 from .scenario_runner import ScenarioRunner
 from .conditions import (
-    ActorExistenceCondition,
+    EntityExistenceCondition,
     AlwaysTrueCondition,
     AndCondition,
     BaseCondition,
@@ -134,7 +134,7 @@ __all__ = [
     "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",
-    "ActorExistenceCondition",
+    "EntityExistenceCondition",
     "AlwaysTrueCondition",
     "AndCondition",
     "BaseCondition",

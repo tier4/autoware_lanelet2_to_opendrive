@@ -25,7 +25,9 @@ from autoware_carla_scenario import (
     StickyCondition,
     TimeoutCondition,
 )
-from autoware_carla_scenario.conditions.entity_in_area import _point_in_polygon_2d
+from autoware_carla_scenario.conditions.composition.entity_in_area import (
+    _point_in_polygon_2d,
+)
 from autoware_carla_scenario.coordinate.poses import CarlaWorldPose, OpenDrivePose
 
 
@@ -430,7 +432,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)
@@ -449,7 +451,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="2", lane_id=-1, s=10.0, t=-1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=1.0)
@@ -463,7 +465,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-2, s=10.0, t=-3.0)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=1.0)
@@ -485,7 +487,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="5", lane_id=1, s=0.0, t=1.0)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=42.5)
@@ -500,7 +502,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-3, s=5.0, t=-2.0)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=3.0)
@@ -519,7 +521,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="2", lane_id=-1, s=5.0, t=-2.0)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=1.0)
@@ -538,7 +540,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=-1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)
@@ -556,7 +558,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)
@@ -573,7 +575,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)
@@ -591,7 +593,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)
@@ -611,7 +613,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=-1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)
@@ -632,7 +634,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)
@@ -652,10 +654,10 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=5.0, t=-2.0)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ), unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.project_onto_road",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.project_onto_road",
         ) as mock_project:
             result = condition.check(world, elapsed=3.0)
 
@@ -674,10 +676,10 @@ class TestEntityLanePositionCondition:
         # project_onto_road provides accurate s/t for rule evaluation
         projected_pose = OpenDrivePose(road_id="1", lane_id=-1, s=50.0, t=-2.0)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=nearest_pose,
         ), unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.project_onto_road",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.project_onto_road",
             return_value=projected_pose,
         ) as mock_project:
             result = condition.check(world, elapsed=3.0)
@@ -693,7 +695,7 @@ class TestEntityLanePositionCondition:
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
         with unittest.mock.patch(
-            "autoware_carla_scenario.conditions.entity_lane_position.to_opendrive",
+            "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
             result = condition.check(world, elapsed=5.0)

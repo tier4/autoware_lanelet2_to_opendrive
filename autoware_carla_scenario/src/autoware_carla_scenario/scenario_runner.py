@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import carla
 
-from .conditions import ActorExistenceCondition, ScenarioResult, TimeoutCondition
+from .conditions import EntityExistenceCondition, ScenarioResult, TimeoutCondition
 from .conditions.base import find_actor_by_role_name
 from .constants import EGO_ROLE_NAME
 from .coordinate.poses import CarlaWorldPose
@@ -271,7 +271,7 @@ class ScenarioRunner:
 
             # Register ego existence fail condition so the scenario fails
             # immediately if the ego is destroyed (e.g. falls through map).
-            scenario.register_fail_condition(ActorExistenceCondition(EGO_ROLE_NAME))
+            scenario.register_fail_condition(EntityExistenceCondition(EGO_ROLE_NAME))
 
             # Warm-up ticks: let physics and TrafficManager stabilise
             # before the main loop begins.

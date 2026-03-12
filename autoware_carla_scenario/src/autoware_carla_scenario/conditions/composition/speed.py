@@ -5,9 +5,9 @@ from __future__ import annotations
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Optional
 
-from ..kinematics import Vector3
-from .base import BaseCondition, ScenarioResult
-from .comparison import ComparisonRule, ScalarComparisonRule
+from ...kinematics import Vector3
+from ..base import BaseCondition, ScenarioResult
+from ..comparison import ComparisonRule, ScalarComparisonRule
 
 if TYPE_CHECKING:
     import carla

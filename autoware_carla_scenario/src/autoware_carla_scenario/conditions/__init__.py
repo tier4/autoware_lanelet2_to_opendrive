@@ -1,30 +1,34 @@
 """Scenario pass/fail conditions for CARLA scenario testing."""
 
-from .actor_existence import ActorExistenceCondition
 from .always_true import AlwaysTrueCondition
+from .and_condition import AndCondition
 from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 from .collision import CollisionCondition
 from .comparison import ComparisonRule, ScalarComparisonRule
-from .and_condition import AndCondition
-from .or_condition import OrCondition
-from .sticky import StickyCondition
+from .composition import (
+    EntityInAreaCondition,
+    EntityLanePositionCondition,
+    SpeedCondition,
+    SpeedCoordinateSystem,
+    SpeedDirection,
+    StandstillCondition,
+    TemporaryStopCondition,
+)
 from .elapsed_time import ElapsedTimeCondition
-from .entity_in_area import EntityInAreaCondition
-from .entity_lane_position import EntityLanePositionCondition
-from .speed import SpeedCondition, SpeedCoordinateSystem, SpeedDirection
-from .composition import StandstillCondition, TemporaryStopCondition
+from .entity_existence import EntityExistenceCondition
+from .or_condition import OrCondition
 from .persistent import PersistentCondition
+from .sticky import StickyCondition
 from .timeout import TimeoutCondition
 
 __all__ = [
-    "ActorExistenceCondition",
     "AlwaysTrueCondition",
     "AndCondition",
     "BaseCondition",
     "CollisionCondition",
     "ComparisonRule",
     "ElapsedTimeCondition",
-    "find_actor_by_role_name",
+    "EntityExistenceCondition",
     "EntityInAreaCondition",
     "EntityLanePositionCondition",
     "OrCondition",
@@ -38,4 +42,5 @@ __all__ = [
     "StickyCondition",
     "TemporaryStopCondition",
     "TimeoutCondition",
+    "find_actor_by_role_name",
 ]
