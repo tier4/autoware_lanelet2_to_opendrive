@@ -2,12 +2,16 @@ defaults:
   - _self_
   - server: localhost
   - ego: default
+  - traffic_manager: default
   - scenario: intersection_passing/left_turn
   - map: nishishinjuku
 
 server:
   host: localhost
   port: 2000
+
+traffic_manager:
+  port: 8100
 
 map:
   name: ???

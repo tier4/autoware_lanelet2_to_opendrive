@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 from .actions import BaseAction
 from .conditions import BaseCondition
-from .constants import EGO_ROLE_NAME
+from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
 from .entity._spawn import SpawnLocation
 from .entity.vehicle_entity import VehicleEntity, VehicleEntityConfig
 
@@ -69,6 +69,7 @@ class BaseScenario(ABC):
         self.ego_config = ego_config
         self.random_seed = random_seed
         self._client: Optional["carla.Client"] = None
+        self._tm_port: int = DEFAULT_TM_PORT
         self._entities: List[VehicleEntity] = []
         self._pre_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
@@ -79,15 +80,19 @@ class BaseScenario(ABC):
     # Client injection
     # ------------------------------------------------------------------
 
-    def set_client(self, client: "carla.Client") -> None:
+    def set_client(
+        self, client: "carla.Client", tm_port: int = DEFAULT_TM_PORT
+    ) -> None:
         """Inject the CARLA client used by this scenario.
 
         Called by :class:`ScenarioRunner` before :meth:`setup`.
 
         Args:
             client: The CARLA client instance.
+            tm_port: CARLA TrafficManager port.
         """
         self._client = client
+        self._tm_port = tm_port
 
     @property
     def client(self) -> "carla.Client":
@@ -102,6 +107,11 @@ class BaseScenario(ABC):
                 "Call set_client() before accessing the client property."
             )
         return self._client
+
+    @property
+    def tm_port(self) -> int:
+        """Return the CARLA TrafficManager port."""
+        return self._tm_port
 
     @property
     def world(self) -> "carla.World":
