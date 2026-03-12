@@ -291,6 +291,14 @@ class TestTemporaryStopCondition:
     Uses mocked coordinate transforms and entity lookups.
     """
 
+    @pytest.fixture(autouse=True)
+    def _mock_road_helpers(self) -> None:
+        """Mock road helpers to avoid MapManager dependency in unit tests."""
+        with patch.object(
+            TemporaryStopCondition, "_get_road_length", return_value=100.0
+        ), patch.object(TemporaryStopCondition, "_find_linked_roads", return_value=[]):
+            yield
+
     def test_validation_empty_positions(self) -> None:
         with pytest.raises(ValueError, match="stop_positions must not be empty"):
             TemporaryStopCondition("ego", stop_positions=[])

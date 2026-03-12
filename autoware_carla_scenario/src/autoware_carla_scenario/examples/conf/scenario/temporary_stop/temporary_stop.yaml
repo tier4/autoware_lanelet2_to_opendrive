@@ -1,11 +1,10 @@
 # @package _global_
 scenario:
   name: temporary_stop
-  stop_lanelet_id: 285
-  stop_s: 0.0
   s_margin: 5.0
   speed_threshold: 0.1
-  stop_duration: 1.0
+  stop_duration: 0.3
+  restart_speed_kmh: 3.0
   timeout_seconds: 5.0
 
 ego:

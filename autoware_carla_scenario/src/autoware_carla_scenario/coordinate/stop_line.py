@@ -6,11 +6,33 @@ import logging
 
 import lanelet2
 
-from ..utils.stop_line import get_stop_line_linestrings
+from ..utils.stop_line import (
+    get_stop_line_linestrings,
+    get_stop_line_linestrings_with_following,
+)
 from .map_manager import MapManager
 from .poses import Lanelet2Pose
 
 logger = logging.getLogger(__name__)
+
+
+def _linestring_to_pose(ls: object, lanelet_id: int) -> Lanelet2Pose | None:
+    """Project a linestring centroid onto a lanelet centerline."""
+    mm = MapManager.get_instance()
+    lanelet = mm.lanelet_map.laneletLayer[lanelet_id]
+
+    points = list(ls)  # type: ignore[call-overload]
+    if not points:
+        return None
+
+    cx = sum(p.x for p in points) / len(points)
+    cy = sum(p.y for p in points) / len(points)
+
+    pt = lanelet2.core.BasicPoint2d(cx, cy)
+    centerline_2d = lanelet2.geometry.to2D(lanelet.centerline)
+    arc = lanelet2.geometry.toArcCoordinates(centerline_2d, pt)
+
+    return Lanelet2Pose(lanelet_id=lanelet_id, s=arc.length, t=0.0)
 
 
 def get_stop_line_poses(lanelet_id: int) -> list[Lanelet2Pose]:
@@ -36,21 +58,40 @@ def get_stop_line_poses(lanelet_id: int) -> list[Lanelet2Pose]:
     if not linestrings:
         return []
 
-    mm = MapManager.get_instance()
-    lanelet = mm.lanelet_map.laneletLayer[lanelet_id]
-
     poses: list[Lanelet2Pose] = []
     for ls in linestrings:
-        points = list(ls)
-        if not points:
-            continue
+        pose = _linestring_to_pose(ls, lanelet_id)
+        if pose is not None:
+            poses.append(pose)
 
-        cx = sum(p.x for p in points) / len(points)
-        cy = sum(p.y for p in points) / len(points)
+    return poses
 
-        pt = lanelet2.core.BasicPoint2d(cx, cy)
-        arc = lanelet2.geometry.toArcCoordinates(lanelet2.geometry.to2D(lanelet), pt)
 
-        poses.append(Lanelet2Pose(lanelet_id=lanelet_id, s=arc.length, t=0.0))
+def get_stop_line_poses_with_following(lanelet_id: int) -> list[Lanelet2Pose]:
+    """Return stop line poses searching the lanelet and its successors.
+
+    Searches the given lanelet first, then its immediate following lanelets
+    via the routing graph. Each stop line centroid is projected onto the
+    lanelet that owns the regulatory element.
+
+    Args:
+        lanelet_id: The starting Lanelet2 lanelet ID.
+
+    Returns:
+        List of :class:`Lanelet2Pose` for each unique stop line found.
+        Empty list if no stop lines are found.
+
+    Raises:
+        ValueError: If the lanelet ID is not found in the map.
+    """
+    results = get_stop_line_linestrings_with_following(lanelet_id)
+    if not results:
+        return []
+
+    poses: list[Lanelet2Pose] = []
+    for owner_id, ls in results:
+        pose = _linestring_to_pose(ls, owner_id)
+        if pose is not None:
+            poses.append(pose)
 
     return poses

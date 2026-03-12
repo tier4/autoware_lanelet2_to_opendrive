@@ -25,13 +25,18 @@ import carla
 
 from autoware_carla_scenario import (
     EGO_ROLE_NAME,
+    AndCondition,
     BaseScenario,
+    ComparisonRule,
     EgoConfig,
     Lanelet2Pose,
     SpawnTransform,
+    SpeedCondition,
+    StickyCondition,
     TemporaryStopCondition,
     TimeoutCondition,
     find_actor_by_role_name,
+    get_stop_line_poses_with_following,
     set_all_traffic_lights_state,
     snap_to_carla_road,
     to_opendrive,
@@ -105,27 +110,43 @@ class TemporaryStopScenario(BaseScenario):
         n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
         logger.info("Set %d traffic lights to green", n)
 
-        # --- Build stop position from config ---
-        stop_pose = Lanelet2Pose(
-            lanelet_id=cfg.stop_lanelet_id,
-            s=cfg.stop_s,
-        )
-        logger.info(
-            "Stop position: lanelet %d s=%.1f",
-            cfg.stop_lanelet_id,
-            cfg.stop_s,
-        )
+        # --- Auto-detect stop line from spawn lanelet + following lanelets ---
+        spawn_lanelet_id = ll2_pose.lanelet_id
+        stop_poses = get_stop_line_poses_with_following(spawn_lanelet_id)
+        if not stop_poses:
+            msg = (
+                f"No stop lines found on lanelet {spawn_lanelet_id} "
+                "or its following lanelets."
+            )
+            raise ValueError(msg)
+        for pose in stop_poses:
+            od = to_opendrive(pose)
+            logger.info(
+                "Stop line detected: lanelet %d s=%.1f -> OpenDRIVE road='%s' s=%.1f",
+                pose.lanelet_id,
+                pose.s,
+                od.road_id,
+                od.s,
+            )
 
-        # --- Pass condition: temporary stop at the target position ---
-        self.register_pass_condition(
+        # --- Pass condition: temporary stop + restart ---
+        # 1) Sticky: latches once ego has temporarily stopped at the position
+        stopped = StickyCondition(
             TemporaryStopCondition(
                 entity_name=EGO_ROLE_NAME,
-                stop_positions=[stop_pose],
+                stop_positions=stop_poses,
                 s_margin=cfg.s_margin,
                 speed_threshold=cfg.speed_threshold,
                 stop_duration=cfg.stop_duration,
             )
         )
+        # 2) Ego has restarted (speed exceeds threshold)
+        restarted = SpeedCondition(
+            entity_name=EGO_ROLE_NAME,
+            value=cfg.restart_speed_kmh / 3.6,
+            rule=ComparisonRule.GREATER_THAN_OR_EQUAL,
+        )
+        self.register_pass_condition(AndCondition([stopped, restarted]))
 
         # --- Fail-safe timeout ---
         self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))

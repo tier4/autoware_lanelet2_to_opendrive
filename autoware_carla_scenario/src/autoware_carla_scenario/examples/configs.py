@@ -113,12 +113,6 @@ class TemporaryStopConfig:
 
     name: str = "temporary_stop"
 
-    #: Lanelet ID where the stop is expected.
-    stop_lanelet_id: int = 285
-
-    #: Longitudinal offset (m) along the lanelet centerline for the stop position.
-    stop_s: float = 0.0
-
     #: Arc-length margin (m) around the stop position.
     s_margin: float = 5.0
 
@@ -127,6 +121,9 @@ class TemporaryStopConfig:
 
     #: Minimum consecutive seconds the entity must remain stopped.
     stop_duration: float = 1.0
+
+    #: Speed (km/h) above which the ego is considered to have restarted.
+    restart_speed_kmh: float = 3.0
 
     #: Fail-safe timeout in seconds.
     timeout_seconds: float = 30.0
