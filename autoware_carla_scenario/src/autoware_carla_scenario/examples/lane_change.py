@@ -1,0 +1,157 @@
+"""Example scenario: Ego vehicle performs a lane change on a straight road.
+
+This scenario spawns the ego vehicle on a configurable lanelet, sets all
+traffic lights to green, and registers a
+:class:`~autoware_carla_scenario.LaneChangeAction` to force a lane change
+via TrafficManager when the trigger condition is met.
+
+The pass condition verifies that the ego reaches the expected destination
+road (the adjacent lane's OpenDRIVE road) within the timeout.
+
+Typical usage
+-------------
+Left lane change::
+
+    uv run scenario scenario=lane_change/left
+
+Right lane change::
+
+    uv run scenario scenario=lane_change/right
+
+With pytest — see ``test/carla_scenario/test_examples.py``.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import carla
+
+from autoware_carla_scenario import (
+    EGO_ROLE_NAME,
+    BaseScenario,
+    EgoConfig,
+    ElapsedTimeCondition,
+    EntityLanePositionCondition,
+    LaneChangeAction,
+    LaneChangeDirection,
+    Lanelet2Pose,
+    SpawnTransform,
+    StickyCondition,
+    TickTiming,
+    TimeoutCondition,
+    find_actor_by_role_name,
+    set_all_traffic_lights_state,
+    snap_to_carla_road,
+    to_opendrive,
+)
+
+from .configs import LaneChangeConfig
+
+logger = logging.getLogger(__name__)
+
+_DIRECTION_MAP: dict[str, LaneChangeDirection] = {
+    "left": LaneChangeDirection.LEFT,
+    "right": LaneChangeDirection.RIGHT,
+}
+
+
+class LaneChangeScenario(BaseScenario):
+    """Spawn the ego and verify it completes a lane change.
+
+    The scenario:
+
+    1. Snaps a Lanelet2 pose to the CARLA road surface for the ego spawn.
+    2. Sets every traffic light in the world to green.
+    3. Registers a :class:`LaneChangeAction` triggered after a configurable
+       delay so the ego reaches cruising speed first.
+    4. Registers a pass condition: the ego must reach the target road.
+    5. Registers a :class:`TimeoutCondition` as a fail-safe.
+    """
+
+    def __init__(
+        self,
+        ego_config: EgoConfig,
+        config: LaneChangeConfig | None = None,
+        spawn_pose: Lanelet2Pose | None = None,
+    ) -> None:
+        super().__init__(ego_config)
+        self._config = config or LaneChangeConfig()
+        self._spawn_pose = spawn_pose
+
+    def setup(self) -> None:
+        """Snap ego spawn to CARLA road, register lane-change action and conditions."""
+        world = self.world
+        cfg = self._config
+
+        # --- Compute ego spawn from Lanelet2Pose via OpenDrivePose ---
+        if self._spawn_pose is None:
+            msg = "spawn_pose is required for LaneChangeScenario"
+            raise ValueError(msg)
+        ll2_pose = self._spawn_pose
+        od_pose = to_opendrive(ll2_pose)
+        snapped = snap_to_carla_road(od_pose, world)
+
+        logger.info(
+            "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
+            "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
+            ll2_pose.lanelet_id,
+            od_pose.road_id,
+            od_pose.lane_id,
+            od_pose.s,
+            snapped.x,
+            snapped.y,
+            snapped.z,
+            snapped.yaw,
+        )
+
+        # Update ego_config so the framework spawns the ego at the snapped pose
+        self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
+
+        # Use BaseScenario helpers for common post-tick patterns
+        ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
+        self.follow_with_spectator(ego_actor)
+        self.log_actor_position(ego_actor, label="ego")
+
+        # --- Set all traffic lights to green ---
+        n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
+        logger.info("Set %d traffic lights to green", n)
+
+        # --- Lane-change action (triggered after delay) ---
+        direction = _DIRECTION_MAP[cfg.direction]
+        lane_change_action = LaneChangeAction(
+            entity_name=EGO_ROLE_NAME,
+            direction=direction,
+            client=self.client,
+            condition=ElapsedTimeCondition(cfg.trigger_delay_seconds),
+            timing=TickTiming.PRE_TICK,
+        )
+        self.register_pre_tick(lane_change_action)
+        logger.info(
+            "Registered LaneChangeAction: %s (delay=%.1fs)",
+            cfg.direction,
+            cfg.trigger_delay_seconds,
+        )
+
+        # --- Pass condition: ego reaches target road ---
+        target_od = to_opendrive(Lanelet2Pose(lanelet_id=cfg.target_lanelet_id, s=0.0))
+        logger.info(
+            "Target lanelet %d -> OpenDRIVE road '%s'",
+            cfg.target_lanelet_id,
+            target_od.road_id,
+        )
+        self.register_pass_condition(
+            StickyCondition(
+                EntityLanePositionCondition(
+                    entity_name=EGO_ROLE_NAME,
+                    road_id=target_od.road_id,
+                )
+            )
+        )
+
+        # --- Fail-safe timeout ---
+        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
+
+    def is_done(self) -> bool:
+        """Always ``False`` — termination is driven by pass/fail conditions."""
+        return False

@@ -108,6 +108,26 @@ class TrafficLightComplianceConfig:
 
 
 @dataclass
+class LaneChangeConfig:
+    """Parameters for the lane-change scenario."""
+
+    name: str = "lane_change"
+
+    #: Direction of the lane change (``"left"`` or ``"right"``).
+    direction: str = "left"
+
+    #: Delay (seconds) before triggering the lane change, giving the ego
+    #: time to reach cruising speed.
+    trigger_delay_seconds: float = 1.0
+
+    #: Lanelet ID of the target lane (the lane the ego should end up in).
+    target_lanelet_id: int = 0
+
+    #: Fail-safe timeout in seconds.
+    timeout_seconds: float = 10.0
+
+
+@dataclass
 class TemporaryStopConfig:
     """Parameters for the temporary-stop scenario."""
 
@@ -146,5 +166,8 @@ class ScenarioRunConfig:
     map: MapConfig = field(default_factory=MapConfig)
     ego: EgoVehicleConfig = field(default_factory=EgoVehicleConfig)
     scenario: (
-        IntersectionPassingConfig | TrafficLightComplianceConfig | TemporaryStopConfig
+        IntersectionPassingConfig
+        | LaneChangeConfig
+        | TrafficLightComplianceConfig
+        | TemporaryStopConfig
     ) = field(default_factory=IntersectionPassingConfig)

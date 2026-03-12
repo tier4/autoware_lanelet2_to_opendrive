@@ -1,0 +1,12 @@
+# @package _global_
+scenario:
+  name: lane_change
+  direction: left
+  trigger_delay_seconds: 1.0
+  target_lanelet_id: 460
+  timeout_seconds: 10.0
+
+ego:
+  initial_speed_kmh: 20.0
+  spawn_lanelet_id: 265
+  spawn_s: 10.0
