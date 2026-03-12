@@ -78,6 +78,10 @@ class IntersectionPassingConfig:
     #: ``None`` disables the speed check.
     min_speed_kmh: float | None = None
 
+    #: Grace period (seconds) before the minimum-speed check activates.
+    #: Gives the ego time to reach cruising speed after spawn.
+    speed_check_delay_seconds: float = 0.3
+
     #: Turn direction at the intersection (``"left"``, ``"right"``, or
     #: ``None`` for straight-through).
     turn_direction: str | None = None

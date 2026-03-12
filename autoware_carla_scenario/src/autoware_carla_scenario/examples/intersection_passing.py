@@ -37,6 +37,7 @@ from autoware_carla_scenario import (
     BaseScenario,
     ComparisonRule,
     EgoConfig,
+    ElapsedTimeCondition,
     EntityLanePositionCondition,
     Lanelet2Pose,
     SpawnTransform,
@@ -183,12 +184,19 @@ class IntersectionPassingScenario(BaseScenario):
         self.register_pass_condition(pass_condition)
 
         # --- Fail: speed drops below minimum (if configured) ---
+        # Wrapped with ElapsedTimeCondition so the check only activates after
+        # a grace period, giving the ego time to reach cruising speed.
         if cfg.min_speed_kmh is not None:
             self.register_fail_condition(
-                SpeedCondition(
-                    entity_name=EGO_ROLE_NAME,
-                    value=cfg.min_speed_kmh / 3.6,
-                    rule=ComparisonRule.LESS_THAN,
+                AndCondition(
+                    [
+                        ElapsedTimeCondition(cfg.speed_check_delay_seconds),
+                        SpeedCondition(
+                            entity_name=EGO_ROLE_NAME,
+                            value=cfg.min_speed_kmh / 3.6,
+                            rule=ComparisonRule.LESS_THAN,
+                        ),
+                    ]
                 )
             )
 
