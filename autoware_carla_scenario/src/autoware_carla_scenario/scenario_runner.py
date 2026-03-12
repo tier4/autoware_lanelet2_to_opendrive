@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 from .conditions import EntityExistenceCondition, ScenarioResult, TimeoutCondition
 from .conditions.base import ConditionStatus, find_actor_by_role_name
-from .constants import EGO_ROLE_NAME
+from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
 from .coordinate.poses import CarlaWorldPose
 from .coordinate.transform import to_opendrive
 from .entity import EgoVehicle
@@ -171,6 +171,7 @@ class ScenarioRunner:
         server: CarlaServerManager,
         host: str = "localhost",
         port: int = 2000,
+        tm_port: int = DEFAULT_TM_PORT,
         timeout_seconds: float = 60.0,
         output_dir: Path = Path("scenario_outputs"),
     ) -> None:
@@ -180,6 +181,7 @@ class ScenarioRunner:
             server: An already-started (or context-managed) server manager.
             host: CARLA server hostname.
             port: CARLA server RPC port.
+            tm_port: CARLA TrafficManager port.
             timeout_seconds: Default timeout applied to every scenario.
             output_dir: Directory where CARLA recording logs are saved.
         """
@@ -187,6 +189,7 @@ class ScenarioRunner:
 
         self.timeout_seconds = timeout_seconds
         self.output_dir = output_dir
+        self._tm_port = tm_port
 
         self._client = carla.Client(host, port)
         self._client.set_timeout(10.0)
@@ -298,7 +301,7 @@ class ScenarioRunner:
         # Configure TrafficManager for deterministic behaviour.
         # Must be synchronous with the world and seeded before any
         # set_autopilot() call so NPC decisions are reproducible.
-        tm = self._client.get_trafficmanager()
+        tm = self._client.get_trafficmanager(self._tm_port)
         tm.set_synchronous_mode(True)
         tm.set_random_device_seed(scenario.random_seed)
 
@@ -309,7 +312,7 @@ class ScenarioRunner:
         try:
             scenario_name = type(scenario).__name__
             logger.info("[%s] === Setup start ===", scenario_name)
-            scenario.set_client(self._client)
+            scenario.set_client(self._client, tm_port=self._tm_port)
             scenario.setup()
             logger.info("[%s] Spawning ego vehicle ...", scenario_name)
             ego_actor = ego.spawn(world, scenario.ego_config)
@@ -338,7 +341,7 @@ class ScenarioRunner:
             # Enable autopilot on every vehicle (all NPCs use TrafficManager)
             n_autopilot = 0
             for actor in world.get_actors().filter("vehicle.*"):
-                actor.set_autopilot(True)
+                actor.set_autopilot(True, self._tm_port)
                 n_autopilot += 1
             if n_autopilot:
                 logger.info(
