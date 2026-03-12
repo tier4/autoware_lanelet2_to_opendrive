@@ -22,6 +22,7 @@ from .composition import (
 )
 from .elapsed_time import ElapsedTimeCondition
 from .entity_existence import EntityExistenceCondition
+from .not_condition import NotCondition
 from .or_condition import OrCondition
 from .persistent import PersistentCondition
 from .sticky import StickyCondition
@@ -38,6 +39,7 @@ __all__ = [
     "EntityExistenceCondition",
     "EntityInAreaCondition",
     "EntityLanePositionCondition",
+    "NotCondition",
     "OrCondition",
     "PersistentCondition",
     "ScalarComparisonRule",

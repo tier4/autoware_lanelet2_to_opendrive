@@ -2,6 +2,7 @@
 scenario:
   name: lane_change
   direction: left
+  expect: success
   timeout_seconds: 10.0
 
 ego:

@@ -116,6 +116,11 @@ class LaneChangeConfig:
     #: Direction of the lane change (``"left"`` or ``"right"``).
     direction: str = "left"
 
+    #: Expected outcome: ``"success"`` expects the lane change to complete,
+    #: ``"fail"`` expects it to NOT complete (scenario passes if lane change
+    #: does not happen within the timeout).
+    expect: str = "success"
+
     #: Fail-safe timeout in seconds.
     timeout_seconds: float = 10.0
 

@@ -41,6 +41,7 @@ from autoware_carla_scenario import (
     LaneChangeAction,
     LaneChangeDirection,
     Lanelet2Pose,
+    NotCondition,
     SpawnTransform,
     StickyCondition,
     TickTiming,
@@ -142,28 +143,40 @@ class LaneChangeScenario(BaseScenario):
         self.register_pre_tick(lane_change_action)
         logger.info("Registered LaneChangeAction: %s", cfg.direction)
 
-        # --- Pass condition: ego reaches the adjacent lane ---
+        # --- Conditions based on expected outcome ---
         # Target lane ID is derived from spawn lane ID + direction delta.
         target_lane_id = od_pose.lane_id + _LANE_ID_DELTA[direction]
+        expect_fail = cfg.expect == "fail"
         logger.info(
-            "Expecting lane change: road='%s' lane %d -> %d (%s)",
+            "Expecting lane change: road='%s' lane %d -> %d (%s) [expect=%s]",
             od_pose.road_id,
             od_pose.lane_id,
             target_lane_id,
             cfg.direction,
-        )
-        self.register_pass_condition(
-            StickyCondition(
-                EntityLanePositionCondition(
-                    entity_name=EGO_ROLE_NAME,
-                    road_id=od_pose.road_id,
-                    lane_id=target_lane_id,
-                )
-            )
+            cfg.expect,
         )
 
-        # --- Fail-safe timeout ---
-        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
+        lane_position_condition = StickyCondition(
+            EntityLanePositionCondition(
+                entity_name=EGO_ROLE_NAME,
+                road_id=od_pose.road_id,
+                lane_id=target_lane_id,
+            )
+        )
+        timeout_condition = TimeoutCondition(cfg.timeout_seconds)
+
+        if expect_fail:
+            # expect=fail: lane change should NOT happen.
+            # If ego reaches the target lane → fail.
+            # If timeout expires without lane change → pass.
+            self.register_fail_condition(NotCondition(lane_position_condition))
+            self.register_pass_condition(timeout_condition)
+        else:
+            # expect=success: lane change should happen.
+            # If ego reaches the target lane → pass.
+            # If timeout expires → fail.
+            self.register_pass_condition(lane_position_condition)
+            self.register_fail_condition(timeout_condition)
 
     def is_done(self) -> bool:
         """Always ``False`` — termination is driven by pass/fail conditions."""
