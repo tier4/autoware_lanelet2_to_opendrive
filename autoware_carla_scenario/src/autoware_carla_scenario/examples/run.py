@@ -2,17 +2,20 @@
 
 Usage examples::
 
-    # Run left-turn scenario (default map: nishishinjuku)
+    # Run intersection-passing scenario (straight-through)
+    uv run scenario scenario=intersection_passing
+
+    # Run left-turn variant (uses intersection_passing with turn_direction=left)
     uv run scenario scenario=left_turn
 
     # Select a different map
-    uv run scenario scenario=left_turn map=nishishinjuku
+    uv run scenario scenario=intersection_passing map=nishishinjuku
 
     # Override individual parameters
-    uv run scenario scenario=left_turn scenario.timeout_seconds=15.0
+    uv run scenario scenario=intersection_passing scenario.timeout_seconds=15.0
 
     # Override server connection
-    uv run scenario scenario=left_turn server.host=192.168.1.100 server.port=3000
+    uv run scenario scenario=intersection_passing server.host=192.168.1.100 server.port=3000
 """
 
 from __future__ import annotations
@@ -35,11 +38,9 @@ from autoware_carla_scenario import (
 
 from .configs import (
     IntersectionPassingConfig,
-    LeftTurnConfig,
     TrafficLightComplianceConfig,
 )
 from .intersection_passing import IntersectionPassingScenario
-from .left_turn import LeftTurnScenario
 from .traffic_light_compliance import TrafficLightComplianceScenario
 
 if TYPE_CHECKING:
@@ -69,14 +70,7 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
         initial_speed_kmh=float(cfg.ego.initial_speed_kmh),
     )
 
-    # --- left_turn ---
-    if scenario_name == "left_turn":
-        return ego, LeftTurnScenario(
-            ego,
-            config=LeftTurnConfig(**scenario_dict),
-        )
-
-    # --- intersection_passing ---
+    # --- intersection_passing (also handles left_turn / right_turn via turn_direction) ---
     if scenario_name == "intersection_passing":
         return ego, IntersectionPassingScenario(
             ego, config=IntersectionPassingConfig(**scenario_dict)
