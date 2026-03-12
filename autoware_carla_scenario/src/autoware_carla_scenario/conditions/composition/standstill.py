@@ -44,41 +44,40 @@ class StandstillCondition(CompositionCondition):
         if speed_threshold < 0:
             raise ValueError("speed_threshold must be non-negative")
 
-        super().__init__(entity_name=entity_name)
-
         speed_cond = SpeedCondition(
             entity_name=entity_name,
             value=speed_threshold,
             rule=ComparisonRule.LESS_THAN_OR_EQUAL,
         )
-        self._inner = PersistentCondition(speed_cond, duration=duration)
+        child = PersistentCondition(speed_cond, duration=duration)
+
+        super().__init__(child=child, entity_name=entity_name)
+
         self._entity_name = entity_name
         self._duration = duration
         self._speed_threshold = speed_threshold
 
     def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
-        """Return a pass result if the entity has been standing still long enough.
+        """Return a pass result once the child :class:`PersistentCondition` fires.
 
         The entity is guaranteed to exist by the
-        :class:`EntityExistenceCondition` guard.
+        :class:`EntityExistenceCondition` guard, and the child
+        ``PersistentCondition(SpeedCondition)`` has already passed when
+        this method is called.
 
         Args:
             world: The CARLA world instance.
             elapsed: Elapsed time in seconds since the scenario started.
 
         Returns:
-            :class:`ScenarioResult` with ``passed=True`` if the entity has been
-            nearly stopped for at least *duration* seconds, ``None`` otherwise.
+            :class:`ScenarioResult` with ``passed=True``.
         """
-        result = self._inner.check(world, elapsed)
-        if result is not None and result.passed:
-            return ScenarioResult(
-                passed=True,
-                message=(
-                    f"Entity '{self._entity_name}' has been standing still"
-                    f" for {self._duration:.2f}s"
-                    f" (threshold: {self._duration}s)"
-                ),
-                elapsed_seconds=result.elapsed_seconds,
-            )
-        return result
+        return ScenarioResult(
+            passed=True,
+            message=(
+                f"Entity '{self._entity_name}' has been standing still"
+                f" for {self._duration:.2f}s"
+                f" (threshold: {self._duration}s)"
+            ),
+            elapsed_seconds=elapsed,
+        )

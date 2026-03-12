@@ -316,14 +316,14 @@ class TestTemporaryStopCondition:
         """Single OpenDrivePose creates a PersistentCondition (not OrCondition)."""
         od = OpenDrivePose(road_id="1", lane_id=-1, s=50.0)
         cond = TemporaryStopCondition("ego", stop_positions=[od])
-        assert isinstance(cond._inner, PersistentCondition)
+        assert isinstance(cond._child, PersistentCondition)
 
     def test_multiple_opendrive_poses(self) -> None:
         """Multiple poses creates an OrCondition wrapping PersistentConditions."""
         od1 = OpenDrivePose(road_id="1", lane_id=-1, s=50.0)
         od2 = OpenDrivePose(road_id="2", lane_id=-1, s=100.0)
         cond = TemporaryStopCondition("ego", stop_positions=[od1, od2])
-        assert isinstance(cond._inner, OrCondition)
+        assert isinstance(cond._child, OrCondition)
 
     @patch("autoware_carla_scenario.conditions.composition.temporary_stop.to_opendrive")
     def test_lanelet2_pose_converted(self, mock_to_od: MagicMock) -> None:
@@ -332,7 +332,7 @@ class TestTemporaryStopCondition:
         ll2 = Lanelet2Pose(lanelet_id=100, s=10.0, t=0.0)
         cond = TemporaryStopCondition("ego", stop_positions=[ll2])
         mock_to_od.assert_called_once_with(ll2)
-        assert isinstance(cond._inner, PersistentCondition)
+        assert isinstance(cond._child, PersistentCondition)
 
     @patch("autoware_carla_scenario.conditions.composition.temporary_stop.to_opendrive")
     def test_carla_world_pose_converted(self, mock_to_od: MagicMock) -> None:
@@ -341,7 +341,7 @@ class TestTemporaryStopCondition:
         cwp = CarlaWorldPose(x=10.0, y=20.0, z=0.0)
         cond = TemporaryStopCondition("ego", stop_positions=[cwp])
         mock_to_od.assert_called_once_with(cwp)
-        assert isinstance(cond._inner, PersistentCondition)
+        assert isinstance(cond._child, PersistentCondition)
 
     def test_opendrive_pose_not_converted(self) -> None:
         """OpenDrivePose is used directly without calling to_opendrive."""

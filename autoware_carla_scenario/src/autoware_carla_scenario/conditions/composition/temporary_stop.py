@@ -63,9 +63,6 @@ class TemporaryStopCondition(CompositionCondition):
         if stop_duration <= 0:
             raise ValueError("stop_duration must be positive")
 
-        super().__init__(entity_name=entity_name)
-        self._entity_name = entity_name
-
         persistent_conditions: list[PersistentCondition] = []
         for pose in stop_positions:
             od_pose = self._to_od(pose)
@@ -95,9 +92,12 @@ class TemporaryStopCondition(CompositionCondition):
             persistent_conditions.append(persistent)
 
         if len(persistent_conditions) == 1:
-            self._inner: BaseCondition = persistent_conditions[0]
+            child: BaseCondition = persistent_conditions[0]
         else:
-            self._inner = OrCondition(persistent_conditions)
+            child = OrCondition(persistent_conditions)
+
+        super().__init__(child=child, entity_name=entity_name)
+        self._entity_name = entity_name
 
     @staticmethod
     def _to_od(pose: AnyPose) -> OpenDrivePose:
@@ -107,18 +107,25 @@ class TemporaryStopCondition(CompositionCondition):
         return to_opendrive(pose)
 
     def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
-        """Return a pass result if the entity has stopped at any target position.
+        """Return a pass result once the child condition fires.
 
         The entity is guaranteed to exist by the
-        :class:`EntityExistenceCondition` guard.
+        :class:`EntityExistenceCondition` guard, and the child
+        (``OrCondition`` / ``PersistentCondition``) has already passed
+        when this method is called.
 
         Args:
             world: The CARLA world instance.
             elapsed: Elapsed time in seconds since the scenario started.
 
         Returns:
-            :class:`ScenarioResult` with ``passed=True`` if the entity has
-            remained stopped at a target position for the required duration,
-            ``None`` otherwise.
+            :class:`ScenarioResult` with ``passed=True``.
         """
-        return self._inner.check(world, elapsed)
+        return ScenarioResult(
+            passed=True,
+            message=(
+                f"Entity '{self._entity_name}' has temporarily stopped"
+                f" at a target position at {elapsed:.2f}s"
+            ),
+            elapsed_seconds=elapsed,
+        )
