@@ -50,6 +50,45 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def project_onto_road(pose: CarlaWorldPose, road_id: str) -> OpenDrivePose:
+    """Project a CARLA world position onto a specific OpenDRIVE road.
+
+    Unlike :func:`to_opendrive` which finds the nearest road, this projects
+    directly onto the specified road regardless of distance.
+
+    Args:
+        pose: The CARLA world pose to project.
+        road_id: The OpenDRIVE road ID to project onto.
+
+    Returns:
+        An :class:`OpenDrivePose` with ``road_id`` set to *road_id*.
+    """
+    mm = MapManager.get_instance()
+    road = mm.road_network.road_ids_to_object[road_id]
+    ref_line: np.ndarray = road.reference_line
+
+    od_x = pose.x
+    od_y = -pose.y
+    od_heading = -math.radians(pose.yaw)
+
+    arc_lengths = _compute_arc_lengths_2d(ref_line)
+    diffs = ref_line - np.array([od_x, od_y])
+    nearest_idx = int(np.argmin(np.linalg.norm(diffs, axis=1)))
+
+    s = float(arc_lengths[nearest_idx])
+    heading_ref = _heading_at_s(ref_line, arc_lengths, s)
+    t = _signed_perp_distance(od_x, od_y, ref_line, nearest_idx, heading_ref)
+    lane_id = _find_lane_at_t(road, s, t)
+
+    return OpenDrivePose(
+        road_id=road_id,
+        lane_id=lane_id,
+        s=s,
+        t=t,
+        heading=_normalize_angle(od_heading - heading_ref),
+    )
+
+
 def to_carla_location(pose: Union[AnyPose, "carla.Location"]) -> "carla.Location":
     """Convert any pose type to a ``carla.Location``.
 
