@@ -2,7 +2,6 @@
 scenario:
   name: lane_change
   direction: left
-  trigger_delay_seconds: 1.0
   timeout_seconds: 10.0
 
 ego:

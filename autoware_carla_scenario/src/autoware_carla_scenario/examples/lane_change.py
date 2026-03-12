@@ -37,7 +37,6 @@ from autoware_carla_scenario import (
     EGO_ROLE_NAME,
     BaseScenario,
     EgoConfig,
-    ElapsedTimeCondition,
     EntityLanePositionCondition,
     LaneChangeAction,
     LaneChangeDirection,
@@ -77,8 +76,7 @@ class LaneChangeScenario(BaseScenario):
 
     1. Snaps a Lanelet2 pose to the CARLA road surface for the ego spawn.
     2. Sets every traffic light in the world to green.
-    3. Registers a :class:`LaneChangeAction` triggered after a configurable
-       delay so the ego reaches cruising speed first.
+    3. Registers a :class:`LaneChangeAction` that fires immediately.
     4. Derives the expected target lane from the spawn lane ID and direction,
        then registers a pass condition checking both road ID and lane ID.
     5. Registers a :class:`TimeoutCondition` as a fail-safe.
@@ -132,21 +130,16 @@ class LaneChangeScenario(BaseScenario):
         n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
         logger.info("Set %d traffic lights to green", n)
 
-        # --- Lane-change action (triggered after delay) ---
+        # --- Lane-change action (fires immediately) ---
         direction = _DIRECTION_MAP[cfg.direction]
         lane_change_action = LaneChangeAction(
             entity_name=EGO_ROLE_NAME,
             direction=direction,
             client=self.client,
-            condition=ElapsedTimeCondition(cfg.trigger_delay_seconds),
             timing=TickTiming.PRE_TICK,
         )
         self.register_pre_tick(lane_change_action)
-        logger.info(
-            "Registered LaneChangeAction: %s (delay=%.1fs)",
-            cfg.direction,
-            cfg.trigger_delay_seconds,
-        )
+        logger.info("Registered LaneChangeAction: %s", cfg.direction)
 
         # --- Pass condition: ego reaches the adjacent lane ---
         # Target lane ID is derived from spawn lane ID + direction delta.

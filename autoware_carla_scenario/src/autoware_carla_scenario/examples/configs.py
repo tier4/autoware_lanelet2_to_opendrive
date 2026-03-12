@@ -116,10 +116,6 @@ class LaneChangeConfig:
     #: Direction of the lane change (``"left"`` or ``"right"``).
     direction: str = "left"
 
-    #: Delay (seconds) before triggering the lane change, giving the ego
-    #: time to reach cruising speed.
-    trigger_delay_seconds: float = 1.0
-
     #: Fail-safe timeout in seconds.
     timeout_seconds: float = 10.0
 
