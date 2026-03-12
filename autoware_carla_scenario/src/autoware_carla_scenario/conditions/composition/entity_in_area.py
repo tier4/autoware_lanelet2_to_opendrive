@@ -9,7 +9,8 @@ import numpy as np
 
 from ...coordinate.poses import AnyPose, CarlaWorldPose
 from ...coordinate.transform import to_carla_world
-from ..base import BaseCondition, ScenarioResult, find_actor_by_role_name
+from ..base import ScenarioResult, find_actor_by_role_name
+from .base import CompositionCondition
 
 if TYPE_CHECKING:
     import carla
@@ -39,7 +40,7 @@ def _point_in_polygon_2d(
     return result >= 0 if include_boundary else result > 0
 
 
-class EntityInAreaCondition(BaseCondition):
+class EntityInAreaCondition(CompositionCondition):
     """Pass condition that triggers when a named entity is inside a polygon area.
 
     The polygon boundary is defined by a list of poses in any supported coordinate
@@ -49,6 +50,9 @@ class EntityInAreaCondition(BaseCondition):
 
     Only the x-y (horizontal) plane is considered for the containment test;
     the z coordinate is ignored.
+
+    An :class:`EntityExistenceCondition` guard ensures the entity is present
+    before the containment check runs.
 
     Args:
         entity_name: The ``role_name`` attribute of the actor to track.
@@ -67,6 +71,7 @@ class EntityInAreaCondition(BaseCondition):
     ) -> None:
         if len(polygon) < 3:
             raise ValueError("polygon must have at least 3 vertices")
+        super().__init__(entity_name=entity_name)
         self._entity_name = entity_name
         self._polygon: Sequence[AnyPose] = polygon
         self._include_boundary = include_boundary
@@ -85,8 +90,11 @@ class EntityInAreaCondition(BaseCondition):
                 result.append(to_carla_world(pose))
         return result
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the named entity is inside the polygon area.
+
+        The entity is guaranteed to exist by the
+        :class:`EntityExistenceCondition` guard.
 
         Args:
             world: The CARLA world instance.
@@ -94,7 +102,7 @@ class EntityInAreaCondition(BaseCondition):
 
         Returns:
             :class:`ScenarioResult` with ``passed=True`` if the entity is inside
-            the area, ``None`` otherwise (entity not found or outside the area).
+            the area, ``None`` otherwise.
         """
         carla_polygon = self._resolve_polygon()
 

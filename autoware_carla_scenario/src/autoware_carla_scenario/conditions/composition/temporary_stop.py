@@ -11,6 +11,7 @@ from ..base import BaseCondition, ScenarioResult
 from ..comparison import ComparisonRule, ScalarComparisonRule
 from ..or_condition import OrCondition
 from ..persistent import PersistentCondition
+from .base import CompositionCondition
 from .entity_lane_position import EntityLanePositionCondition
 from .speed import SpeedCondition
 
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     import carla
 
 
-class TemporaryStopCondition(BaseCondition):
+class TemporaryStopCondition(CompositionCondition):
     """Pass when entity temporarily stops at any of the given positions.
 
     For each stop position, constructs a composite condition:
@@ -26,6 +27,9 @@ class TemporaryStopCondition(BaseCondition):
 
     When multiple stop positions are given, they are combined with
     :class:`OrCondition` — stopping at any one position is sufficient.
+
+    An :class:`EntityExistenceCondition` guard ensures the entity is present
+    before the inner conditions are evaluated.
 
     Args:
         entity_name: The ``role_name`` attribute of the actor to track.
@@ -59,6 +63,7 @@ class TemporaryStopCondition(BaseCondition):
         if stop_duration <= 0:
             raise ValueError("stop_duration must be positive")
 
+        super().__init__(entity_name=entity_name)
         self._entity_name = entity_name
 
         persistent_conditions: list[PersistentCondition] = []
@@ -101,8 +106,11 @@ class TemporaryStopCondition(BaseCondition):
             return pose
         return to_opendrive(pose)
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the entity has stopped at any target position.
+
+        The entity is guaranteed to exist by the
+        :class:`EntityExistenceCondition` guard.
 
         Args:
             world: The CARLA world instance.

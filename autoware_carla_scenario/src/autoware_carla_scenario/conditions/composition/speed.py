@@ -6,8 +6,9 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Optional
 
 from ...kinematics import Vector3
-from ..base import BaseCondition, ScenarioResult
+from ..base import ScenarioResult
 from ..comparison import ComparisonRule, ScalarComparisonRule
+from .base import CompositionCondition
 
 if TYPE_CHECKING:
     import carla
@@ -58,7 +59,7 @@ class SpeedCoordinateSystem(Enum):
     ENTITY = auto()
 
 
-class SpeedCondition(BaseCondition):
+class SpeedCondition(CompositionCondition):
     """Pass condition that triggers when an entity's speed meets a comparison.
 
     Evaluates the specified speed component of an entity against a threshold
@@ -102,6 +103,7 @@ class SpeedCondition(BaseCondition):
             raise ValueError(
                 "reference_entity_name is required " "when coordinate_system is ENTITY"
             )
+        super().__init__()
         self._entity_name = entity_name
         self._comparison = ScalarComparisonRule(
             field="speed", rule=rule, value=value, tolerance=tolerance
@@ -161,7 +163,7 @@ class SpeedCondition(BaseCondition):
         left_unit = Vector3(fwd_unit.y, -fwd_unit.x, 0.0)
         return vel.dot(left_unit)
 
-    def check(self, world: carla.World, elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, world: carla.World, elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the entity's speed satisfies the rule.
 
         Args:

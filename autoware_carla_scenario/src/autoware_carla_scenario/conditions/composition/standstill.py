@@ -4,19 +4,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from ..base import BaseCondition, ScenarioResult
+from ..base import ScenarioResult
 from ..comparison import ComparisonRule
 from ..persistent import PersistentCondition
+from .base import CompositionCondition
 from .speed import SpeedCondition
 
 if TYPE_CHECKING:
     import carla
 
 
-class StandstillCondition(BaseCondition):
+class StandstillCondition(CompositionCondition):
     """Pass when entity speed stays below threshold for *duration* seconds.
 
     Composition of ``PersistentCondition(SpeedCondition(LESS_THAN_OR_EQUAL))``.
+
+    An :class:`EntityExistenceCondition` guard ensures the entity is present
+    before the inner condition is evaluated.
 
     Args:
         entity_name: The ``role_name`` attribute of the actor to track.
@@ -40,6 +44,8 @@ class StandstillCondition(BaseCondition):
         if speed_threshold < 0:
             raise ValueError("speed_threshold must be non-negative")
 
+        super().__init__(entity_name=entity_name)
+
         speed_cond = SpeedCondition(
             entity_name=entity_name,
             value=speed_threshold,
@@ -50,8 +56,11 @@ class StandstillCondition(BaseCondition):
         self._duration = duration
         self._speed_threshold = speed_threshold
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the entity has been standing still long enough.
+
+        The entity is guaranteed to exist by the
+        :class:`EntityExistenceCondition` guard.
 
         Args:
             world: The CARLA world instance.
