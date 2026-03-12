@@ -59,7 +59,14 @@ Public API re-exported for convenience::
     )
 """
 
-from .actions import BaseAction, TickTiming, TurnAction, TurnDirection
+from .actions import (
+    BaseAction,
+    LaneChangeAction,
+    LaneChangeDirection,
+    TickTiming,
+    TurnAction,
+    TurnDirection,
+)
 from .scenario_runner import ScenarioRunner
 from .conditions import (
     EntityExistenceCondition,
@@ -194,6 +201,8 @@ __all__ = [
     "FrenetAcceleration",
     # Actions
     "BaseAction",
+    "LaneChangeAction",
+    "LaneChangeDirection",
     "TickTiming",
     "TurnAction",
     "TurnDirection",
