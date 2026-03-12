@@ -1,0 +1,9 @@
+# @package _global_
+# Nishishinjuku map configuration for CARLA scenarios.
+#
+# Override paths via CLI if your files are in a different location:
+#   uv run scenario map=nishishinjuku map.xodr_path=/other/path.xodr
+map:
+  name: NishishinjukuMap
+  xodr_path: ${oc.env:NISHISHINJUKU_XODR_PATH,autoware_carla_scenario/test/carla_scenario/data/nishishinjuku.xodr}
+  lanelet2_path: ${oc.env:NISHISHINJUKU_LANELET2_PATH,autoware_carla_scenario/test/carla_scenario/data/nishishinjuku.osm}

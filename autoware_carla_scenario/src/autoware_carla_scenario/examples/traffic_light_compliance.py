@@ -17,7 +17,7 @@ Typical usage
 -------------
 Standalone (no pytest)::
 
-    uv run scenario scenario=traffic_light_compliance map.name=NishishinjukuMap
+    uv run scenario scenario=traffic_light_compliance
 
 With pytest — see ``test/carla_scenario/test_examples.py``.
 """

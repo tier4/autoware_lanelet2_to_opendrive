@@ -2,17 +2,17 @@
 
 Usage examples::
 
-    # Run left-turn scenario
-    uv run scenario scenario=left_turn map.name=NishishinjukuMap
+    # Run left-turn scenario (default map: nishishinjuku)
+    uv run scenario scenario=left_turn
 
-    # Override a target environment
-    uv run scenario scenario=left_turn target=nishishinjuku
+    # Select a different map
+    uv run scenario scenario=left_turn map=nishishinjuku
 
     # Override individual parameters
-    uv run scenario scenario=left_turn map.name=NishishinjukuMap scenario.timeout_seconds=15.0
+    uv run scenario scenario=left_turn scenario.timeout_seconds=15.0
 
     # Override server connection
-    uv run scenario scenario=left_turn map.name=X server.host=192.168.1.100 server.port=3000
+    uv run scenario scenario=left_turn server.host=192.168.1.100 server.port=3000
 """
 
 from __future__ import annotations

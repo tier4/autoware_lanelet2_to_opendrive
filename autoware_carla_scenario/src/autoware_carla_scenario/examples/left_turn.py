@@ -14,7 +14,7 @@ Typical usage
 -------------
 Standalone (no pytest)::
 
-    uv run scenario scenario=left_turn map.name=NishishinjukuMap
+    uv run scenario scenario=left_turn
 
 With pytest — see ``test/carla_scenario/test_examples.py``.
 """

@@ -2,6 +2,7 @@ defaults:
   - _self_
   - target: default
   - scenario: left_turn
+  - map: nishishinjuku
 
 server:
   host: localhost
