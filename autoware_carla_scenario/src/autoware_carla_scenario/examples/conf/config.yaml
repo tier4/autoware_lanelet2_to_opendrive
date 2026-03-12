@@ -2,7 +2,7 @@ defaults:
   - _self_
   - server: localhost
   - ego: default
-  - scenario: left_turn
+  - scenario: intersection_passing/left_turn
   - map: nishishinjuku
 
 server:
