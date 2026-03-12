@@ -6,7 +6,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Optional
 
 from ...kinematics import Vector3
-from ..base import ScenarioResult
+from ..base import ScenarioResult, find_actor_in_list
 from ..comparison import ComparisonRule, ScalarComparisonRule
 from .base import CompositionCondition
 
@@ -15,17 +15,6 @@ if TYPE_CHECKING:
 
 _NEAR_ZERO_THRESHOLD = 1e-12
 """Magnitude below which a forward vector is considered degenerate."""
-
-
-def _find_actor_in_list(
-    actors: list[carla.Actor],
-    role_name: str,
-) -> Optional[carla.Actor]:
-    """Find an actor by ``role_name`` in a pre-fetched actor list."""
-    for actor in actors:
-        if actor.attributes.get("role_name") == role_name:
-            return actor
-    return None
 
 
 class SpeedDirection(Enum):
@@ -103,8 +92,7 @@ class SpeedCondition(CompositionCondition):
             raise ValueError(
                 "reference_entity_name is required " "when coordinate_system is ENTITY"
             )
-        super().__init__()
-        self._entity_name = entity_name
+        super().__init__(entity_name=entity_name)
         self._comparison = ScalarComparisonRule(
             field="speed", rule=rule, value=value, tolerance=tolerance
         )
@@ -144,7 +132,7 @@ class SpeedCondition(CompositionCondition):
 
         # --- ENTITY coordinate system ---
         assert self._reference_entity_name is not None
-        ref_entity = _find_actor_in_list(actors, self._reference_entity_name)
+        ref_entity = find_actor_in_list(actors, self._reference_entity_name)
         if ref_entity is None:
             return None
 
@@ -174,8 +162,9 @@ class SpeedCondition(CompositionCondition):
             :class:`ScenarioResult` with ``passed=True`` if the speed
             condition is met, ``None`` otherwise.
         """
+        assert self._entity_name is not None
         actors: list[carla.Actor] = world.get_actors()
-        entity = _find_actor_in_list(actors, self._entity_name)
+        entity = find_actor_in_list(actors, self._entity_name)
         if entity is None:
             return None
 

@@ -46,6 +46,7 @@ class CompositionCondition(BaseCondition):
         entity_name: str | None = None,
     ) -> None:
         self._child = child
+        self._entity_name = entity_name
         self._entity_existence: EntityExistenceCondition | None = (
             EntityExistenceCondition(entity_name) if entity_name is not None else None
         )

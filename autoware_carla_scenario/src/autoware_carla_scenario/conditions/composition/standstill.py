@@ -53,7 +53,6 @@ class StandstillCondition(CompositionCondition):
 
         super().__init__(child=child, entity_name=entity_name)
 
-        self._entity_name = entity_name
         self._duration = duration
         self._speed_threshold = speed_threshold
 
@@ -77,7 +76,7 @@ class StandstillCondition(CompositionCondition):
             message=(
                 f"Entity '{self._entity_name}' has been standing still"
                 f" for {self._duration:.2f}s"
-                f" (threshold: {self._duration}s)"
+                f" (speed threshold: {self._speed_threshold} m/s)"
             ),
             elapsed_seconds=elapsed,
         )

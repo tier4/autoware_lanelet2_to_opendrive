@@ -10,6 +10,24 @@ if TYPE_CHECKING:
     import carla
 
 
+def find_actor_in_list(
+    actors: "list[carla.Actor]", role_name: str
+) -> Optional["carla.Actor"]:
+    """Find a single actor by its ``role_name`` in a pre-fetched actor list.
+
+    Args:
+        actors: Pre-fetched actor list (e.g. from ``world.get_actors()``).
+        role_name: The ``role_name`` attribute value to search for.
+
+    Returns:
+        The matching actor, or ``None`` if no actor with that role name exists.
+    """
+    return next(
+        (a for a in actors if a.attributes.get("role_name") == role_name),
+        None,
+    )
+
+
 def find_actor_by_role_name(
     world: "carla.World", role_name: str
 ) -> Optional["carla.Actor"]:
@@ -22,11 +40,7 @@ def find_actor_by_role_name(
     Returns:
         The matching actor, or ``None`` if no actor with that role name exists.
     """
-    actors = world.get_actors()
-    return next(
-        (a for a in actors if a.attributes.get("role_name") == role_name),
-        None,
-    )
+    return find_actor_in_list(world.get_actors(), role_name)
 
 
 @dataclass
