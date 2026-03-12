@@ -39,6 +39,7 @@ from autoware_carla_scenario import (
     Lanelet2Pose,
     SpawnTransform,
     SpeedCondition,
+    StandstillCondition,
     StickyCondition,
     TimeoutCondition,
     find_actor_by_role_name,
@@ -145,18 +146,11 @@ class TrafficLightComplianceScenario(BaseScenario):
         self.register_pre_tick(_switch_lights)
 
         # --- Pass conditions ---
-        # 1) Verify ego stopped during red phase (1.0–2.9 s)
+        # 1) Verify ego stopped during red phase (standstill for >= cfg.light_switch_delay_seconds - merging time)
         stopped_at_red = StickyCondition(
-            AndCondition(
-                [
-                    ElapsedTimeCondition(1.0, ComparisonRule.GREATER_THAN_OR_EQUAL),
-                    ElapsedTimeCondition(2.9, ComparisonRule.LESS_THAN),
-                    SpeedCondition(
-                        entity_name=EGO_ROLE_NAME,
-                        value=0.0,
-                        rule=ComparisonRule.LESS_THAN_OR_EQUAL,
-                    ),
-                ]
+            StandstillCondition(
+                entity_name=EGO_ROLE_NAME,
+                duration=cfg.light_switch_delay_seconds - cfg.merging_time_seconds,
             )
         )
 

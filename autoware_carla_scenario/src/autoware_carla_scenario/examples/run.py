@@ -135,6 +135,10 @@ def _print_summary(names: list[str], results: list[ScenarioResult]) -> bool:
         if not result.passed:
             for line in result.message.splitlines():
                 print(f"         {line}")  # noqa: T201
+        if result.condition_statuses:
+            for cs in result.condition_statuses:
+                mark = "OK" if cs.satisfied else "NG"
+                print(f"    [{mark}] {cs.label}: {cs.message}")  # noqa: T201
     passed = sum(1 for r in results if r.passed)
     total = len(results)
     print(thin)  # noqa: T201

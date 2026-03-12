@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from ..coordinate.poses import CarlaWorldPose
-from ..coordinate.transform import project_onto_road, to_opendrive
-from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
-from .comparison import ScalarComparisonRule
+from ...coordinate.poses import CarlaWorldPose
+from ...coordinate.transform import project_onto_road, to_opendrive
+from ..base import ScenarioResult, find_actor_by_role_name
+from ..comparison import ScalarComparisonRule
+from .base import CompositionCondition
 
 if TYPE_CHECKING:
     import carla
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 _VALID_FIELDS = frozenset({"s", "t"})
 
 
-class EntityLanePositionCondition(BaseCondition):
+class EntityLanePositionCondition(CompositionCondition):
     """Pass condition that triggers when a named entity is on a specified OpenDRIVE road and lane.
 
     On every call to :meth:`check`, the entity's CARLA world position is converted
@@ -31,6 +32,9 @@ class EntityLanePositionCondition(BaseCondition):
     be on any lane of that road.  When comparison *rules* are also specified,
     :func:`project_onto_road` is used to obtain accurate ``s``/``t`` values on
     the confirmed road.
+
+    An :class:`EntityExistenceCondition` guard ensures the entity is present
+    before the position check runs.
 
     .. note::
         :class:`~autoware_carla_scenario.coordinate.map_manager.MapManager` must be
@@ -56,6 +60,7 @@ class EntityLanePositionCondition(BaseCondition):
         lane_id: Optional[int] = None,
         rules: Optional[list[ScalarComparisonRule]] = None,
     ) -> None:
+        super().__init__(entity_name=entity_name)
         self._entity_name = entity_name
         self._road_id = road_id
         self._lane_id = lane_id
@@ -67,8 +72,11 @@ class EntityLanePositionCondition(BaseCondition):
                     f"ScalarComparisonRule field must be 's' or 't', got '{rule.field}'"
                 )
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the named entity is on the specified road and lane.
+
+        The entity is guaranteed to exist by the
+        :class:`EntityExistenceCondition` guard.
 
         Args:
             world: The CARLA world instance.
@@ -80,10 +88,6 @@ class EntityLanePositionCondition(BaseCondition):
         """
         entity = find_actor_by_role_name(world, self._entity_name)
         if entity is None:
-            logger.debug(
-                "EntityLanePositionCondition: actor '%s' not found",
-                self._entity_name,
-            )
             return None
 
         loc = entity.get_location()

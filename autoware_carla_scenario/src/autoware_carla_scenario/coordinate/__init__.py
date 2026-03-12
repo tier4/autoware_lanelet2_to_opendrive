@@ -22,6 +22,7 @@ from .frames import CoordinateFrame, FrameMismatchError, frame_of
 from .map_manager import MapManager
 from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
 from .snap import snap_to_carla_road
+from .stop_line import get_stop_line_poses
 from .transform import (
     project_onto_road,
     to_carla_location,
@@ -39,6 +40,7 @@ __all__ = [
     "OpenDrivePose",
     "MapManager",
     "frame_of",
+    "get_stop_line_poses",
     "project_onto_road",
     "snap_to_carla_road",
     "to_carla_location",
