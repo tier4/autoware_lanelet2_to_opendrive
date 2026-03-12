@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -292,7 +293,7 @@ class TestTemporaryStopCondition:
     """
 
     @pytest.fixture(autouse=True)
-    def _mock_road_helpers(self) -> None:
+    def _mock_road_helpers(self) -> Generator[None, None, None]:
         """Mock road helpers to avoid MapManager dependency in unit tests."""
         with patch.object(
             TemporaryStopCondition, "_get_road_length", return_value=100.0
