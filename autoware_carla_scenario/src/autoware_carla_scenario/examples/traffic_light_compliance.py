@@ -17,18 +17,15 @@ Typical usage
 -------------
 Standalone (no pytest)::
 
-    uv run traffic-light-compliance --map NishishinjyukuMap
+    uv run traffic-light-compliance map.name=NishishinjyukuMap
 
 With pytest — see ``test/carla_scenario/test_examples.py``.
 """
 
 from __future__ import annotations
 
-import argparse
 import logging
-import sys
 import time
-from pathlib import Path
 
 import carla
 
@@ -40,7 +37,6 @@ from autoware_carla_scenario import (
     EgoConfig,
     ElapsedTimeCondition,
     Lanelet2Pose,
-    ScenarioQueue,
     SpawnTransform,
     SpeedCondition,
     StickyCondition,
@@ -49,6 +45,8 @@ from autoware_carla_scenario import (
     set_all_traffic_lights_state,
     snap_to_carla_road,
 )
+
+from .configs import TrafficLightComplianceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +82,19 @@ class TrafficLightComplianceScenario(BaseScenario):
     6. Registers a :class:`TimeoutCondition` as a fail-safe.
     """
 
-    def __init__(self, ego_config: EgoConfig) -> None:
+    def __init__(
+        self,
+        ego_config: EgoConfig,
+        config: TrafficLightComplianceConfig | None = None,
+    ) -> None:
         super().__init__(ego_config)
+        self._config = config or TrafficLightComplianceConfig()
 
     def setup(self, world: carla.World) -> None:
         """Snap ego spawn, set lights to red, register conditions."""
+        cfg = self._config
         # --- Compute ego spawn from Lanelet2Pose ---
-        spawn_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=15.0)
+        spawn_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)
         snapped = snap_to_carla_road(spawn_pose, world)
 
         logger.info(
@@ -130,7 +134,7 @@ class TrafficLightComplianceScenario(BaseScenario):
                 switch_state["start"] = time.monotonic()
                 return
             elapsed = time.monotonic() - float(switch_state["start"])  # type: ignore[arg-type]
-            if elapsed >= LIGHT_SWITCH_DELAY_SECONDS:
+            if elapsed >= cfg.light_switch_delay_seconds:
                 count = set_all_traffic_lights_state(w, carla.TrafficLightState.Green)
                 logger.info(
                     "Switched %d traffic lights to green at %.2fs", count, elapsed
@@ -162,7 +166,7 @@ class TrafficLightComplianceScenario(BaseScenario):
                     ElapsedTimeCondition(3.5, ComparisonRule.GREATER_THAN_OR_EQUAL),
                     SpeedCondition(
                         entity_name=EGO_ROLE_NAME,
-                        value=MOVING_SPEED_KMH / 3.6,
+                        value=cfg.moving_speed_kmh / 3.6,
                         rule=ComparisonRule.GREATER_THAN_OR_EQUAL,
                     ),
                 ]
@@ -179,7 +183,7 @@ class TrafficLightComplianceScenario(BaseScenario):
                     ElapsedTimeCondition(2.9, ComparisonRule.LESS_THAN),
                     SpeedCondition(
                         entity_name=EGO_ROLE_NAME,
-                        value=MOVING_SPEED_KMH / 3.6,
+                        value=cfg.moving_speed_kmh / 3.6,
                         rule=ComparisonRule.GREATER_THAN_OR_EQUAL,
                     ),
                 ]
@@ -187,86 +191,8 @@ class TrafficLightComplianceScenario(BaseScenario):
         )
 
         # --- Fail-safe timeout ---
-        self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))
+        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
 
     def is_done(self) -> bool:
         """Always ``False`` — termination is driven by pass/fail conditions."""
         return False
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-
-def main() -> None:
-    """Run TrafficLightComplianceScenario as a standalone script.
-
-    Requires ``--map`` (and optionally ``--xodr`` to overwrite the built-in
-    map's ``.xodr``) to load the Nishishinjuku map that contains lanelet 242.
-
-    Example::
-
-        uv run traffic-light-compliance --map NishishinjyukuMap
-        uv run traffic-light-compliance --map NishishinjyukuMap --xodr path/to/nishishinjuku.xodr
-    """
-    parser = argparse.ArgumentParser(
-        description="Run the traffic-light-compliance example scenario.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument("--host", default="localhost", help="CARLA server host")
-    parser.add_argument("--port", type=int, default=2000, help="CARLA server port")
-    parser.add_argument("--map", required=True, help="Built-in CARLA map name")
-    parser.add_argument(
-        "--xodr",
-        type=Path,
-        default=None,
-        help="Path to OpenDRIVE (.xodr) file (overwrites the built-in map)",
-    )
-    parser.add_argument(
-        "--lanelet2",
-        type=Path,
-        default=None,
-        help="Path to Lanelet2 (.osm) file (required for coordinate transforms)",
-    )
-    parser.add_argument(
-        "--vehicle",
-        default="vehicle.mini.cooper",
-        help="Ego vehicle blueprint ID",
-    )
-
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
-    )
-
-    # Ego spawn location is determined in setup() via snap_to_carla_road;
-    # provide a dummy transform that will be overwritten before ego.spawn().
-    ego = EgoConfig(
-        spawn_location=SpawnTransform(
-            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
-        ),
-        vehicle_type=args.vehicle,
-        initial_speed_kmh=0.0,
-    )
-
-    queue = ScenarioQueue(
-        host=args.host,
-        port=args.port,
-        xodr_path=args.xodr,
-        lanelet2_path=args.lanelet2,
-        map_name=args.map,
-    )
-    queue.add(TrafficLightComplianceScenario(ego))
-
-    with queue:
-        results = queue.run_all()
-
-    result = results[0]
-    print(result)
-    sys.exit(0 if result.passed else 1)
-
-
-if __name__ == "__main__":
-    main()

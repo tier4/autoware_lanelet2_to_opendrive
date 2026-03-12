@@ -1,0 +1,17 @@
+defaults:
+  - _self_
+  - target: default
+  - scenario: spawn_and_idle
+
+server:
+  host: localhost
+  port: 2000
+
+map:
+  name: ???
+  xodr_path: null
+  lanelet2_path: null
+
+ego:
+  vehicle_type: vehicle.mini.cooper
+  initial_speed_kmh: 0.0

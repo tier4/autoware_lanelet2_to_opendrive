@@ -11,17 +11,14 @@ Typical usage
 -------------
 Standalone (no pytest)::
 
-    uv run intersection-passing --xodr /path/to/nishishinjuku.xodr
+    uv run intersection-passing map.name=NishishinjyukuMap
 
 With pytest — see ``test/carla_scenario/test_examples.py``.
 """
 
 from __future__ import annotations
 
-import argparse
 import logging
-import sys
-from pathlib import Path
 
 import carla
 
@@ -33,7 +30,6 @@ from autoware_carla_scenario import (
     EgoConfig,
     EntityLanePositionCondition,
     Lanelet2Pose,
-    ScenarioQueue,
     SpawnTransform,
     SpeedCondition,
     StickyCondition,
@@ -43,6 +39,8 @@ from autoware_carla_scenario import (
     snap_to_carla_road,
     to_opendrive,
 )
+
+from .configs import IntersectionPassingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -87,13 +85,17 @@ class IntersectionPassingScenario(BaseScenario):
     Once all expected roads have been visited the scenario passes.
     """
 
-    def __init__(self, ego_config: EgoConfig) -> None:
+    def __init__(
+        self, ego_config: EgoConfig, config: IntersectionPassingConfig | None = None
+    ) -> None:
         super().__init__(ego_config)
+        self._config = config or IntersectionPassingConfig()
 
     def setup(self, world: carla.World) -> None:
         """Snap ego spawn to CARLA road, set lights to green, register conditions."""
+        cfg = self._config
         # --- Compute ego spawn from Lanelet2Pose ---
-        spawn_pose = Lanelet2Pose(lanelet_id=SPAWN_LANELET_ID, s=25.0)
+        spawn_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)
         snapped = snap_to_carla_road(spawn_pose, world)
 
         logger.info(
@@ -123,7 +125,7 @@ class IntersectionPassingScenario(BaseScenario):
         # --- Build unique route road IDs from lanelet IDs ---
         seen: set[str] = set()
         route_road_ids: list[str] = []
-        for ll_id in EXPECTED_ROUTE_LANELET_IDS:
+        for ll_id in cfg.expected_route_lanelet_ids:
             rid = _lanelet_start_road_id(ll_id)
             logger.info("Lanelet %d -> OpenDRIVE road '%s'", ll_id, rid)
             if rid not in seen:
@@ -148,92 +150,14 @@ class IntersectionPassingScenario(BaseScenario):
         self.register_fail_condition(
             SpeedCondition(
                 entity_name=EGO_ROLE_NAME,
-                value=MIN_SPEED_KMH / 3.6,
+                value=cfg.min_speed_kmh / 3.6,
                 rule=ComparisonRule.LESS_THAN,
             )
         )
 
         # --- Fail-safe timeout ---
-        self.register_fail_condition(TimeoutCondition(SCENARIO_TIMEOUT_SECONDS))
+        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
 
     def is_done(self) -> bool:
         """Always ``False`` — termination is driven by pass/fail conditions."""
         return False
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-
-def main() -> None:
-    """Run IntersectionPassingScenario as a standalone script.
-
-    Requires ``--map`` (and optionally ``--xodr`` to overwrite the built-in
-    map's ``.xodr``) to load the Nishishinjuku map that contains lanelet 242.
-
-    Example::
-
-        uv run intersection-passing --map NishishinjyukuMap
-        uv run intersection-passing --map NishishinjyukuMap --xodr path/to/nishishinjuku.xodr
-    """
-    parser = argparse.ArgumentParser(
-        description="Run the intersection-passing example scenario.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument("--host", default="localhost", help="CARLA server host")
-    parser.add_argument("--port", type=int, default=2000, help="CARLA server port")
-    parser.add_argument("--map", required=True, help="Built-in CARLA map name")
-    parser.add_argument(
-        "--xodr",
-        type=Path,
-        default=None,
-        help="Path to OpenDRIVE (.xodr) file (overwrites the built-in map)",
-    )
-    parser.add_argument(
-        "--lanelet2",
-        type=Path,
-        default=None,
-        help="Path to Lanelet2 (.osm) file (required for coordinate transforms)",
-    )
-    parser.add_argument(
-        "--vehicle",
-        default="vehicle.mini.cooper",
-        help="Ego vehicle blueprint ID",
-    )
-
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
-    )
-
-    # Ego spawn location is determined in setup() via snap_to_carla_road;
-    # provide a dummy transform that will be overwritten before ego.spawn().
-    ego = EgoConfig(
-        spawn_location=SpawnTransform(
-            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
-        ),
-        vehicle_type=args.vehicle,
-        initial_speed_kmh=MIN_SPEED_KMH,
-    )
-
-    queue = ScenarioQueue(
-        host=args.host,
-        port=args.port,
-        xodr_path=args.xodr,
-        lanelet2_path=args.lanelet2,
-        map_name=args.map,
-    )
-    queue.add(IntersectionPassingScenario(ego))
-
-    with queue:
-        results = queue.run_all()
-
-    result = results[0]
-    print(result)
-    sys.exit(0 if result.passed else 1)
-
-
-if __name__ == "__main__":
-    main()
