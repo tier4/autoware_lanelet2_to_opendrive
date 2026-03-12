@@ -12,7 +12,8 @@ from .elapsed_time import ElapsedTimeCondition
 from .entity_in_area import EntityInAreaCondition
 from .entity_lane_position import EntityLanePositionCondition
 from .speed import SpeedCondition, SpeedCoordinateSystem, SpeedDirection
-from .standstill import StandstillCondition
+from .composition import StandstillCondition, TemporaryStopCondition
+from .persistent import PersistentCondition
 from .timeout import TimeoutCondition
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "EntityInAreaCondition",
     "EntityLanePositionCondition",
     "OrCondition",
+    "PersistentCondition",
     "ScalarComparisonRule",
     "ScenarioResult",
     "SpeedCondition",
@@ -34,5 +36,6 @@ __all__ = [
     "SpeedDirection",
     "StandstillCondition",
     "StickyCondition",
+    "TemporaryStopCondition",
     "TimeoutCondition",
 ]
