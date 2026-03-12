@@ -8,6 +8,9 @@ Usage examples::
     # Run left-turn variant (uses intersection_passing with turn_direction=left)
     uv run scenario scenario=intersection_passing/left_turn
 
+    # Run traffic-light-compliance scenario
+    uv run scenario scenario=traffic_light_compliance/traffic_light_compliance
+
     # Run all intersection-passing variants in a single batch
     uv run scenario scenario='intersection_passing/*'
 
@@ -40,6 +43,7 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_carla_scenario import (
     BaseScenario,
     EgoConfig,
+    Lanelet2Pose,
     ScenarioQueue,
     SpawnTransform,
 )
@@ -172,9 +176,11 @@ def _log_batch_plan(
         logger.info("  map         : %s", cfg.map.name)
         logger.info("  server      : %s:%s", cfg.server.host, cfg.server.port)
         logger.info(
-            "  ego         : %s (%.1f km/h)",
+            "  ego         : %s (%.1f km/h) spawn=lanelet:%d s:%.1f",
             cfg.ego.vehicle_type,
             cfg.ego.initial_speed_kmh,
+            cfg.ego.spawn_lanelet_id,
+            cfg.ego.spawn_s,
         )
         # Log all scenario-specific parameters.
         logger.info("  scenario parameters:")
@@ -249,16 +255,26 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
         initial_speed_kmh=float(cfg.ego.initial_speed_kmh),
     )
 
+    # Build spawn pose from ego config (lanelet2-specific, kept in examples layer).
+    spawn_pose = Lanelet2Pose(
+        lanelet_id=cfg.ego.spawn_lanelet_id,
+        s=cfg.ego.spawn_s,
+    )
+
     # --- intersection_passing (also handles left_turn / right_turn via turn_direction) ---
     if scenario_name == "intersection_passing":
         return ego, IntersectionPassingScenario(
-            ego, config=IntersectionPassingConfig(**scenario_dict)
+            ego,
+            config=IntersectionPassingConfig(**scenario_dict),
+            spawn_pose=spawn_pose,
         )
 
     # --- traffic_light_compliance ---
     if scenario_name == "traffic_light_compliance":
         return ego, TrafficLightComplianceScenario(
-            ego, config=TrafficLightComplianceConfig(**scenario_dict)
+            ego,
+            config=TrafficLightComplianceConfig(**scenario_dict),
+            spawn_pose=spawn_pose,
         )
 
     msg = f"Unknown scenario name: {scenario_name!r}"

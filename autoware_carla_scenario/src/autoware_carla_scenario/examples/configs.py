@@ -46,6 +46,12 @@ class EgoVehicleConfig:
     vehicle_type: str = "vehicle.mini.cooper"
     initial_speed_kmh: float = 0.0
 
+    #: Lanelet where the ego is spawned.
+    spawn_lanelet_id: int = 242
+
+    #: Longitudinal offset along the lanelet centerline.
+    spawn_s: float = 25.0
+
 
 # ---------------------------------------------------------------------------
 # Scenario-specific configs
@@ -61,12 +67,6 @@ class IntersectionPassingConfig:
     """
 
     name: str = "intersection_passing"
-
-    #: Lanelet where the ego is spawned.
-    spawn_lanelet_id: int = 242
-
-    #: Longitudinal offset along the lanelet centerline.
-    spawn_s: float = 25.0
 
     #: Ordered lanelets the ego is expected to traverse.
     expected_route_lanelet_ids: list[int] = field(default_factory=lambda: [460, 265])
@@ -92,12 +92,6 @@ class TrafficLightComplianceConfig:
     """Parameters for the traffic-light-compliance scenario."""
 
     name: str = "traffic_light_compliance"
-
-    #: Lanelet where the ego is spawned.
-    spawn_lanelet_id: int = 242
-
-    #: Longitudinal offset along the lanelet centerline.
-    spawn_s: float = 15.0
 
     #: Delay (seconds) before switching traffic lights from red to green.
     light_switch_delay_seconds: float = 3.0

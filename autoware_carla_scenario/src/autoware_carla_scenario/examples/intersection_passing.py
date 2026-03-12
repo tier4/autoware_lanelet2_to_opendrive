@@ -61,9 +61,6 @@ logger = logging.getLogger(__name__)
 # Lanelet IDs that define the expected route
 # ---------------------------------------------------------------------------
 
-#: Lanelet where the ego is spawned.
-SPAWN_LANELET_ID: int = 242
-
 #: Ordered lanelets the ego is expected to traverse through the intersection.
 EXPECTED_ROUTE_LANELET_IDS: list[int] = [460, 265]
 
@@ -108,24 +105,31 @@ class IntersectionPassingScenario(BaseScenario):
     """
 
     def __init__(
-        self, ego_config: EgoConfig, config: IntersectionPassingConfig | None = None
+        self,
+        ego_config: EgoConfig,
+        config: IntersectionPassingConfig | None = None,
+        spawn_pose: Lanelet2Pose | None = None,
     ) -> None:
         super().__init__(ego_config)
         self._config = config or IntersectionPassingConfig()
+        self._spawn_pose = spawn_pose
 
     def setup(self) -> None:
         """Snap ego spawn to CARLA road, set lights to green, register conditions."""
         world = self.world
         cfg = self._config
         # --- Compute ego spawn from Lanelet2Pose via OpenDrivePose ---
-        ll2_pose = Lanelet2Pose(lanelet_id=cfg.spawn_lanelet_id, s=cfg.spawn_s)
+        if self._spawn_pose is None:
+            msg = "spawn_pose is required for IntersectionPassingScenario"
+            raise ValueError(msg)
+        ll2_pose = self._spawn_pose
         od_pose = to_opendrive(ll2_pose)
         snapped = snap_to_carla_road(od_pose, world)
 
         logger.info(
             "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
             "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
-            cfg.spawn_lanelet_id,
+            ll2_pose.lanelet_id,
             od_pose.road_id,
             od_pose.lane_id,
             od_pose.s,
