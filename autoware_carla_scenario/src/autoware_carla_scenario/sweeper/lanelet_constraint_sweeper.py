@@ -1,0 +1,175 @@
+"""Hydra Sweeper plugin that enumerates lanelets matching declarative constraints.
+
+When activated via ``--multirun hydra/sweeper=lanelet_constraint``, this
+sweeper:
+
+1. Loads the Lanelet2 map (lightweight, no CARLA required).
+2. Parses constraints from ``sweep.constraints`` and finds matching lanelets.
+3. For each match, resolves bindings from ``sweep.bindings`` to compute
+   derived parameters (e.g. ``ego.spawn_s``).
+4. Constructs per-lanelet Hydra override batches and launches them.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from hydra.core.plugins import Plugins
+from hydra.plugins.sweeper import Sweeper
+from hydra.types import HydraContext
+from omegaconf import DictConfig, OmegaConf
+
+from .bindings import Binding, parse_binding
+from .constraints import Constraint, find_matching_lanelets, parse_constraint
+from .map_loader import load_lanelet2_map
+
+logger = logging.getLogger(__name__)
+
+
+class LaneletConstraintSweeper(Sweeper):
+    """Sweep over lanelets that satisfy declarative constraints."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.config: DictConfig | None = None
+        self.hydra_context: HydraContext | None = None
+        self.launcher: Any = None
+
+    def setup(
+        self,
+        *,
+        config: DictConfig,
+        hydra_context: HydraContext,
+        task_function: Any,
+    ) -> None:
+        """Store references and instantiate the job launcher."""
+        self.config = config
+        self.hydra_context = hydra_context
+        self.launcher = Plugins.instance().instantiate_launcher(
+            hydra_context=hydra_context,
+            task_function=task_function,
+            config=config,
+        )
+
+    def sweep(self, arguments: list[str]) -> Any:
+        """Execute the constraint-based sweep.
+
+        Args:
+            arguments: Additional CLI overrides passed alongside ``--multirun``.
+
+        Returns:
+            The aggregated results from all launched jobs.
+        """
+        assert self.config is not None
+        assert self.launcher is not None
+
+        cfg = self.config
+
+        # -- 1. Resolve map paths ------------------------------------------
+        lanelet2_path = OmegaConf.select(cfg, "map.lanelet2_path")
+        xodr_path = OmegaConf.select(cfg, "map.xodr_path")
+        if lanelet2_path is None or xodr_path is None:
+            raise ValueError(
+                "LaneletConstraintSweeper requires both map.lanelet2_path and "
+                "map.xodr_path to be set in the config."
+            )
+
+        # -- 2. Load the Lanelet2 map (lightweight) ------------------------
+        lanelet_map = load_lanelet2_map(lanelet2_path, xodr_path)
+
+        # -- 3. Parse constraints ------------------------------------------
+        sweep_cfg = OmegaConf.select(cfg, "sweep")
+        if sweep_cfg is None:
+            raise ValueError(
+                "No 'sweep' section found in config. "
+                "LaneletConstraintSweeper requires sweep.constraints."
+            )
+        sweep_dict = OmegaConf.to_container(sweep_cfg, resolve=True)
+        assert isinstance(sweep_dict, dict)
+
+        constraints_cfg = sweep_dict.get("constraints", {})
+        if not constraints_cfg:
+            raise ValueError("sweep.constraints is empty; nothing to sweep.")
+
+        # Constraints are keyed by the target parameter (e.g. ego.spawn_lanelet_id).
+        # Each value is a list of constraint dicts.
+        all_constraints: list[Constraint] = []
+        constraint_target_key: str | None = None
+        for target_key, constraint_list in constraints_cfg.items():
+            constraint_target_key = target_key
+            for c_cfg in constraint_list:
+                all_constraints.append(parse_constraint(c_cfg))
+
+        if not all_constraints or constraint_target_key is None:
+            raise ValueError("No valid constraints found in sweep.constraints.")
+
+        # -- 4. Find matching lanelets -------------------------------------
+        matched_ids = find_matching_lanelets(all_constraints, lanelet_map)
+        if not matched_ids:
+            logger.warning("No lanelets match the given constraints. Nothing to sweep.")
+            return []
+
+        # -- 5. Parse bindings ---------------------------------------------
+        bindings_cfg = sweep_dict.get("bindings", {})
+        bindings: list[Binding] = []
+        for target_key, b_cfg in bindings_cfg.items():
+            bindings.append(parse_binding(target_key, b_cfg))
+
+        # -- 6. Build override batches -------------------------------------
+        batches: list[tuple[str, ...]] = []
+        for lid in matched_ids:
+            overrides: list[str] = [f"{constraint_target_key}={lid}"]
+            for binding in bindings:
+                try:
+                    value = binding.resolve(lid, lanelet_map)
+                    overrides.append(f"{binding.target_key}={value}")
+                except Exception:
+                    logger.warning(
+                        "Binding %s failed for lanelet %d; skipping this lanelet.",
+                        binding.target_key,
+                        lid,
+                        exc_info=True,
+                    )
+                    break
+            else:
+                # Merge CLI arguments.
+                overrides.extend(arguments)
+                batches.append(tuple(overrides))
+
+        if not batches:
+            logger.warning("All lanelets were skipped due to binding failures.")
+            return []
+
+        logger.info(
+            "Sweeping %d lanelet(s): %s",
+            len(batches),
+            [b[0] for b in batches],
+        )
+
+        # -- 7. Launch batches one-by-one (continue on failure) ---------------
+        all_returns: list[Any] = []
+        failed_count = 0
+        for idx, batch in enumerate(batches):
+            logger.info("[%d/%d] Launching: %s", idx + 1, len(batches), batch)
+            try:
+                ret = self.launcher.launch([batch], initial_job_idx=idx)
+                all_returns.extend(ret)
+            except Exception:
+                failed_count += 1
+                logger.error(
+                    "[%d/%d] Job failed for overrides %s — continuing.",
+                    idx + 1,
+                    len(batches),
+                    batch,
+                    exc_info=True,
+                )
+                all_returns.append(None)
+
+        logger.info(
+            "Sweep complete: %d/%d succeeded, %d failed.",
+            len(batches) - failed_count,
+            len(batches),
+            failed_count,
+        )
+        return all_returns

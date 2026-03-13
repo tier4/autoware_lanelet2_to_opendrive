@@ -81,6 +81,11 @@ def _is_glob_pattern(value: str) -> bool:
     return any(ch in value for ch in ("*", "?", "["))
 
 
+def _is_multirun() -> bool:
+    """Return ``True`` when running under Hydra ``--multirun``."""
+    return "--multirun" in sys.argv or "-m" in sys.argv
+
+
 def _extract_scenario_override(argv: list[str]) -> tuple[str | None, list[str]]:
     """Parse *argv* to extract the ``scenario=…`` value.
 
@@ -305,8 +310,12 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     raise ValueError(msg)
 
 
-def run_scenario(cfg: DictConfig) -> None:
-    """Build and execute a scenario from a resolved Hydra config."""
+def run_scenario(cfg: DictConfig) -> ScenarioResult:
+    """Build and execute a scenario from a resolved Hydra config.
+
+    Returns the :class:`ScenarioResult` so that callers (including Hydra
+    multirun) can inspect it without the process being terminated.
+    """
     logger.info("Resolved config:\n%s", OmegaConf.to_yaml(cfg))
 
     _ego, scenario = build_scenario(cfg)
@@ -332,7 +341,7 @@ def run_scenario(cfg: DictConfig) -> None:
 
     result = results[0]
     print(result)  # noqa: T201
-    sys.exit(0 if result.passed else 1)
+    return result
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
@@ -341,7 +350,11 @@ def _hydra_main(cfg: DictConfig) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
-    run_scenario(cfg)
+    result = run_scenario(cfg)
+    # Only exit for single-run mode. In --multirun, Hydra calls this
+    # function repeatedly; sys.exit() would kill the entire sweep.
+    if not _is_multirun():
+        sys.exit(0 if result.passed else 1)
 
 
 def main() -> None:

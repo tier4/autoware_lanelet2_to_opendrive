@@ -8,6 +8,7 @@ YAML values directly to these dataclasses via OmegaConf.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from omegaconf import MISSING
 
@@ -176,6 +177,24 @@ class TemporaryStopConfig:
 
 
 # ---------------------------------------------------------------------------
+# Sweep config (for lanelet-constraint sweeper)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SweepConfig:
+    """Optional sweep section for lanelet-constraint-based multirun.
+
+    ``constraints`` maps a target key (e.g. ``ego.spawn_lanelet_id``) to a
+    list of constraint dicts.  ``bindings`` maps a target key
+    (e.g. ``ego.spawn_s``) to a binding dict that auto-derives the value.
+    """
+
+    constraints: dict[str, Any] = field(default_factory=dict)
+    bindings: dict[str, Any] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
 # Top-level Hydra config
 # ---------------------------------------------------------------------------
 
@@ -197,3 +216,4 @@ class ScenarioRunConfig:
         | TrafficLightComplianceConfig
         | TemporaryStopConfig
     ) = field(default_factory=IntersectionPassingConfig)
+    sweep: SweepConfig = field(default_factory=SweepConfig)

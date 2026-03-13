@@ -10,3 +10,15 @@ ego:
   initial_speed_kmh: 0.0
   spawn_lanelet_id: 242
   spawn_s: 15.0
+
+sweep:
+  constraints:
+    ego.spawn_lanelet_id:
+      - type: and
+        constraints:
+          - type: has_stop_line
+          - type: has_traffic_light_stop_line
+  bindings:
+    ego.spawn_s:
+      type: stop_line_offset
+      offset: 15.0
