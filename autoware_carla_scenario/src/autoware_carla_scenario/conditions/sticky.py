@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .base import BaseCondition, ScenarioResult
 
@@ -39,6 +39,17 @@ class StickyCondition(BaseCondition):
         super().__init__(label=label if label is not None else auto_label)
         self._condition = condition
         self._latched_result: Optional[ScenarioResult] = None
+
+    def get_details(self) -> dict[str, Any]:
+        return {
+            "wrapper": "sticky",
+            "latched": self._latched_result is not None,
+            "child": {
+                "condition_type": type(self._condition).__name__,
+                "label": self._condition.label,
+                **self._condition.get_details(),
+            },
+        }
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return the latched result if available, otherwise delegate to the child.

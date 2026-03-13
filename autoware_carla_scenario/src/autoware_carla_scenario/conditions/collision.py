@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..constants import EGO_ROLE_NAME
 from .base import BaseCondition, ScenarioResult
@@ -33,12 +33,21 @@ class CollisionCondition(BaseCondition):
     def __init__(self, min_impulse: float = 0.0, *, label: str) -> None:
         super().__init__(label=label)
         self._min_impulse = min_impulse
+        self._collision_elapsed: Optional[float] = None
         self._sensor: Optional["carla.Actor"] = None
         self._lock = threading.Lock()
         self._collided = False
         self._other_type_id: Optional[str] = None
         self._last_attach_attempt: float = -math.inf
         self._cached_result: Optional[ScenarioResult] = None
+
+    def get_details(self) -> dict[str, Any]:
+        details: dict[str, Any] = {"min_impulse": self._min_impulse}
+        if self._collided:
+            details["other_actor_type"] = self._other_type_id or "unknown"
+            if self._collision_elapsed is not None:
+                details["collision_elapsed_seconds"] = self._collision_elapsed
+        return details
 
     def _on_collision(self, event: "carla.CollisionEvent") -> None:
         """Callback invoked by CARLA when a collision event occurs."""
@@ -97,6 +106,7 @@ class CollisionCondition(BaseCondition):
         with self._lock:
             if self._collided:
                 other = self._other_type_id or "unknown"
+                self._collision_elapsed = elapsed
                 self._cached_result = ScenarioResult(
                     passed=False,
                     message=f"Ego vehicle collided with '{other}' at {elapsed:.2f}s",

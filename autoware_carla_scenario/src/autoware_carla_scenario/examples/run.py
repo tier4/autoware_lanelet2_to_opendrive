@@ -130,8 +130,35 @@ def _compose_config(scenario_name: str, overrides: list[str]) -> DictConfig:
     return cfg
 
 
-def _print_summary(names: list[str], results: list[ScenarioResult]) -> bool:
-    """Print a formatted result table and return ``True`` if all passed."""
+def _write_batch_result_json(
+    names: list[str],
+    results: list[ScenarioResult],
+    output_dir: Path,
+) -> Path:
+    """Write a machine-readable JSON summary to *output_dir* and return the path."""
+    import json  # noqa: PLC0415
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "batch_results.json"
+    json_results = [
+        {"scenario": name, **result.to_dict()} for name, result in zip(names, results)
+    ]
+    json_path.write_text(
+        json.dumps(json_results, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return json_path
+
+
+def _print_summary(
+    names: list[str],
+    results: list[ScenarioResult],
+    output_dir: Path = Path("scenario_outputs"),
+) -> bool:
+    """Print a formatted result table and return ``True`` if all passed.
+
+    A machine-readable JSON file is also written to *output_dir*.
+    """
     sep = "=" * 60
     thin = "-" * 60
     print(f"\n{sep}")  # noqa: T201
@@ -149,6 +176,11 @@ def _print_summary(names: list[str], results: list[ScenarioResult]) -> bool:
                 mark = "OK" if cs.satisfied else "NG"
                 padded = cs.label.ljust(max_label_len)
                 print(f"    [{mark}] {padded} : {cs.message}")  # noqa: T201
+
+    json_path = _write_batch_result_json(names, results, output_dir)
+    print(thin)  # noqa: T201
+    print(f"Result JSON: {json_path}")  # noqa: T201
+
     passed = sum(1 for r in results if r.passed)
     total = len(results)
     print(thin)  # noqa: T201
@@ -331,7 +363,13 @@ def run_scenario(cfg: DictConfig) -> None:
         results = queue.run_all()
 
     result = results[0]
-    print(result)  # noqa: T201
+    output_dir = Path("scenario_outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "result.json"
+    json_path.write_text(result.to_json(indent=2), encoding="utf-8")
+    status = "PASSED" if result.passed else "FAILED"
+    print(f"{status}: {result.message} ({result.elapsed_seconds:.2f}s)")  # noqa: T201
+    print(f"Result JSON: {json_path}")  # noqa: T201
     sys.exit(0 if result.passed else 1)
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ...entity_role import EntityRole
 from ..base import BaseCondition, ScenarioResult
@@ -57,6 +57,18 @@ class CompositionCondition(BaseCondition):
             if entity_name is not None
             else None
         )
+
+    def get_details(self) -> dict[str, Any]:
+        details: dict[str, Any] = {}
+        if self._entity_name is not None:
+            details["entity_name"] = str(self._entity_name)
+        if self._child is not None:
+            details["child"] = {
+                "condition_type": type(self._child).__name__,
+                "label": self._child.label,
+                **self._child.get_details(),
+            }
+        return details
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Evaluate entity existence, then child, then delegate to :meth:`_check`.

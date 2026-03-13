@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .base import BaseCondition, ScenarioResult
 from .comparison import ComparisonRule, ScalarComparisonRule
@@ -46,6 +46,13 @@ class ElapsedTimeCondition(BaseCondition):
         self._comparison = ScalarComparisonRule(
             field="elapsed", rule=rule, value=duration_seconds, tolerance=tolerance
         )
+
+    def get_details(self) -> dict[str, Any]:
+        return {
+            "duration_seconds": self._comparison.value,
+            "rule": self._comparison.rule.name,
+            "tolerance": self._comparison.tolerance,
+        }
 
     @property
     def duration_seconds(self) -> float:

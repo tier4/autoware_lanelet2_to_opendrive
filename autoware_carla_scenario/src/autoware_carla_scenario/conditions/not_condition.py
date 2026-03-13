@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .base import BaseCondition, ScenarioResult
 
@@ -24,6 +24,16 @@ class NotCondition(BaseCondition):
     def __init__(self, condition: BaseCondition, *, label: str | None = None) -> None:
         super().__init__(label=label if label is not None else condition.label)
         self._condition = condition
+
+    def get_details(self) -> dict[str, Any]:
+        return {
+            "operator": "NOT",
+            "child": {
+                "condition_type": type(self._condition).__name__,
+                "label": self._condition.label,
+                **self._condition.get_details(),
+            },
+        }
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Check the child condition and invert the result.

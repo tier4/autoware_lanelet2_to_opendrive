@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ..entity_role import EntityRole
 from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
@@ -34,6 +34,9 @@ class EntityExistenceCondition(BaseCondition):
     def __init__(self, entity_name: Union[EntityRole, str], *, label: str) -> None:
         super().__init__(label=label)
         self._entity_name = entity_name
+
+    def get_details(self) -> dict[str, Any]:
+        return {"entity_name": str(self._entity_name)}
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a fail result if the actor does not exist.

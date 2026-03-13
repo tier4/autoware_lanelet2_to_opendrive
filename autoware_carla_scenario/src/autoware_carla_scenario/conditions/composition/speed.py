@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ...entity_role import EntityRole
 from ...kinematics import Vector3
@@ -102,6 +102,20 @@ class SpeedCondition(CompositionCondition):
         self._direction = direction
         self._coordinate_system = coordinate_system
         self._reference_entity_name = reference_entity_name
+
+    def get_details(self) -> dict[str, Any]:
+        details = super().get_details()
+        details.update(
+            {
+                "value": self._comparison.value,
+                "rule": self._comparison.rule.name,
+                "direction": self._direction.name,
+                "coordinate_system": self._coordinate_system.name,
+            }
+        )
+        if self._reference_entity_name is not None:
+            details["reference_entity_name"] = str(self._reference_entity_name)
+        return details
 
     def _extract_speed_component(
         self,

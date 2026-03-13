@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ...entity_role import EntityRole
 from ..base import ScenarioResult
@@ -59,6 +59,16 @@ class StandstillCondition(CompositionCondition):
 
         self._duration = duration
         self._speed_threshold = speed_threshold
+
+    def get_details(self) -> dict[str, Any]:
+        details = super().get_details()
+        details.update(
+            {
+                "duration_seconds": self._duration,
+                "speed_threshold": self._speed_threshold,
+            }
+        )
+        return details
 
     def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result once the child :class:`PersistentCondition` fires.
