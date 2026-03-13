@@ -51,10 +51,12 @@ from autoware_carla_scenario.conditions import ScenarioResult
 
 from .configs import (
     IntersectionPassingConfig,
+    LaneChangeConfig,
     TemporaryStopConfig,
     TrafficLightComplianceConfig,
 )
 from .intersection_passing import IntersectionPassingScenario
+from .lane_change import LaneChangeScenario
 from .temporary_stop import TemporaryStopScenario
 from .traffic_light_compliance import TrafficLightComplianceScenario
 
@@ -278,6 +280,14 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
         return ego, TrafficLightComplianceScenario(
             ego,
             config=TrafficLightComplianceConfig(**scenario_dict),
+            spawn_pose=spawn_pose,
+        )
+
+    # --- lane_change ---
+    if scenario_name == "lane_change":
+        return ego, LaneChangeScenario(
+            ego,
+            config=LaneChangeConfig(**scenario_dict),
             spawn_pose=spawn_pose,
         )
 

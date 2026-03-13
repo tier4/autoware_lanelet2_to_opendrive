@@ -16,6 +16,7 @@ Public API re-exported for convenience::
         ElapsedTimeCondition,
         EntityInAreaCondition,
         EntityLanePositionCondition,
+        NotCondition,
         OrCondition,
         SpeedCondition,
         SpeedCoordinateSystem,
@@ -59,7 +60,14 @@ Public API re-exported for convenience::
     )
 """
 
-from .actions import BaseAction, TickTiming, TurnAction, TurnDirection
+from .actions import (
+    BaseAction,
+    LaneChangeAction,
+    LaneChangeDirection,
+    TickTiming,
+    TurnAction,
+    TurnDirection,
+)
 from .scenario_runner import ScenarioRunner
 from .conditions import (
     EntityExistenceCondition,
@@ -71,6 +79,7 @@ from .conditions import (
     ElapsedTimeCondition,
     EntityInAreaCondition,
     EntityLanePositionCondition,
+    NotCondition,
     OrCondition,
     PersistentCondition,
     ScalarComparisonRule,
@@ -146,6 +155,7 @@ __all__ = [
     "ElapsedTimeCondition",
     "EntityInAreaCondition",
     "EntityLanePositionCondition",
+    "NotCondition",
     "OrCondition",
     "PersistentCondition",
     "ScalarComparisonRule",
@@ -194,6 +204,8 @@ __all__ = [
     "FrenetAcceleration",
     # Actions
     "BaseAction",
+    "LaneChangeAction",
+    "LaneChangeDirection",
     "TickTiming",
     "TurnAction",
     "TurnDirection",
