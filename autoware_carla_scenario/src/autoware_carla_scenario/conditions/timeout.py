@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .base import BaseCondition, ScenarioResult
 
@@ -22,6 +22,9 @@ class TimeoutCondition(BaseCondition):
         """
         super().__init__(label=label)
         self.timeout_seconds = timeout_seconds
+
+    def get_details(self) -> dict[str, Any]:
+        return {"timeout_seconds": self.timeout_seconds}
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a failure result if elapsed time exceeds the timeout.

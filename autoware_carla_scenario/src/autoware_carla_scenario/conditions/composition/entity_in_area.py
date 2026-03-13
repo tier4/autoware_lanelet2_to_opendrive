@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Union
 
 import cv2
 import numpy as np
@@ -77,6 +77,16 @@ class EntityInAreaCondition(CompositionCondition):
         super().__init__(entity_name=entity_name, label=label)
         self._polygon: Sequence[AnyPose] = polygon
         self._include_boundary = include_boundary
+
+    def get_details(self) -> dict[str, Any]:
+        details = super().get_details()
+        details.update(
+            {
+                "polygon_vertices": len(self._polygon),
+                "include_boundary": self._include_boundary,
+            }
+        )
+        return details
 
     def _resolve_polygon(self) -> List[CarlaWorldPose]:
         """Convert all polygon vertices to CarlaWorldPose.

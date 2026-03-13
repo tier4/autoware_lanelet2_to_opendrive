@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ...coordinate.poses import CarlaWorldPose
 from ...coordinate.transform import project_onto_road, to_opendrive
@@ -73,6 +73,17 @@ class EntityLanePositionCondition(CompositionCondition):
                 raise ValueError(
                     f"ScalarComparisonRule field must be 's' or 't', got '{rule.field}'"
                 )
+
+    def get_details(self) -> dict[str, Any]:
+        details = super().get_details()
+        details.update(
+            {
+                "road_id": self._road_id,
+                "lane_id": self._lane_id,
+                "rules": [r.to_dict() for r in self._rules],
+            }
+        )
+        return details
 
     def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result if the named entity is on the specified road and lane.

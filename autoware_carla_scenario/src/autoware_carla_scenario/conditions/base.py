@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ..entity_role import EntityRole
 
@@ -50,11 +51,34 @@ def find_actor_by_role_name(
 
 @dataclass
 class ConditionStatus:
-    """Snapshot of a single condition's state when the scenario ended."""
+    """Snapshot of a single condition's state when the scenario ended.
+
+    Attributes:
+        label: Human-readable identifier (e.g. ``"pass[0](elapsed_time_30s)"``).
+        satisfied: Whether the condition was satisfied at snapshot time.
+        message: Human-readable description of the state.
+        condition_type: Class name of the condition (e.g. ``"TimeoutCondition"``).
+        role: Whether this is a ``"pass"`` or ``"fail"`` condition.
+        details: Structured key/value pairs specific to the condition type.
+    """
 
     label: str
     satisfied: bool
     message: str
+    condition_type: str = ""
+    role: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable nested dict."""
+        return {
+            "label": self.label,
+            "satisfied": self.satisfied,
+            "message": self.message,
+            "condition_type": self.condition_type,
+            "role": self.role,
+            "details": self.details,
+        }
 
 
 @dataclass
@@ -65,6 +89,25 @@ class ScenarioResult:
     message: str
     elapsed_seconds: float
     condition_statuses: list[ConditionStatus] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable nested dict of the full result."""
+        return {
+            "passed": self.passed,
+            "message": self.message,
+            "elapsed_seconds": self.elapsed_seconds,
+            "condition_statuses": [cs.to_dict() for cs in self.condition_statuses],
+        }
+
+    def to_json(self, **kwargs: Any) -> str:
+        """Serialise to a JSON string.
+
+        Args:
+            **kwargs: Forwarded to :func:`json.dumps`
+                (e.g. ``indent=2``, ``ensure_ascii=False``).
+        """
+        kwargs.setdefault("ensure_ascii", False)
+        return json.dumps(self.to_dict(), **kwargs)
 
 
 class BaseCondition(ABC):
@@ -90,3 +133,23 @@ class BaseCondition(ABC):
             A ScenarioResult if the condition is met, None otherwise.
         """
         ...
+
+    def get_details(self) -> dict[str, Any]:
+        """Return structured details about this condition's configuration.
+
+        Subclasses should override this to expose condition-specific
+        parameters (thresholds, targets, etc.) for structured JSON logging.
+        """
+        return {}
+
+    def to_summary_dict(self) -> dict[str, Any]:
+        """Return a summary dict identifying this condition and its details.
+
+        Combines ``condition_type``, ``label``, and :meth:`get_details`
+        into a single dict suitable for nesting inside parent conditions.
+        """
+        return {
+            "condition_type": type(self).__name__,
+            "label": self.label,
+            **self.get_details(),
+        }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..constants import EGO_ROLE_NAME
 from .base import BaseCondition, ScenarioResult
@@ -39,6 +39,16 @@ class CollisionCondition(BaseCondition):
         self._other_type_id: Optional[str] = None
         self._last_attach_attempt: float = -math.inf
         self._cached_result: Optional[ScenarioResult] = None
+
+    def get_details(self) -> dict[str, Any]:
+        details: dict[str, Any] = {"min_impulse": self._min_impulse}
+        if self._collided:
+            details["other_actor_type"] = self._other_type_id or "unknown"
+            if self._cached_result is not None:
+                details["collision_elapsed_seconds"] = (
+                    self._cached_result.elapsed_seconds
+                )
+        return details
 
     def _on_collision(self, event: "carla.CollisionEvent") -> None:
         """Callback invoked by CARLA when a collision event occurs."""

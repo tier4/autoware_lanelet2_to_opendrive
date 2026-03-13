@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, List, Optional, Sequence
 
 from .base import BaseCondition, ScenarioResult
 
@@ -31,6 +31,12 @@ class AndCondition(BaseCondition):
         auto_label = " AND ".join(c.label for c in conditions)
         super().__init__(label=label if label is not None else auto_label)
         self._conditions: Sequence[BaseCondition] = conditions
+
+    def get_details(self) -> dict[str, Any]:
+        return {
+            "operator": "AND",
+            "children": [c.to_summary_dict() for c in self._conditions],
+        }
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Check all child conditions with AND logic.

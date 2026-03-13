@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .base import BaseCondition, ScenarioResult
 
@@ -37,6 +37,13 @@ class PersistentCondition(BaseCondition):
         self._condition = condition
         self._duration = duration
         self._true_start: Optional[float] = None
+
+    def get_details(self) -> dict[str, Any]:
+        return {
+            "wrapper": "persistent",
+            "required_duration_seconds": self._duration,
+            "child": self._condition.to_summary_dict(),
+        }
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Return a pass result when the child has been passing for *duration* seconds.
