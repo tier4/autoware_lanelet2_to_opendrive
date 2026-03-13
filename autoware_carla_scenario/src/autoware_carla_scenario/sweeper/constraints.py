@@ -13,6 +13,15 @@ combinations::
         - type: has_stop_line
         - type: has_traffic_light_stop_line
 
+    # Junction lanelet (has turn_direction tag)
+    - type: is_junction
+
+    # Traffic light on a junction — required for CARLA
+    - type: and
+      constraints:
+        - type: has_traffic_light_stop_line
+        - type: is_junction
+
     # Negation
     - type: not
       constraint:
@@ -107,6 +116,36 @@ class HasTrafficLightStopLineConstraint:
         return False
 
 
+@dataclass(frozen=True)
+class IsJunctionConstraint:
+    """Matches lanelets that are inside a junction (intersection).
+
+    A lanelet is considered a junction lanelet when it has the
+    ``turn_direction`` attribute in its tags.  This is the standard
+    convention used in Lanelet2 maps for Autoware.
+
+    .. note::
+
+        In CARLA, traffic lights must be associated with a junction.
+        If a lanelet with a traffic-light stop line is **not** inside a
+        junction (i.e. lacks ``turn_direction``), the traffic light
+        cannot be mapped to a CARLA junction and the scenario will fail.
+        Use this constraint together with ``has_traffic_light_stop_line``
+        to filter for valid lanelets::
+
+            - type: and
+              constraints:
+                - type: has_traffic_light_stop_line
+                - type: is_junction
+    """
+
+    type: str = "is_junction"
+
+    def evaluate(self, lanelet: Any) -> bool:
+        """Return ``True`` if *lanelet* has a ``turn_direction`` attribute."""
+        return "turn_direction" in lanelet.attributes
+
+
 # ---------------------------------------------------------------------------
 # Composite constraints (and / or / not)
 # ---------------------------------------------------------------------------
@@ -150,6 +189,7 @@ class NotConstraint:
 _LEAF_REGISTRY: dict[str, type] = {
     "has_stop_line": HasStopLineConstraint,
     "has_traffic_light_stop_line": HasTrafficLightStopLineConstraint,
+    "is_junction": IsJunctionConstraint,
     "lanelet_ids": LaneletIdsConstraint,
 }
 
