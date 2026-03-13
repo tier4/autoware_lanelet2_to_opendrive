@@ -363,12 +363,11 @@ def run_scenario(cfg: DictConfig) -> None:
         results = queue.run_all()
 
     result = results[0]
-    output_dir = Path("scenario_outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    json_path = output_dir / "result.json"
-    json_path.write_text(result.to_json(indent=2), encoding="utf-8")
     status = "PASSED" if result.passed else "FAILED"
     print(f"{status}: {result.message} ({result.elapsed_seconds:.2f}s)")  # noqa: T201
+    # JSON is already written by ScenarioRunner; print the path for convenience.
+    scenario_name = type(scenario).__name__
+    json_path = Path("scenario_outputs") / f"{scenario_name}_result.json"
     print(f"Result JSON: {json_path}")  # noqa: T201
     sys.exit(0 if result.passed else 1)
 
