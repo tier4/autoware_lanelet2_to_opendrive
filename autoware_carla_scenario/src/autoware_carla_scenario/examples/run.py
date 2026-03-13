@@ -130,8 +130,35 @@ def _compose_config(scenario_name: str, overrides: list[str]) -> DictConfig:
     return cfg
 
 
-def _print_summary(names: list[str], results: list[ScenarioResult]) -> bool:
-    """Print a formatted result table and return ``True`` if all passed."""
+def _write_batch_result_json(
+    names: list[str],
+    results: list[ScenarioResult],
+    output_dir: Path,
+) -> Path:
+    """Write a machine-readable JSON summary to *output_dir* and return the path."""
+    import json  # noqa: PLC0415
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "batch_results.json"
+    json_results = [
+        {"scenario": name, **result.to_dict()} for name, result in zip(names, results)
+    ]
+    json_path.write_text(
+        json.dumps(json_results, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return json_path
+
+
+def _print_summary(
+    names: list[str],
+    results: list[ScenarioResult],
+    output_dir: Path = Path("scenario_outputs"),
+) -> bool:
+    """Print a formatted result table and return ``True`` if all passed.
+
+    A machine-readable JSON file is also written to *output_dir*.
+    """
     sep = "=" * 60
     thin = "-" * 60
     print(f"\n{sep}")  # noqa: T201
@@ -149,6 +176,11 @@ def _print_summary(names: list[str], results: list[ScenarioResult]) -> bool:
                 mark = "OK" if cs.satisfied else "NG"
                 padded = cs.label.ljust(max_label_len)
                 print(f"    [{mark}] {padded} : {cs.message}")  # noqa: T201
+
+    json_path = _write_batch_result_json(names, results, output_dir)
+    print(thin)  # noqa: T201
+    print(f"Result JSON: {json_path}")  # noqa: T201
+
     passed = sum(1 for r in results if r.passed)
     total = len(results)
     print(thin)  # noqa: T201
@@ -199,6 +231,21 @@ def _log_batch_plan(
     logger.info(sep)
 
 
+def _make_batch_output_dir() -> Path:
+    """Create a Hydra-style timestamped output directory for batch runs.
+
+    Returns:
+        Absolute path to the created directory
+        (e.g. ``outputs/2026-03-13/12-00-00/``).
+    """
+    from datetime import datetime  # noqa: PLC0415
+
+    now = datetime.now()  # noqa: DTZ005
+    output_dir = Path("outputs") / now.strftime("%Y-%m-%d") / now.strftime("%H-%M-%S")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir.resolve()
+
+
 def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
     """Compose configs, build scenarios, and run them in a single queue."""
     configs = [_compose_config(name, overrides) for name in scenario_names]
@@ -226,6 +273,10 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         else None
     )
 
+    # Batch mode bypasses @hydra.main, so we create the output directory
+    # ourselves following Hydra's timestamped convention.
+    output_dir = _make_batch_output_dir()
+
     queue = ScenarioQueue(
         host=first_cfg.server.host,
         port=first_cfg.server.port,
@@ -233,6 +284,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=first_cfg.map.name,
+        output_dir=output_dir,
     )
 
     for i, (name, cfg) in enumerate(zip(scenario_names, configs), 1):
@@ -245,7 +297,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
     with queue:
         results = queue.run_all()
 
-    all_passed = _print_summary(scenario_names, results)
+    all_passed = _print_summary(scenario_names, results, output_dir=output_dir)
     sys.exit(0 if all_passed else 1)
 
 
@@ -306,7 +358,12 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
 
 
 def run_scenario(cfg: DictConfig) -> None:
-    """Build and execute a scenario from a resolved Hydra config."""
+    """Build and execute a scenario from a resolved Hydra config.
+
+    Hydra changes the working directory to its output directory
+    (e.g. ``outputs/YYYY-MM-DD/HH-MM-SS/``) before this function is
+    called, so all relative paths resolve inside that directory.
+    """
     logger.info("Resolved config:\n%s", OmegaConf.to_yaml(cfg))
 
     _ego, scenario = build_scenario(cfg)
@@ -317,6 +374,10 @@ def run_scenario(cfg: DictConfig) -> None:
         Path(cfg.map.lanelet2_path) if cfg.map.get("lanelet2_path") else None
     )
 
+    # Hydra has already set cwd to the run output directory —
+    # write recordings and result JSON directly there.
+    output_dir = Path(".")
+
     queue = ScenarioQueue(
         host=cfg.server.host,
         port=cfg.server.port,
@@ -324,6 +385,7 @@ def run_scenario(cfg: DictConfig) -> None:
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=cfg.map.name,
+        output_dir=output_dir,
     )
     queue.add(scenario)
 
@@ -331,7 +393,12 @@ def run_scenario(cfg: DictConfig) -> None:
         results = queue.run_all()
 
     result = results[0]
-    print(result)  # noqa: T201
+    status = "PASSED" if result.passed else "FAILED"
+    print(f"{status}: {result.message} ({result.elapsed_seconds:.2f}s)")  # noqa: T201
+    # JSON is already written by ScenarioRunner; print the absolute path.
+    scenario_name = type(scenario).__name__
+    json_path = (output_dir / f"{scenario_name}_result.json").resolve()
+    print(f"Result JSON: {json_path}")  # noqa: T201
     sys.exit(0 if result.passed else 1)
 
 

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     import carla
 
 from .conditions import EntityExistenceCondition, ScenarioResult, TimeoutCondition
-from .conditions.base import ConditionStatus, find_actor_by_role_name
+from .conditions.base import BaseCondition, ConditionStatus, find_actor_by_role_name
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
 from .coordinate.poses import CarlaWorldPose
 from .coordinate.transform import to_opendrive
@@ -100,6 +100,43 @@ def _log_ego_opendrive_position(
         )
 
 
+def _build_condition_status(
+    cond: "BaseCondition",
+    index: int,
+    role: str,
+    world: "carla.World",
+    elapsed: float,
+) -> ConditionStatus:
+    """Build a :class:`ConditionStatus` for a single condition.
+
+    Args:
+        cond: The condition instance.
+        index: Positional index within its role group (pass or fail).
+        role: ``"pass"`` or ``"fail"``.
+        world: CARLA world.
+        elapsed: Elapsed time in seconds.
+    """
+    check = cond.check(world, elapsed)
+    cond_type = type(cond).__name__
+    details = cond.get_details()
+
+    if check is not None:
+        satisfied = True
+        message = check.message
+    else:
+        satisfied = False
+        message = "not yet satisfied" if role == "pass" else "not triggered"
+
+    return ConditionStatus(
+        label=f"{role}[{index}]({cond.label})",
+        satisfied=satisfied,
+        message=message,
+        condition_type=cond_type,
+        role=role,
+        details=details,
+    )
+
+
 def _collect_condition_statuses(
     scenario: "BaseScenario",
     world: "carla.World",
@@ -115,44 +152,23 @@ def _collect_condition_statuses(
     statuses: list[ConditionStatus] = []
 
     for i, cond in enumerate(scenario._pass_conditions):
-        cond_label = getattr(cond, "label", None) or f"pass[{i}]"
-        check = cond.check(world, elapsed)
-        if check is not None:
-            status = ConditionStatus(
-                label=f"pass[{i}]({cond_label})", satisfied=True, message=check.message
-            )
+        status = _build_condition_status(cond, i, "pass", world, elapsed)
+        if status.satisfied:
             logger.info(
                 "[%s]   %s: OK — %s", scenario_name, status.label, status.message
             )
         else:
-            status = ConditionStatus(
-                label=f"pass[{i}]({cond_label})",
-                satisfied=False,
-                message="not yet satisfied",
-            )
             logger.info("[%s]   %s: PENDING", scenario_name, status.label)
         statuses.append(status)
 
     for i, cond in enumerate(scenario._fail_conditions):
-        cond_label = getattr(cond, "label", None) or f"fail[{i}]"
-        check = cond.check(world, elapsed)
-        if check is not None:
-            status = ConditionStatus(
-                label=f"fail[{i}]({cond_label})",
-                satisfied=True,
-                message=check.message,
-            )
+        status = _build_condition_status(cond, i, "fail", world, elapsed)
+        if status.satisfied:
             logger.info(
                 "[%s]   %s: TRIGGERED — %s",
                 scenario_name,
                 status.label,
                 status.message,
-            )
-        else:
-            status = ConditionStatus(
-                label=f"fail[{i}]({cond_label})",
-                satisfied=False,
-                message="not triggered",
             )
         statuses.append(status)
 
@@ -404,14 +420,13 @@ class ScenarioRunner:
 
                 # Check pass conditions
                 for i, condition in enumerate(scenario._pass_conditions):
-                    cond_label = getattr(condition, "label", None) or str(i)
                     check = condition.check(world, elapsed)
                     if check is not None:
                         logger.info(
                             "[%s] Pass condition [%d](%s) SATISFIED: %s",
                             scenario_name,
                             i,
-                            cond_label,
+                            condition.label,
                             check.message,
                         )
                         result = ScenarioResult(
@@ -428,7 +443,7 @@ class ScenarioRunner:
                             "[%s] Pass condition [%d](%s) pending at t=%.2fs (tick %d)",
                             scenario_name,
                             i,
-                            cond_label,
+                            condition.label,
                             elapsed,
                             tick_count,
                         )
@@ -438,14 +453,13 @@ class ScenarioRunner:
 
                 # Check fail conditions
                 for i, condition in enumerate(scenario._fail_conditions):
-                    cond_label = getattr(condition, "label", None) or str(i)
                     check = condition.check(world, elapsed)
                     if check is not None:
                         logger.info(
                             "[%s] Fail condition [%d](%s) TRIGGERED: %s",
                             scenario_name,
                             i,
-                            cond_label,
+                            condition.label,
                             check.message,
                         )
                         result = ScenarioResult(
@@ -512,5 +526,9 @@ class ScenarioRunner:
                 result.message,
                 result.elapsed_seconds,
             )
+            json_path = self.output_dir / f"{scenario_name}_result.json"
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            json_path.write_text(result.to_json(indent=2), encoding="utf-8")
+            logger.info("[%s] Result JSON written to: %s", scenario_name, json_path)
 
         return result

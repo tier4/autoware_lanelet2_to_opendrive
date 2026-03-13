@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from .base import BaseCondition, ScenarioResult
 
@@ -30,6 +30,12 @@ class OrCondition(BaseCondition):
         auto_label = " OR ".join(c.label for c in conditions)
         super().__init__(label=label if label is not None else auto_label)
         self._conditions: Sequence[BaseCondition] = conditions
+
+    def get_details(self) -> dict[str, Any]:
+        return {
+            "operator": "OR",
+            "children": [c.to_summary_dict() for c in self._conditions],
+        }
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Check child conditions with OR logic.
