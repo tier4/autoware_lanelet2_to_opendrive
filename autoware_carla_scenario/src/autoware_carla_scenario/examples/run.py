@@ -38,6 +38,7 @@ import carla
 import hydra
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from autoware_carla_scenario import (
@@ -79,6 +80,11 @@ def _to_dict(cfg_node: DictConfig) -> dict:  # type: ignore[type-arg]
 def _is_glob_pattern(value: str) -> bool:
     """Return ``True`` if *value* contains glob metacharacters."""
     return any(ch in value for ch in ("*", "?", "["))
+
+
+def _is_multirun() -> bool:
+    """Return ``True`` when running under Hydra ``--multirun``."""
+    return "--multirun" in sys.argv or "-m" in sys.argv
 
 
 def _extract_scenario_override(argv: list[str]) -> tuple[str | None, list[str]]:
@@ -273,6 +279,8 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         else None
     )
 
+    cooldown = float(first_cfg.server.get("cooldown_seconds", 0.0))
+
     # Batch mode bypasses @hydra.main, so we create the output directory
     # ourselves following Hydra's timestamped convention.
     output_dir = _make_batch_output_dir()
@@ -284,6 +292,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=first_cfg.map.name,
+        cooldown_seconds=cooldown,
         output_dir=output_dir,
     )
 
@@ -357,8 +366,11 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     raise ValueError(msg)
 
 
-def run_scenario(cfg: DictConfig) -> None:
+def run_scenario(cfg: DictConfig) -> ScenarioResult:
     """Build and execute a scenario from a resolved Hydra config.
+
+    Returns the :class:`ScenarioResult` so that callers (including Hydra
+    multirun) can inspect it without the process being terminated.
 
     Hydra changes the working directory to its output directory
     (e.g. ``outputs/YYYY-MM-DD/HH-MM-SS/``) before this function is
@@ -374,9 +386,11 @@ def run_scenario(cfg: DictConfig) -> None:
         Path(cfg.map.lanelet2_path) if cfg.map.get("lanelet2_path") else None
     )
 
-    # Hydra has already set cwd to the run output directory —
-    # write recordings and result JSON directly there.
-    output_dir = Path(".")
+    cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
+
+    # Retrieve the Hydra output directory (works regardless of
+    # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
+    output_dir = Path(HydraConfig.get().runtime.output_dir)
 
     queue = ScenarioQueue(
         host=cfg.server.host,
@@ -385,6 +399,7 @@ def run_scenario(cfg: DictConfig) -> None:
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=cfg.map.name,
+        cooldown_seconds=cooldown,
         output_dir=output_dir,
     )
     queue.add(scenario)
@@ -399,7 +414,7 @@ def run_scenario(cfg: DictConfig) -> None:
     scenario_name = type(scenario).__name__
     json_path = (output_dir / f"{scenario_name}_result.json").resolve()
     print(f"Result JSON: {json_path}")  # noqa: T201
-    sys.exit(0 if result.passed else 1)
+    return result
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
@@ -408,7 +423,11 @@ def _hydra_main(cfg: DictConfig) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
-    run_scenario(cfg)
+    result = run_scenario(cfg)
+    # Only exit for single-run mode. In --multirun, Hydra calls this
+    # function repeatedly; sys.exit() would kill the entire sweep.
+    if not _is_multirun():
+        sys.exit(0 if result.passed else 1)
 
 
 def main() -> None:

@@ -18,6 +18,7 @@ wheels/
 
 # Hydra output
 outputs/
+multirun/
 
 # MkDocs build output
 site/

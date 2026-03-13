@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import List, Optional
+
+from tqdm import tqdm
 
 from .scenario_runner import ScenarioRunner
 from .conditions import ScenarioResult
@@ -57,6 +60,7 @@ class ScenarioQueue:
         timeout_seconds: float = 60.0,
         output_dir: Path = Path("scenario_outputs"),
         server_extra_args: Optional[List[str]] = None,
+        cooldown_seconds: float = 0.0,
     ) -> None:
         """Create a scenario queue.
 
@@ -80,6 +84,9 @@ class ScenarioQueue:
             output_dir: Directory for MP4 recordings.
             server_extra_args: Extra CLI arguments for CarlaUE5.sh (only used
                 when the queue creates its own server).
+            cooldown_seconds: Wait time (seconds) between consecutive scenario
+                runs.  Gives the CARLA server time to finish cleanup before the
+                next scenario connects.  0 disables the cooldown.
         """
         if server is not None:
             self._server = server
@@ -100,6 +107,7 @@ class ScenarioQueue:
         self._tm_port = tm_port
         self._timeout_seconds = timeout_seconds
         self._output_dir = output_dir
+        self._cooldown_seconds = cooldown_seconds
 
         self._scenarios: List[BaseScenario] = []
         self._results: List[ScenarioResult] = []
@@ -141,7 +149,13 @@ class ScenarioQueue:
                 "Use the context manager ('with queue:') or call start() first."
             )
         results: List[ScenarioResult] = []
-        for scenario in self._scenarios:
+        for i, scenario in enumerate(self._scenarios):
+            # Cooldown between consecutive scenarios.
+            if i > 0 and self._cooldown_seconds > 0:
+                _wait_with_progress(
+                    self._cooldown_seconds,
+                    desc="CARLA cooldown",
+                )
             result = self._runner.run_scenario(scenario)
             self._scenario_results[id(scenario)] = result
             results.append(result)
@@ -294,3 +308,18 @@ class ScenarioQueue:
 
     def __len__(self) -> int:
         return len(self._scenarios)
+
+
+# ------------------------------------------------------------------
+# Module-level helpers
+# ------------------------------------------------------------------
+
+
+def _wait_with_progress(seconds: float, *, desc: str = "Waiting") -> None:
+    """Sleep for *seconds* with a tqdm progress bar (0.1 s resolution)."""
+    steps = max(1, int(seconds * 10))
+    interval = seconds / steps
+    for _ in tqdm(
+        range(steps), desc=desc, bar_format="{desc}: {bar}| {elapsed}<{remaining}"
+    ):
+        time.sleep(interval)
