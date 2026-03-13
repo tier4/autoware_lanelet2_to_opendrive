@@ -35,7 +35,8 @@ class StickyCondition(BaseCondition):
     """
 
     def __init__(self, condition: BaseCondition, *, label: str | None = None) -> None:
-        super().__init__(label=label if label is not None else condition.label)
+        auto_label = f"{condition.label}_sticky"
+        super().__init__(label=label if label is not None else auto_label)
         self._condition = condition
         self._latched_result: Optional[ScenarioResult] = None
 
