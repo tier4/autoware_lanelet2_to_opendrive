@@ -476,6 +476,21 @@ class ScenarioRunner:
             if recording_started:
                 self._client.stop_recorder()
                 logger.info("[%s] Recorder stopped", scenario_name)
+            # Destroy NPC entities registered by the scenario
+            for entity in scenario._entities:
+                try:
+                    entity.destroy()
+                    logger.info(
+                        "[%s] Destroyed NPC %s", scenario_name, entity.role_name
+                    )
+                except Exception:
+                    logger.warning(
+                        "[%s] Failed to destroy NPC %s",
+                        scenario_name,
+                        entity.role_name,
+                        exc_info=True,
+                    )
+
             logger.info("[%s] Destroying ego vehicle ...", scenario_name)
             ego.destroy()
             logger.info("[%s] Ego destroyed", scenario_name)

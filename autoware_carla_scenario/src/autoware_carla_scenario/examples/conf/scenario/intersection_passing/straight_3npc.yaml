@@ -1,0 +1,25 @@
+# @package _global_
+scenario:
+  name: intersection_passing
+  expected_route_lanelet_ids: [460, 265]
+  timeout_seconds: 10.0
+  min_speed_kmh: 5.0
+  speed_check_delay_seconds: 0.3
+  npc_vehicles:
+    - spawn_lanelet_id: 263
+      spawn_s: 5.0
+      vehicle_type: vehicle.mini.cooper
+      initial_speed_kmh: 25.0
+    - spawn_lanelet_id: 277
+      spawn_s: 0.0
+      vehicle_type: vehicle.mini.cooper
+      initial_speed_kmh: 25.0
+    - spawn_lanelet_id: 242
+      spawn_s: 0.0
+      vehicle_type: vehicle.mini.cooper
+      initial_speed_kmh: 25.0
+
+ego:
+  initial_speed_kmh: 5.0
+  spawn_lanelet_id: 242
+  spawn_s: 25.0
