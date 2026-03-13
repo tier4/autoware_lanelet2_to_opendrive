@@ -39,6 +39,7 @@ from autoware_carla_scenario import (
     EgoConfig,
     ElapsedTimeCondition,
     EntityLanePositionCondition,
+    EntityRole,
     Lanelet2Pose,
     SpawnTransform,
     SpeedCondition,
@@ -47,6 +48,8 @@ from autoware_carla_scenario import (
     TimeoutCondition,
     TurnAction,
     TurnDirection,
+    VehicleEntity,
+    VehicleEntityConfig,
     find_actor_by_role_name,
     set_all_traffic_lights_state,
     snap_to_carla_road,
@@ -146,6 +149,29 @@ class IntersectionPassingScenario(BaseScenario):
         ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
         self.follow_with_spectator(ego_actor)
         self.log_actor_position(ego_actor, label="ego")
+
+        # --- Spawn NPC vehicles ---
+        for i, npc_cfg in enumerate(cfg.npc_vehicles, start=1):
+            npc_pose = Lanelet2Pose(
+                lanelet_id=npc_cfg.spawn_lanelet_id, s=npc_cfg.spawn_s
+            )
+            npc_snapped = snap_to_carla_road(to_opendrive(npc_pose), world)
+            npc_entity = VehicleEntity(
+                VehicleEntityConfig(
+                    role_name=EntityRole.npc(i),
+                    spawn_location=SpawnTransform(npc_snapped.to_carla_transform()),
+                    vehicle_type=npc_cfg.vehicle_type,
+                    initial_speed_kmh=npc_cfg.initial_speed_kmh,
+                )
+            )
+            npc_entity.spawn(world)
+            self.register_entity(npc_entity)
+            logger.info(
+                "Spawned NPC %s on lanelet %d (s=%.1f)",
+                EntityRole.npc(i),
+                npc_cfg.spawn_lanelet_id,
+                npc_cfg.spawn_s,
+            )
 
         # --- Set all traffic lights to green ---
         n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)

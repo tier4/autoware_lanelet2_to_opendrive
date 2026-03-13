@@ -59,6 +59,23 @@ class EgoVehicleConfig:
 
 
 @dataclass
+class NpcVehicleConfig:
+    """Configuration for a single NPC vehicle in a scenario."""
+
+    #: Lanelet where the NPC is spawned.
+    spawn_lanelet_id: int = MISSING
+
+    #: Longitudinal offset along the lanelet centerline.
+    spawn_s: float = 0.0
+
+    #: CARLA vehicle blueprint ID.
+    vehicle_type: str = "vehicle.mini.cooper"
+
+    #: Initial speed in km/h applied after warm-up.
+    initial_speed_kmh: float = 0.0
+
+
+@dataclass
 class IntersectionPassingConfig:
     """Parameters for the intersection-passing scenario.
 
@@ -85,6 +102,17 @@ class IntersectionPassingConfig:
     #: Turn direction at the intersection (``"left"``, ``"right"``, or
     #: ``None`` for straight-through).
     turn_direction: str | None = None
+
+    #: Optional list of NPC vehicles to spawn in the scenario.
+    #: Empty by default for backwards compatibility with existing YAML configs.
+    npc_vehicles: list[NpcVehicleConfig] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Convert raw dicts from OmegaConf into NpcVehicleConfig instances."""
+        self.npc_vehicles = [
+            NpcVehicleConfig(**v) if isinstance(v, dict) else v
+            for v in self.npc_vehicles
+        ]
 
 
 @dataclass
