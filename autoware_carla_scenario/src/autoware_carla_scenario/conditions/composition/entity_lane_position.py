@@ -80,14 +80,7 @@ class EntityLanePositionCondition(CompositionCondition):
             {
                 "road_id": self._road_id,
                 "lane_id": self._lane_id,
-                "rules": [
-                    {
-                        "field": r.field,
-                        "rule": r.rule.name,
-                        "value": r.value,
-                    }
-                    for r in self._rules
-                ],
+                "rules": [r.to_dict() for r in self._rules],
             }
         )
         return details

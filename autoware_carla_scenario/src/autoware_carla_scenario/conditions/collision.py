@@ -33,7 +33,6 @@ class CollisionCondition(BaseCondition):
     def __init__(self, min_impulse: float = 0.0, *, label: str) -> None:
         super().__init__(label=label)
         self._min_impulse = min_impulse
-        self._collision_elapsed: Optional[float] = None
         self._sensor: Optional["carla.Actor"] = None
         self._lock = threading.Lock()
         self._collided = False
@@ -45,8 +44,10 @@ class CollisionCondition(BaseCondition):
         details: dict[str, Any] = {"min_impulse": self._min_impulse}
         if self._collided:
             details["other_actor_type"] = self._other_type_id or "unknown"
-            if self._collision_elapsed is not None:
-                details["collision_elapsed_seconds"] = self._collision_elapsed
+            if self._cached_result is not None:
+                details["collision_elapsed_seconds"] = (
+                    self._cached_result.elapsed_seconds
+                )
         return details
 
     def _on_collision(self, event: "carla.CollisionEvent") -> None:
@@ -106,7 +107,6 @@ class CollisionCondition(BaseCondition):
         with self._lock:
             if self._collided:
                 other = self._other_type_id or "unknown"
-                self._collision_elapsed = elapsed
                 self._cached_result = ScenarioResult(
                     passed=False,
                     message=f"Ego vehicle collided with '{other}' at {elapsed:.2f}s",

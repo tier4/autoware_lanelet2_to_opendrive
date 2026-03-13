@@ -44,11 +44,7 @@ class StickyCondition(BaseCondition):
         return {
             "wrapper": "sticky",
             "latched": self._latched_result is not None,
-            "child": {
-                "condition_type": type(self._condition).__name__,
-                "label": self._condition.label,
-                **self._condition.get_details(),
-            },
+            "child": self._condition.to_summary_dict(),
         }
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

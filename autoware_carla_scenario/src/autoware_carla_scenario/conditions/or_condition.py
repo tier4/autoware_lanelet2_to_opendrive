@@ -34,14 +34,7 @@ class OrCondition(BaseCondition):
     def get_details(self) -> dict[str, Any]:
         return {
             "operator": "OR",
-            "children": [
-                {
-                    "condition_type": type(c).__name__,
-                    "label": c.label,
-                    **c.get_details(),
-                }
-                for c in self._conditions
-            ],
+            "children": [c.to_summary_dict() for c in self._conditions],
         }
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

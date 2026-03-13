@@ -63,11 +63,7 @@ class CompositionCondition(BaseCondition):
         if self._entity_name is not None:
             details["entity_name"] = str(self._entity_name)
         if self._child is not None:
-            details["child"] = {
-                "condition_type": type(self._child).__name__,
-                "label": self._child.label,
-                **self._child.get_details(),
-            }
+            details["child"] = self._child.to_summary_dict()
         return details
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

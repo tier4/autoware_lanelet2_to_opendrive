@@ -116,10 +116,9 @@ def _build_condition_status(
         world: CARLA world.
         elapsed: Elapsed time in seconds.
     """
-    cond_label = getattr(cond, "label", None) or f"{role}[{index}]"
     check = cond.check(world, elapsed)
     cond_type = type(cond).__name__
-    details = cond.get_details() if hasattr(cond, "get_details") else {}
+    details = cond.get_details()
 
     if check is not None:
         satisfied = True
@@ -129,7 +128,7 @@ def _build_condition_status(
         message = "not yet satisfied" if role == "pass" else "not triggered"
 
     return ConditionStatus(
-        label=f"{role}[{index}]({cond_label})",
+        label=f"{role}[{index}]({cond.label})",
         satisfied=satisfied,
         message=message,
         condition_type=cond_type,
@@ -421,14 +420,13 @@ class ScenarioRunner:
 
                 # Check pass conditions
                 for i, condition in enumerate(scenario._pass_conditions):
-                    cond_label = getattr(condition, "label", None) or str(i)
                     check = condition.check(world, elapsed)
                     if check is not None:
                         logger.info(
                             "[%s] Pass condition [%d](%s) SATISFIED: %s",
                             scenario_name,
                             i,
-                            cond_label,
+                            condition.label,
                             check.message,
                         )
                         result = ScenarioResult(
@@ -445,7 +443,7 @@ class ScenarioRunner:
                             "[%s] Pass condition [%d](%s) pending at t=%.2fs (tick %d)",
                             scenario_name,
                             i,
-                            cond_label,
+                            condition.label,
                             elapsed,
                             tick_count,
                         )
@@ -455,14 +453,13 @@ class ScenarioRunner:
 
                 # Check fail conditions
                 for i, condition in enumerate(scenario._fail_conditions):
-                    cond_label = getattr(condition, "label", None) or str(i)
                     check = condition.check(world, elapsed)
                     if check is not None:
                         logger.info(
                             "[%s] Fail condition [%d](%s) TRIGGERED: %s",
                             scenario_name,
                             i,
-                            cond_label,
+                            condition.label,
                             check.message,
                         )
                         result = ScenarioResult(

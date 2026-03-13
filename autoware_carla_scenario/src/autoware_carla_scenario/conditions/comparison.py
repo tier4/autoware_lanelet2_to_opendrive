@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Any
 
 
 class ComparisonRule(Enum):
@@ -73,3 +74,11 @@ class ScalarComparisonRule:
     def satisfied(self, actual: float) -> bool:
         """Return True if *actual* satisfies this rule."""
         return compare(actual, self.rule, self.value, self.tolerance)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dict representation."""
+        return {
+            "field": self.field,
+            "rule": self.rule.name,
+            "value": self.value,
+        }

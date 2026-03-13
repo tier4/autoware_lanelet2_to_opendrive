@@ -141,3 +141,15 @@ class BaseCondition(ABC):
         parameters (thresholds, targets, etc.) for structured JSON logging.
         """
         return {}
+
+    def to_summary_dict(self) -> dict[str, Any]:
+        """Return a summary dict identifying this condition and its details.
+
+        Combines ``condition_type``, ``label``, and :meth:`get_details`
+        into a single dict suitable for nesting inside parent conditions.
+        """
+        return {
+            "condition_type": type(self).__name__,
+            "label": self.label,
+            **self.get_details(),
+        }
