@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import enum
 import logging
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from typing import Optional as _Optional
 
 from ..conditions import BaseCondition
 from ..conditions.base import find_actor_by_role_name
 from ..constants import DEFAULT_TM_PORT
+from ..entity_role import EntityRole
 from .base import BaseAction, TickTiming
 
 if TYPE_CHECKING:
@@ -57,7 +58,7 @@ class TurnAction(BaseAction):
 
     def __init__(
         self,
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         direction: TurnDirection,
         client: "carla.Client",
         condition: _Optional[BaseCondition] = None,

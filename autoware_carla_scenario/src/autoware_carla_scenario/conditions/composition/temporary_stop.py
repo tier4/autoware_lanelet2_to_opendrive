@@ -9,7 +9,7 @@ created for the predecessor/successor roads and combined via
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence, Union
 
 import numpy as np
 
@@ -19,6 +19,7 @@ from ...coordinate.transform import to_opendrive
 from ..and_condition import AndCondition
 from ..base import BaseCondition, ScenarioResult
 from ..comparison import ComparisonRule, ScalarComparisonRule
+from ...entity_role import EntityRole
 from ..or_condition import OrCondition
 from ..persistent import PersistentCondition
 from .base import CompositionCondition
@@ -64,7 +65,7 @@ class TemporaryStopCondition(CompositionCondition):
 
     def __init__(
         self,
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         stop_positions: Sequence[AnyPose],
         s_margin: float = 5.0,
         speed_threshold: float = 0.1,
@@ -115,7 +116,7 @@ class TemporaryStopCondition(CompositionCondition):
     @classmethod
     def _build_position_conditions(
         cls,
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         od_pose: OpenDrivePose,
         s_margin: float,
     ) -> list[EntityLanePositionCondition]:
@@ -202,7 +203,7 @@ class TemporaryStopCondition(CompositionCondition):
 
     @staticmethod
     def _make_lane_condition(
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         road_id: str,
         s_lo: float,
         s_hi: float,

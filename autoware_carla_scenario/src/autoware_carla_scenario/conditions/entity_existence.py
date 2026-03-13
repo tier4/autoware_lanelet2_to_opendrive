@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
+from ..entity_role import EntityRole
 from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
 
 if TYPE_CHECKING:
@@ -27,9 +28,10 @@ class EntityExistenceCondition(BaseCondition):
 
     Args:
         entity_name: The ``role_name`` attribute of the actor to monitor.
+            Accepts both :class:`EntityRole` and plain ``str``.
     """
 
-    def __init__(self, entity_name: str) -> None:
+    def __init__(self, entity_name: Union[EntityRole, str]) -> None:
         self._entity_name = entity_name
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

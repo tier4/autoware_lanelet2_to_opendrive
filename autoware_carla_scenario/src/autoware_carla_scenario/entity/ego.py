@@ -41,7 +41,7 @@ class EgoVehicle:
         self._vehicle = spawn_vehicle_actor(
             world,
             config.vehicle_type,
-            EGO_ROLE_NAME,
+            str(EGO_ROLE_NAME),
             config.spawn_location,
         )
         return self._vehicle

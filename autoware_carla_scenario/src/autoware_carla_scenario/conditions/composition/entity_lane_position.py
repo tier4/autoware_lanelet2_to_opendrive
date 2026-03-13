@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from ...coordinate.poses import CarlaWorldPose
 from ...coordinate.transform import project_onto_road, to_opendrive
+from ...entity_role import EntityRole
 from ..base import ScenarioResult, find_actor_by_role_name
 from ..comparison import ScalarComparisonRule
 from .base import CompositionCondition
@@ -55,7 +56,7 @@ class EntityLanePositionCondition(CompositionCondition):
 
     def __init__(
         self,
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         road_id: str,
         lane_id: Optional[int] = None,
         rules: Optional[list[ScalarComparisonRule]] = None,

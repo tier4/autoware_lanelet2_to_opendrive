@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
+from ...entity_role import EntityRole
 from ...kinematics import Vector3
 from ..base import ScenarioResult, find_actor_in_list
 from ..comparison import ComparisonRule, ScalarComparisonRule
@@ -75,12 +76,12 @@ class SpeedCondition(CompositionCondition):
 
     def __init__(
         self,
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         value: float,
         rule: ComparisonRule,
         direction: SpeedDirection = SpeedDirection.MAGNITUDE,
         coordinate_system: SpeedCoordinateSystem = SpeedCoordinateSystem.WORLD,
-        reference_entity_name: Optional[str] = None,
+        reference_entity_name: Union[EntityRole, str, None] = None,
         tolerance: float = 1e-6,
     ) -> None:
         if tolerance < 0:

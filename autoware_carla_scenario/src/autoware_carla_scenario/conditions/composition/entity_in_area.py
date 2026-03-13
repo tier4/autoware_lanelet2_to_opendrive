@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence, Union
 
 import cv2
 import numpy as np
 
 from ...coordinate.poses import AnyPose, CarlaWorldPose
 from ...coordinate.transform import to_carla_world
+from ...entity_role import EntityRole
 from ..base import ScenarioResult, find_actor_by_role_name
 from .base import CompositionCondition
 
@@ -65,7 +66,7 @@ class EntityInAreaCondition(CompositionCondition):
 
     def __init__(
         self,
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         polygon: Sequence[AnyPose],
         include_boundary: bool = True,
     ) -> None:

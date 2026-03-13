@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
+from ...entity_role import EntityRole
 from ..base import ScenarioResult
 from ..comparison import ComparisonRule
 from ..persistent import PersistentCondition
@@ -35,7 +36,7 @@ class StandstillCondition(CompositionCondition):
 
     def __init__(
         self,
-        entity_name: str,
+        entity_name: Union[EntityRole, str],
         duration: float,
         speed_threshold: float = 0.1,
     ) -> None:
