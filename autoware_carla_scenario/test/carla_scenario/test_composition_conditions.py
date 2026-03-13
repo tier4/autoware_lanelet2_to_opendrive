@@ -32,6 +32,9 @@ from autoware_carla_scenario.coordinate.poses import (
 class AlwaysPassCondition(BaseCondition):
     """Test helper: always returns a passing result."""
 
+    def __init__(self) -> None:
+        super().__init__(label="always_pass")
+
     def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
         return ScenarioResult(
             passed=True, message="Always passes", elapsed_seconds=elapsed
@@ -41,12 +44,18 @@ class AlwaysPassCondition(BaseCondition):
 class AlwaysNoneCondition(BaseCondition):
     """Test helper: never triggers."""
 
+    def __init__(self) -> None:
+        super().__init__(label="always_none")
+
     def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
         return None
 
 
 class AlwaysFailCondition(BaseCondition):
     """Test helper: always returns a failing result."""
+
+    def __init__(self) -> None:
+        super().__init__(label="always_fail")
 
     def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
         return ScenarioResult(
@@ -58,6 +67,7 @@ class ToggleCondition(BaseCondition):
     """Test helper: alternates between pass and None based on a sequence."""
 
     def __init__(self, results: list[Optional[bool]]) -> None:
+        super().__init__(label="toggle")
         self._results = results
         self._index = 0
 
@@ -210,13 +220,13 @@ class TestStandstillConditionComposition:
     """
 
     def test_returns_none_before_duration(self) -> None:
-        condition = StandstillCondition("ego", duration=3.0)
+        condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         assert condition.check(world, elapsed=0.0) is None
         assert condition.check(world, elapsed=2.9) is None
 
     def test_returns_pass_after_duration(self) -> None:
-        condition = StandstillCondition("ego", duration=3.0)
+        condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         condition.check(world, elapsed=0.0)
         result = condition.check(world, elapsed=3.0)
@@ -224,7 +234,7 @@ class TestStandstillConditionComposition:
         assert result.passed is True
 
     def test_timer_resets_when_moving(self) -> None:
-        condition = StandstillCondition("ego", duration=2.0)
+        condition = StandstillCondition("ego", duration=2.0, label="test_standstill")
         world_stop = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         world_move = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
 
@@ -243,7 +253,9 @@ class TestStandstillConditionComposition:
         assert result.passed is True
 
     def test_speed_below_threshold_counts(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.5)
+        condition = StandstillCondition(
+            "ego", duration=1.0, speed_threshold=0.5, label="test_standstill"
+        )
         # Speed = sqrt(0.3^2 + 0.3^2) ~ 0.42 < 0.5
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.3, vy=0.3)
         condition.check(world, elapsed=0.0)
@@ -252,28 +264,32 @@ class TestStandstillConditionComposition:
         assert result.passed is True
 
     def test_speed_above_threshold_no_trigger(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.1)
+        condition = StandstillCondition(
+            "ego", duration=1.0, speed_threshold=0.1, label="test_standstill"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=0.0)
         condition.check(world, elapsed=0.0)
         assert condition.check(world, elapsed=5.0) is None
 
     def test_entity_not_found_returns_none(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0)
+        condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("other", 0.0, 0.0, vx=0.0, vy=0.0)
         assert condition.check(world, elapsed=0.0) is None
 
     def test_invalid_duration_raises(self) -> None:
         with pytest.raises(ValueError, match="duration must be positive"):
-            StandstillCondition("ego", duration=0.0)
+            StandstillCondition("ego", duration=0.0, label="test_standstill")
         with pytest.raises(ValueError, match="duration must be positive"):
-            StandstillCondition("ego", duration=-1.0)
+            StandstillCondition("ego", duration=-1.0, label="test_standstill")
 
     def test_invalid_speed_threshold_raises(self) -> None:
         with pytest.raises(ValueError, match="speed_threshold must be non-negative"):
-            StandstillCondition("ego", duration=1.0, speed_threshold=-0.1)
+            StandstillCondition(
+                "ego", duration=1.0, speed_threshold=-0.1, label="test_standstill"
+            )
 
     def test_elapsed_seconds_in_result(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0)
+        condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         condition.check(world, elapsed=10.0)
         result = condition.check(world, elapsed=11.0)
@@ -302,36 +318,48 @@ class TestTemporaryStopCondition:
 
     def test_validation_empty_positions(self) -> None:
         with pytest.raises(ValueError, match="stop_positions must not be empty"):
-            TemporaryStopCondition("ego", stop_positions=[])
+            TemporaryStopCondition("ego", stop_positions=[], label="test_temp_stop")
 
     def test_validation_s_margin(self) -> None:
         od = OpenDrivePose(road_id="1", lane_id=-1, s=50.0)
         with pytest.raises(ValueError, match="s_margin must be positive"):
-            TemporaryStopCondition("ego", stop_positions=[od], s_margin=0.0)
+            TemporaryStopCondition(
+                "ego", stop_positions=[od], s_margin=0.0, label="test_temp_stop"
+            )
         with pytest.raises(ValueError, match="s_margin must be positive"):
-            TemporaryStopCondition("ego", stop_positions=[od], s_margin=-1.0)
+            TemporaryStopCondition(
+                "ego", stop_positions=[od], s_margin=-1.0, label="test_temp_stop"
+            )
 
     def test_validation_speed_threshold(self) -> None:
         od = OpenDrivePose(road_id="1", lane_id=-1, s=50.0)
         with pytest.raises(ValueError, match="speed_threshold must be non-negative"):
-            TemporaryStopCondition("ego", stop_positions=[od], speed_threshold=-0.1)
+            TemporaryStopCondition(
+                "ego", stop_positions=[od], speed_threshold=-0.1, label="test_temp_stop"
+            )
 
     def test_validation_stop_duration(self) -> None:
         od = OpenDrivePose(road_id="1", lane_id=-1, s=50.0)
         with pytest.raises(ValueError, match="stop_duration must be positive"):
-            TemporaryStopCondition("ego", stop_positions=[od], stop_duration=0.0)
+            TemporaryStopCondition(
+                "ego", stop_positions=[od], stop_duration=0.0, label="test_temp_stop"
+            )
 
     def test_single_opendrive_pose(self) -> None:
         """Single OpenDrivePose creates a PersistentCondition (not OrCondition)."""
         od = OpenDrivePose(road_id="1", lane_id=-1, s=50.0)
-        cond = TemporaryStopCondition("ego", stop_positions=[od])
+        cond = TemporaryStopCondition(
+            "ego", stop_positions=[od], label="test_temp_stop"
+        )
         assert isinstance(cond._child, PersistentCondition)
 
     def test_multiple_opendrive_poses(self) -> None:
         """Multiple poses creates an OrCondition wrapping PersistentConditions."""
         od1 = OpenDrivePose(road_id="1", lane_id=-1, s=50.0)
         od2 = OpenDrivePose(road_id="2", lane_id=-1, s=100.0)
-        cond = TemporaryStopCondition("ego", stop_positions=[od1, od2])
+        cond = TemporaryStopCondition(
+            "ego", stop_positions=[od1, od2], label="test_temp_stop"
+        )
         assert isinstance(cond._child, OrCondition)
 
     @patch("autoware_carla_scenario.conditions.composition.temporary_stop.to_opendrive")
@@ -339,7 +367,9 @@ class TestTemporaryStopCondition:
         """Lanelet2Pose is converted via to_opendrive()."""
         mock_to_od.return_value = OpenDrivePose(road_id="5", lane_id=-1, s=30.0)
         ll2 = Lanelet2Pose(lanelet_id=100, s=10.0, t=0.0)
-        cond = TemporaryStopCondition("ego", stop_positions=[ll2])
+        cond = TemporaryStopCondition(
+            "ego", stop_positions=[ll2], label="test_temp_stop"
+        )
         mock_to_od.assert_called_once_with(ll2)
         assert isinstance(cond._child, PersistentCondition)
 
@@ -348,7 +378,9 @@ class TestTemporaryStopCondition:
         """CarlaWorldPose is converted via to_opendrive()."""
         mock_to_od.return_value = OpenDrivePose(road_id="7", lane_id=-1, s=40.0)
         cwp = CarlaWorldPose(x=10.0, y=20.0, z=0.0)
-        cond = TemporaryStopCondition("ego", stop_positions=[cwp])
+        cond = TemporaryStopCondition(
+            "ego", stop_positions=[cwp], label="test_temp_stop"
+        )
         mock_to_od.assert_called_once_with(cwp)
         assert isinstance(cond._child, PersistentCondition)
 
@@ -358,5 +390,5 @@ class TestTemporaryStopCondition:
         with patch(
             "autoware_carla_scenario.conditions.composition.temporary_stop.to_opendrive"
         ) as mock_to_od:
-            TemporaryStopCondition("ego", stop_positions=[od])
+            TemporaryStopCondition("ego", stop_positions=[od], label="test_temp_stop")
             mock_to_od.assert_not_called()

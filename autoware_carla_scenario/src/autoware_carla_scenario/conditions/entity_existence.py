@@ -31,7 +31,8 @@ class EntityExistenceCondition(BaseCondition):
             Accepts both :class:`EntityRole` and plain ``str``.
     """
 
-    def __init__(self, entity_name: Union[EntityRole, str]) -> None:
+    def __init__(self, entity_name: Union[EntityRole, str], *, label: str) -> None:
+        super().__init__(label=label)
         self._entity_name = entity_name
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

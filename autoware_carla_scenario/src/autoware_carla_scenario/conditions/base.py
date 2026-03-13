@@ -70,6 +70,14 @@ class ScenarioResult:
 class BaseCondition(ABC):
     """Abstract base class for scenario pass/fail conditions."""
 
+    def __init__(self, label: str) -> None:
+        if not label:
+            raise ValueError(
+                f"{type(self).__name__}: label must not be empty. "
+                "Provide a non-empty string to identify this condition."
+            )
+        self.label = label
+
     @abstractmethod
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Check the condition.

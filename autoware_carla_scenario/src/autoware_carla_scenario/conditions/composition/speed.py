@@ -83,6 +83,8 @@ class SpeedCondition(CompositionCondition):
         coordinate_system: SpeedCoordinateSystem = SpeedCoordinateSystem.WORLD,
         reference_entity_name: Union[EntityRole, str, None] = None,
         tolerance: float = 1e-6,
+        *,
+        label: str,
     ) -> None:
         if tolerance < 0:
             raise ValueError("tolerance must be non-negative")
@@ -93,7 +95,7 @@ class SpeedCondition(CompositionCondition):
             raise ValueError(
                 "reference_entity_name is required " "when coordinate_system is ENTITY"
             )
-        super().__init__(entity_name=entity_name)
+        super().__init__(entity_name=entity_name, label=label)
         self._comparison = ScalarComparisonRule(
             field="speed", rule=rule, value=value, tolerance=tolerance
         )

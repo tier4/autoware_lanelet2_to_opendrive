@@ -70,6 +70,8 @@ class TemporaryStopCondition(CompositionCondition):
         s_margin: float = 5.0,
         speed_threshold: float = 0.1,
         stop_duration: float = 1.0,
+        *,
+        label: str,
     ) -> None:
         if not stop_positions:
             raise ValueError("stop_positions must not be empty")
@@ -86,7 +88,7 @@ class TemporaryStopCondition(CompositionCondition):
 
             # Build position conditions spanning multiple roads if needed
             position_conds = self._build_position_conditions(
-                entity_name, od_pose, s_margin
+                entity_name, od_pose, s_margin, label=label
             )
             if len(position_conds) == 1:
                 position_cond: BaseCondition = position_conds[0]
@@ -97,6 +99,7 @@ class TemporaryStopCondition(CompositionCondition):
                 entity_name=entity_name,
                 value=speed_threshold,
                 rule=ComparisonRule.LESS_THAN_OR_EQUAL,
+                label=f"{label}_speed",
             )
             and_cond = AndCondition([position_cond, speed_cond])
             persistent = PersistentCondition(and_cond, duration=stop_duration)
@@ -107,7 +110,7 @@ class TemporaryStopCondition(CompositionCondition):
         else:
             child = OrCondition(persistent_conditions)
 
-        super().__init__(child=child, entity_name=entity_name)
+        super().__init__(child=child, entity_name=entity_name, label=label)
 
     # ------------------------------------------------------------------
     # Margin / road-boundary helpers
@@ -119,6 +122,8 @@ class TemporaryStopCondition(CompositionCondition):
         entity_name: Union[EntityRole, str],
         od_pose: OpenDrivePose,
         s_margin: float,
+        *,
+        label: str,
     ) -> list[EntityLanePositionCondition]:
         """Build EntityLanePositionConditions, splitting across roads when needed.
 
@@ -138,7 +143,7 @@ class TemporaryStopCondition(CompositionCondition):
         clamped_max = min(road_length, s_max)
         conditions.append(
             cls._make_lane_condition(
-                entity_name, od_pose.road_id, clamped_min, clamped_max
+                entity_name, od_pose.road_id, clamped_min, clamped_max, label=label
             )
         )
         logger.info(
@@ -163,7 +168,7 @@ class TemporaryStopCondition(CompositionCondition):
                     lo = 0.0
                     hi = min(overflow, pred_length)
                 conditions.append(
-                    cls._make_lane_condition(entity_name, pred_id, lo, hi)
+                    cls._make_lane_condition(entity_name, pred_id, lo, hi, label=label)
                 )
                 logger.info(
                     "  + predecessor road='%s' s=[%.1f, %.1f] (contact=%s, length=%.1f)",
@@ -188,7 +193,7 @@ class TemporaryStopCondition(CompositionCondition):
                     lo = max(0.0, succ_length - overflow)
                     hi = succ_length
                 conditions.append(
-                    cls._make_lane_condition(entity_name, succ_id, lo, hi)
+                    cls._make_lane_condition(entity_name, succ_id, lo, hi, label=label)
                 )
                 logger.info(
                     "  + successor road='%s' s=[%.1f, %.1f] (contact=%s, length=%.1f)",
@@ -207,6 +212,8 @@ class TemporaryStopCondition(CompositionCondition):
         road_id: str,
         s_lo: float,
         s_hi: float,
+        *,
+        label: str,
     ) -> EntityLanePositionCondition:
         """Create an EntityLanePositionCondition for a road segment."""
         return EntityLanePositionCondition(
@@ -224,6 +231,7 @@ class TemporaryStopCondition(CompositionCondition):
                     value=s_hi,
                 ),
             ],
+            label=label,
         )
 
     @staticmethod

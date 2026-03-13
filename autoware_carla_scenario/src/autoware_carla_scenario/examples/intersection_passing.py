@@ -180,6 +180,7 @@ class IntersectionPassingScenario(BaseScenario):
                 EntityLanePositionCondition(
                     entity_name=EGO_ROLE_NAME,
                     road_id=rid,
+                    label=f"ego_on_road_{rid}",
                 )
             )
             for rid in route_road_ids
@@ -195,18 +196,24 @@ class IntersectionPassingScenario(BaseScenario):
             self.register_fail_condition(
                 AndCondition(
                     [
-                        ElapsedTimeCondition(cfg.speed_check_delay_seconds),
+                        ElapsedTimeCondition(
+                            cfg.speed_check_delay_seconds,
+                            label="speed_check_delay",
+                        ),
                         SpeedCondition(
                             entity_name=EGO_ROLE_NAME,
                             value=cfg.min_speed_kmh / 3.6,
                             rule=ComparisonRule.LESS_THAN,
+                            label="ego_min_speed",
                         ),
                     ]
                 )
             )
 
         # --- Fail-safe timeout ---
-        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
+        self.register_fail_condition(
+            TimeoutCondition(cfg.timeout_seconds, label="scenario_timeout")
+        )
 
     def is_done(self) -> bool:
         """Always ``False`` — termination is driven by pass/fail conditions."""

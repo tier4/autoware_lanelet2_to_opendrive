@@ -115,26 +115,32 @@ def _collect_condition_statuses(
     statuses: list[ConditionStatus] = []
 
     for i, cond in enumerate(scenario._pass_conditions):
+        cond_label = getattr(cond, "label", None) or f"pass[{i}]"
         check = cond.check(world, elapsed)
         if check is not None:
             status = ConditionStatus(
-                label=f"pass[{i}]", satisfied=True, message=check.message
+                label=f"pass[{i}]({cond_label})", satisfied=True, message=check.message
             )
             logger.info(
                 "[%s]   %s: OK — %s", scenario_name, status.label, status.message
             )
         else:
             status = ConditionStatus(
-                label=f"pass[{i}]", satisfied=False, message="not yet satisfied"
+                label=f"pass[{i}]({cond_label})",
+                satisfied=False,
+                message="not yet satisfied",
             )
             logger.info("[%s]   %s: PENDING", scenario_name, status.label)
         statuses.append(status)
 
     for i, cond in enumerate(scenario._fail_conditions):
+        cond_label = getattr(cond, "label", None) or f"fail[{i}]"
         check = cond.check(world, elapsed)
         if check is not None:
             status = ConditionStatus(
-                label=f"fail[{i}]", satisfied=True, message=check.message
+                label=f"fail[{i}]({cond_label})",
+                satisfied=True,
+                message=check.message,
             )
             logger.info(
                 "[%s]   %s: TRIGGERED — %s",
@@ -144,7 +150,9 @@ def _collect_condition_statuses(
             )
         else:
             status = ConditionStatus(
-                label=f"fail[{i}]", satisfied=False, message="not triggered"
+                label=f"fail[{i}]({cond_label})",
+                satisfied=False,
+                message="not triggered",
             )
         statuses.append(status)
 
@@ -325,7 +333,9 @@ class ScenarioRunner:
 
             # Register ego existence fail condition so the scenario fails
             # immediately if the ego is destroyed (e.g. falls through map).
-            scenario.register_fail_condition(EntityExistenceCondition(EGO_ROLE_NAME))
+            scenario.register_fail_condition(
+                EntityExistenceCondition(EGO_ROLE_NAME, label="ego_existence")
+            )
 
             # Warm-up ticks: let physics and TrafficManager stabilise
             # before the main loop begins.
@@ -363,7 +373,9 @@ class ScenarioRunner:
             logger.info("[%s] Recording to %s", scenario_name, output_path)
 
             # Register default timeout fail condition
-            scenario.register_fail_condition(TimeoutCondition(self.timeout_seconds))
+            scenario.register_fail_condition(
+                TimeoutCondition(self.timeout_seconds, label="default_timeout")
+            )
 
             logger.info("[%s] === Tick loop start ===", scenario_name)
             start_time = time.monotonic()
@@ -392,12 +404,14 @@ class ScenarioRunner:
 
                 # Check pass conditions
                 for i, condition in enumerate(scenario._pass_conditions):
+                    cond_label = getattr(condition, "label", None) or str(i)
                     check = condition.check(world, elapsed)
                     if check is not None:
                         logger.info(
-                            "[%s] Pass condition [%d] SATISFIED: %s",
+                            "[%s] Pass condition [%d](%s) SATISFIED: %s",
                             scenario_name,
                             i,
+                            cond_label,
                             check.message,
                         )
                         result = ScenarioResult(
@@ -411,9 +425,10 @@ class ScenarioRunner:
                         break
                     if tick_count % _CONDITION_LOG_INTERVAL == 0:
                         logger.info(
-                            "[%s] Pass condition [%d] pending at t=%.2fs (tick %d)",
+                            "[%s] Pass condition [%d](%s) pending at t=%.2fs (tick %d)",
                             scenario_name,
                             i,
+                            cond_label,
                             elapsed,
                             tick_count,
                         )
@@ -423,12 +438,14 @@ class ScenarioRunner:
 
                 # Check fail conditions
                 for i, condition in enumerate(scenario._fail_conditions):
+                    cond_label = getattr(condition, "label", None) or str(i)
                     check = condition.check(world, elapsed)
                     if check is not None:
                         logger.info(
-                            "[%s] Fail condition [%d] TRIGGERED: %s",
+                            "[%s] Fail condition [%d](%s) TRIGGERED: %s",
                             scenario_name,
                             i,
+                            cond_label,
                             check.message,
                         )
                         result = ScenarioResult(

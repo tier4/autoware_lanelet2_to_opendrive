@@ -202,6 +202,7 @@ class TestScenarioQueueUnit:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestScenarioQueueIntegration:
     @pytest.fixture(autouse=True)
     def skip_if_no_carla(self, carla_queue: ScenarioQueue) -> None:

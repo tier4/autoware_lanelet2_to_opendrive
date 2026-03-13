@@ -34,6 +34,9 @@ from autoware_carla_scenario.coordinate.poses import CarlaWorldPose, OpenDrivePo
 class AlwaysPassCondition(BaseCondition):
     """Test helper: always returns a passing result."""
 
+    def __init__(self) -> None:
+        super().__init__(label="always_pass")
+
     def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
         return ScenarioResult(
             passed=True, message="Always passes", elapsed_seconds=elapsed
@@ -42,6 +45,9 @@ class AlwaysPassCondition(BaseCondition):
 
 class AlwaysNoneCondition(BaseCondition):
     """Test helper: never triggers."""
+
+    def __init__(self) -> None:
+        super().__init__(label="always_none")
 
     def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
         return None
@@ -54,13 +60,13 @@ class AlwaysNoneCondition(BaseCondition):
 
 class TestTimeoutCondition:
     def test_returns_none_before_timeout(self) -> None:
-        condition = TimeoutCondition(timeout_seconds=10.0)
+        condition = TimeoutCondition(timeout_seconds=10.0, label="test_timeout")
         world = MagicMock()
         result = condition.check(world, elapsed=5.0)
         assert result is None
 
     def test_returns_failure_at_timeout(self) -> None:
-        condition = TimeoutCondition(timeout_seconds=10.0)
+        condition = TimeoutCondition(timeout_seconds=10.0, label="test_timeout")
         world = MagicMock()
         result = condition.check(world, elapsed=10.0)
         assert result is not None
@@ -68,18 +74,18 @@ class TestTimeoutCondition:
         assert result.elapsed_seconds == pytest.approx(10.0)
 
     def test_returns_failure_beyond_timeout(self) -> None:
-        condition = TimeoutCondition(timeout_seconds=5.0)
+        condition = TimeoutCondition(timeout_seconds=5.0, label="test_timeout")
         world = MagicMock()
         result = condition.check(world, elapsed=999.9)
         assert result is not None
         assert result.passed is False
 
     def test_default_timeout_is_60_seconds(self) -> None:
-        condition = TimeoutCondition()
+        condition = TimeoutCondition(label="test_timeout")
         assert condition.timeout_seconds == pytest.approx(60.0)
 
     def test_message_contains_timeout_info(self) -> None:
-        condition = TimeoutCondition(timeout_seconds=30.0)
+        condition = TimeoutCondition(timeout_seconds=30.0, label="test_timeout")
         world = MagicMock()
         result = condition.check(world, elapsed=30.0)
         assert result is not None
@@ -93,13 +99,13 @@ class TestTimeoutCondition:
 
 class TestElapsedTimeCondition:
     def test_returns_none_before_duration(self) -> None:
-        condition = ElapsedTimeCondition(duration_seconds=10.0)
+        condition = ElapsedTimeCondition(duration_seconds=10.0, label="test_elapsed")
         world = MagicMock()
         result = condition.check(world, elapsed=5.0)
         assert result is None
 
     def test_returns_pass_at_duration(self) -> None:
-        condition = ElapsedTimeCondition(duration_seconds=10.0)
+        condition = ElapsedTimeCondition(duration_seconds=10.0, label="test_elapsed")
         world = MagicMock()
         result = condition.check(world, elapsed=10.0)
         assert result is not None
@@ -107,14 +113,14 @@ class TestElapsedTimeCondition:
         assert result.elapsed_seconds == pytest.approx(10.0)
 
     def test_returns_pass_beyond_duration(self) -> None:
-        condition = ElapsedTimeCondition(duration_seconds=5.0)
+        condition = ElapsedTimeCondition(duration_seconds=5.0, label="test_elapsed")
         world = MagicMock()
         result = condition.check(world, elapsed=999.9)
         assert result is not None
         assert result.passed is True
 
     def test_message_contains_duration_info(self) -> None:
-        condition = ElapsedTimeCondition(duration_seconds=30.0)
+        condition = ElapsedTimeCondition(duration_seconds=30.0, label="test_elapsed")
         world = MagicMock()
         result = condition.check(world, elapsed=30.0)
         assert result is not None
@@ -122,11 +128,11 @@ class TestElapsedTimeCondition:
 
     def test_zero_duration_raises(self) -> None:
         with pytest.raises(ValueError, match="duration_seconds must be positive"):
-            ElapsedTimeCondition(duration_seconds=0.0)
+            ElapsedTimeCondition(duration_seconds=0.0, label="test_elapsed")
 
     def test_negative_duration_raises(self) -> None:
         with pytest.raises(ValueError, match="duration_seconds must be positive"):
-            ElapsedTimeCondition(duration_seconds=-5.0)
+            ElapsedTimeCondition(duration_seconds=-5.0, label="test_elapsed")
 
 
 class TestElapsedTimeConditionWithRule:
@@ -134,7 +140,9 @@ class TestElapsedTimeConditionWithRule:
 
     def test_greater_than(self) -> None:
         cond = ElapsedTimeCondition(
-            duration_seconds=10.0, rule=ComparisonRule.GREATER_THAN
+            duration_seconds=10.0,
+            rule=ComparisonRule.GREATER_THAN,
+            label="test_elapsed",
         )
         world = MagicMock()
         assert cond.check(world, elapsed=10.0) is None  # not strictly greater
@@ -144,7 +152,7 @@ class TestElapsedTimeConditionWithRule:
 
     def test_less_than(self) -> None:
         cond = ElapsedTimeCondition(
-            duration_seconds=10.0, rule=ComparisonRule.LESS_THAN
+            duration_seconds=10.0, rule=ComparisonRule.LESS_THAN, label="test_elapsed"
         )
         world = MagicMock()
         result = cond.check(world, elapsed=5.0)
@@ -154,7 +162,10 @@ class TestElapsedTimeConditionWithRule:
 
     def test_equal_to_within_tolerance(self) -> None:
         cond = ElapsedTimeCondition(
-            duration_seconds=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.01
+            duration_seconds=10.0,
+            rule=ComparisonRule.EQUAL_TO,
+            tolerance=0.01,
+            label="test_elapsed",
         )
         world = MagicMock()
         result = cond.check(world, elapsed=10.005)
@@ -163,14 +174,19 @@ class TestElapsedTimeConditionWithRule:
 
     def test_equal_to_outside_tolerance(self) -> None:
         cond = ElapsedTimeCondition(
-            duration_seconds=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.001
+            duration_seconds=10.0,
+            rule=ComparisonRule.EQUAL_TO,
+            tolerance=0.001,
+            label="test_elapsed",
         )
         world = MagicMock()
         assert cond.check(world, elapsed=10.1) is None
 
     def test_less_than_or_equal(self) -> None:
         cond = ElapsedTimeCondition(
-            duration_seconds=10.0, rule=ComparisonRule.LESS_THAN_OR_EQUAL
+            duration_seconds=10.0,
+            rule=ComparisonRule.LESS_THAN_OR_EQUAL,
+            label="test_elapsed",
         )
         world = MagicMock()
         result = cond.check(world, elapsed=10.0)
@@ -180,7 +196,7 @@ class TestElapsedTimeConditionWithRule:
 
     def test_default_rule_is_greater_than_or_equal(self) -> None:
         """Backward compatibility: default behaves as >= (original semantics)."""
-        cond = ElapsedTimeCondition(duration_seconds=10.0)
+        cond = ElapsedTimeCondition(duration_seconds=10.0, label="test_elapsed")
         world = MagicMock()
         result = cond.check(world, elapsed=10.0)
         assert result is not None
@@ -192,10 +208,13 @@ class TestElapsedTimeConditionWithRule:
                 duration_seconds=10.0,
                 rule=ComparisonRule.EQUAL_TO,
                 tolerance=-1.0,
+                label="test_elapsed",
             )
 
     def test_message_contains_rule_text(self) -> None:
-        cond = ElapsedTimeCondition(duration_seconds=5.0, rule=ComparisonRule.LESS_THAN)
+        cond = ElapsedTimeCondition(
+            duration_seconds=5.0, rule=ComparisonRule.LESS_THAN, label="test_elapsed"
+        )
         world = MagicMock()
         result = cond.check(world, elapsed=3.0)
         assert result is not None
@@ -225,6 +244,7 @@ class TestBaseCondition:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 class TestTimeoutConditionIntegration:
     """Uses a real CARLA world to test TimeoutCondition."""
 
@@ -235,7 +255,7 @@ class TestTimeoutConditionIntegration:
     def test_timeout_triggers_on_real_world(self, carla_queue) -> None:  # noqa: ANN001
         runner = carla_queue._runner
         world = runner._world or runner._client.get_world()
-        condition = TimeoutCondition(timeout_seconds=0.0)
+        condition = TimeoutCondition(timeout_seconds=0.0, label="test_timeout")
         result = condition.check(world, elapsed=1.0)
         assert result is not None
         assert result.passed is False
@@ -342,7 +362,7 @@ class TestEntityInAreaCondition:
 
     def test_entity_inside_returns_pass(self) -> None:
         polygon = self._square_polygon()
-        condition = EntityInAreaCondition("npc1", polygon)
+        condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=0.0)
         result = condition.check(world, elapsed=1.0)
         assert result is not None
@@ -351,21 +371,21 @@ class TestEntityInAreaCondition:
 
     def test_entity_outside_returns_none(self) -> None:
         polygon = self._square_polygon()
-        condition = EntityInAreaCondition("npc1", polygon)
+        condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=10.0, y=10.0)
         result = condition.check(world, elapsed=1.0)
         assert result is None
 
     def test_entity_not_found_returns_none(self) -> None:
         polygon = self._square_polygon()
-        condition = EntityInAreaCondition("npc1", polygon)
+        condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("other_actor", x=0.0, y=0.0)
         result = condition.check(world, elapsed=1.0)
         assert result is None
 
     def test_result_elapsed_seconds(self) -> None:
         polygon = self._square_polygon()
-        condition = EntityInAreaCondition("npc1", polygon)
+        condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=0.0)
         result = condition.check(world, elapsed=3.5)
         assert result is not None
@@ -374,7 +394,9 @@ class TestEntityInAreaCondition:
     def test_polygon_too_few_vertices_raises(self) -> None:
         with pytest.raises(ValueError, match="at least 3"):
             EntityInAreaCondition(
-                "npc1", [CarlaWorldPose(0, 0, 0), CarlaWorldPose(1, 0, 0)]
+                "npc1",
+                [CarlaWorldPose(0, 0, 0), CarlaWorldPose(1, 0, 0)],
+                label="test_entity_in_area",
             )
 
     def test_carla_world_pose_polygon_passthrough(self) -> None:
@@ -384,7 +406,7 @@ class TestEntityInAreaCondition:
             CarlaWorldPose(x=2.0, y=-2.0, z=0.0),
             CarlaWorldPose(x=0.0, y=2.0, z=0.0),
         ]
-        condition = EntityInAreaCondition("npc1", polygon)
+        condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=0.0)
         result = condition.check(world, elapsed=2.0)
         assert result is not None
@@ -393,13 +415,15 @@ class TestEntityInAreaCondition:
     def test_boundary_included_by_default(self) -> None:
         # Entity on the bottom edge of the square (y == -5.0).
         polygon = self._square_polygon()
-        condition = EntityInAreaCondition("npc1", polygon)
+        condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=-5.0)
         assert condition.check(world, elapsed=1.0) is not None
 
     def test_boundary_excluded_when_flag_false(self) -> None:
         polygon = self._square_polygon()
-        condition = EntityInAreaCondition("npc1", polygon, include_boundary=False)
+        condition = EntityInAreaCondition(
+            "npc1", polygon, include_boundary=False, label="test_entity_in_area"
+        )
         world = _make_world_with_actor("npc1", x=0.0, y=-5.0)
         assert condition.check(world, elapsed=1.0) is None
 
@@ -410,7 +434,7 @@ class TestEntityInAreaCondition:
             CarlaWorldPose(x=1.0, y=-1.0, z=0.0),
             CarlaWorldPose(x=0.0, y=1.0, z=0.0),
         ]
-        condition = EntityInAreaCondition("npc1", polygon)
+        condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
 
         world_in = _make_world_with_actor("npc1", x=0.0, y=0.0)
         assert condition.check(world_in, elapsed=1.0) is not None
@@ -427,7 +451,9 @@ class TestEntityInAreaCondition:
 class TestEntityLanePositionCondition:
     def test_entity_on_matching_road_lane_returns_pass(self) -> None:
         """Condition triggers when entity is on the specified road and lane."""
-        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
@@ -446,7 +472,9 @@ class TestEntityLanePositionCondition:
 
     def test_entity_on_different_road_returns_none(self) -> None:
         """Condition does not trigger when entity is on a different road."""
-        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         fake_od_pose = OpenDrivePose(road_id="2", lane_id=-1, s=10.0, t=-1.5)
@@ -460,7 +488,9 @@ class TestEntityLanePositionCondition:
 
     def test_entity_on_different_lane_returns_none(self) -> None:
         """Condition does not trigger when entity is on a different lane."""
-        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-2, s=10.0, t=-3.0)
@@ -474,7 +504,9 @@ class TestEntityLanePositionCondition:
 
     def test_entity_not_found_returns_none(self) -> None:
         """Condition returns None when the entity does not exist in the world."""
-        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, label="test_lane_pos"
+        )
         world = _make_world_with_actor("other_actor", x=100.0, y=200.0)
 
         result = condition.check(world, elapsed=1.0)
@@ -482,7 +514,9 @@ class TestEntityLanePositionCondition:
 
     def test_result_elapsed_seconds(self) -> None:
         """Elapsed time is correctly recorded in the result."""
-        condition = EntityLanePositionCondition("npc1", road_id="5", lane_id=1)
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="5", lane_id=1, label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=0.0, y=0.0)
 
         fake_od_pose = OpenDrivePose(road_id="5", lane_id=1, s=0.0, t=1.0)
@@ -497,7 +531,9 @@ class TestEntityLanePositionCondition:
 
     def test_lane_id_none_matches_any_lane_on_same_road(self) -> None:
         """When lane_id is None, any lane on the matching road triggers pass."""
-        condition = EntityLanePositionCondition("npc1", road_id="1")
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-3, s=5.0, t=-2.0)
@@ -516,7 +552,9 @@ class TestEntityLanePositionCondition:
 
     def test_lane_id_none_different_road_returns_none(self) -> None:
         """When lane_id is None, a different road still returns None."""
-        condition = EntityLanePositionCondition("npc1", road_id="1")
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         fake_od_pose = OpenDrivePose(road_id="2", lane_id=-1, s=5.0, t=-2.0)
@@ -534,7 +572,7 @@ class TestEntityLanePositionCondition:
         """s > 30 with actual s=50 → pass."""
         rules = [ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 30.0)]
         condition = EntityLanePositionCondition(
-            "npc1", road_id="1", lane_id=-1, rules=rules
+            "npc1", road_id="1", lane_id=-1, rules=rules, label="test_lane_pos"
         )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
@@ -552,7 +590,7 @@ class TestEntityLanePositionCondition:
         """s > 30 with actual s=10 → None."""
         rules = [ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 30.0)]
         condition = EntityLanePositionCondition(
-            "npc1", road_id="1", lane_id=-1, rules=rules
+            "npc1", road_id="1", lane_id=-1, rules=rules, label="test_lane_pos"
         )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
@@ -569,7 +607,7 @@ class TestEntityLanePositionCondition:
         """t < 0 with actual t=-1.5 → pass."""
         rules = [ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0)]
         condition = EntityLanePositionCondition(
-            "npc1", road_id="1", lane_id=-1, rules=rules
+            "npc1", road_id="1", lane_id=-1, rules=rules, label="test_lane_pos"
         )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
@@ -587,7 +625,7 @@ class TestEntityLanePositionCondition:
         """t < 0 with actual t=1.5 → None."""
         rules = [ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0)]
         condition = EntityLanePositionCondition(
-            "npc1", road_id="1", lane_id=-1, rules=rules
+            "npc1", road_id="1", lane_id=-1, rules=rules, label="test_lane_pos"
         )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
@@ -607,7 +645,7 @@ class TestEntityLanePositionCondition:
             ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0),
         ]
         condition = EntityLanePositionCondition(
-            "npc1", road_id="1", lane_id=-1, rules=rules
+            "npc1", road_id="1", lane_id=-1, rules=rules, label="test_lane_pos"
         )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
@@ -628,7 +666,7 @@ class TestEntityLanePositionCondition:
             ScalarComparisonRule("t", ComparisonRule.LESS_THAN, 0.0),
         ]
         condition = EntityLanePositionCondition(
-            "npc1", road_id="1", lane_id=-1, rules=rules
+            "npc1", road_id="1", lane_id=-1, rules=rules, label="test_lane_pos"
         )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
@@ -645,11 +683,15 @@ class TestEntityLanePositionCondition:
         """A rule with field='z' raises ValueError."""
         rules = [ScalarComparisonRule("z", ComparisonRule.GREATER_THAN, 0.0)]
         with pytest.raises(ValueError, match="must be 's' or 't'"):
-            EntityLanePositionCondition("npc1", road_id="1", rules=rules)
+            EntityLanePositionCondition(
+                "npc1", road_id="1", rules=rules, label="test_lane_pos"
+            )
 
     def test_lane_id_none_without_rules_does_not_call_project(self) -> None:
         """When lane_id is None and no rules, project_onto_road is not called."""
-        condition = EntityLanePositionCondition("npc1", road_id="1")
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=5.0, t=-2.0)
@@ -668,7 +710,9 @@ class TestEntityLanePositionCondition:
     def test_lane_id_none_with_rules_uses_project_for_st(self) -> None:
         """When lane_id is None with rules, project_onto_road provides s/t."""
         rules = [ScalarComparisonRule("s", ComparisonRule.GREATER_THAN, 10.0)]
-        condition = EntityLanePositionCondition("npc1", road_id="1", rules=rules)
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", rules=rules, label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         # to_opendrive confirms road_id match
@@ -690,7 +734,9 @@ class TestEntityLanePositionCondition:
 
     def test_rules_none_preserves_existing_behavior(self) -> None:
         """No rules = existing behavior unchanged."""
-        condition = EntityLanePositionCondition("npc1", road_id="1", lane_id=-1)
+        condition = EntityLanePositionCondition(
+            "npc1", road_id="1", lane_id=-1, label="test_lane_pos"
+        )
         world = _make_world_with_actor("npc1", x=100.0, y=200.0)
 
         fake_od_pose = OpenDrivePose(road_id="1", lane_id=-1, s=10.0, t=-1.5)
@@ -713,6 +759,9 @@ class TestEntityLanePositionCondition:
 
 class AlwaysFailCondition(BaseCondition):
     """Test helper: always returns a failing result."""
+
+    def __init__(self) -> None:
+        super().__init__(label="always_fail")
 
     def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
         return ScenarioResult(
@@ -750,6 +799,7 @@ class TestAndCondition:
     def test_fail_short_circuits(self) -> None:
         """Fail result stops evaluation — second condition is never checked."""
         spy = MagicMock(spec=BaseCondition)
+        spy.label = "spy"
         cond = AndCondition([AlwaysFailCondition(), spy])
         cond.check(MagicMock(), elapsed=1.0)
         spy.check.assert_not_called()
@@ -757,6 +807,7 @@ class TestAndCondition:
     def test_none_short_circuits(self) -> None:
         """None result stops evaluation — second condition is never checked."""
         spy = MagicMock(spec=BaseCondition)
+        spy.label = "spy"
         cond = AndCondition([AlwaysNoneCondition(), spy])
         cond.check(MagicMock(), elapsed=1.0)
         spy.check.assert_not_called()
@@ -814,6 +865,7 @@ class TestOrCondition:
     def test_first_match_short_circuits(self) -> None:
         """First non-None result stops evaluation — second is never checked."""
         spy = MagicMock(spec=BaseCondition)
+        spy.label = "spy"
         cond = OrCondition([AlwaysPassCondition(), spy])
         cond.check(MagicMock(), elapsed=1.0)
         spy.check.assert_not_called()
@@ -848,13 +900,13 @@ class TestOrCondition:
 
 class TestStandstillCondition:
     def test_returns_none_before_duration(self) -> None:
-        condition = StandstillCondition("ego", duration=3.0)
+        condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         assert condition.check(world, elapsed=0.0) is None
         assert condition.check(world, elapsed=2.9) is None
 
     def test_returns_pass_after_duration(self) -> None:
-        condition = StandstillCondition("ego", duration=3.0)
+        condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         condition.check(world, elapsed=0.0)
         result = condition.check(world, elapsed=3.0)
@@ -863,7 +915,7 @@ class TestStandstillCondition:
         assert "ego" in result.message
 
     def test_timer_resets_when_moving(self) -> None:
-        condition = StandstillCondition("ego", duration=2.0)
+        condition = StandstillCondition("ego", duration=2.0, label="test_standstill")
         world_stop = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         world_move = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
 
@@ -882,7 +934,9 @@ class TestStandstillCondition:
         assert result.passed is True
 
     def test_speed_below_threshold_counts(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.5)
+        condition = StandstillCondition(
+            "ego", duration=1.0, speed_threshold=0.5, label="test_standstill"
+        )
         # Speed = sqrt(0.3^2 + 0.3^2) ≈ 0.42 < 0.5
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.3, vy=0.3)
         condition.check(world, elapsed=0.0)
@@ -891,28 +945,32 @@ class TestStandstillCondition:
         assert result.passed is True
 
     def test_speed_above_threshold_no_trigger(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0, speed_threshold=0.1)
+        condition = StandstillCondition(
+            "ego", duration=1.0, speed_threshold=0.1, label="test_standstill"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=0.0)
         condition.check(world, elapsed=0.0)
         assert condition.check(world, elapsed=5.0) is None
 
     def test_entity_not_found_returns_none(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0)
+        condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("other", 0.0, 0.0, vx=0.0, vy=0.0)
         assert condition.check(world, elapsed=0.0) is None
 
     def test_invalid_duration_raises(self) -> None:
         with pytest.raises(ValueError, match="duration must be positive"):
-            StandstillCondition("ego", duration=0.0)
+            StandstillCondition("ego", duration=0.0, label="test_standstill")
         with pytest.raises(ValueError, match="duration must be positive"):
-            StandstillCondition("ego", duration=-1.0)
+            StandstillCondition("ego", duration=-1.0, label="test_standstill")
 
     def test_invalid_speed_threshold_raises(self) -> None:
         with pytest.raises(ValueError, match="speed_threshold must be non-negative"):
-            StandstillCondition("ego", duration=1.0, speed_threshold=-0.1)
+            StandstillCondition(
+                "ego", duration=1.0, speed_threshold=-0.1, label="test_standstill"
+            )
 
     def test_elapsed_seconds_in_result(self) -> None:
-        condition = StandstillCondition("ego", duration=1.0)
+        condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
         condition.check(world, elapsed=10.0)
         result = condition.check(world, elapsed=11.0)
@@ -943,6 +1001,7 @@ class TestStickyCondition:
 
         class FailThenNone(BaseCondition):
             def __init__(self) -> None:
+                super().__init__(label="fail_then_none")
                 self._called = False
 
             def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
@@ -964,6 +1023,7 @@ class TestStickyCondition:
 
         class PassOnce(BaseCondition):
             def __init__(self) -> None:
+                super().__init__(label="pass_once")
                 self._called = False
 
             def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
@@ -988,6 +1048,7 @@ class TestStickyCondition:
     def test_inner_not_called_after_latch(self) -> None:
         """Once latched, the inner condition is never called again."""
         spy = MagicMock(spec=BaseCondition)
+        spy.label = "spy"
         spy.check.return_value = ScenarioResult(
             passed=True, message="ok", elapsed_seconds=0.0
         )
@@ -1017,6 +1078,7 @@ class TestStickyCondition:
             """Pass on the Nth check, None otherwise."""
 
             def __init__(self, trigger_at: int) -> None:
+                super().__init__(label=f"counted_{trigger_at}")
                 self._count = 0
                 self._trigger_at = trigger_at
 
@@ -1083,7 +1145,9 @@ class TestSpeedConditionMagnitude:
     """SpeedCondition with SpeedDirection.MAGNITUDE."""
 
     def test_speed_above_threshold_greater_than(self) -> None:
-        cond = SpeedCondition("ego", value=5.0, rule=ComparisonRule.GREATER_THAN)
+        cond = SpeedCondition(
+            "ego", value=5.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
+        )
         # speed = sqrt(10^2 + 0^2) = 10.0
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         result = cond.check(world, elapsed=1.0)
@@ -1091,30 +1155,42 @@ class TestSpeedConditionMagnitude:
         assert result.passed is True
 
     def test_speed_below_threshold_greater_than(self) -> None:
-        cond = SpeedCondition("ego", value=15.0, rule=ComparisonRule.GREATER_THAN)
+        cond = SpeedCondition(
+            "ego", value=15.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         assert cond.check(world, elapsed=1.0) is None
 
     def test_speed_equal_threshold_greater_than(self) -> None:
-        cond = SpeedCondition("ego", value=10.0, rule=ComparisonRule.GREATER_THAN)
+        cond = SpeedCondition(
+            "ego", value=10.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         assert cond.check(world, elapsed=1.0) is None
 
     def test_less_than(self) -> None:
-        cond = SpeedCondition("ego", value=15.0, rule=ComparisonRule.LESS_THAN)
+        cond = SpeedCondition(
+            "ego", value=15.0, rule=ComparisonRule.LESS_THAN, label="test_speed"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         result = cond.check(world, elapsed=2.0)
         assert result is not None
         assert result.passed is True
 
     def test_less_than_not_met(self) -> None:
-        cond = SpeedCondition("ego", value=5.0, rule=ComparisonRule.LESS_THAN)
+        cond = SpeedCondition(
+            "ego", value=5.0, rule=ComparisonRule.LESS_THAN, label="test_speed"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         assert cond.check(world, elapsed=1.0) is None
 
     def test_equal_to_within_tolerance(self) -> None:
         cond = SpeedCondition(
-            "ego", value=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.01
+            "ego",
+            value=10.0,
+            rule=ComparisonRule.EQUAL_TO,
+            tolerance=0.01,
+            label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.005, vy=0.0)
         result = cond.check(world, elapsed=1.0)
@@ -1123,14 +1199,21 @@ class TestSpeedConditionMagnitude:
 
     def test_equal_to_outside_tolerance(self) -> None:
         cond = SpeedCondition(
-            "ego", value=10.0, rule=ComparisonRule.EQUAL_TO, tolerance=0.001
+            "ego",
+            value=10.0,
+            rule=ComparisonRule.EQUAL_TO,
+            tolerance=0.001,
+            label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.1, vy=0.0)
         assert cond.check(world, elapsed=1.0) is None
 
     def test_greater_than_or_equal_at_boundary(self) -> None:
         cond = SpeedCondition(
-            "ego", value=10.0, rule=ComparisonRule.GREATER_THAN_OR_EQUAL
+            "ego",
+            value=10.0,
+            rule=ComparisonRule.GREATER_THAN_OR_EQUAL,
+            label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         result = cond.check(world, elapsed=1.0)
@@ -1138,19 +1221,28 @@ class TestSpeedConditionMagnitude:
         assert result.passed is True
 
     def test_less_than_or_equal_at_boundary(self) -> None:
-        cond = SpeedCondition("ego", value=10.0, rule=ComparisonRule.LESS_THAN_OR_EQUAL)
+        cond = SpeedCondition(
+            "ego",
+            value=10.0,
+            rule=ComparisonRule.LESS_THAN_OR_EQUAL,
+            label="test_speed",
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         result = cond.check(world, elapsed=1.0)
         assert result is not None
         assert result.passed is True
 
     def test_entity_not_found(self) -> None:
-        cond = SpeedCondition("missing", value=0.0, rule=ComparisonRule.GREATER_THAN)
+        cond = SpeedCondition(
+            "missing", value=0.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
         assert cond.check(world, elapsed=1.0) is None
 
     def test_message_contains_entity_name(self) -> None:
-        cond = SpeedCondition("npc1", value=5.0, rule=ComparisonRule.GREATER_THAN)
+        cond = SpeedCondition(
+            "npc1", value=5.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
+        )
         world = _make_world_with_actor("npc1", 0.0, 0.0, vx=10.0, vy=0.0)
         result = cond.check(world, elapsed=1.0)
         assert result is not None
@@ -1158,7 +1250,9 @@ class TestSpeedConditionMagnitude:
         assert "magnitude" in result.message
 
     def test_elapsed_seconds_recorded(self) -> None:
-        cond = SpeedCondition("ego", value=0.0, rule=ComparisonRule.GREATER_THAN)
+        cond = SpeedCondition(
+            "ego", value=0.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
+        )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
         result = cond.check(world, elapsed=42.5)
         assert result is not None
@@ -1166,7 +1260,9 @@ class TestSpeedConditionMagnitude:
 
     def test_3d_magnitude(self) -> None:
         """Magnitude uses all three velocity components."""
-        cond = SpeedCondition("ego", value=5.0, rule=ComparisonRule.GREATER_THAN)
+        cond = SpeedCondition(
+            "ego", value=5.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
+        )
         # speed = sqrt(3^2 + 4^2 + 0^2) = 5.0 — not greater than 5.0
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=3.0, vy=4.0, vz=0.0)
         assert cond.check(world, elapsed=1.0) is None
@@ -1182,6 +1278,7 @@ class TestSpeedConditionWorld:
             rule=ComparisonRule.GREATER_THAN,
             direction=SpeedDirection.LONGITUDINAL,
             coordinate_system=SpeedCoordinateSystem.WORLD,
+            label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=3.0)
         result = cond.check(world, elapsed=1.0)
@@ -1196,6 +1293,7 @@ class TestSpeedConditionWorld:
             rule=ComparisonRule.GREATER_THAN,
             direction=SpeedDirection.LATERAL,
             coordinate_system=SpeedCoordinateSystem.WORLD,
+            label="test_speed",
         )
         # vy = 8.0 > 5.0
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=8.0)
@@ -1212,6 +1310,7 @@ class TestSpeedConditionWorld:
             rule=ComparisonRule.LESS_THAN,
             direction=SpeedDirection.LONGITUDINAL,
             coordinate_system=SpeedCoordinateSystem.WORLD,
+            label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=-3.0, vy=0.0)
         result = cond.check(world, elapsed=1.0)
@@ -1230,6 +1329,7 @@ class TestSpeedConditionEntity:
                 rule=ComparisonRule.GREATER_THAN,
                 direction=SpeedDirection.LONGITUDINAL,
                 coordinate_system=SpeedCoordinateSystem.ENTITY,
+                label="test_speed",
             )
 
     def test_reference_entity_not_found(self) -> None:
@@ -1240,6 +1340,7 @@ class TestSpeedConditionEntity:
             direction=SpeedDirection.LONGITUDINAL,
             coordinate_system=SpeedCoordinateSystem.ENTITY,
             reference_entity_name="missing_ref",
+            label="test_speed",
         )
         # World only has "npc", no "missing_ref"
         world = _make_world_with_actor("npc", 0.0, 0.0, vx=10.0, vy=0.0)
@@ -1254,6 +1355,7 @@ class TestSpeedConditionEntity:
             direction=SpeedDirection.LONGITUDINAL,
             coordinate_system=SpeedCoordinateSystem.ENTITY,
             reference_entity_name="ref",
+            label="test_speed",
         )
         # ref faces East (fwd=(1,0)), npc moves East at 10 m/s
         world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 1.0, 0.0)
@@ -1274,6 +1376,7 @@ class TestSpeedConditionEntity:
             direction=SpeedDirection.LATERAL,
             coordinate_system=SpeedCoordinateSystem.ENTITY,
             reference_entity_name="ref",
+            label="test_speed",
         )
         # ref faces East (fwd=(1,0)), npc moves North (vy=-5 in CARLA)
         world = _make_world_with_entity_frame("npc", 0.0, -5.0, "ref", 1.0, 0.0)
@@ -1294,6 +1397,7 @@ class TestSpeedConditionEntity:
             direction=SpeedDirection.LATERAL,
             coordinate_system=SpeedCoordinateSystem.ENTITY,
             reference_entity_name="ref",
+            label="test_speed",
         )
         world = _make_world_with_entity_frame("npc", 0.0, 5.0, "ref", 1.0, 0.0)
         result = cond.check(world, elapsed=1.0)
@@ -1313,6 +1417,7 @@ class TestSpeedConditionEntity:
             coordinate_system=SpeedCoordinateSystem.ENTITY,
             reference_entity_name="ref",
             tolerance=0.01,
+            label="test_speed",
         )
         world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 0.0, -1.0)
         result = cond.check(world, elapsed=1.0)
@@ -1333,6 +1438,7 @@ class TestSpeedConditionEntity:
             direction=SpeedDirection.LATERAL,
             coordinate_system=SpeedCoordinateSystem.ENTITY,
             reference_entity_name="ref",
+            label="test_speed",
         )
         world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 0.0, -1.0)
         result = cond.check(world, elapsed=1.0)
@@ -1348,6 +1454,7 @@ class TestSpeedConditionEntity:
             direction=SpeedDirection.MAGNITUDE,
             coordinate_system=SpeedCoordinateSystem.ENTITY,
             reference_entity_name="ref",
+            label="test_speed",
         )
         # speed = sqrt(3^2 + 4^2) = 5.0 — not > 5.0
         world = _make_world_with_entity_frame("npc", 3.0, 4.0, "ref", 1.0, 0.0)
@@ -1360,7 +1467,11 @@ class TestSpeedConditionValidation:
     def test_negative_tolerance_raises(self) -> None:
         with pytest.raises(ValueError, match="tolerance must be non-negative"):
             SpeedCondition(
-                "ego", value=5.0, rule=ComparisonRule.GREATER_THAN, tolerance=-1.0
+                "ego",
+                value=5.0,
+                rule=ComparisonRule.GREATER_THAN,
+                tolerance=-1.0,
+                label="test_speed",
             )
 
     def test_entity_frame_without_reference_raises(self) -> None:
@@ -1371,6 +1482,7 @@ class TestSpeedConditionValidation:
                 rule=ComparisonRule.GREATER_THAN,
                 direction=SpeedDirection.LATERAL,
                 coordinate_system=SpeedCoordinateSystem.ENTITY,
+                label="test_speed",
             )
 
     def test_world_frame_without_reference_is_valid(self) -> None:
@@ -1381,5 +1493,6 @@ class TestSpeedConditionValidation:
             rule=ComparisonRule.GREATER_THAN,
             direction=SpeedDirection.LONGITUDINAL,
             coordinate_system=SpeedCoordinateSystem.WORLD,
+            label="test_speed",
         )
         assert cond is not None

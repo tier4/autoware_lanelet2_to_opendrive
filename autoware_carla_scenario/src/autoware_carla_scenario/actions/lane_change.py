@@ -60,10 +60,11 @@ class LaneChangeAction(BaseAction):
         condition: _Optional[BaseCondition] = None,
         timing: TickTiming = TickTiming.PRE_TICK,
         *,
+        label: str = "lane_change",
         once: bool = True,
         tm_port: int = DEFAULT_TM_PORT,
     ) -> None:
-        super().__init__(condition=condition, timing=timing, once=once)
+        super().__init__(label=label, condition=condition, timing=timing, once=once)
         self._entity_name = entity_name
         self._direction = direction
         self._client = client

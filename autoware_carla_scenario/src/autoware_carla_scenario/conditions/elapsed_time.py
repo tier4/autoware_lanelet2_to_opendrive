@@ -35,7 +35,10 @@ class ElapsedTimeCondition(BaseCondition):
         duration_seconds: float,
         rule: ComparisonRule = ComparisonRule.GREATER_THAN_OR_EQUAL,
         tolerance: float = 1e-6,
+        *,
+        label: str,
     ) -> None:
+        super().__init__(label=label)
         if duration_seconds <= 0:
             raise ValueError("duration_seconds must be positive")
         if tolerance < 0:

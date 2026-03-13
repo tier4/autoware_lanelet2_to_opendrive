@@ -17,6 +17,9 @@ class AlwaysTrueCondition(BaseCondition):
     (subject to the action's own ``once`` flag).
     """
 
+    def __init__(self, *, label: str = "always_true") -> None:
+        super().__init__(label=label)
+
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
         """Always returns a passing :class:`ScenarioResult`."""
         return ScenarioResult(

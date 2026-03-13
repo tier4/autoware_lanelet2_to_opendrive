@@ -39,6 +39,8 @@ class StandstillCondition(CompositionCondition):
         entity_name: Union[EntityRole, str],
         duration: float,
         speed_threshold: float = 0.1,
+        *,
+        label: str,
     ) -> None:
         if duration <= 0:
             raise ValueError("duration must be positive")
@@ -49,10 +51,11 @@ class StandstillCondition(CompositionCondition):
             entity_name=entity_name,
             value=speed_threshold,
             rule=ComparisonRule.LESS_THAN_OR_EQUAL,
+            label=f"{label}_speed",
         )
         child = PersistentCondition(speed_cond, duration=duration)
 
-        super().__init__(child=child, entity_name=entity_name)
+        super().__init__(child=child, entity_name=entity_name, label=label)
 
         self._duration = duration
         self._speed_threshold = speed_threshold

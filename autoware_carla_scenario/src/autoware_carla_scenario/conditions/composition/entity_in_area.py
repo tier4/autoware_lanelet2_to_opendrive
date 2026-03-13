@@ -69,10 +69,12 @@ class EntityInAreaCondition(CompositionCondition):
         entity_name: Union[EntityRole, str],
         polygon: Sequence[AnyPose],
         include_boundary: bool = True,
+        *,
+        label: str,
     ) -> None:
         if len(polygon) < 3:
             raise ValueError("polygon must have at least 3 vertices")
-        super().__init__(entity_name=entity_name)
+        super().__init__(entity_name=entity_name, label=label)
         self._polygon: Sequence[AnyPose] = polygon
         self._include_boundary = include_boundary
 
