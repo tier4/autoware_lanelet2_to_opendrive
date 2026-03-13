@@ -38,6 +38,7 @@ import carla
 import hydra
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from autoware_carla_scenario import (
@@ -387,9 +388,9 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
 
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
 
-    # Hydra has already set cwd to the run output directory —
-    # write recordings and result JSON directly there.
-    output_dir = Path(".")
+    # Retrieve the Hydra output directory (works regardless of
+    # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
+    output_dir = Path(HydraConfig.get().runtime.output_dir)
 
     queue = ScenarioQueue(
         host=cfg.server.host,
