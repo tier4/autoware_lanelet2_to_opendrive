@@ -13,12 +13,14 @@ if TYPE_CHECKING:
 class TimeoutCondition(BaseCondition):
     """Fail condition that triggers when elapsed time exceeds the timeout."""
 
-    def __init__(self, timeout_seconds: float = 60.0) -> None:
+    def __init__(self, timeout_seconds: float = 60.0, *, label: str) -> None:
         """Initialize the timeout condition.
 
         Args:
             timeout_seconds: Number of seconds before failing. Defaults to 60.0.
+            label: Human-readable label identifying this condition.
         """
+        super().__init__(label=label)
         self.timeout_seconds = timeout_seconds
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

@@ -28,9 +28,12 @@ class PersistentCondition(BaseCondition):
         ValueError: If *duration* is not positive.
     """
 
-    def __init__(self, condition: BaseCondition, duration: float) -> None:
+    def __init__(
+        self, condition: BaseCondition, duration: float, *, label: str | None = None
+    ) -> None:
         if duration <= 0:
             raise ValueError("duration must be positive")
+        super().__init__(label=label if label is not None else condition.label)
         self._condition = condition
         self._duration = duration
         self._true_start: Optional[float] = None

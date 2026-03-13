@@ -161,9 +161,12 @@ class LaneChangeScenario(BaseScenario):
                 entity_name=EGO_ROLE_NAME,
                 road_id=od_pose.road_id,
                 lane_id=target_lane_id,
+                label="ego_target_lane",
             )
         )
-        timeout_condition = TimeoutCondition(cfg.timeout_seconds)
+        timeout_condition = TimeoutCondition(
+            cfg.timeout_seconds, label="scenario_timeout"
+        )
 
         if expect_fail:
             # expect=fail: lane change should NOT happen.

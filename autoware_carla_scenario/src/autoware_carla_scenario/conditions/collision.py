@@ -30,7 +30,8 @@ class CollisionCondition(BaseCondition):
     # Minimum interval between ego vehicle search attempts (seconds).
     _ATTACH_RETRY_INTERVAL: float = 1.0
 
-    def __init__(self, min_impulse: float = 0.0) -> None:
+    def __init__(self, min_impulse: float = 0.0, *, label: str) -> None:
+        super().__init__(label=label)
         self._min_impulse = min_impulse
         self._sensor: Optional["carla.Actor"] = None
         self._lock = threading.Lock()

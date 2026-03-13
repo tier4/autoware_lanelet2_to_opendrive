@@ -60,8 +60,10 @@ class EntityLanePositionCondition(CompositionCondition):
         road_id: str,
         lane_id: Optional[int] = None,
         rules: Optional[list[ScalarComparisonRule]] = None,
+        *,
+        label: str,
     ) -> None:
-        super().__init__(entity_name=entity_name)
+        super().__init__(entity_name=entity_name, label=label)
         self._road_id = road_id
         self._lane_id = lane_id
         self._rules: list[ScalarComparisonRule] = rules or []

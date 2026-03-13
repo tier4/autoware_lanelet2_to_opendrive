@@ -64,13 +64,14 @@ class TurnAction(BaseAction):
         condition: _Optional[BaseCondition] = None,
         timing: TickTiming = TickTiming.PRE_TICK,
         *,
+        label: str = "turn_signal",
         once: bool = True,
         search_distance: float = 200.0,
         waypoint_step: float = 2.0,
         post_junction_distance: float = 20.0,
         tm_port: int = DEFAULT_TM_PORT,
     ) -> None:
-        super().__init__(condition=condition, timing=timing, once=once)
+        super().__init__(label=label, condition=condition, timing=timing, once=once)
         self._entity_name = entity_name
         self._direction = direction
         self._client = client

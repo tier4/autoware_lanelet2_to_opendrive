@@ -22,9 +22,13 @@ class OrCondition(BaseCondition):
         conditions: Child conditions to evaluate.  Must contain at least 2.
     """
 
-    def __init__(self, conditions: Sequence[BaseCondition]) -> None:
+    def __init__(
+        self, conditions: Sequence[BaseCondition], *, label: str | None = None
+    ) -> None:
         if len(conditions) < 2:
             raise ValueError("OrCondition requires at least 2 conditions")
+        auto_label = " OR ".join(c.label for c in conditions)
+        super().__init__(label=label if label is not None else auto_label)
         self._conditions: Sequence[BaseCondition] = conditions
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

@@ -325,7 +325,9 @@ class ScenarioRunner:
 
             # Register ego existence fail condition so the scenario fails
             # immediately if the ego is destroyed (e.g. falls through map).
-            scenario.register_fail_condition(EntityExistenceCondition(EGO_ROLE_NAME))
+            scenario.register_fail_condition(
+                EntityExistenceCondition(EGO_ROLE_NAME, label="ego_existence")
+            )
 
             # Warm-up ticks: let physics and TrafficManager stabilise
             # before the main loop begins.
@@ -363,7 +365,9 @@ class ScenarioRunner:
             logger.info("[%s] Recording to %s", scenario_name, output_path)
 
             # Register default timeout fail condition
-            scenario.register_fail_condition(TimeoutCondition(self.timeout_seconds))
+            scenario.register_fail_condition(
+                TimeoutCondition(self.timeout_seconds, label="default_timeout")
+            )
 
             logger.info("[%s] === Tick loop start ===", scenario_name)
             start_time = time.monotonic()

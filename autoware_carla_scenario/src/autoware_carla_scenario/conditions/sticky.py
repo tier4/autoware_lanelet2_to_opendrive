@@ -34,7 +34,8 @@ class StickyCondition(BaseCondition):
         condition: The child condition to wrap.
     """
 
-    def __init__(self, condition: BaseCondition) -> None:
+    def __init__(self, condition: BaseCondition, *, label: str | None = None) -> None:
+        super().__init__(label=label if label is not None else condition.label)
         self._condition = condition
         self._latched_result: Optional[ScenarioResult] = None
 

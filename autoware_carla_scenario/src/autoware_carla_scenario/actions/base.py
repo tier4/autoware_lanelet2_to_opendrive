@@ -44,11 +44,18 @@ class BaseAction(ABC):
 
     def __init__(
         self,
+        label: str,
         condition: Optional[BaseCondition] = None,
         timing: TickTiming = TickTiming.POST_TICK,
         *,
         once: bool = True,
     ) -> None:
+        if not label:
+            raise ValueError(
+                f"{type(self).__name__}: label must not be empty. "
+                "Provide a non-empty string to identify this action."
+            )
+        self.label = label
         self._condition = condition if condition is not None else AlwaysTrueCondition()
         self._timing = timing
         self._once = once

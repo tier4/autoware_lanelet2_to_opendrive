@@ -32,6 +32,7 @@ def test_stop_is_idempotent() -> None:
     manager.stop()  # Should not raise
 
 
+@pytest.mark.integration
 class TestCarlaServerIntegration:
     """Integration tests that verify the session-scoped CARLA server.
 

@@ -21,7 +21,8 @@ class NotCondition(BaseCondition):
         condition: The child condition whose result is inverted.
     """
 
-    def __init__(self, condition: BaseCondition) -> None:
+    def __init__(self, condition: BaseCondition, *, label: str | None = None) -> None:
+        super().__init__(label=label if label is not None else condition.label)
         self._condition = condition
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

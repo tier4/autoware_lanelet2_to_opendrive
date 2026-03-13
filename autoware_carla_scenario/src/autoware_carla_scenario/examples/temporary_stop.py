@@ -138,6 +138,7 @@ class TemporaryStopScenario(BaseScenario):
                 s_margin=cfg.s_margin,
                 speed_threshold=cfg.speed_threshold,
                 stop_duration=cfg.stop_duration,
+                label="temporary_stop",
             )
         )
         # 2) Ego has restarted (speed exceeds threshold)
@@ -145,11 +146,14 @@ class TemporaryStopScenario(BaseScenario):
             entity_name=EGO_ROLE_NAME,
             value=cfg.restart_speed_kmh / 3.6,
             rule=ComparisonRule.GREATER_THAN_OR_EQUAL,
+            label="ego_restart_speed",
         )
         self.register_pass_condition(AndCondition([stopped, restarted]))
 
         # --- Fail-safe timeout ---
-        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
+        self.register_fail_condition(
+            TimeoutCondition(cfg.timeout_seconds, label="scenario_timeout")
+        )
 
     def is_done(self) -> bool:
         """Always ``False`` -- termination is driven by pass/fail conditions."""

@@ -46,11 +46,16 @@ class CompositionCondition(BaseCondition):
         self,
         child: BaseCondition | None = None,
         entity_name: Union[EntityRole, str] | None = None,
+        *,
+        label: str,
     ) -> None:
+        super().__init__(label=label)
         self._child = child
         self._entity_name = entity_name
         self._entity_existence: EntityExistenceCondition | None = (
-            EntityExistenceCondition(entity_name) if entity_name is not None else None
+            EntityExistenceCondition(entity_name, label=f"{label}_entity_exists")
+            if entity_name is not None
+            else None
         )
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

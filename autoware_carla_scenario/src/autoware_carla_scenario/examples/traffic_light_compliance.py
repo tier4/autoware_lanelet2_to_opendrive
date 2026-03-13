@@ -153,6 +153,7 @@ class TrafficLightComplianceScenario(BaseScenario):
             StandstillCondition(
                 entity_name=EGO_ROLE_NAME,
                 duration=cfg.light_switch_delay_seconds - cfg.merging_time_seconds,
+                label="ego_standstill_at_red",
             )
         )
 
@@ -160,11 +161,16 @@ class TrafficLightComplianceScenario(BaseScenario):
         moving_after_green = StickyCondition(
             AndCondition(
                 [
-                    ElapsedTimeCondition(3.5, ComparisonRule.GREATER_THAN_OR_EQUAL),
+                    ElapsedTimeCondition(
+                        3.5,
+                        ComparisonRule.GREATER_THAN_OR_EQUAL,
+                        label="green_phase_elapsed",
+                    ),
                     SpeedCondition(
                         entity_name=EGO_ROLE_NAME,
                         value=cfg.moving_speed_kmh / 3.6,
                         rule=ComparisonRule.GREATER_THAN_OR_EQUAL,
+                        label="ego_moving_after_green",
                     ),
                 ]
             )
@@ -176,19 +182,30 @@ class TrafficLightComplianceScenario(BaseScenario):
         self.register_fail_condition(
             AndCondition(
                 [
-                    ElapsedTimeCondition(1.0, ComparisonRule.GREATER_THAN_OR_EQUAL),
-                    ElapsedTimeCondition(2.9, ComparisonRule.LESS_THAN),
+                    ElapsedTimeCondition(
+                        1.0,
+                        ComparisonRule.GREATER_THAN_OR_EQUAL,
+                        label="red_phase_start",
+                    ),
+                    ElapsedTimeCondition(
+                        2.9,
+                        ComparisonRule.LESS_THAN,
+                        label="red_phase_end",
+                    ),
                     SpeedCondition(
                         entity_name=EGO_ROLE_NAME,
                         value=cfg.moving_speed_kmh / 3.6,
                         rule=ComparisonRule.GREATER_THAN_OR_EQUAL,
+                        label="ego_moving_during_red",
                     ),
                 ]
             )
         )
 
         # --- Fail-safe timeout ---
-        self.register_fail_condition(TimeoutCondition(cfg.timeout_seconds))
+        self.register_fail_condition(
+            TimeoutCondition(cfg.timeout_seconds, label="scenario_timeout")
+        )
 
     def is_done(self) -> bool:
         """Always ``False`` — termination is driven by pass/fail conditions."""
