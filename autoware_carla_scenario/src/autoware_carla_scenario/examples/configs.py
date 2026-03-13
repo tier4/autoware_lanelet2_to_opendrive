@@ -25,6 +25,11 @@ class ServerConfig:
     host: str = "localhost"
     port: int = 2000
 
+    #: Cooldown (seconds) between consecutive scenario runs.  Gives the
+    #: CARLA server time to finish cleanup (destroy actors, restore settings)
+    #: before the next scenario connects.  0 disables the cooldown.
+    cooldown_seconds: float = 3.0
+
 
 @dataclass
 class MapConfig:
@@ -192,6 +197,11 @@ class SweepConfig:
 
     constraints: dict[str, Any] = field(default_factory=dict)
     bindings: dict[str, Any] = field(default_factory=dict)
+
+    #: Hard timeout (seconds) per job.  If a single scenario run exceeds
+    #: this duration (e.g. CARLA hangs), it is forcefully interrupted and
+    #: the sweep continues with the next lanelet.  0 disables the timeout.
+    job_timeout_seconds: int = 120
 
 
 # ---------------------------------------------------------------------------

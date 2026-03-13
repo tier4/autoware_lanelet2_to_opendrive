@@ -231,6 +231,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         else None
     )
 
+    cooldown = float(first_cfg.server.get("cooldown_seconds", 0.0))
     queue = ScenarioQueue(
         host=first_cfg.server.host,
         port=first_cfg.server.port,
@@ -238,6 +239,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=first_cfg.map.name,
+        cooldown_seconds=cooldown,
     )
 
     for i, (name, cfg) in enumerate(zip(scenario_names, configs), 1):
@@ -326,6 +328,7 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
         Path(cfg.map.lanelet2_path) if cfg.map.get("lanelet2_path") else None
     )
 
+    cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
     queue = ScenarioQueue(
         host=cfg.server.host,
         port=cfg.server.port,
@@ -333,6 +336,7 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
         xodr_path=xodr_path,
         lanelet2_path=lanelet2_path,
         map_name=cfg.map.name,
+        cooldown_seconds=cooldown,
     )
     queue.add(scenario)
 

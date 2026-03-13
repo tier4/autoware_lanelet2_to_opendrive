@@ -13,18 +13,33 @@ sweeper:
 from __future__ import annotations
 
 import logging
+import signal
+import time
 from typing import Any
 
 from hydra.core.plugins import Plugins
 from hydra.plugins.sweeper import Sweeper
 from hydra.types import HydraContext
 from omegaconf import DictConfig, OmegaConf
+from tqdm import tqdm
 
 from .bindings import Binding, parse_binding
 from .constraints import Constraint, find_matching_lanelets, parse_constraint
 from .map_loader import load_lanelet2_map
 
 logger = logging.getLogger(__name__)
+
+# Default hard timeout per job (seconds).  Can be overridden via
+# ``sweep.job_timeout_seconds`` in the scenario YAML.
+_DEFAULT_JOB_TIMEOUT = 120
+
+
+class _JobTimeoutError(Exception):
+    """Raised by the SIGALRM handler when a job exceeds its time budget."""
+
+
+def _alarm_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
+    raise _JobTimeoutError
 
 
 class LaneletConstraintSweeper(Sweeper):
@@ -147,18 +162,49 @@ class LaneletConstraintSweeper(Sweeper):
             [b[0] for b in batches],
         )
 
-        # -- 7. Launch batches one-by-one (continue on failure) ---------------
+        # -- 7. Resolve per-job timeout and cooldown -------------------------
+        job_timeout: int = int(
+            sweep_dict.get("job_timeout_seconds", _DEFAULT_JOB_TIMEOUT)
+        )
+        cooldown: float = float(
+            OmegaConf.select(cfg, "server.cooldown_seconds", default=0.0)
+        )
+
+        # -- 8. Launch batches one-by-one (continue on failure / timeout) --
         all_returns: list[Any] = []
         failed_count = 0
+        timed_out_count = 0
+
         for idx, batch in enumerate(batches):
+            # Cooldown between consecutive jobs.
+            if idx > 0 and cooldown > 0:
+                _wait_with_progress(cooldown, desc="CARLA cooldown")
+
             logger.info("[%d/%d] Launching: %s", idx + 1, len(batches), batch)
+            prev_handler = signal.getsignal(signal.SIGALRM)
             try:
+                if job_timeout > 0:
+                    signal.signal(signal.SIGALRM, _alarm_handler)
+                    signal.alarm(job_timeout)
+
                 ret = self.launcher.launch([batch], initial_job_idx=idx)
                 all_returns.extend(ret)
+
+            except _JobTimeoutError:
+                timed_out_count += 1
+                logger.error(
+                    "[%d/%d] Job TIMED OUT after %ds for overrides %s — continuing.",
+                    idx + 1,
+                    len(batches),
+                    job_timeout,
+                    batch,
+                )
+                all_returns.append(None)
+
             except Exception:
                 failed_count += 1
                 logger.error(
-                    "[%d/%d] Job failed for overrides %s — continuing.",
+                    "[%d/%d] Job FAILED for overrides %s — continuing.",
                     idx + 1,
                     len(batches),
                     batch,
@@ -166,10 +212,28 @@ class LaneletConstraintSweeper(Sweeper):
                 )
                 all_returns.append(None)
 
+            finally:
+                # Always cancel pending alarm and restore the previous handler.
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, prev_handler)
+
         logger.info(
-            "Sweep complete: %d/%d succeeded, %d failed.",
-            len(batches) - failed_count,
+            "Sweep complete: %d/%d succeeded, %d failed, %d timed out.",
+            len(batches) - failed_count - timed_out_count,
             len(batches),
             failed_count,
+            timed_out_count,
         )
         return all_returns
+
+
+def _wait_with_progress(seconds: float, *, desc: str = "Waiting") -> None:
+    """Sleep for *seconds* with a tqdm progress bar (0.1 s resolution)."""
+    steps = max(1, int(seconds * 10))
+    interval = seconds / steps
+    for _ in tqdm(
+        range(steps),
+        desc=desc,
+        bar_format="{desc}: {bar}| {elapsed}<{remaining}",
+    ):
+        time.sleep(interval)
