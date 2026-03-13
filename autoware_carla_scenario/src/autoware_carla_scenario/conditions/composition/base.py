@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
+from ...entity_role import EntityRole
 from ..base import BaseCondition, ScenarioResult
 from ..entity_existence import EntityExistenceCondition
 
@@ -38,12 +39,13 @@ class CompositionCondition(BaseCondition):
         entity_name: When provided, an :class:`EntityExistenceCondition`
             is constructed internally and used as a guard.  :meth:`check`
             returns ``None`` immediately if the entity is absent.
+            Accepts both :class:`EntityRole` and plain ``str``.
     """
 
     def __init__(
         self,
         child: BaseCondition | None = None,
-        entity_name: str | None = None,
+        entity_name: Union[EntityRole, str] | None = None,
     ) -> None:
         self._child = child
         self._entity_name = entity_name

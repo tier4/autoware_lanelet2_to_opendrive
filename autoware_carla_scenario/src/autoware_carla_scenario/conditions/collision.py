@@ -65,7 +65,7 @@ class CollisionCondition(BaseCondition):
 
         actors = world.get_actors().filter("vehicle.*")
         ego = next(
-            (a for a in actors if a.attributes.get("role_name") == EGO_ROLE_NAME),
+            (a for a in actors if a.attributes.get("role_name") == str(EGO_ROLE_NAME)),
             None,
         )
         if ego is None:

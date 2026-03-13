@@ -4,6 +4,7 @@ Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
         EGO_ROLE_NAME,
+        EntityRole,
         ScenarioRunner,
         CarlaScenarioFixture,
         CarlaServerManager,
@@ -94,6 +95,7 @@ from .conditions import (
     find_actor_by_role_name,
 )
 from .constants import EGO_ROLE_NAME
+from .entity_role import EntityRole
 from .coordinate import (
     CarlaWorldPose,
     CoordinateFrame,
@@ -141,6 +143,7 @@ from .utils import (
 
 __all__ = [
     "EGO_ROLE_NAME",
+    "EntityRole",
     "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",

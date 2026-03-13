@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     import carla
 
+from ..entity_role import EntityRole
 from ._spawn import SpawnLocation, spawn_vehicle_actor
 
 #: Module-level flag set by :class:`~autoware_carla_scenario.scenario_runner.ScenarioRunner`
@@ -24,7 +25,7 @@ class VehicleEntityConfig:
     explicit :class:`SpawnTransform` or a :class:`SpawnPointIndex`.
     """
 
-    role_name: str
+    role_name: Union[EntityRole, str]
     spawn_location: SpawnLocation
     vehicle_type: str = "vehicle.mini.cooper"
     initial_speed_kmh: float = 0.0
@@ -47,7 +48,7 @@ class VehicleEntity:
     # ------------------------------------------------------------------
 
     @property
-    def role_name(self) -> str:
+    def role_name(self) -> Union[EntityRole, str]:
         """Return the role name that identifies this entity."""
         return self._config.role_name
 
@@ -99,7 +100,7 @@ class VehicleEntity:
         self._vehicle = spawn_vehicle_actor(
             world,
             self._config.vehicle_type,
-            self._config.role_name,
+            str(self._config.role_name),
             self._config.spawn_location,
         )
         return self._vehicle
