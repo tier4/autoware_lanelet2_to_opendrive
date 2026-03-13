@@ -67,6 +67,23 @@ class HasStopLineConstraint:
 
 
 @dataclass(frozen=True)
+class LaneletIdsConstraint:
+    """Matches only lanelets whose ID is in the given list.
+
+    Useful for re-running specific lanelets that failed during a previous
+    sweep::
+
+        - type: lanelet_ids
+          ids: [31, 300, 242]
+    """
+
+    ids: tuple[int, ...] = field(default_factory=tuple)
+
+    def evaluate(self, lanelet: Any) -> bool:
+        return lanelet.id in self.ids
+
+
+@dataclass(frozen=True)
 class HasTrafficLightStopLineConstraint:
     """Matches lanelets whose stop line originates from a traffic-light RE.
 
@@ -133,6 +150,7 @@ class NotConstraint:
 _LEAF_REGISTRY: dict[str, type] = {
     "has_stop_line": HasStopLineConstraint,
     "has_traffic_light_stop_line": HasTrafficLightStopLineConstraint,
+    "lanelet_ids": LaneletIdsConstraint,
 }
 
 
@@ -191,7 +209,12 @@ def parse_constraint(cfg: dict[str, Any]) -> Constraint:
             f"Available leaves: {list(_LEAF_REGISTRY)}, "
             f"composites: ['and', 'or', 'not']"
         )
-    return cls(**{k: v for k, v in cfg.items() if k != "type"})
+    kwargs = {k: v for k, v in cfg.items() if k != "type"}
+    # Convert list values to tuples for frozen dataclasses.
+    for k, v in kwargs.items():
+        if isinstance(v, list):
+            kwargs[k] = tuple(v)
+    return cls(**kwargs)
 
 
 def find_matching_lanelets(

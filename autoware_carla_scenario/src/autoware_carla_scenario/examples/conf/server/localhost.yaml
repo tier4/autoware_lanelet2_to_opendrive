@@ -2,4 +2,4 @@
 server:
   host: localhost
   port: 2000
-  cooldown_seconds: 3.0
+  cooldown_seconds: 1.0
