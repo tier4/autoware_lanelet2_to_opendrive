@@ -40,14 +40,6 @@ logger = logging.getLogger(__name__)
 _DEFAULT_JOB_TIMEOUT = 120
 
 
-class _JobTimeoutError(Exception):
-    """Raised by the SIGALRM handler when a job exceeds its time budget."""
-
-
-def _alarm_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
-    raise _JobTimeoutError
-
-
 def _launch_job_isolated(
     launcher: Any,
     batch: tuple[str, ...],
@@ -71,6 +63,8 @@ def _launch_job_isolated(
 
     if child_pid == 0:
         # ---- child process ----
+        # Create a new process group so the parent can kill the entire tree.
+        os.setpgrp()
         # Reset any inherited SIGALRM handler so it doesn't fire in the child.
         signal.signal(signal.SIGALRM, signal.SIG_DFL)
         signal.alarm(0)
@@ -90,7 +84,7 @@ def _launch_job_isolated(
         nonlocal timed_out
         timed_out = True
         try:
-            os.kill(child_pid, signal.SIGKILL)
+            os.killpg(child_pid, signal.SIGKILL)
         except OSError:
             pass
 
@@ -250,30 +244,39 @@ class LaneletConstraintSweeper(Sweeper):
             OmegaConf.select(cfg, "server.cooldown_max_retries", default=0)
         )
         max_attempts = 1 + max_retries
-        resume_from: int = int(os.environ.get("SWEEP_RESUME_FROM", "0"))
+        resume_from: int = int(
+            sweep_dict.get("resume_from", 0) or os.environ.get("SWEEP_RESUME_FROM", "0")
+        )
 
-        # -- 8. Launch batches one-by-one via fork isolation --
+        # -- 8. Apply resume: skip jobs before the resume point (1-indexed) --
+        if resume_from > 1:
+            skip_count = min(resume_from - 1, len(batches))
+            logger.info(
+                "Resuming from job %d — skipping %d/%d job(s).",
+                resume_from,
+                skip_count,
+                len(batches),
+            )
+            batches = batches[skip_count:]
+            # Offset indices so logs still show the original 1-based position.
+            idx_offset = skip_count
+        else:
+            idx_offset = 0
+
+        # -- 9. Launch batches one-by-one via fork isolation --
         all_returns: list[Any] = []
         failed_count = 0
         timed_out_count = 0
+        first_job = True
 
-        for idx, batch in enumerate(batches):
-            # Resume logic: skip jobs before the resume point (1-indexed).
-            if resume_from > 0 and (idx + 1) < resume_from:
-                logger.info(
-                    "[%d/%d] SKIPPED (resume_from=%d): %s",
-                    idx + 1,
-                    len(batches),
-                    resume_from,
-                    batch,
-                )
-                all_returns.append(None)
-                continue
+        for local_idx, batch in enumerate(batches):
+            idx = local_idx + idx_offset
 
             succeeded = False
             for attempt in range(max_attempts):
                 # Cooldown in the parent process (no CARLA state, SIGSEGV-safe).
-                if (idx > 0 or attempt > 0) and cooldown > 0:
+                # Skip cooldown before the very first job of this run.
+                if (not first_job or attempt > 0) and cooldown > 0:
                     _wait_with_progress(
                         cooldown,
                         desc="CARLA cooldown"
@@ -284,7 +287,7 @@ class LaneletConstraintSweeper(Sweeper):
                 logger.info(
                     "[%d/%d] Launching (attempt %d/%d): %s",
                     idx + 1,
-                    len(batches),
+                    idx_offset + len(batches),
                     attempt + 1,
                     max_attempts,
                     batch,
@@ -303,7 +306,7 @@ class LaneletConstraintSweeper(Sweeper):
                         "[%d/%d] Job TIMED OUT after %ds (attempt %d/%d) "
                         "for overrides %s",
                         idx + 1,
-                        len(batches),
+                        idx_offset + len(batches),
                         job_timeout,
                         attempt + 1,
                         max_attempts,
@@ -314,7 +317,7 @@ class LaneletConstraintSweeper(Sweeper):
                         "[%d/%d] Job CRASHED (signal %d) (attempt %d/%d) "
                         "for overrides %s",
                         idx + 1,
-                        len(batches),
+                        idx_offset + len(batches),
                         -exit_code,
                         attempt + 1,
                         max_attempts,
@@ -325,31 +328,36 @@ class LaneletConstraintSweeper(Sweeper):
                         "[%d/%d] Job FAILED (exit code %d) (attempt %d/%d) "
                         "for overrides %s",
                         idx + 1,
-                        len(batches),
+                        idx_offset + len(batches),
                         exit_code,
                         attempt + 1,
                         max_attempts,
                         batch,
                     )
 
+            first_job = False
             # Result JSON is written to disk by the child; parent only
             # tracks success/failure.
             all_returns.append(None)
             if not succeeded:
+                # Distinguish timeouts from other failures for the summary.
+                if exit_code is None:
+                    timed_out_count += 1
                 failed_count += 1
                 logger.error(
                     "[%d/%d] Job FAILED after %d attempt(s) for overrides %s "
                     "— continuing.",
                     idx + 1,
-                    len(batches),
+                    idx_offset + len(batches),
                     max_attempts,
                     batch,
                 )
 
+        executed = len(batches)
         logger.info(
-            "Sweep complete: %d/%d succeeded, %d failed, %d timed out.",
-            len(batches) - failed_count - timed_out_count,
-            len(batches),
+            "Sweep complete: %d/%d succeeded, %d failed (%d timed out).",
+            executed - failed_count,
+            executed,
             failed_count,
             timed_out_count,
         )
