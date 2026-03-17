@@ -758,6 +758,116 @@ def run_stop_line_validation(
 
 
 # ---------------------------------------------------------------------------
+# Junction lanelet validation
+# ---------------------------------------------------------------------------
+
+
+def _parse_road_junction_map(
+    xodr_root: object,
+) -> dict[int, int]:
+    """Build a road_id -> junction_id mapping from the XODR root.
+
+    A road with ``junction="-1"`` is not part of any junction.
+    A road with ``junction >= 0`` belongs to that junction.
+
+    Args:
+        xodr_root: Pre-parsed XML root element.
+
+    Returns:
+        Dictionary mapping road ID to junction ID.
+    """
+    road_to_junction: dict[int, int] = {}
+    for road_elem in xodr_root.iter("road"):  # type: ignore[union-attr]
+        road_id = int(road_elem.get("id", "-1"))
+        junction = int(road_elem.get("junction", "-1"))
+        road_to_junction[road_id] = junction
+    return road_to_junction
+
+
+def run_junction_lanelet_validation(
+    xodr_path: Path,
+    osm_path: Path,
+    shared: tuple | None = None,
+) -> bool:
+    """Validate that lanelets with turn_direction map to junction roads in XODR.
+
+    A lanelet with a ``turn_direction`` attribute is expected to correspond to
+    an OpenDRIVE road that belongs to a junction (``junction >= 0``).  If the
+    mapped road is *not* part of a junction, this is reported as an error.
+
+    Args:
+        xodr_path: Path to the OpenDRIVE file.
+        osm_path: Path to the Lanelet2 OSM file.
+        shared: Pre-loaded validation context from ``_load_map_for_validation``.
+            If *None*, the context is loaded internally.
+
+    Returns:
+        ``True`` if validation passed, ``False`` if errors were found.
+    """
+    ctx = shared or _load_map_for_validation(xodr_path, osm_path)
+    if ctx is None:
+        print("  Skipping junction lanelet validation (no mapping data).")
+        return True
+
+    lanelet_map, _offset_x, _offset_y, conv_mapping, _effective_osm, xodr_root = ctx
+
+    # Build road_id -> junction_id map from XODR
+    road_to_junction = _parse_road_junction_map(xodr_root)
+
+    # Collect lanelets with turn_direction
+    turn_direction_lanelets: list[tuple[int, str]] = []
+    for lanelet in lanelet_map.laneletLayer:
+        if "turn_direction" in lanelet.attributes:
+            turn_direction_lanelets.append(
+                (lanelet.id, lanelet.attributes["turn_direction"])
+            )
+
+    if not turn_direction_lanelets:
+        print("  No lanelets with turn_direction found; nothing to validate.")
+        return True
+
+    errors: list[str] = []
+    ok_count = 0
+    unmapped_count = 0
+
+    for lanelet_id, turn_dir in sorted(turn_direction_lanelets):
+        mapping_entry = conv_mapping.lanelet_to_road_and_lane.get(lanelet_id)
+        if mapping_entry is None:
+            unmapped_count += 1
+            continue
+
+        road_id, _lane_id = mapping_entry
+        junction_id = road_to_junction.get(road_id, -1)
+
+        if junction_id >= 0:
+            ok_count += 1
+        else:
+            errors.append(
+                f"  lanelet {lanelet_id} (turn_direction={turn_dir}): "
+                f"road {road_id} is not part of a junction (junction={junction_id})"
+            )
+
+    # ── Summary
+    print(f"\n  Lanelets with turn_direction: {len(turn_direction_lanelets)}")
+    print(f"  Mapped to junction road    : {ok_count}")
+    print(f"  NOT in junction (error)    : {len(errors)}")
+    if unmapped_count > 0:
+        print(f"  Not in mapping (skipped)   : {unmapped_count}")
+
+    if errors:
+        print(f"\n  Errors ({len(errors)}):")
+        for e in errors[:20]:
+            print(e)
+        if len(errors) > 20:
+            print(f"  ... and {len(errors) - 20} more")
+        print("  Junction lanelet validation: FAILED")
+        return False
+
+    print("  Junction lanelet validation: PASSED")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Unified analysis entry-point (callable from convert and CLI)
 # ---------------------------------------------------------------------------
 
@@ -853,6 +963,17 @@ def run_analysis(
 
     stop_line_ok = run_stop_line_validation(xodr_path, osm_path, shared=shared_ctx)
     if not stop_line_ok:
+        error_count += 1
+
+    # ── Junction lanelet validation ──────────────────────────────────────
+    print(f"\n{'=' * 72}")
+    print("  Junction Lanelet Validation")
+    print(f"{'=' * 72}")
+
+    junction_ok = run_junction_lanelet_validation(
+        xodr_path, osm_path, shared=shared_ctx
+    )
+    if not junction_ok:
         error_count += 1
 
     # ── Final summary ──────────────────────────────────────────────────────
