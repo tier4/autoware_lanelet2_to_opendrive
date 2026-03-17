@@ -8,4 +8,4 @@ ego:
   # ray_distance_upper: search range (m) above the estimated z.
   # ray_distance_lower: search range (m) below the estimated z.
   ground_projection_ray_distance_upper: 5.0
-  ground_projection_ray_distance_lower: 5.0
+  ground_projection_ray_distance_lower: 10.0

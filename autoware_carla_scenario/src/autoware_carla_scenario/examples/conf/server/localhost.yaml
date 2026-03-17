@@ -3,4 +3,4 @@ server:
   host: localhost
   port: 2000
   cooldown_seconds: 2.0
-  cooldown_max_retries: 1
+  cooldown_max_retries: 0

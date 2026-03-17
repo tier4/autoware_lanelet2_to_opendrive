@@ -458,6 +458,15 @@ def _refine_z_with_ground_projection(
             "or the CARLA map is not loaded correctly."
         )
 
+    if result.label == _carla.CityObjectLabel.NONE:
+        logger.warning(
+            "ground_projection hit at (%.2f, %.2f) has CityObjectLabel.NONE. "
+            "Enable semantic tags on the map's ground meshes for more "
+            "reliable ground detection.",
+            x,
+            y,
+        )
+
     ground_z = result.location.z
     delta = ground_z - z_estimate
     if abs(delta) > 0.01:
