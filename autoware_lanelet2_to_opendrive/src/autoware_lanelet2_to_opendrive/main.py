@@ -2,6 +2,7 @@
 """Main script to convert Lanelet2 maps to OpenDRIVE format."""
 
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -1416,14 +1417,17 @@ def preprocess_and_convert_with_hydra(
     # Save mapping JSON and cross-validate against geometric mapping
     if conversion_config.output_path:
         from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _preprocessed_osm_path_for,
             validate_and_save_mapping,
         )
+
+        xodr_path = Path(conversion_config.output_path)
 
         validate_and_save_mapping(
             lanelet_to_road_and_lane=lanelet_to_road_and_lane,
             lanelet_map=lanelet_map,
             roads=opendrive.roads,
-            xodr_path=Path(conversion_config.output_path),
+            xodr_path=xodr_path,
             osm_path=input_map_path,
             mgrs_offset=(offset_x, offset_y),
             preprocessing_log=preprocessing_log_dict,
@@ -1432,12 +1436,7 @@ def preprocess_and_convert_with_hydra(
         # Save preprocessed OSM next to XODR so that standalone `analyze`
         # can reproduce the same lanelet map without re-running preprocessing.
         if has_preprocessing:
-            import shutil
-
-            xodr_out = Path(conversion_config.output_path)
-            preprocessed_osm_dest = (
-                xodr_out.parent / f"{xodr_out.stem}.preprocessed.osm"
-            )
+            preprocessed_osm_dest = _preprocessed_osm_path_for(xodr_path)
             shutil.copy2(input_map_path, preprocessed_osm_dest)
             logger.info(f"Preprocessed OSM saved to: {preprocessed_osm_dest}")
 
@@ -1446,7 +1445,7 @@ def preprocess_and_convert_with_hydra(
 
         logger.info("Running post-conversion analysis...")
         run_analysis(
-            xodr_path=Path(conversion_config.output_path),
+            xodr_path=xodr_path,
             osm_path=input_map_path,
         )
 

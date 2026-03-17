@@ -294,7 +294,7 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
         GeoRoadLaneletMapping,
         MappingMismatchError,
         _cache_path_for,
-        _sha256_of_file,
+        _preprocessed_osm_path_for,
         build_mapping,
         parse_roads_from_xodr,
         validate_mapping_consistency,
@@ -317,15 +317,17 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     # preprocessed OSM.  Look for the companion file saved by the converter.
     effective_osm = osm_path
     if conv_mapping.preprocessing_log is not None:
-        preprocessed_osm = xodr_path.parent / f"{xodr_path.stem}.preprocessed.osm"
+        preprocessed_osm = _preprocessed_osm_path_for(xodr_path)
         if preprocessed_osm.exists():
             effective_osm = preprocessed_osm
             print(f"  Using preprocessed OSM: {preprocessed_osm}")
         else:
             print(
                 f"  WARNING: Mapping has preprocessing_log but "
-                f"{preprocessed_osm.name} not found; using original OSM."
+                f"{preprocessed_osm.name} not found.\n"
+                f"  Validation would compare against a different lanelet set; skipping."
             )
+            return False
 
     # Parse geoReference from XODR to determine origin
     tree = ET.parse(str(xodr_path))
@@ -359,11 +361,14 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
 
     # Parse XODR XML to build Road objects (avoids pyxodr dependency)
     roads = parse_roads_from_xodr(xodr_path)
-    xodr_sha256 = _sha256_of_file(xodr_path)
-    osm_sha256 = _sha256_of_file(effective_osm)
 
+    # Reuse SHA256 from the loaded mapping JSON to avoid re-hashing large files.
     geo_mapping = build_mapping(
-        lanelet_map, roads, (offset_x, offset_y), xodr_sha256, osm_sha256
+        lanelet_map,
+        roads,
+        (offset_x, offset_y),
+        conv_mapping.xodr_sha256,
+        conv_mapping.osm_sha256,
     )
 
     try:

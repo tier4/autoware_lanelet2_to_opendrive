@@ -1098,6 +1098,11 @@ def _cache_path_for(xodr_path: Path) -> Path:
     return xodr_path.parent / f"{xodr_path.stem}.mapping.json"
 
 
+def _preprocessed_osm_path_for(xodr_path: Path) -> Path:
+    """Return the preprocessed OSM sidecar path next to the XODR file."""
+    return xodr_path.parent / f"{xodr_path.stem}.preprocessed.osm"
+
+
 # ---------------------------------------------------------------------------
 # Cross-validation
 # ---------------------------------------------------------------------------
