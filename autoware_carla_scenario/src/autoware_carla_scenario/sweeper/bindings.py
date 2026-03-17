@@ -32,7 +32,9 @@ class Binding(Protocol):
         """Hydra override key this binding writes to (e.g. ``ego.spawn_s``)."""
         ...
 
-    def resolve(self, lanelet_id: int, lanelet_map: Any) -> float:
+    def resolve(
+        self, lanelet_id: int, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> float:
         """Compute the parameter value for the given lanelet."""
         ...
 
@@ -49,8 +51,29 @@ class StopLineOffsetBinding:
     target_key: str
     offset: float = 15.0
 
-    def resolve(self, lanelet_id: int, lanelet_map: Any) -> float:
-        """Return the arc-length position *offset* metres before the stop line."""
+    @staticmethod
+    def _project_stop_line(ls: Any, lanelet: Any) -> float:
+        """Project stop line centroid onto lanelet centerline, return arc-length."""
+        points = list(ls)
+        if not points:
+            raise ValueError("Stop line linestring has no points.")
+        cx = sum(p.x for p in points) / len(points)
+        cy = sum(p.y for p in points) / len(points)
+        pt = lanelet2.core.BasicPoint2d(cx, cy)
+        centerline_2d = lanelet2.geometry.to2D(lanelet.centerline)
+        arc = lanelet2.geometry.toArcCoordinates(centerline_2d, pt)
+        return arc.length
+
+    def resolve(
+        self, lanelet_id: int, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> float:
+        """Return the arc-length position *offset* metres before the stop line.
+
+        If the spawn lanelet itself has no stop line, following lanelets are
+        searched via the routing graph.  The cross-lanelet arc-length is then
+        ``spawn_lanelet_length + stop_s_on_following - offset``, clamped so
+        the vehicle stays within the spawn lanelet.
+        """
         lanelet = lanelet_map.laneletLayer[lanelet_id]
 
         # Collect stop lines from this lanelet's regulatory elements.
@@ -58,37 +81,56 @@ class StopLineOffsetBinding:
         stop_lines = _collect_stop_lines_from_reg_elems(
             lanelet.regulatoryElements, seen_ids
         )
-        if not stop_lines:
-            raise ValueError(
-                f"Lanelet {lanelet_id} has no stop line; "
-                "cannot resolve stop_line_offset binding."
+
+        if stop_lines:
+            # Stop line found on the spawn lanelet itself.
+            stop_s = self._project_stop_line(stop_lines[0], lanelet)
+            result = max(0.0, stop_s - self.offset)
+            logger.debug(
+                "Lanelet %d: stop_line_s=%.2f, offset=%.2f -> spawn_s=%.2f",
+                lanelet_id,
+                stop_s,
+                self.offset,
+                result,
             )
+            return result
 
-        # Use the first stop line (same convention as get_stop_line_poses).
-        ls = stop_lines[0]
-        points = list(ls)
-        if not points:
-            raise ValueError(
-                f"Stop line linestring on lanelet {lanelet_id} has no points."
+        # -- Fallback: search following lanelets for a stop line. --
+        if routing_graph is None:
+            from .constraints import create_routing_graph
+
+            routing_graph = create_routing_graph(lanelet_map)
+        following = routing_graph.following(lanelet)
+        spawn_lanelet_length = lanelet2.geometry.length2d(lanelet)
+
+        for fll in following:
+            fll_stop_lines = _collect_stop_lines_from_reg_elems(
+                fll.regulatoryElements, seen_ids
             )
+            if not fll_stop_lines:
+                continue
 
-        cx = sum(p.x for p in points) / len(points)
-        cy = sum(p.y for p in points) / len(points)
+            stop_s_on_following = self._project_stop_line(fll_stop_lines[0], fll)
+            total_arc = spawn_lanelet_length + stop_s_on_following
+            result = max(0.0, min(total_arc - self.offset, spawn_lanelet_length))
+            logger.debug(
+                "Lanelet %d: stop line on following lanelet %d "
+                "(stop_s_following=%.2f, spawn_len=%.2f, total_arc=%.2f, "
+                "offset=%.2f) -> spawn_s=%.2f",
+                lanelet_id,
+                fll.id,
+                stop_s_on_following,
+                spawn_lanelet_length,
+                total_arc,
+                self.offset,
+                result,
+            )
+            return result
 
-        pt = lanelet2.core.BasicPoint2d(cx, cy)
-        centerline_2d = lanelet2.geometry.to2D(lanelet.centerline)
-        arc = lanelet2.geometry.toArcCoordinates(centerline_2d, pt)
-        stop_s = arc.length
-
-        result = max(0.0, stop_s - self.offset)
-        logger.debug(
-            "Lanelet %d: stop_line_s=%.2f, offset=%.2f -> spawn_s=%.2f",
-            lanelet_id,
-            stop_s,
-            self.offset,
-            result,
+        raise ValueError(
+            f"Lanelet {lanelet_id} and its following lanelets have no stop line; "
+            "cannot resolve stop_line_offset binding."
         )
-        return result
 
 
 # ---------------------------------------------------------------------------
