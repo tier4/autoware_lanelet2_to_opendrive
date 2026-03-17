@@ -123,6 +123,30 @@ class EqualsConstraint:
 
 
 @dataclass(frozen=True)
+class InSetConstraint:
+    """Matches lanelets whose ID is contained in a given set of values.
+
+    Useful for filtering by a pre-defined list of lanelet IDs (e.g. IDs
+    loaded from a map configuration parameter)::
+
+        - type: in_set
+          values: [100, 200, 300]
+
+    Combine with ``not`` to *exclude* specific IDs::
+
+        - type: not
+          constraint:
+            type: in_set
+            values: ${map.no_3d_model_lanelet_ids}
+    """
+
+    values: tuple[int | str, ...] = field(default_factory=tuple)
+
+    def evaluate(self, lanelet: Any) -> bool:
+        return lanelet.id in self.values
+
+
+@dataclass(frozen=True)
 class HasTrafficLightStopLineConstraint:
     """Matches lanelets whose stop line originates from a traffic-light RE.
 
@@ -318,6 +342,7 @@ _LEAF_REGISTRY: dict[str, type] = {
     "has_traffic_light_stop_line": HasTrafficLightStopLineConstraint,
     "is_junction": IsJunctionConstraint,
     "equals": EqualsConstraint,
+    "in_set": InSetConstraint,
 }
 
 

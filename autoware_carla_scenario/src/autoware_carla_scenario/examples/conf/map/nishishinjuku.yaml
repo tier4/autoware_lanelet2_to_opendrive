@@ -7,3 +7,6 @@ map:
   name: NishishinjukuMap
   xodr_path: ${oc.env:NISHISHINJUKU_XODR_PATH,autoware_carla_scenario/test/carla_scenario/data/nishishinjuku.xodr}
   lanelet2_path: ${oc.env:NISHISHINJUKU_LANELET2_PATH,autoware_carla_scenario/test/carla_scenario/data/nishishinjuku.osm}
+  # Lanelet IDs to exclude from scenario sweeps (e.g. lanelets without
+  # a matching 3D model in CARLA that cause spawn or rendering failures).
+  no_3d_model_lanelet_ids: []
