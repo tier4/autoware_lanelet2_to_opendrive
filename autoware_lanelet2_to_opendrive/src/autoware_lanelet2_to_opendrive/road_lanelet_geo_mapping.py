@@ -530,7 +530,7 @@ def validate_and_save_mapping(
     logger.info("Mapping JSON saved to %s", json_path)
 
     # 3. Cross-validate with geometric mapping
-    road_network = RoadNetwork.from_file(str(xodr_path))
+    road_network = RoadNetwork(str(xodr_path))
     geo_mapping = build_mapping(
         lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
     )

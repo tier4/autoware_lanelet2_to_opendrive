@@ -341,7 +341,7 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     offset_x = 0.0
     offset_y = 0.0
 
-    road_network = RoadNetwork.from_file(str(xodr_path))
+    road_network = RoadNetwork(str(xodr_path))
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
 
