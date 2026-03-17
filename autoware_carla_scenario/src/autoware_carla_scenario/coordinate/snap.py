@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union, overload
 
 from .poses import CarlaWorldPose, Lanelet2Pose, OpenDrivePose
@@ -23,6 +24,50 @@ logger = logging.getLogger(__name__)
 
 #: Maximum distance (m) to the nearest spawn point before a warning is emitted.
 _SPAWN_POINT_WARN_DISTANCE: float = 10.0
+
+
+@dataclass
+class GroundProjectionConfig:
+    """Tunable parameters for the ground-projection z-refinement.
+
+    The ray is cast downward from ``z_estimate + ray_distance_upper`` and
+    searches a total of ``ray_distance_upper + ray_distance_lower`` metres,
+    i.e. from ``z_estimate + upper`` to ``z_estimate - lower``.
+    """
+
+    #: Search range (m) above the estimated z.
+    ray_distance_upper: float = 5.0
+
+    #: Search range (m) below the estimated z.
+    ray_distance_lower: float = 5.0
+
+    #: Minimum absolute z delta (m) to log an info message.
+    z_log_threshold: float = 0.01
+
+
+_ground_projection_config = GroundProjectionConfig()
+
+
+def configure_ground_projection(
+    *,
+    ray_distance_upper: float | None = None,
+    ray_distance_lower: float | None = None,
+) -> None:
+    """Update the module-level :class:`GroundProjectionConfig`.
+
+    Only the parameters that are explicitly passed (not ``None``) are changed.
+    Call this before any :func:`snap_to_carla_road` invocation so that the
+    snap pipeline uses the desired values.
+    """
+    if ray_distance_upper is not None:
+        _ground_projection_config.ray_distance_upper = ray_distance_upper
+    if ray_distance_lower is not None:
+        _ground_projection_config.ray_distance_lower = ray_distance_lower
+    logger.info(
+        "Ground projection config updated: ray_distance_upper=%.2f, ray_distance_lower=%.2f",
+        _ground_projection_config.ray_distance_upper,
+        _ground_projection_config.ray_distance_lower,
+    )
 
 
 @overload
@@ -162,13 +207,17 @@ def _snap_lanelet2_via_opendrive(
     # Re-convert via XODR geometry (position now lies on the lane centre)
     carla_from_od = to_carla_world(od_corrected)
 
-    # Z correction
+    # Z correction: first from nearest spawn point, then refine via ground projection
     snapped_z = _z_from_nearest_spawn_point(carla_from_od.x, carla_from_od.y, world)
+    base_z = snapped_z if snapped_z is not None else carla_from_od.z
+    refined_z = refine_z_with_ground_projection(
+        carla_from_od.x, carla_from_od.y, base_z, world
+    )
 
     result = CarlaWorldPose(
         x=carla_from_od.x,
         y=carla_from_od.y,
-        z=snapped_z if snapped_z is not None else carla_from_od.z,
+        z=refined_z,
         roll=carla_from_od.roll,
         pitch=carla_from_od.pitch,
         yaw=carla_from_od.yaw,
@@ -222,10 +271,14 @@ def _snap_opendrive_via_waypoint_xodr(
         return to_carla_world(pose)
 
     tf = waypoint.transform
+    refined_z = refine_z_with_ground_projection(
+        tf.location.x, tf.location.y, tf.location.z, world
+    )
+
     result = CarlaWorldPose(
         x=tf.location.x,
         y=tf.location.y,
-        z=tf.location.z,
+        z=refined_z,
         yaw=tf.rotation.yaw,
     )
 
@@ -278,11 +331,13 @@ def _snap_carla_via_waypoint(
     snapped_y = waypoint.transform.location.y
 
     snapped_z = _z_from_nearest_spawn_point(snapped_x, snapped_y, world)
+    base_z = snapped_z if snapped_z is not None else pose.z
+    refined_z = refine_z_with_ground_projection(snapped_x, snapped_y, base_z, world)
 
     result = CarlaWorldPose(
         x=snapped_x,
         y=snapped_y,
-        z=snapped_z if snapped_z is not None else pose.z,
+        z=refined_z,
         roll=pose.roll,
         pitch=pose.pitch,
         yaw=pose.yaw,
@@ -339,3 +394,91 @@ def _z_from_nearest_spawn_point(
             )
 
     return best_z
+
+
+def refine_z_with_ground_projection(
+    x: float,
+    y: float,
+    z_estimate: float,
+    world: "carla.World",
+) -> float:
+    """Refine *z_estimate* by casting a downward ray via ``world.ground_projection``.
+
+    A ray is cast from ``(x, y, z_estimate + offset)`` downward.  If the ray
+    hits the physics-mesh ground surface, the hit-point's z coordinate is
+    returned.
+
+    Parameters
+    ----------
+    x, y:
+        CARLA world horizontal coordinates.
+    z_estimate:
+        The best z estimate from existing logic (spawn-point / waypoint).
+    world:
+        An active ``carla.World`` instance.
+
+    Returns
+    -------
+    float
+        The refined z coordinate.
+
+    Raises
+    ------
+    RuntimeError
+        If ``ground_projection`` is unavailable, fails, or returns no hit.
+        A missing ground hit indicates that the spawn location is outside the
+        physics mesh (e.g. off-road or the map is not loaded correctly).
+    """
+    import carla as _carla  # noqa: PLC0415
+
+    cfg = _ground_projection_config
+    origin = _carla.Location(
+        x=x,
+        y=y,
+        z=z_estimate + cfg.ray_distance_upper,
+    )
+    search_distance = cfg.ray_distance_upper + cfg.ray_distance_lower
+
+    try:
+        result = world.ground_projection(origin, search_distance)
+    except AttributeError:
+        raise RuntimeError(
+            "world.ground_projection() is not available in this CARLA version. "
+            "A CARLA build that supports ground_projection is required."
+        ) from None
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"world.ground_projection() failed at ({x:.2f}, {y:.2f}, "
+            f"{origin.z:.2f}): {exc}. "
+            "The physics mesh may not be loaded."
+        ) from exc
+
+    if result is None:
+        raise RuntimeError(
+            f"ground_projection returned no hit at ({x:.2f}, {y:.2f}) "
+            f"with z_estimate={z_estimate:.3f}. "
+            "The spawn location is likely outside the drivable surface "
+            "or the CARLA map is not loaded correctly."
+        )
+
+    if result.label == _carla.CityObjectLabel.NONE:
+        logger.warning(
+            "ground_projection hit at (%.2f, %.2f) has CityObjectLabel.NONE. "
+            "Enable semantic tags on the map's ground meshes for more "
+            "reliable ground detection.",
+            x,
+            y,
+        )
+
+    ground_z = result.location.z
+    delta = ground_z - z_estimate
+    if abs(delta) > cfg.z_log_threshold:
+        logger.info(
+            "ground_projection refined z: %.3f -> %.3f (delta=%.3f) at (%.1f, %.1f)",
+            z_estimate,
+            ground_z,
+            delta,
+            x,
+            y,
+        )
+    return ground_z

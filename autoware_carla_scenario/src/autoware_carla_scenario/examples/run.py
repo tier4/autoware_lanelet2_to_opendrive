@@ -48,6 +48,7 @@ from autoware_carla_scenario import (
     Lanelet2Pose,
     ScenarioQueue,
     SpawnTransform,
+    configure_ground_projection,
 )
 from autoware_carla_scenario.conditions import ScenarioResult
 
@@ -315,6 +316,12 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
 
 def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     """Instantiate the correct scenario class based on ``cfg.scenario.name``."""
+    # Apply ground projection parameters from ego config before building.
+    configure_ground_projection(
+        ray_distance_upper=float(cfg.ego.ground_projection_ray_distance_upper),
+        ray_distance_lower=float(cfg.ego.ground_projection_ray_distance_lower),
+    )
+
     scenario_name: str = cfg.scenario.name
     scenario_dict = _to_dict(cfg.scenario)
 

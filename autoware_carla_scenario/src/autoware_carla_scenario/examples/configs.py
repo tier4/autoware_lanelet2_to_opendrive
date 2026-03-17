@@ -63,6 +63,12 @@ class EgoVehicleConfig:
     #: Longitudinal offset along the lanelet centerline.
     spawn_s: float = 25.0
 
+    #: Search range (m) above the estimated z for the ground projection ray.
+    ground_projection_ray_distance_upper: float = 5.0
+
+    #: Search range (m) below the estimated z for the ground projection ray.
+    ground_projection_ray_distance_lower: float = 5.0
+
 
 # ---------------------------------------------------------------------------
 # Scenario-specific configs
