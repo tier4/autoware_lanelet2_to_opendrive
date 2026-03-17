@@ -41,6 +41,9 @@ class GroundProjectionConfig:
     #: Search range (m) below the estimated z.
     ray_distance_lower: float = 5.0
 
+    #: Minimum absolute z delta (m) to log an info message.
+    z_log_threshold: float = 0.01
+
 
 _ground_projection_config = GroundProjectionConfig()
 
@@ -207,7 +210,7 @@ def _snap_lanelet2_via_opendrive(
     # Z correction: first from nearest spawn point, then refine via ground projection
     snapped_z = _z_from_nearest_spawn_point(carla_from_od.x, carla_from_od.y, world)
     base_z = snapped_z if snapped_z is not None else carla_from_od.z
-    refined_z = _refine_z_with_ground_projection(
+    refined_z = refine_z_with_ground_projection(
         carla_from_od.x, carla_from_od.y, base_z, world
     )
 
@@ -268,7 +271,7 @@ def _snap_opendrive_via_waypoint_xodr(
         return to_carla_world(pose)
 
     tf = waypoint.transform
-    refined_z = _refine_z_with_ground_projection(
+    refined_z = refine_z_with_ground_projection(
         tf.location.x, tf.location.y, tf.location.z, world
     )
 
@@ -329,7 +332,7 @@ def _snap_carla_via_waypoint(
 
     snapped_z = _z_from_nearest_spawn_point(snapped_x, snapped_y, world)
     base_z = snapped_z if snapped_z is not None else pose.z
-    refined_z = _refine_z_with_ground_projection(snapped_x, snapped_y, base_z, world)
+    refined_z = refine_z_with_ground_projection(snapped_x, snapped_y, base_z, world)
 
     result = CarlaWorldPose(
         x=snapped_x,
@@ -393,7 +396,7 @@ def _z_from_nearest_spawn_point(
     return best_z
 
 
-def _refine_z_with_ground_projection(
+def refine_z_with_ground_projection(
     x: float,
     y: float,
     z_estimate: float,
@@ -469,7 +472,7 @@ def _refine_z_with_ground_projection(
 
     ground_z = result.location.z
     delta = ground_z - z_estimate
-    if abs(delta) > 0.01:
+    if abs(delta) > cfg.z_log_threshold:
         logger.info(
             "ground_projection refined z: %.3f -> %.3f (delta=%.3f) at (%.1f, %.1f)",
             z_estimate,

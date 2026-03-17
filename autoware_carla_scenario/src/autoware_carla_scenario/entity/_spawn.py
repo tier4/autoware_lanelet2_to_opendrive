@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     import carla
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -87,9 +84,6 @@ def spawn_vehicle_actor(
         raise RuntimeError(f"Blueprint not found: {vehicle_type}")
     vehicle_bp.set_attribute("role_name", role_name)
 
-    # Refine z via ground_projection before spawning
-    resolved_transform = _refine_spawn_z(world, resolved_transform)
-
     # try_spawn_actor returns None on collision / out-of-bounds instead of
     # raising an opaque std::exception like spawn_actor does.
     actor = world.try_spawn_actor(vehicle_bp, resolved_transform)
@@ -111,38 +105,3 @@ def spawn_vehicle_actor(
         )
 
     return actor
-
-
-def _refine_spawn_z(
-    world: "carla.World",
-    transform: "carla.Transform",
-) -> "carla.Transform":
-    """Refine the spawn transform's z using ``world.ground_projection``.
-
-    Casts a ray downward from slightly above the transform's location.  If
-    the ray hits the ground mesh, a new transform with the corrected z is
-    returned; otherwise the original transform is returned unchanged.
-    """
-    from ..coordinate.snap import (  # noqa: PLC0415
-        _refine_z_with_ground_projection,
-    )
-
-    loc = transform.location
-    refined_z = _refine_z_with_ground_projection(loc.x, loc.y, loc.z, world)
-
-    if refined_z == loc.z:
-        return transform
-
-    import carla as _carla  # noqa: PLC0415
-
-    logger.info(
-        "Spawn z refined via ground_projection: %.3f -> %.3f at (%.1f, %.1f)",
-        loc.z,
-        refined_z,
-        loc.x,
-        loc.y,
-    )
-    return _carla.Transform(
-        _carla.Location(x=loc.x, y=loc.y, z=refined_z),
-        transform.rotation,
-    )
