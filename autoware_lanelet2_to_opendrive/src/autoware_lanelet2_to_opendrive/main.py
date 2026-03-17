@@ -288,7 +288,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_to_lanelet_ids: Dict[int, List[int]],
         lanelet_to_road_id: Dict[int, int],
         junctions: List[Junction],
-    ) -> None:
+    ) -> Dict[int, Tuple[int, int]]:
         """
         Set up predecessor/successor connections for roads and lanes.
 
@@ -298,6 +298,9 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
             lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
             junctions: All junctions
+
+        Returns:
+            Mapping from lanelet ID to (road_id, lane_id) for all lanes.
         """
         # Set road links for connecting roads
         print("\n=== Building road links for connecting roads ===")
@@ -317,7 +320,8 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Set lane links for all roads
         print("\n=== Building lane links for all roads ===")
-        Road.set_all_lane_links(self.lanelet_map, all_roads)
+        lanelet_to_road_and_lane = Road.set_all_lane_links(self.lanelet_map, all_roads)
+        return lanelet_to_road_and_lane
 
     def _extract_and_assign_signals(
         self,
@@ -924,7 +928,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return opendrive
 
-    def convert(self) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
+    def convert(
+        self,
+    ) -> Tuple[OpenDRIVE, RoadLaneletMapping, Dict[int, Tuple[int, int]]]:
         """
         Convert Lanelet2 map to OpenDRIVE format.
 
@@ -934,6 +940,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             Tuple of:
                 - OpenDRIVE object representing the converted map
                 - RoadLaneletMapping containing bidirectional mapping
+                - Mapping from lanelet ID to (road_id, lane_id) for all lanes
         """
         print("Converting Lanelet2 map to OpenDRIVE format...")
 
@@ -963,7 +970,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         )
 
         # Step 4: Set up road and lane connections
-        self._setup_connections(
+        lanelet_to_road_and_lane = self._setup_connections(
             all_roads,
             connecting_roads,
             mapping.road_to_lanelets,
@@ -1063,14 +1070,14 @@ class _Lanelet2ToOpenDRIVEConverter:
             all_roads, junctions, signals_and_controllers
         )
 
-        return opendrive, mapping
+        return opendrive, mapping, lanelet_to_road_and_lane
 
 
 def convert_lanelet2_to_opendrive(
     lanelet_map: lanelet2.core.LaneletMap,
     config: ConversionConfig,
     mgrs_code: Optional[str] = None,
-) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
+) -> Tuple[OpenDRIVE, RoadLaneletMapping, Dict[int, Tuple[int, int]]]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
 
@@ -1090,6 +1097,7 @@ def convert_lanelet2_to_opendrive(
         Tuple of:
             - OpenDRIVE object representing the converted map
             - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
+            - Mapping from lanelet ID to (road_id, lane_id) for all lanes
     """
     # Merge legacy mgrs_code argument into config.origin so the converter has
     # a single, consistent source of truth for the MGRS grid code.
@@ -1391,13 +1399,57 @@ def preprocess_and_convert_with_hydra(
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;
     # no need to pass it as a separate argument.
-    opendrive, mapping = convert_lanelet2_to_opendrive(lanelet_map, conversion_config)
+    opendrive, mapping, lanelet_to_road_and_lane = convert_lanelet2_to_opendrive(
+        lanelet_map, conversion_config
+    )
 
     logger.info("Conversion completed successfully!")
     logger.info(
         f"Road-Lanelet mapping: {len(mapping.road_to_lanelets)} roads, "
         f"{len(mapping.lanelet_to_road)} lanelets"
     )
+
+    # Save mapping JSON and run cross-validation if output path is set
+    if conversion_config.output_path:
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            GeoRoadLaneletMapping,
+            _sha256_of_file,
+            save_mapping_json,
+            build_mapping,
+            validate_mapping_consistency,
+        )
+
+        xodr_path = Path(conversion_config.output_path)
+        osm_path = input_map_path
+
+        # Compute SHA256 checksums
+        xodr_sha256 = _sha256_of_file(xodr_path)
+        osm_sha256 = _sha256_of_file(osm_path)
+
+        # Build GeoRoadLaneletMapping from conversion-time mapping and save
+        conv_geo_mapping = GeoRoadLaneletMapping(
+            xodr_sha256=xodr_sha256,
+            osm_sha256=osm_sha256,
+            lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+        )
+        json_path = save_mapping_json(conv_geo_mapping, xodr_path)
+        logger.info(f"Mapping JSON saved to: {json_path}")
+
+        # Cross-validation with geometric mapping
+        try:
+            from pyxodr import RoadNetwork
+
+            road_network = RoadNetwork.from_file(str(xodr_path))
+            mgrs_offset = (offset_x, offset_y)
+            geo_mapping = build_mapping(
+                lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
+            )
+            validate_mapping_consistency(lanelet_to_road_and_lane, geo_mapping)
+            logger.info("Cross-validation passed successfully!")
+        except ImportError:
+            logger.warning("pyxodr not installed; skipping geometric cross-validation")
+        except Exception as e:
+            logger.warning(f"Geometric cross-validation failed: {e}")
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")

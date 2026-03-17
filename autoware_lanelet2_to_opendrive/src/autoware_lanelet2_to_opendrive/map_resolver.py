@@ -175,18 +175,34 @@ def _convert_lanelet2_to_xodr_cached(
 
     from .main import convert_lanelet2_to_opendrive
     from .opendrive.opendrive import save_opendrive_to_file
+    from .road_lanelet_geo_mapping import (
+        GeoRoadLaneletMapping,
+        save_mapping_json,
+    )
 
     projector = MGRSProjector(origin)
     lanelet_map = lanelet2.io.load(lanelet2_path, projector)
 
     # mgrs_code is already in config.origin.mgrs_code (merged above).
-    opendrive, _ = convert_lanelet2_to_opendrive(lanelet_map, config)
+    opendrive, _, lanelet_to_road_and_lane = convert_lanelet2_to_opendrive(
+        lanelet_map, config
+    )
 
     # ------------------------------------------------------------------
     # Persist to cache
     # ------------------------------------------------------------------
     cache_dir.mkdir(parents=True, exist_ok=True)
     save_opendrive_to_file(opendrive, cached_xodr)
+
+    # Save mapping JSON next to the cached XODR
+    xodr_sha256 = _sha256_of_file(cached_xodr)
+    osm_sha256 = _sha256_of_file(lanelet2_path)
+    conv_mapping = GeoRoadLaneletMapping(
+        xodr_sha256=xodr_sha256,
+        osm_sha256=osm_sha256,
+        lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+    )
+    save_mapping_json(conv_mapping, cached_xodr)
 
     cache_info: dict = {
         "source_sha256": source_sha256,

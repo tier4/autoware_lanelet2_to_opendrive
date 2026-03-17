@@ -26,6 +26,11 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+
+class MappingMismatchError(Exception):
+    """Raised when conversion mapping and geometric mapping disagree."""
+
+
 #: Mapping cache files are stored next to the source XODR file.
 
 #: Maximum mean distance (m) between a road reference line and a lanelet
@@ -379,6 +384,98 @@ def build_mapping(
 def _cache_path_for(xodr_path: Path) -> Path:
     """Return the cache file path next to the XODR file."""
     return xodr_path.parent / f"{xodr_path.stem}.mapping.json"
+
+
+# ---------------------------------------------------------------------------
+# Cross-validation
+# ---------------------------------------------------------------------------
+
+
+def validate_mapping_consistency(
+    conversion_mapping: dict[int, tuple[int, int]],
+    geo_mapping: GeoRoadLaneletMapping,
+) -> None:
+    """Validate that conversion-time mapping matches geometric mapping.
+
+    Compares each entry in the conversion-time mapping against the geometric
+    mapping.  Raises :class:`MappingMismatchError` if any lanelet ID maps to a
+    different ``(road_id, lane_id)`` pair.
+
+    Args:
+        conversion_mapping: Mapping produced during conversion
+            (lanelet_id -> (road_id, lane_id)).
+        geo_mapping: Mapping produced by geometric boundary comparison.
+
+    Raises:
+        MappingMismatchError: When at least one entry differs between the two
+            mappings.
+    """
+    mismatches: list[str] = []
+    geo = geo_mapping.lanelet_to_road_and_lane
+
+    for lanelet_id, conv_value in conversion_mapping.items():
+        geo_value = geo.get(lanelet_id)
+        if geo_value is None:
+            mismatches.append(
+                f"  lanelet {lanelet_id}: conversion={conv_value}, " f"geo=<missing>"
+            )
+        elif conv_value != geo_value:
+            mismatches.append(
+                f"  lanelet {lanelet_id}: conversion={conv_value}, " f"geo={geo_value}"
+            )
+
+    # Also check for entries only in geo mapping
+    for lanelet_id, geo_value in geo.items():
+        if lanelet_id not in conversion_mapping:
+            mismatches.append(
+                f"  lanelet {lanelet_id}: conversion=<missing>, " f"geo={geo_value}"
+            )
+
+    if mismatches:
+        detail = "\n".join(mismatches[:20])
+        total = len(mismatches)
+        raise MappingMismatchError(
+            f"Mapping mismatch: {total} entries differ between conversion-time "
+            f"and geometric mappings:\n{detail}"
+            + (f"\n  ... and {total - 20} more" if total > 20 else "")
+        )
+
+    logger.info(
+        "Cross-validation passed: conversion and geometric mappings agree "
+        "(%d entries)",
+        len(conversion_mapping),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Save mapping JSON
+# ---------------------------------------------------------------------------
+
+
+def save_mapping_json(
+    mapping: GeoRoadLaneletMapping,
+    xodr_path: Path,
+) -> Path:
+    """Save mapping to a JSON file next to the XODR file.
+
+    Args:
+        mapping: The mapping to save.
+        xodr_path: Path to the XODR file (used to derive the JSON path).
+
+    Returns:
+        Path to the saved JSON file.
+    """
+    cache_file = _cache_path_for(xodr_path)
+    cache_file.write_text(
+        json.dumps(mapping.to_dict(), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    logger.info(
+        "Saved mapping JSON to %s (%d entries)",
+        cache_file,
+        len(mapping.lanelet_to_road_and_lane),
+    )
+    return cache_file
 
 
 # ---------------------------------------------------------------------------

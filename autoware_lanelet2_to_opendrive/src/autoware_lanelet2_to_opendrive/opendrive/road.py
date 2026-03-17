@@ -1007,7 +1007,7 @@ class Road:
         lanelet_map: lanelet2.core.LaneletMap,
         roads: List["Road"],
         routing_graph: Optional[RoutingGraph] = None,
-    ) -> None:
+    ) -> Dict[int, Tuple[int, int]]:
         """Set lane links for all roads based on lanelet connections.
 
         This method builds a global mapping from lanelet IDs to (road_id, lane_id)
@@ -1018,10 +1018,13 @@ class Road:
             roads: List of all roads (both regular and connecting roads from junctions)
             routing_graph: Optional pre-built routing graph. If None, creates a new one.
 
+        Returns:
+            Mapping from lanelet ID to (road_id, lane_id) for all lanes.
+
         Example:
             >>> # After creating all roads
             >>> all_roads = regular_roads + connecting_roads
-            >>> Road.set_all_lane_links(lanelet_map, all_roads)
+            >>> mapping = Road.set_all_lane_links(lanelet_map, all_roads)
         """
         # Build global mapping from lanelet_id to (road_id, lane_id)
         lanelet_to_road_and_lane: Dict[int, Tuple[int, int]] = {}
@@ -1069,6 +1072,8 @@ class Road:
                 road.set_lane_links(context)
             except Exception as e:
                 tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
+
+        return lanelet_to_road_and_lane
 
     @staticmethod
     def set_connecting_road_links(

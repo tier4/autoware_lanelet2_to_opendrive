@@ -23,6 +23,11 @@ from .preprocess_lanelet import (
     LaneletPreprocessor,
 )
 from .map_resolver import resolve_map_to_xodr
+from .road_lanelet_geo_mapping import (
+    GeoRoadLaneletMapping,
+    MappingMismatchError,
+    validate_mapping_consistency,
+)
 
 __all__ = [
     "Point2D",
@@ -41,4 +46,7 @@ __all__ = [
     "PreprocessOperation",
     "LaneletPreprocessor",
     "resolve_map_to_xodr",
+    "GeoRoadLaneletMapping",
+    "MappingMismatchError",
+    "validate_mapping_consistency",
 ]
