@@ -12,10 +12,12 @@ sweeper:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
 import time
+from pathlib import Path
 from typing import Any
 
 from hydra.core.plugins import Plugins
@@ -38,6 +40,35 @@ logger = logging.getLogger(__name__)
 # Default hard timeout per job (seconds).  Can be overridden via
 # ``sweep.job_timeout_seconds`` in the scenario YAML.
 _DEFAULT_JOB_TIMEOUT = 120
+
+
+def _check_result_json_in_dir(working_dir: str | None) -> bool | None:
+    """Read the scenario result JSON from a job's output directory.
+
+    Args:
+        working_dir: The Hydra job output directory (from ``JobReturn.working_dir``).
+
+    Returns:
+        ``True`` if the scenario passed, ``False`` if it failed or the
+        result file is missing (e.g. spawn failure prevented the scenario
+        from running), or ``None`` if *working_dir* is not available.
+    """
+    if not working_dir:
+        return None
+    output_dir = Path(working_dir)
+    if not output_dir.is_dir():
+        return None
+    result_files = sorted(output_dir.glob("*_result.json"))
+    if not result_files:
+        # Output directory exists but no result JSON — the scenario did
+        # not complete (e.g. spawn failure raised before ScenarioRunner
+        # could write the result).
+        return False
+    try:
+        data = json.loads(result_files[0].read_text(encoding="utf-8"))
+        return bool(data.get("passed", True))
+    except (json.JSONDecodeError, OSError):
+        return False
 
 
 def _launch_job_isolated(
@@ -69,12 +100,26 @@ def _launch_job_isolated(
         signal.signal(signal.SIGALRM, signal.SIG_DFL)
         signal.alarm(0)
         try:
-            launcher.launch([batch], initial_job_idx=idx)
+            job_returns = launcher.launch([batch], initial_job_idx=idx)
         except SystemExit as exc:
             os._exit(exc.code if isinstance(exc.code, int) else 1)
         except Exception:
             logger.exception("Job raised an exception in child process")
             os._exit(1)
+        # launcher.launch() completes without error even when the scenario
+        # *fails* (in --multirun mode _hydra_main does not sys.exit).
+        # Hydra catches task-function exceptions internally and stores them
+        # in JobReturn.return_value, so we must inspect the return value
+        # and the result JSON to determine the actual outcome.
+        if job_returns:
+            ret = job_returns[0]
+            # If the task function raised (e.g. spawn failure), Hydra stores
+            # the exception as return_value instead of re-raising it.
+            if isinstance(getattr(ret, "return_value", None), Exception):
+                os._exit(1)
+            working_dir = getattr(ret, "working_dir", None)
+            if _check_result_json_in_dir(working_dir) is False:
+                os._exit(1)
         os._exit(0)
 
     # ---- parent process ----

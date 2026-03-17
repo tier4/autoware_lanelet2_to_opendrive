@@ -21,7 +21,7 @@ sweep:
               - type: has_traffic_light_stop_line
               - type: is_junction
           - type: equals
-            value: 3002141
+            value: any
   bindings:
     ego.spawn_s:
       type: stop_line_offset
