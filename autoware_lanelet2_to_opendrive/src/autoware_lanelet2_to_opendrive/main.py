@@ -1429,6 +1429,18 @@ def preprocess_and_convert_with_hydra(
             preprocessing_log=preprocessing_log_dict,
         )
 
+        # Save preprocessed OSM next to XODR so that standalone `analyze`
+        # can reproduce the same lanelet map without re-running preprocessing.
+        if has_preprocessing:
+            import shutil
+
+            xodr_out = Path(conversion_config.output_path)
+            preprocessed_osm_dest = (
+                xodr_out.parent / f"{xodr_out.stem}.preprocessed.osm"
+            )
+            shutil.copy2(input_map_path, preprocessed_osm_dest)
+            logger.info(f"Preprocessed OSM saved to: {preprocessed_osm_dest}")
+
         # Run ASAM QC analysis + mapping cross-validation
         from autoware_lanelet2_to_opendrive.analyze_xodr import run_analysis
 

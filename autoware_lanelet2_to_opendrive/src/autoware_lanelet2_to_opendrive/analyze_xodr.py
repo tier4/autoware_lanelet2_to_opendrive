@@ -313,6 +313,20 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     print(f"\n  Mapping file : {mapping_path}")
     print(f"  Entries      : {len(conv_mapping.lanelet_to_road_and_lane)}")
 
+    # If the mapping contains a preprocessing_log, the conversion used a
+    # preprocessed OSM.  Look for the companion file saved by the converter.
+    effective_osm = osm_path
+    if conv_mapping.preprocessing_log is not None:
+        preprocessed_osm = xodr_path.parent / f"{xodr_path.stem}.preprocessed.osm"
+        if preprocessed_osm.exists():
+            effective_osm = preprocessed_osm
+            print(f"  Using preprocessed OSM: {preprocessed_osm}")
+        else:
+            print(
+                f"  WARNING: Mapping has preprocessing_log but "
+                f"{preprocessed_osm.name} not found; using original OSM."
+            )
+
     # Parse geoReference from XODR to determine origin
     tree = ET.parse(str(xodr_path))
     geo_ref_elem = tree.find(".//geoReference")
@@ -333,7 +347,7 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     # Load Lanelet2 map with the same origin
     origin = latlon_to_lanelet2_origin(origin_lat, origin_lon)
     projector = MGRSProjector(origin)
-    lanelet_map = lanelet2.io.load(str(osm_path), projector)
+    lanelet_map = lanelet2.io.load(str(effective_osm), projector)
 
     # Recover MGRS offset: forward-project the geoReference origin to get the
     # MGRS absolute coordinates of the XODR origin.  The XODR uses local
@@ -346,7 +360,7 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     # Parse XODR XML to build Road objects (avoids pyxodr dependency)
     roads = parse_roads_from_xodr(xodr_path)
     xodr_sha256 = _sha256_of_file(xodr_path)
-    osm_sha256 = _sha256_of_file(osm_path)
+    osm_sha256 = _sha256_of_file(effective_osm)
 
     geo_mapping = build_mapping(
         lanelet_map, roads, (offset_x, offset_y), xodr_sha256, osm_sha256
