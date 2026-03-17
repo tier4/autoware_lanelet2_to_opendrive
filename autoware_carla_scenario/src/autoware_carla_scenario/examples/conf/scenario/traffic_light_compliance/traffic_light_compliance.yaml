@@ -14,10 +14,15 @@ ego:
 sweep:
   constraints:
     ego.spawn_lanelet_id:
-      - type: and
+      # - type: and
+      #   constraints:
+      #     # - type: has_stop_line
+      #     # - type: has_traffic_light_stop_line
+      #     - type: lanelet_ids
+      #       ids:
+      #         - 31
+      - type: previous_of
         constraints:
-          - type: has_stop_line
-          - type: has_traffic_light_stop_line
           - type: lanelet_ids
             ids:
               - 31
