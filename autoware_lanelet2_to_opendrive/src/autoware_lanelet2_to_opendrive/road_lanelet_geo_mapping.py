@@ -44,6 +44,23 @@ _MATCH_THRESHOLD: float = 2.0
 
 
 # ---------------------------------------------------------------------------
+# Internal dataclass for 3-phase matching
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _RoadCandidates:
+    """Per-road candidate list for the 3-phase matching algorithm."""
+
+    road: "ConverterRoad"
+    road_id: int
+    lane_ids: list[int]
+    is_rht: bool
+    ref_line: np.ndarray
+    candidates: list[tuple[float, int]]  # [(distance, lanelet_id), ...] ascending
+
+
+# ---------------------------------------------------------------------------
 # Dataclass
 # ---------------------------------------------------------------------------
 
@@ -376,6 +393,111 @@ def parse_roads_from_xodr(xodr_path: Path) -> list["ConverterRoad"]:
 
 
 # ---------------------------------------------------------------------------
+# Phase 1 & 2 helpers for 3-phase matching
+# ---------------------------------------------------------------------------
+
+
+def _compute_all_candidates(
+    roads: list["ConverterRoad"],
+    lanelet_left: dict[int, np.ndarray],
+    lanelet_right: dict[int, np.ndarray],
+    lanelet_left_bbox: dict[int, tuple[float, float, float, float]],
+    lanelet_right_bbox: dict[int, tuple[float, float, float, float]],
+) -> list[_RoadCandidates]:
+    """Phase 1: compute candidate lanelet lists for every road.
+
+    For each road, applies bbox -> direction -> distance filtering against
+    **all** lanelets (no ``matched_lanelets`` exclusion) and returns candidates
+    sorted by ascending distance.
+    """
+    all_rc: list[_RoadCandidates] = []
+
+    for road in roads:
+        ref_line = _sample_reference_line_from_road(road)
+        if len(ref_line) < 2:
+            continue
+
+        lane_ids = _get_driving_lane_ids_from_road(road)
+        if not lane_ids:
+            continue
+
+        is_rht = all(lid < 0 for lid in lane_ids)
+        boundaries = lanelet_left if is_rht else lanelet_right
+        bboxes = lanelet_left_bbox if is_rht else lanelet_right_bbox
+        ref_bbox = _bbox(ref_line)
+
+        candidates: list[tuple[float, int]] = []
+        for lid, boundary in boundaries.items():
+            if not _bboxes_overlap(ref_bbox, bboxes[lid]):
+                continue
+            if not _same_direction(ref_line, boundary):
+                continue
+            dist = _symmetric_mean_distance(ref_line, boundary)
+            if dist <= _MATCH_THRESHOLD:
+                candidates.append((dist, lid))
+
+        candidates.sort()  # ascending by distance
+
+        if candidates:
+            all_rc.append(
+                _RoadCandidates(
+                    road=road,
+                    road_id=road.id,
+                    lane_ids=lane_ids,
+                    is_rht=is_rht,
+                    ref_line=ref_line,
+                    candidates=candidates,
+                )
+            )
+
+    return all_rc
+
+
+def _resolve_conflicts(
+    all_rc: list[_RoadCandidates],
+) -> dict[int, int]:
+    """Phase 2: iteratively resolve conflicts when multiple roads claim the same lanelet.
+
+    Returns a mapping ``rc_index -> candidates_list_index`` indicating which
+    candidate each road should use as its reference lanelet.  Roads that
+    cannot be assigned any candidate are excluded from the result.
+    """
+    # assignment[rc_idx] = index into all_rc[rc_idx].candidates
+    assignment: dict[int, int] = {i: 0 for i in range(len(all_rc))}
+
+    while True:
+        # Build claims: lanelet_id -> [(rc_idx, distance), ...]
+        claims: dict[int, list[tuple[int, float]]] = {}
+        for rc_idx, cand_idx in assignment.items():
+            rc = all_rc[rc_idx]
+            if cand_idx >= len(rc.candidates):
+                continue
+            dist, lid = rc.candidates[cand_idx]
+            claims.setdefault(lid, []).append((rc_idx, dist))
+
+        had_conflict = False
+        for lid, claimants in claims.items():
+            if len(claimants) <= 1:
+                continue
+            # Sort by (distance, road_id) for deterministic tie-breaking
+            claimants.sort(key=lambda x: (x[1], all_rc[x[0]].road_id))
+            # Winner = closest; losers advance to next candidate
+            for rc_idx, _ in claimants[1:]:
+                assignment[rc_idx] += 1
+                had_conflict = True
+
+        if not had_conflict:
+            break
+
+    # Remove entries where the candidate index is out of range
+    return {
+        rc_idx: cand_idx
+        for rc_idx, cand_idx in assignment.items()
+        if cand_idx < len(all_rc[rc_idx].candidates)
+    }
+
+
+# ---------------------------------------------------------------------------
 # Build mapping
 # ---------------------------------------------------------------------------
 
@@ -507,75 +629,56 @@ def build_mapping(
                 best_cand = cand
         return best_cand
 
-    # -- Match roads to lanelets ------------------------------------------
+    # -- 3-phase matching --------------------------------------------------
 
     mapping: dict[int, tuple[int, int]] = {}
     matched_lanelets: set[int] = set()
 
-    # Sort roads by lane count ascending so that roads with fewer lanes are
-    # matched first.  Single-lane roads have no flexibility in their reference-
-    # lanelet choice, whereas multi-lane roads can shift their starting point
-    # if their first-choice reference lanelet is already claimed.  This avoids
-    # a greedy allocation error where a multi-lane road "steals" a lanelet
-    # that should belong to a neighbouring single-lane road.
-    sorted_roads = sorted(roads, key=lambda r: len(_get_driving_lane_ids_from_road(r)))
+    # Phase 1: compute candidate lists for every road (no exclusion)
+    all_rc = _compute_all_candidates(
+        roads,
+        lanelet_left,
+        lanelet_right,
+        lanelet_left_bbox,
+        lanelet_right_bbox,
+    )
 
-    for road in tqdm(sorted_roads, desc="Matching roads to lanelets", unit="road"):
-        ref_line = _sample_reference_line_from_road(road)
-        if len(ref_line) < 2:
-            continue
+    # Phase 2: resolve conflicts iteratively
+    assignment = _resolve_conflicts(all_rc)
 
-        lane_ids = _get_driving_lane_ids_from_road(road)
-        if not lane_ids:
-            continue
+    # Build resolved_references: lanelet_id -> rc_idx
+    resolved_references: dict[int, int] = {}
+    for rc_idx, cand_idx in assignment.items():
+        _, lid = all_rc[rc_idx].candidates[cand_idx]
+        resolved_references[lid] = rc_idx
 
-        road_id = road.id
+    # Phase 3: walk adjacency in distance order (closest first)
+    sorted_assignments = sorted(
+        assignment.items(),
+        key=lambda item: all_rc[item[0]].candidates[item[1]][0],
+    )
 
-        # Determine RHT / LHT from lane IDs
-        is_rht = all(lid < 0 for lid in lane_ids)
-
-        # RHT reference line = leftmost lanelet's LEFT boundary
-        # LHT reference line = rightmost lanelet's RIGHT boundary
-        boundaries = lanelet_left if is_rht else lanelet_right
-        bboxes = lanelet_left_bbox if is_rht else lanelet_right_bbox
-
-        ref_bbox = _bbox(ref_line)
-
-        best_lid: Optional[int] = None
-        best_dist = float("inf")
-
-        for lid, boundary in boundaries.items():
-            if lid in matched_lanelets:
-                continue
-            if not _bboxes_overlap(ref_bbox, bboxes[lid]):
-                continue
-            # Reject opposing-direction lanelets: the road reference line
-            # and the lanelet boundary must run in the same direction.
-            if not _same_direction(ref_line, boundary):
-                continue
-            dist = _symmetric_mean_distance(ref_line, boundary)
-            if dist < best_dist:
-                best_dist = dist
-                best_lid = lid
-
-        if best_lid is None or best_dist > _MATCH_THRESHOLD:
-            logger.debug(
-                "No matching lanelet for road %s (best_dist=%.2f)",
-                road_id,
-                best_dist,
-            )
-            continue
-
-        # -- Assign lane IDs by walking adjacency -------------------------
+    for rc_idx, cand_idx in tqdm(
+        sorted_assignments, desc="Matching roads to lanelets", unit="road"
+    ):
+        rc = all_rc[rc_idx]
+        _, best_lid = rc.candidates[cand_idx]
+        road_id = rc.road_id
 
         current = best_lid
-        for lane_id in lane_ids:
+        for lane_id in rc.lane_ids:
             mapping[current] = (int(road_id), lane_id)
             matched_lanelets.add(current)
 
             # Advance: RHT walks right, LHT walks left
-            next_ll = _right_neighbor(current) if is_rht else _left_neighbor(current)
+            next_ll = _right_neighbor(current) if rc.is_rht else _left_neighbor(current)
             if next_ll is None:
+                break
+            # Guard: do not step into another road's resolved reference lanelet
+            if (
+                next_ll in resolved_references
+                and resolved_references[next_ll] != rc_idx
+            ):
                 break
             current = next_ll
 
