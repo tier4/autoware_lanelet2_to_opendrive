@@ -1,20 +1,21 @@
 """
-Analyze an OpenDRIVE (.xodr) file using ASAM QC OpenDRIVE checker.
+Analyze an OpenDRIVE (.xodr) file using ASAM QC OpenDRIVE checker and
+cross-validate the lanelet-to-road mapping against geometric comparison.
 
 Runs all available checks (basic, schema, semantic, geometry, performance,
-smoothness) against a given .xodr file and prints a human-readable report.
+smoothness) against a given .xodr file, performs mapping cross-validation,
+and prints a human-readable report.
 
 Usage:
-    uv run analyze <path_to_xodr_file> [options]
+    uv run analyze <xodr_file> <osm_file> [options]
 
 Examples:
-    uv run analyze test/data/nishishinjuku.xodr
-    uv run analyze output.xodr --output result.xqar
-    uv run analyze output.xodr --min-severity WARNING
-    uv run analyze output.xodr --max-issues 20
-    uv run analyze output.xodr --ignore-pattern "attribute 'rule'"
-    uv run analyze output.xodr --ignore-pattern "foo" --ignore-pattern "bar"
-    uv run analyze output.xodr --no-default-ignores
+    uv run analyze output.xodr input.osm
+    uv run analyze output.xodr input.osm --output result.xqar
+    uv run analyze output.xodr input.osm --min-severity WARNING
+    uv run analyze output.xodr input.osm --max-issues 20
+    uv run analyze output.xodr input.osm --ignore-pattern "attribute 'rule'"
+    uv run analyze output.xodr input.osm --no-default-ignores
 """
 
 import argparse
@@ -30,6 +31,8 @@ from qc_opendrive.main import run_checks
 
 # Silence verbose library logging (overridden by --verbose)
 logging.getLogger().setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 # Default ignore patterns for known false positives.
 # The converter targets CARLA which uses OpenDRIVE 1.4 syntax but supports
@@ -260,15 +263,227 @@ def print_report(
     return total_errors
 
 
+# ---------------------------------------------------------------------------
+# Mapping cross-validation (standalone, for CLI use without convert context)
+# ---------------------------------------------------------------------------
+
+
+def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
+    """Run mapping cross-validation between XODR and OSM files.
+
+    Loads the Lanelet2 map from *osm_path*, parses the XODR with ``pyxodr``,
+    and checks that the ``.mapping.json`` next to the XODR is consistent with
+    the geometric boundary comparison.
+
+    Args:
+        xodr_path: Path to the OpenDRIVE file.
+        osm_path: Path to the Lanelet2 OSM file.
+
+    Returns:
+        ``True`` if mapping validation passed or was skipped (no mapping file),
+        ``False`` if a mismatch was detected.
+    """
+    import json
+
+    import lanelet2
+    import lxml.etree as ET
+    from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
+    from pyxodr.road_objects.network import RoadNetwork
+
+    from .projection import latlon_to_lanelet2_origin
+    from .road_lanelet_geo_mapping import (
+        GeoRoadLaneletMapping,
+        MappingMismatchError,
+        _cache_path_for,
+        _sha256_of_file,
+        build_mapping,
+        validate_mapping_consistency,
+    )
+
+    # Check for .mapping.json next to the XODR
+    mapping_path = _cache_path_for(xodr_path)
+    if not mapping_path.exists():
+        print(f"\n  Mapping file not found: {mapping_path}")
+        print("  Skipping mapping cross-validation.")
+        return True
+
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
+    conv_mapping = GeoRoadLaneletMapping.from_dict(data)
+
+    print(f"\n  Mapping file : {mapping_path}")
+    print(f"  Entries      : {len(conv_mapping.lanelet_to_road_and_lane)}")
+
+    # Parse geoReference from XODR to determine origin
+    tree = ET.parse(str(xodr_path))
+    geo_ref_elem = tree.find(".//geoReference")
+    if geo_ref_elem is None or geo_ref_elem.text is None:
+        print("  WARNING: No geoReference in XODR; skipping mapping validation.")
+        return True
+
+    proj_string = geo_ref_elem.text.strip()
+    lat_match = re.search(r"\+lat_0=([\d.eE+-]+)", proj_string)
+    lon_match = re.search(r"\+lon_0=([\d.eE+-]+)", proj_string)
+    if not lat_match or not lon_match:
+        print("  WARNING: Cannot parse lat_0/lon_0 from geoReference; skipping.")
+        return True
+
+    origin_lat = float(lat_match.group(1))
+    origin_lon = float(lon_match.group(1))
+
+    # Load Lanelet2 map with the same origin
+    origin = latlon_to_lanelet2_origin(origin_lat, origin_lon)
+    projector = MGRSProjector(origin)
+    lanelet_map = lanelet2.io.load(str(osm_path), projector)
+
+    # The geometric comparison subtracts mgrs_offset from lanelet coordinates.
+    # In the standalone CLI context we cannot reliably reconstruct the meter
+    # offset used during conversion, so we default to (0, 0).
+    offset_x = 0.0
+    offset_y = 0.0
+
+    road_network = RoadNetwork.from_file(str(xodr_path))
+    xodr_sha256 = _sha256_of_file(xodr_path)
+    osm_sha256 = _sha256_of_file(osm_path)
+
+    geo_mapping = build_mapping(
+        lanelet_map, road_network, (offset_x, offset_y), xodr_sha256, osm_sha256
+    )
+
+    try:
+        validate_mapping_consistency(conv_mapping.lanelet_to_road_and_lane, geo_mapping)
+        print("  Mapping cross-validation: PASSED")
+        return True
+    except MappingMismatchError as e:
+        print(f"  Mapping cross-validation: FAILED\n  {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Unified analysis entry-point (callable from convert and CLI)
+# ---------------------------------------------------------------------------
+
+
+def run_analysis(
+    xodr_path: Path,
+    osm_path: Path,
+    *,
+    min_severity: IssueSeverity = IssueSeverity.INFORMATION,
+    max_issues_per_checker: int = 10,
+    ignore_patterns: list[str] | None = None,
+    fail_on_warning: bool = False,
+    result_file: str | None = None,
+) -> int:
+    """Run ASAM QC checks and mapping cross-validation.
+
+    This is the programmatic entry-point shared by the ``analyze`` CLI command
+    and the ``convert`` post-conversion step.
+
+    Args:
+        xodr_path: Path to the .xodr file.
+        osm_path: Path to the Lanelet2 .osm file.
+        min_severity: Minimum severity level to report.
+        max_issues_per_checker: Max issues shown per checker.
+        ignore_patterns: Regex patterns to suppress matching issues.
+        fail_on_warning: Treat warnings as failures.
+        result_file: Path to persist the .xqar result (temp file if None).
+
+    Returns:
+        Number of errors found (ASAM QC errors + mapping mismatch).
+    """
+    xodr_path = xodr_path.resolve()
+    osm_path = osm_path.resolve()
+
+    if ignore_patterns is None:
+        ignore_patterns = list(DEFAULT_IGNORE_PATTERNS)
+
+    # ── ASAM QC checks ─────────────────────────────────────────────────────
+    use_temp = result_file is None
+    if use_temp:
+        tmp = tempfile.NamedTemporaryFile(suffix=".xqar", delete=False)
+        rf = tmp.name
+        tmp.close()
+    else:
+        rf = str(Path(result_file).resolve())
+
+    config = build_config(str(xodr_path), rf)
+
+    result_obj = Result()
+    result_obj.register_checker_bundle(
+        name=constants.BUNDLE_NAME,
+        description="OpenDrive checker bundle",
+        version=constants.BUNDLE_VERSION,
+        summary="",
+    )
+    result_obj.set_result_version(version=constants.BUNDLE_VERSION)
+
+    run_checks(config, result_obj)
+
+    error_count = print_report(
+        result_obj,
+        str(xodr_path),
+        min_severity,
+        max_issues_per_checker=max_issues_per_checker,
+        ignore_patterns=ignore_patterns,
+    )
+
+    result_obj.copy_param_from_config(config)
+    result_obj.write_to_file(rf, generate_summary=True)
+
+    if not use_temp:
+        print(f"\nFull result written to: {rf}")
+
+    if use_temp:
+        Path(rf).unlink(missing_ok=True)
+
+    # ── Mapping cross-validation ───────────────────────────────────────────
+    print(f"\n{'=' * 72}")
+    print("  Mapping Cross-Validation")
+    print(f"{'=' * 72}")
+
+    mapping_ok = run_mapping_validation(xodr_path, osm_path)
+    if not mapping_ok:
+        error_count += 1
+
+    # ── Final summary ──────────────────────────────────────────────────────
+    print(f"\n{'=' * 72}")
+    if error_count > 0:
+        print(f"  FINAL RESULT: FAIL  ({error_count} error(s) found)")
+    else:
+        print("  FINAL RESULT: PASS")
+    print(f"{'=' * 72}")
+
+    # Check warnings for fail_on_warning
+    if fail_on_warning and error_count == 0:
+        checker_ids = result_obj.get_checker_ids(constants.BUNDLE_NAME)
+        warning_count = sum(
+            sum(
+                1
+                for issue in result_obj.get_checker_result(
+                    constants.BUNDLE_NAME, cid
+                ).issues
+                if issue.level == IssueSeverity.WARNING
+            )
+            for cid in checker_ids
+        )
+        if warning_count > 0:
+            return 1
+
+    return error_count
+
+
 def main() -> None:
     """Entry point for the analyze command."""
     parser = argparse.ArgumentParser(
         prog="analyze",
-        description="Analyze a .xodr file with ASAM QC OpenDRIVE checker.",
+        description=(
+            "Analyze a .xodr file with ASAM QC OpenDRIVE checker "
+            "and cross-validate the lanelet-to-road mapping."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument("xodr_file", help="Path to the .xodr file to analyze")
+    parser.add_argument("osm_file", help="Path to the Lanelet2 .osm file")
     parser.add_argument(
         "--output",
         "-o",
@@ -333,74 +548,25 @@ def main() -> None:
         print(f"Error: file not found: {xodr_path}", file=sys.stderr)
         sys.exit(2)
 
-    min_severity = MIN_SEVERITY_MAP[args.min_severity.upper()]
+    osm_path = Path(args.osm_file).resolve()
+    if not osm_path.exists():
+        print(f"Error: file not found: {osm_path}", file=sys.stderr)
+        sys.exit(2)
 
-    # Determine result file path
-    use_temp = args.output is None
-    if use_temp:
-        tmp = tempfile.NamedTemporaryFile(suffix=".xqar", delete=False)
-        result_file = tmp.name
-        tmp.close()
-    else:
-        result_file = str(Path(args.output).resolve())
-
-    # Build config and run all checks
-    config = build_config(str(xodr_path), result_file)
-
-    result_obj = Result()
-    result_obj.register_checker_bundle(
-        name=constants.BUNDLE_NAME,
-        description="OpenDrive checker bundle",
-        version=constants.BUNDLE_VERSION,
-        summary="",
-    )
-    result_obj.set_result_version(version=constants.BUNDLE_VERSION)
-
-    run_checks(config, result_obj)
-
-    # Print report BEFORE write_to_file so generate_summary=True does not
-    # append "X issue(s) are found." to checker summaries before we read them.
     base_patterns = [] if args.no_default_ignores else DEFAULT_IGNORE_PATTERNS
     all_ignore_patterns = base_patterns + args.ignore_patterns
 
-    error_count = print_report(
-        result_obj,
-        str(xodr_path),
-        min_severity,
+    error_count = run_analysis(
+        xodr_path=xodr_path,
+        osm_path=osm_path,
+        min_severity=MIN_SEVERITY_MAP[args.min_severity.upper()],
         max_issues_per_checker=args.max_issues,
         ignore_patterns=all_ignore_patterns,
+        fail_on_warning=args.fail_on_warning,
+        result_file=args.output,
     )
 
-    # Write result file (generate_summary appends issue counts to summaries)
-    result_obj.copy_param_from_config(config)
-    result_obj.write_to_file(result_file, generate_summary=True)
-
-    if not use_temp:
-        print(f"\nFull result written to: {result_file}")
-
-    # Clean up temp file
-    if use_temp:
-        Path(result_file).unlink(missing_ok=True)
-
-    # Exit code
-    if error_count > 0:
-        sys.exit(1)
-
-    checker_ids = result_obj.get_checker_ids(constants.BUNDLE_NAME)
-    warning_count = sum(
-        sum(
-            1
-            for issue in result_obj.get_checker_result(
-                constants.BUNDLE_NAME, cid
-            ).issues
-            if issue.level == IssueSeverity.WARNING
-        )
-        for cid in checker_ids
-    )
-    if args.fail_on_warning and warning_count > 0:
-        sys.exit(1)
-
-    sys.exit(0)
+    sys.exit(1 if error_count > 0 else 0)
 
 
 if __name__ == "__main__":

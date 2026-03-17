@@ -1423,6 +1423,15 @@ def preprocess_and_convert_with_hydra(
             mgrs_offset=(offset_x, offset_y),
         )
 
+        # Run ASAM QC analysis + mapping cross-validation
+        from autoware_lanelet2_to_opendrive.analyze_xodr import run_analysis
+
+        logger.info("Running post-conversion analysis...")
+        run_analysis(
+            xodr_path=Path(conversion_config.output_path),
+            osm_path=input_map_path,
+        )
+
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
