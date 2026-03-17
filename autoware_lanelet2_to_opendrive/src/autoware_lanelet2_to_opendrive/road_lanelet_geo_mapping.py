@@ -67,7 +67,8 @@ class _RoadCandidates:
     lane_ids: list[int]
     is_rht: bool
     ref_line: np.ndarray
-    candidates: list[tuple[float, int]]  # [(distance, lanelet_id), ...] ascending
+    candidates: list[tuple[float, int]]  # [(ranking_dist, lanelet_id), ...] ascending
+    raw_dists: dict[int, float] = field(default_factory=dict)  # lid -> raw distance
     walk_lane_ids: list[int] = field(default_factory=list)  # Geometric walk order
 
 
@@ -83,6 +84,7 @@ class GeoRoadLaneletMapping:
     xodr_sha256: str
     osm_sha256: str
     lanelet_to_road_and_lane: dict[int, tuple[int, int]] = field(default_factory=dict)
+    preprocessing_log: dict | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
         init=False,
@@ -105,14 +107,17 @@ class GeoRoadLaneletMapping:
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dictionary."""
-        return {
-            "version": 2,
+        result: dict = {
+            "version": 3,
             "xodr_sha256": self.xodr_sha256,
             "osm_sha256": self.osm_sha256,
             "lanelet_to_road_and_lane": {
                 str(k): list(v) for k, v in self.lanelet_to_road_and_lane.items()
             },
         }
+        if self.preprocessing_log is not None:
+            result["preprocessing_log"] = self.preprocessing_log
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "GeoRoadLaneletMapping":
@@ -124,6 +129,7 @@ class GeoRoadLaneletMapping:
                 int(k): (v[0], v[1])
                 for k, v in data["lanelet_to_road_and_lane"].items()
             },
+            preprocessing_log=data.get("preprocessing_log"),
         )
 
 
@@ -468,6 +474,7 @@ def _compute_all_candidates(
         ]
 
         candidates: list[tuple[float, int]] = []
+        raw_dists: dict[int, float] = {}
         best_rejected_dist: float = float("inf")
         best_rejected_lid: Optional[int] = None
         n_bbox_skip = 0
@@ -479,6 +486,7 @@ def _compute_all_candidates(
 
         for require_dir, metric in _FALLBACK_LEVELS:
             candidates.clear()
+            raw_dists.clear()
             best_rejected_dist = float("inf")
             best_rejected_lid = None
             n_bbox_skip = 0
@@ -510,6 +518,7 @@ def _compute_all_candidates(
                     )
                     ranking_dist = dist + (ep_start + ep_end) * _ENDPOINT_WEIGHT
                     candidates.append((ranking_dist, lid))
+                    raw_dists[lid] = dist
                 elif dist < best_rejected_dist:
                     best_rejected_dist = dist
                     best_rejected_lid = lid
@@ -549,6 +558,7 @@ def _compute_all_candidates(
                     is_rht=is_rht,
                     ref_line=ref_line,
                     candidates=candidates,
+                    raw_dists=dict(raw_dists),
                     walk_lane_ids=walk_lane_ids,
                 )
             )
@@ -646,55 +656,54 @@ def _resolve_conflicts(
 
     # --- Swap detection: fix pairwise assignment swaps that greedy missed ---
     # Two roads A, B may each hold the other's ideal lanelet.  When swapping
-    # reduces the total distance, apply the swap.  Safe because each assigned
-    # lanelet is unique and the swap preserves uniqueness.
+    # reduces the total raw distance, apply the swap.  Raw (geometric)
+    # distances are used instead of ranking distances (which include the
+    # endpoint penalty) for more accurate swap benefit calculation.
     swap_found = True
     while swap_found:
         swap_found = False
         items = list(valid.items())
         for i in range(len(items)):
             rc_a, cand_a = items[i]
-            dist_a, lid_a = all_rc[rc_a].candidates[cand_a]
+            _, lid_a = all_rc[rc_a].candidates[cand_a]
+            raw_a = all_rc[rc_a].raw_dists.get(lid_a, float("inf"))
             for j in range(i + 1, len(items)):
                 rc_b, cand_b = items[j]
-                dist_b, lid_b = all_rc[rc_b].candidates[cand_b]
+                _, lid_b = all_rc[rc_b].candidates[cand_b]
+                raw_b = all_rc[rc_b].raw_dists.get(lid_b, float("inf"))
 
                 # Does A have lid_b? Does B have lid_a?
-                swap_a = next(
-                    (
-                        (ci, d)
-                        for ci, (d, cand_lid) in enumerate(all_rc[rc_a].candidates)
-                        if cand_lid == lid_b
-                    ),
-                    None,
-                )
-                if swap_a is None:
+                raw_a_new = all_rc[rc_a].raw_dists.get(lid_b)
+                if raw_a_new is None:
                     continue
-                swap_b = next(
-                    (
-                        (ci, d)
-                        for ci, (d, cand_lid) in enumerate(all_rc[rc_b].candidates)
-                        if cand_lid == lid_a
-                    ),
-                    None,
-                )
-                if swap_b is None:
+                raw_b_new = all_rc[rc_b].raw_dists.get(lid_a)
+                if raw_b_new is None:
                     continue
 
-                ci_a_new, dist_a_new = swap_a
-                ci_b_new, dist_b_new = swap_b
-                if dist_a_new + dist_b_new < dist_a + dist_b:
+                if raw_a_new + raw_b_new < raw_a + raw_b:
+                    # Find the candidate indices for the swapped lanelets
+                    ci_a_new = next(
+                        ci
+                        for ci, (_, cand_lid) in enumerate(all_rc[rc_a].candidates)
+                        if cand_lid == lid_b
+                    )
+                    ci_b_new = next(
+                        ci
+                        for ci, (_, cand_lid) in enumerate(all_rc[rc_b].candidates)
+                        if cand_lid == lid_a
+                    )
                     valid[rc_a] = ci_a_new
                     valid[rc_b] = ci_b_new
                     swap_found = True
                     logger.debug(
-                        "Swap fix: roads %d↔%d (lanelets %d↔%d, " "cost %.3f→%.3f)",
+                        "Swap fix: roads %d<->%d (lanelets %d<->%d, "
+                        "raw cost %.3f->%.3f)",
                         all_rc[rc_a].road_id,
                         all_rc[rc_b].road_id,
                         lid_a,
                         lid_b,
-                        dist_a + dist_b,
-                        dist_a_new + dist_b_new,
+                        raw_a + raw_b,
+                        raw_a_new + raw_b_new,
                     )
                     break
             if swap_found:
@@ -961,6 +970,55 @@ def build_mapping(
             mapping[lid] = (rid, lane_id)
             matched_lanelets.add(lid)
 
+    # -- Rescue pass: attempt to assign dropped roads -----------------------
+    # Roads that had candidates in Phase 1 but were dropped in Phase 2
+    # (conflict resolution) get a second chance with a relaxed search
+    # against currently unmatched lanelets.
+    _RESCUE_THRESHOLD: float = _MATCH_THRESHOLD * 1.5
+    assigned_rc_indices = set(assignment.keys())
+    for rc_idx in range(len(all_rc)):
+        if rc_idx in assigned_rc_indices:
+            continue
+        rc = all_rc[rc_idx]
+        boundaries = lanelet_left if rc.is_rht else lanelet_right
+        bboxes = lanelet_left_bbox if rc.is_rht else lanelet_right_bbox
+        ref_bbox = _bbox(rc.ref_line)
+        best_lid: Optional[int] = None
+        best_dist = _RESCUE_THRESHOLD
+        for lid, boundary in boundaries.items():
+            if lid in matched_lanelets:
+                continue
+            if not _bboxes_overlap(ref_bbox, bboxes[lid]):
+                continue
+            dist = _symmetric_mean_distance(boundary, rc.ref_line)
+            if dist < best_dist:
+                best_dist = dist
+                best_lid = lid
+
+        if best_lid is not None:
+            # Assign reference lanelet and walk
+            current = best_lid
+            walk_result_rescue: list[tuple[int, int, int]] = []
+            for lane_id in rc.walk_lane_ids:
+                walk_result_rescue.append((current, int(rc.road_id), lane_id))
+                next_ll = (
+                    _right_neighbor(current) if rc.is_rht else _left_neighbor(current)
+                )
+                if next_ll is None or next_ll in matched_lanelets:
+                    break
+                current = next_ll
+            for lid, rid, lane_id in walk_result_rescue:
+                mapping[lid] = (rid, lane_id)
+                matched_lanelets.add(lid)
+            logger.info(
+                "Rescue: road %d recovered via lanelet %d (dist=%.3f, lanes=%d/%d)",
+                rc.road_id,
+                best_lid,
+                best_dist,
+                len(walk_result_rescue),
+                len(rc.walk_lane_ids),
+            )
+
     # -- Diagnostic summary ------------------------------------------------
     all_road_ids = {road.id for road in roads if road.plan_view and road.lanes}
     rc_road_ids = {rc.road_id for rc in all_rc}
@@ -1048,6 +1106,7 @@ def _cache_path_for(xodr_path: Path) -> Path:
 def validate_mapping_consistency(
     conversion_mapping: dict[int, tuple[int, int]],
     geo_mapping: GeoRoadLaneletMapping,
+    preprocessing_log: dict | None = None,
 ) -> None:
     """Validate that conversion-time mapping matches geometric mapping.
 
@@ -1059,31 +1118,50 @@ def validate_mapping_consistency(
         conversion_mapping: Mapping produced during conversion
             (lanelet_id -> (road_id, lane_id)).
         geo_mapping: Mapping produced by geometric boundary comparison.
+        preprocessing_log: Optional preprocessing log dict (from
+            ``PreprocessingLog.to_dict()``) to annotate mismatches with
+            preprocessing context.
 
     Raises:
         MappingMismatchError: When at least one entry differs between the two
             mappings.
     """
+    # Build a set of merge-produced IDs and a lookup from the log
+    merge_output_ids: set[int] = set()
+    merge_sources: dict[int, list[int]] = {}
+    if preprocessing_log:
+        for entry in preprocessing_log.get("entries", []):
+            if entry.get("operation") == "merge":
+                for oid in entry.get("output_ids", []):
+                    merge_output_ids.add(oid)
+                    merge_sources[oid] = entry.get("input_ids", [])
+
     mismatches: list[str] = []
     geo = geo_mapping.lanelet_to_road_and_lane
 
     for lanelet_id, conv_value in conversion_mapping.items():
         geo_value = geo.get(lanelet_id)
         if geo_value is None:
-            mismatches.append(
-                f"  lanelet {lanelet_id}: conversion={conv_value}, " f"geo=<missing>"
-            )
+            msg = f"  lanelet {lanelet_id}: conversion={conv_value}, geo=<missing>"
+            if lanelet_id in merge_output_ids:
+                src = merge_sources.get(lanelet_id, [])
+                msg += f" [merge output from {src}]"
+            mismatches.append(msg)
         elif conv_value != geo_value:
-            mismatches.append(
-                f"  lanelet {lanelet_id}: conversion={conv_value}, " f"geo={geo_value}"
-            )
+            msg = f"  lanelet {lanelet_id}: conversion={conv_value}, geo={geo_value}"
+            if lanelet_id in merge_output_ids:
+                src = merge_sources.get(lanelet_id, [])
+                msg += f" [merge output from {src}]"
+            mismatches.append(msg)
 
     # Also check for entries only in geo mapping
     for lanelet_id, geo_value in geo.items():
         if lanelet_id not in conversion_mapping:
-            mismatches.append(
-                f"  lanelet {lanelet_id}: conversion=<missing>, " f"geo={geo_value}"
-            )
+            msg = f"  lanelet {lanelet_id}: conversion=<missing>, geo={geo_value}"
+            if lanelet_id in merge_output_ids:
+                src = merge_sources.get(lanelet_id, [])
+                msg += f" [merge output from {src}]"
+            mismatches.append(msg)
 
     if mismatches:
         detail = "\n".join(mismatches[:20])
@@ -1144,6 +1222,7 @@ def validate_and_save_mapping(
     xodr_path: Path,
     osm_path: Path,
     mgrs_offset: tuple[float, float],
+    preprocessing_log: dict | None = None,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
@@ -1162,6 +1241,8 @@ def validate_and_save_mapping(
         xodr_path: Path to the generated XODR file.
         osm_path: Path to the source OSM file.
         mgrs_offset: ``(offset_x, offset_y)`` coordinate offset.
+        preprocessing_log: Optional preprocessing log dict to embed in the
+            mapping JSON and annotate cross-validation mismatches.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
@@ -1179,6 +1260,7 @@ def validate_and_save_mapping(
         xodr_sha256=xodr_sha256,
         osm_sha256=osm_sha256,
         lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+        preprocessing_log=preprocessing_log,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)
@@ -1187,7 +1269,9 @@ def validate_and_save_mapping(
     geo_mapping = build_mapping(
         lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256
     )
-    validate_mapping_consistency(lanelet_to_road_and_lane, geo_mapping)
+    validate_mapping_consistency(
+        lanelet_to_road_and_lane, geo_mapping, preprocessing_log
+    )
     logger.info("Cross-validation passed successfully!")
 
     return json_path

@@ -45,7 +45,7 @@ class TestRemoveLaneletBasic:
         # Execute removal
         preprocessor = LaneletPreprocessor(config)
         preprocessor.lanelet_map = lanelet_map
-        new_map = preprocessor.execute_remove_lanelet_operations(lanelet_map)
+        new_map, _log = preprocessor.execute_remove_lanelet_operations(lanelet_map)
 
         # Verify lanelet was removed
         assert len(list(new_map.laneletLayer)) == 2
@@ -92,7 +92,7 @@ class TestRemoveLaneletBasic:
         # Execute removal
         preprocessor = LaneletPreprocessor(config)
         preprocessor.lanelet_map = lanelet_map
-        new_map = preprocessor.execute_remove_lanelet_operations(lanelet_map)
+        new_map, _log = preprocessor.execute_remove_lanelet_operations(lanelet_map)
 
         # Verify lanelets were removed
         assert len(list(new_map.laneletLayer)) == 2
@@ -134,7 +134,7 @@ class TestRemoveLaneletBasic:
         # Execute removal
         preprocessor = LaneletPreprocessor(config)
         preprocessor.lanelet_map = lanelet_map
-        new_map = preprocessor.execute_remove_lanelet_operations(lanelet_map)
+        new_map, _log = preprocessor.execute_remove_lanelet_operations(lanelet_map)
 
         # Verify nothing was removed
         assert len(list(new_map.laneletLayer)) == 1
@@ -178,7 +178,7 @@ class TestRemoveLaneletBasic:
         # Execute removal
         preprocessor = LaneletPreprocessor(config)
         preprocessor.lanelet_map = lanelet_map
-        new_map = preprocessor.execute_remove_lanelet_operations(lanelet_map)
+        new_map, _log = preprocessor.execute_remove_lanelet_operations(lanelet_map)
 
         # Verify lanelets were removed
         assert len(list(new_map.laneletLayer)) == 4

@@ -1296,6 +1296,8 @@ def preprocess_and_convert_with_hydra(
         ]
     )
 
+    preprocessing_log_dict: dict | None = None
+
     if has_preprocessing:
         logger.info("Running preprocessing operations...")
 
@@ -1312,12 +1314,14 @@ def preprocess_and_convert_with_hydra(
 
         # Run preprocessing
         preprocessor = LaneletPreprocessor(config)
-        preprocessor.process()
+        _lanelet_map, preprocessing_log = preprocessor.process()
+        preprocessing_log_dict = preprocessing_log.to_dict()
 
         # Update input path to use preprocessed map
         input_map_path = preprocessed_path
         logger.info(
-            f"Preprocessing completed. Using preprocessed map from: {input_map_path}"
+            f"Preprocessing completed ({len(preprocessing_log.entries)} ops). "
+            f"Using preprocessed map from: {input_map_path}"
         )
 
     # Load the (possibly preprocessed) Lanelet2 map
@@ -1422,6 +1426,7 @@ def preprocess_and_convert_with_hydra(
             xodr_path=Path(conversion_config.output_path),
             osm_path=input_map_path,
             mgrs_offset=(offset_x, offset_y),
+            preprocessing_log=preprocessing_log_dict,
         )
 
         # Run ASAM QC analysis + mapping cross-validation
