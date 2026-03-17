@@ -14,10 +14,14 @@ ego:
 sweep:
   constraints:
     ego.spawn_lanelet_id:
-      - type: previous_of
+      - type: and
         constraints:
-          - type: has_traffic_light_stop_line
-          - type: is_junction
+          - type: previous_of
+            constraints:
+              - type: has_traffic_light_stop_line
+              - type: is_junction
+          - type: equals
+            value: 3002141
   bindings:
     ego.spawn_s:
       type: stop_line_offset

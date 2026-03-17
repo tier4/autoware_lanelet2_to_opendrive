@@ -27,6 +27,12 @@ combinations::
       constraint:
         type: has_traffic_light_stop_line
 
+Simple value constraints::
+
+    # Match a specific lanelet by ID
+    - type: equals
+      value: 3002141
+
 Set-level relational constraints (``previous_of``, ``following_of``) evaluate
 inner constraints across all lanelets first, then resolve to the
 previous/following neighbours via the routing graph::
@@ -90,20 +96,19 @@ class HasStopLineConstraint:
 
 
 @dataclass(frozen=True)
-class LaneletIdsConstraint:
-    """Matches only lanelets whose ID is in the given list.
+class EqualsConstraint:
+    """Matches a lanelet whose ID equals the given value.
 
-    Useful for re-running specific lanelets that failed during a previous
-    sweep::
+    A general-purpose equality check on the lanelet ID::
 
-        - type: lanelet_ids
-          ids: [31, 300, 242]
+        - type: equals
+          value: 3002141
     """
 
-    ids: tuple[int, ...] = field(default_factory=tuple)
+    value: int = 0
 
     def evaluate(self, lanelet: Any) -> bool:
-        return lanelet.id in self.ids
+        return lanelet.id == self.value
 
 
 @dataclass(frozen=True)
@@ -301,7 +306,7 @@ _LEAF_REGISTRY: dict[str, type] = {
     "has_stop_line": HasStopLineConstraint,
     "has_traffic_light_stop_line": HasTrafficLightStopLineConstraint,
     "is_junction": IsJunctionConstraint,
-    "lanelet_ids": LaneletIdsConstraint,
+    "equals": EqualsConstraint,
 }
 
 
