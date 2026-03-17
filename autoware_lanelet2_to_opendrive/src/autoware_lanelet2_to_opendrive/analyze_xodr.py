@@ -271,9 +271,9 @@ def print_report(
 def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     """Run mapping cross-validation between XODR and OSM files.
 
-    Loads the Lanelet2 map from *osm_path*, parses the XODR with ``pyxodr``,
-    and checks that the ``.mapping.json`` next to the XODR is consistent with
-    the geometric boundary comparison.
+    Loads the Lanelet2 map from *osm_path*, parses the XODR to extract road
+    reference lines and lane IDs, and checks that the ``.mapping.json`` next
+    to the XODR is consistent with the geometric boundary comparison.
 
     Args:
         xodr_path: Path to the OpenDRIVE file.
@@ -288,7 +288,6 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     import lanelet2
     import lxml.etree as ET
     from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
-    from pyxodr.road_objects.network import RoadNetwork
 
     from .projection import latlon_to_lanelet2_origin
     from .road_lanelet_geo_mapping import (
@@ -297,6 +296,7 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
         _cache_path_for,
         _sha256_of_file,
         build_mapping,
+        parse_roads_from_xodr,
         validate_mapping_consistency,
     )
 
@@ -335,18 +335,21 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     projector = MGRSProjector(origin)
     lanelet_map = lanelet2.io.load(str(osm_path), projector)
 
-    # The geometric comparison subtracts mgrs_offset from lanelet coordinates.
-    # In the standalone CLI context we cannot reliably reconstruct the meter
-    # offset used during conversion, so we default to (0, 0).
-    offset_x = 0.0
-    offset_y = 0.0
+    # Recover MGRS offset: forward-project the geoReference origin to get the
+    # MGRS absolute coordinates of the XODR origin.  The XODR uses local
+    # coordinates = MGRS_absolute - offset, so we need this offset to bring
+    # lanelet coordinates into the same space as the XODR roads.
+    fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
+    offset_x = fwd.x
+    offset_y = fwd.y
 
-    road_network = RoadNetwork(str(xodr_path))
+    # Parse XODR XML to build Road objects (avoids pyxodr dependency)
+    roads = parse_roads_from_xodr(xodr_path)
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
 
     geo_mapping = build_mapping(
-        lanelet_map, road_network, (offset_x, offset_y), xodr_sha256, osm_sha256
+        lanelet_map, roads, (offset_x, offset_y), xodr_sha256, osm_sha256
     )
 
     try:

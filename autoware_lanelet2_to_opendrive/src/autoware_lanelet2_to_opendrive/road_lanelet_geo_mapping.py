@@ -19,10 +19,13 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from tqdm import tqdm
+
+if TYPE_CHECKING:
+    from .opendrive.road import Road as ConverterRoad
 
 logger = logging.getLogger(__name__)
 
@@ -153,20 +156,70 @@ def _symmetric_mean_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Lane-ID extraction
+# Reference-line sampling from converter Road objects
 # ---------------------------------------------------------------------------
 
 
-def _get_driving_lane_ids(road) -> list[int]:
-    """Return sorted non-zero lane IDs from the first lane section.
+def _sample_reference_line_from_road(
+    road: "ConverterRoad", num_samples_per_segment: int = 10
+) -> np.ndarray:
+    """Sample 2D reference line points from a converter Road's ParamPoly3 geometries.
+
+    Evaluates the parametric cubic polynomial at evenly-spaced parameter values
+    within each geometry segment and transforms local (u, v) to global (x, y).
+
+    Args:
+        road: Converter Road object with ``plan_view`` containing geometries.
+        num_samples_per_segment: Number of sample points per geometry segment.
+
+    Returns:
+        NumPy array of shape ``(N, 2)`` with global (x, y) coordinates.
+    """
+    if road.plan_view is None or not road.plan_view.geometries:
+        return np.empty((0, 2))
+
+    points: list[list[float]] = []
+    for geom in road.plan_view.geometries:
+        cos_hdg = np.cos(geom.hdg)
+        sin_hdg = np.sin(geom.hdg)
+        for i in range(num_samples_per_segment):
+            p = geom.length * i / num_samples_per_segment
+            u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
+            v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
+            x = geom.x + cos_hdg * u - sin_hdg * v
+            y = geom.y + sin_hdg * u + cos_hdg * v
+            points.append([x, y])
+
+    # Add endpoint of last segment
+    if road.plan_view.geometries:
+        last = road.plan_view.geometries[-1]
+        p = last.length
+        cos_hdg = np.cos(last.hdg)
+        sin_hdg = np.sin(last.hdg)
+        u = last.aU + last.bU * p + last.cU * p**2 + last.dU * p**3
+        v = last.aV + last.bV * p + last.cV * p**2 + last.dV * p**3
+        x = last.x + cos_hdg * u - sin_hdg * v
+        y = last.y + sin_hdg * u + cos_hdg * v
+        points.append([x, y])
+
+    return np.array(points)
+
+
+# ---------------------------------------------------------------------------
+# Lane-ID extraction from converter Road objects
+# ---------------------------------------------------------------------------
+
+
+def _get_driving_lane_ids_from_road(road: "ConverterRoad") -> list[int]:
+    """Return sorted non-zero lane IDs from a converter Road's first lane section.
 
     Sorted by ``abs(id)`` so that the innermost lane (closest to the
     reference line) comes first.
     """
-    if not road.lane_sections:
+    if road.lanes is None or not road.lanes.lane_sections:
         return []
-    section = road.lane_sections[0]
-    ids = [lane.id for lane in section.lanes if lane.id != 0]
+    section = road.lanes.lane_sections[0]
+    ids = list(section.left_lanes.keys()) + list(section.right_lanes.keys())
     return sorted(ids, key=abs)
 
 
@@ -185,18 +238,139 @@ def _sha256_of_file(path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Parse XODR XML to converter-compatible Road objects
+# ---------------------------------------------------------------------------
+
+
+def parse_roads_from_xodr(xodr_path: Path) -> list["ConverterRoad"]:
+    """Parse XODR XML and construct converter-compatible Road objects.
+
+    Reads ``<road>`` elements from the XODR file, extracting ``<planView>``
+    geometries (``<paramPoly3>``) and lane IDs from ``<laneSection>``.
+    Returns a list of ``Road`` objects usable by :func:`build_mapping`.
+
+    This utility allows callers that only have an XODR file (not converter
+    Road objects) to build the geometric mapping without pyxodr.
+
+    Args:
+        xodr_path: Path to the OpenDRIVE file.
+
+    Returns:
+        List of converter ``Road`` objects with ``plan_view`` and ``lanes``
+        populated from the XODR XML.
+    """
+    import lxml.etree as ET
+
+    from .opendrive.enums import LaneType
+    from .opendrive.geometry import ParamPoly3, PlanView
+    from .opendrive.lane import Lane
+    from .opendrive.lane_section import LaneSection
+    from .opendrive.lane_sections import Lanes
+    from .opendrive.reference_line import ReferenceLine
+    from .opendrive.road import Road
+
+    tree = ET.parse(str(xodr_path))
+    root = tree.getroot()
+    roads: list[Road] = []
+
+    for road_elem in root.findall(".//road"):
+        road_id = int(road_elem.get("id", "0"))
+        junction = int(road_elem.get("junction", "-1"))
+
+        # Parse planView geometries
+        geometries = []
+        plan_view_elem = road_elem.find("planView")
+        if plan_view_elem is not None:
+            for geom_elem in plan_view_elem.findall("geometry"):
+                pp3_elem = geom_elem.find("paramPoly3")
+                if pp3_elem is not None:
+                    geometries.append(
+                        ParamPoly3(
+                            s=float(geom_elem.get("s", "0")),
+                            x=float(geom_elem.get("x", "0")),
+                            y=float(geom_elem.get("y", "0")),
+                            hdg=float(geom_elem.get("hdg", "0")),
+                            length=float(geom_elem.get("length", "0")),
+                            aU=float(pp3_elem.get("aU", "0")),
+                            bU=float(pp3_elem.get("bU", "0")),
+                            cU=float(pp3_elem.get("cU", "0")),
+                            dU=float(pp3_elem.get("dU", "0")),
+                            aV=float(pp3_elem.get("aV", "0")),
+                            bV=float(pp3_elem.get("bV", "0")),
+                            cV=float(pp3_elem.get("cV", "0")),
+                            dV=float(pp3_elem.get("dV", "0")),
+                            pRange=pp3_elem.get("pRange", "arcLength"),
+                        )
+                    )
+
+        if not geometries:
+            continue
+
+        plan_view = PlanView(geometries=geometries)
+
+        # Parse lane IDs from first laneSection
+        lane_section = LaneSection(s_offset=0.0)
+        lanes_elem = road_elem.find("lanes")
+        if lanes_elem is not None:
+            first_section = lanes_elem.find("laneSection")
+            if first_section is not None:
+                # Parse left lanes
+                left_elem = first_section.find("left")
+                if left_elem is not None:
+                    for lane_elem in left_elem.findall("lane"):
+                        lid = int(lane_elem.get("id", "0"))
+                        if lid > 0:
+                            lane = Lane(lane_id=lid, lane_type=LaneType.DRIVING)
+                            lane_section.left_lanes[lid] = lane
+
+                # Parse right lanes
+                right_elem = first_section.find("right")
+                if right_elem is not None:
+                    for lane_elem in right_elem.findall("lane"):
+                        lid = int(lane_elem.get("id", "0"))
+                        if lid < 0:
+                            lane = Lane(lane_id=lid, lane_type=LaneType.DRIVING)
+                            lane_section.right_lanes[lid] = lane
+
+                # Set a dummy center lane
+                dummy_ref = ReferenceLine.__new__(ReferenceLine)
+                dummy_ref._lane = Lane(
+                    lane_id=0,
+                    lane_type=LaneType.NONE,
+                    level=False,
+                )
+                lane_section.center_lane = dummy_ref
+
+        lanes_obj = Lanes(lane_sections=[lane_section])
+
+        road = Road(
+            id=road_id,
+            junction=junction,
+            plan_view=plan_view,
+            lanes=lanes_obj,
+        )
+        roads.append(road)
+
+    return roads
+
+
+# ---------------------------------------------------------------------------
 # Build mapping
 # ---------------------------------------------------------------------------
 
 
 def build_mapping(
     lanelet_map,
-    road_network,
+    roads: list["ConverterRoad"],
     mgrs_offset: tuple[float, float],
     xodr_sha256: str,
     osm_sha256: str,
 ) -> GeoRoadLaneletMapping:
     """Build lanelet -> (road_id, lane_id) mapping by boundary shape comparison.
+
+    Uses the converter's own ``Road`` objects (with ``plan_view`` and ``lanes``)
+    to sample reference-line polylines and extract lane IDs.  This avoids the
+    need to re-parse the XODR with an external library like pyxodr.
 
     Algorithm
     ---------
@@ -210,6 +384,16 @@ def build_mapping(
     4. From the reference lanelet, walk adjacent lanelets (via shared
        boundary linestring IDs) and assign lane IDs from the road's
        lane structure.
+
+    Args:
+        lanelet_map: Lanelet2 map.
+        roads: List of converter ``Road`` objects (from ``opendrive.road``).
+        mgrs_offset: ``(offset_x, offset_y)`` subtracted from lanelet coords.
+        xodr_sha256: SHA256 of the XODR file.
+        osm_sha256: SHA256 of the OSM file.
+
+    Returns:
+        :class:`GeoRoadLaneletMapping` built by geometric comparison.
     """
     offset_x, offset_y = mgrs_offset
 
@@ -307,17 +491,16 @@ def build_mapping(
     mapping: dict[int, tuple[int, int]] = {}
     matched_lanelets: set[int] = set()
 
-    roads = road_network.road_ids_to_object
-    for road_id, road in tqdm(
-        roads.items(), desc="Matching roads to lanelets", unit="road"
-    ):
-        ref_line: np.ndarray = road.reference_line
+    for road in tqdm(roads, desc="Matching roads to lanelets", unit="road"):
+        ref_line = _sample_reference_line_from_road(road)
         if len(ref_line) < 2:
             continue
 
-        lane_ids = _get_driving_lane_ids(road)
+        lane_ids = _get_driving_lane_ids_from_road(road)
         if not lane_ids:
             continue
+
+        road_id = road.id
 
         # Determine RHT / LHT from lane IDs
         is_rht = all(lid < 0 for lid in lane_ids)
@@ -486,6 +669,7 @@ def save_mapping_json(
 def validate_and_save_mapping(
     lanelet_to_road_and_lane: dict[int, tuple[int, int]],
     lanelet_map,
+    roads: list["ConverterRoad"],
     xodr_path: Path,
     osm_path: Path,
     mgrs_offset: tuple[float, float],
@@ -497,12 +681,13 @@ def validate_and_save_mapping(
     1. Compute SHA256 checksums of the XODR and OSM files.
     2. Build a :class:`GeoRoadLaneletMapping` from the conversion-time mapping
        and save it as ``.mapping.json`` next to the XODR file.
-    3. Re-parse the XODR with ``pyxodr``, build the geometric mapping via
-       :func:`build_mapping`, and cross-validate the two mappings.
+    3. Build a geometric mapping from the converter's own ``Road`` objects
+       via :func:`build_mapping`, and cross-validate the two mappings.
 
     Args:
         lanelet_to_road_and_lane: Mapping produced during conversion.
         lanelet_map: The Lanelet2 map used for conversion.
+        roads: List of converter ``Road`` objects (from ``opendrive.road``).
         xodr_path: Path to the generated XODR file.
         osm_path: Path to the source OSM file.
         mgrs_offset: ``(offset_x, offset_y)`` coordinate offset.
@@ -514,8 +699,6 @@ def validate_and_save_mapping(
         MappingMismatchError: When the conversion-time mapping disagrees with
             the geometric mapping.
     """
-    from pyxodr.road_objects.network import RoadNetwork
-
     # 1. SHA256
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
@@ -529,10 +712,9 @@ def validate_and_save_mapping(
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)
 
-    # 3. Cross-validate with geometric mapping
-    road_network = RoadNetwork(str(xodr_path))
+    # 3. Cross-validate with geometric mapping using converter Roads
     geo_mapping = build_mapping(
-        lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
+        lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256
     )
     validate_mapping_consistency(lanelet_to_road_and_lane, geo_mapping)
     logger.info("Cross-validation passed successfully!")
@@ -549,7 +731,7 @@ def load_or_build_mapping(
     xodr_path: Path,
     osm_path: Path,
     lanelet_map,
-    road_network,
+    roads: list["ConverterRoad"],
     mgrs_offset: tuple[float, float],
 ) -> GeoRoadLaneletMapping:
     """Load cached mapping or build a fresh one.
@@ -589,9 +771,7 @@ def load_or_build_mapping(
             )
 
     # Build fresh mapping
-    mapping = build_mapping(
-        lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
-    )
+    mapping = build_mapping(lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256)
 
     # Save to cache
     try:

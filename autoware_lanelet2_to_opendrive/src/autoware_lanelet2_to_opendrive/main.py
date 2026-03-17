@@ -1418,6 +1418,7 @@ def preprocess_and_convert_with_hydra(
         validate_and_save_mapping(
             lanelet_to_road_and_lane=lanelet_to_road_and_lane,
             lanelet_map=lanelet_map,
+            roads=opendrive.roads,
             xodr_path=Path(conversion_config.output_path),
             osm_path=input_map_path,
             mgrs_offset=(offset_x, offset_y),

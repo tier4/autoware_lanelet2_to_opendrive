@@ -27,6 +27,7 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     _sha256_of_file,
     build_mapping,
     load_or_build_mapping,
+    parse_roads_from_xodr,
 )
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -47,6 +48,12 @@ def map_manager():
     mm._mgrs_offset = None
     mm._road_lanelet_mapping = None
     MapManager.reset()
+
+
+@pytest.fixture(scope="module")
+def parsed_roads():
+    """Parse XODR to converter-compatible Road objects."""
+    return parse_roads_from_xodr(XODR_PATH)
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +92,7 @@ class TestSHA256Cache:
         digest = _sha256_of_file(XODR_PATH)
         assert len(digest) == 64
 
-    def test_cache_creates_file(self, map_manager, tmp_path):
+    def test_cache_creates_file(self, map_manager, parsed_roads, tmp_path):
         import shutil
 
         xodr_copy = tmp_path / "test.xodr"
@@ -97,14 +104,14 @@ class TestSHA256Cache:
             xodr_copy,
             osm_copy,
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
         )
         cache_file = tmp_path / "test.mapping.json"
         assert cache_file.exists()
         assert len(mapping.lanelet_to_road_and_lane) > 0
 
-    def test_cache_hit(self, map_manager, tmp_path):
+    def test_cache_hit(self, map_manager, parsed_roads, tmp_path):
         import shutil
 
         xodr_copy = tmp_path / "test.xodr"
@@ -116,19 +123,19 @@ class TestSHA256Cache:
             xodr_copy,
             osm_copy,
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
         )
         m2 = load_or_build_mapping(
             xodr_copy,
             osm_copy,
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
         )
         assert m1.lanelet_to_road_and_lane == m2.lanelet_to_road_and_lane
 
-    def test_cache_miss_on_changed_sha(self, map_manager, tmp_path):
+    def test_cache_miss_on_changed_sha(self, map_manager, parsed_roads, tmp_path):
         import shutil
 
         xodr_copy = tmp_path / "test.xodr"
@@ -140,7 +147,7 @@ class TestSHA256Cache:
             xodr_copy,
             osm_copy,
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
         )
         # Corrupt the cache
@@ -153,7 +160,7 @@ class TestSHA256Cache:
             xodr_copy,
             osm_copy,
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
         )
         assert m2.xodr_sha256 == m1.xodr_sha256
@@ -165,32 +172,32 @@ class TestSHA256Cache:
 
 
 class TestBuildMapping:
-    def test_returns_valid_mapping(self, map_manager):
+    def test_returns_valid_mapping(self, map_manager, parsed_roads):
         mapping = build_mapping(
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
             xodr_sha256="t",
             osm_sha256="t",
         )
         assert len(mapping.lanelet_to_road_and_lane) > 0
 
-    def test_road_ids_exist_in_network(self, map_manager):
+    def test_road_ids_exist_in_parsed_roads(self, map_manager, parsed_roads):
         mapping = build_mapping(
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
             xodr_sha256="t",
             osm_sha256="t",
         )
-        road_ids = set(map_manager.road_network.road_ids_to_object.keys())
+        road_ids = {road.id for road in parsed_roads}
         for _lid, (rid, _lane) in mapping.lanelet_to_road_and_lane.items():
-            assert str(rid) in road_ids
+            assert rid in road_ids
 
-    def test_lane_ids_are_nonzero(self, map_manager):
+    def test_lane_ids_are_nonzero(self, map_manager, parsed_roads):
         mapping = build_mapping(
             map_manager.lanelet_map,
-            map_manager.road_network,
+            parsed_roads,
             map_manager.mgrs_offset,
             xodr_sha256="t",
             osm_sha256="t",
