@@ -144,7 +144,6 @@ class GeoRoadLaneletMapping:
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dictionary."""
         result: dict = {
-            "version": 4,
             "xodr_sha256": self.xodr_sha256,
             "osm_sha256": self.osm_sha256,
             "lanelet_to_road_and_lane": {
@@ -165,10 +164,7 @@ class GeoRoadLaneletMapping:
 
     @classmethod
     def from_dict(cls, data: dict) -> "GeoRoadLaneletMapping":
-        """Deserialize from a JSON-compatible dictionary.
-
-        Supports version 3 (no stop line info) and version 4 (with stop line info).
-        """
+        """Deserialize from a JSON-compatible dictionary."""
         stop_line_mapping: dict[int, StopLineMappingEntry] | None = None
         skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None
 

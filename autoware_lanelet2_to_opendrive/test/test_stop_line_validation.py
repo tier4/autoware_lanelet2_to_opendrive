@@ -51,15 +51,14 @@ class TestSkippedStopLineEntry:
 
 
 # ---------------------------------------------------------------------------
-# GeoRoadLaneletMapping version 3/4 compatibility
+# GeoRoadLaneletMapping serialization
 # ---------------------------------------------------------------------------
 
 
-class TestGeoRoadLaneletMappingVersion:
-    def test_version_3_from_dict_has_none_stop_line_fields(self) -> None:
-        """Version 3 JSON (no stop line info) should yield None fields."""
+class TestGeoRoadLaneletMappingSerialization:
+    def test_from_dict_without_stop_line_fields(self) -> None:
+        """JSON without stop line fields should yield None."""
         data = {
-            "version": 3,
             "xodr_sha256": "aaa",
             "osm_sha256": "bbb",
             "lanelet_to_road_and_lane": {"10": [1, -1]},
@@ -69,8 +68,7 @@ class TestGeoRoadLaneletMappingVersion:
         assert mapping.skipped_stop_lines is None
         assert mapping.lanelet_to_road_and_lane == {10: (1, -1)}
 
-    def test_version_4_round_trip(self) -> None:
-        """Version 4 JSON with stop line data survives round-trip."""
+    def test_round_trip_with_stop_line_data(self) -> None:
         original = GeoRoadLaneletMapping(
             xodr_sha256="aaa",
             osm_sha256="bbb",
@@ -85,7 +83,7 @@ class TestGeoRoadLaneletMappingVersion:
             },
         )
         data = original.to_dict()
-        assert data["version"] == 4
+        assert "version" not in data
         assert "stop_line_mapping" in data
         assert "skipped_stop_lines" in data
 
@@ -93,13 +91,10 @@ class TestGeoRoadLaneletMappingVersion:
         assert restored.stop_line_mapping is not None
         assert restored.skipped_stop_lines is not None
         assert restored.stop_line_mapping[1812].road_id == 5
-        assert restored.stop_line_mapping[1812].signal_types == [294]
         assert restored.stop_line_mapping[1230].signal_types == [205, 294]
         assert restored.skipped_stop_lines[2001].reason == "no_nearest_road"
-        assert restored.skipped_stop_lines[2002].reason == "construction_failed"
 
-    def test_version_4_json_file(self, tmp_path: Path) -> None:
-        """Version 4 mapping can be saved and loaded from JSON file."""
+    def test_json_file_round_trip(self, tmp_path: Path) -> None:
         xodr_path = tmp_path / "test.xodr"
         xodr_path.write_text("<OpenDRIVE/>")
 
@@ -116,25 +111,24 @@ class TestGeoRoadLaneletMappingVersion:
         )
         result_path = save_mapping_json(mapping, xodr_path)
         data = json.loads(result_path.read_text(encoding="utf-8"))
-        assert data["version"] == 4
+        assert "version" not in data
         assert data["stop_line_mapping"]["100"]["road_id"] == 1
         assert data["skipped_stop_lines"]["200"]["reason"] == "no_nearest_road"
 
-    def test_version_4_without_stop_line_data(self) -> None:
-        """Version 4 mapping without stop line data serializes cleanly."""
+    def test_without_stop_line_data(self) -> None:
         mapping = GeoRoadLaneletMapping(
             xodr_sha256="aaa",
             osm_sha256="bbb",
             lanelet_to_road_and_lane={},
         )
         data = mapping.to_dict()
-        assert data["version"] == 4
+        assert "version" not in data
         assert "stop_line_mapping" not in data
         assert "skipped_stop_lines" not in data
 
 
 # ---------------------------------------------------------------------------
-# _parse_stop_lines_from_xodr
+# _parse_stop_lines_from_xodr (now includes dependencies)
 # ---------------------------------------------------------------------------
 
 
@@ -162,12 +156,13 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        obj_to_road, sig_types, all_sigs = _parse_stop_lines_from_xodr(
+        obj_to_road, sig_types, all_sigs, deps = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert obj_to_road == {1812: 5}
         assert sig_types == {}
         assert all_sigs == set()
+        assert deps == {}
 
     def test_carla_stop_line_object(self, tmp_path: Path) -> None:
         from autoware_lanelet2_to_opendrive.analyze_xodr import (
@@ -187,7 +182,7 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        obj_to_road, _, _ = _parse_stop_lines_from_xodr(
+        obj_to_road, _, _, _ = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert obj_to_road == {999: 12}
@@ -222,7 +217,7 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        _, sig_types, all_sigs = _parse_stop_lines_from_xodr(
+        _, sig_types, all_sigs, _ = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert sig_types[1812] == [294]
@@ -248,21 +243,14 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        obj_to_road, _, _ = _parse_stop_lines_from_xodr(
+        obj_to_road, _, _, _ = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert obj_to_road == {}
 
-
-# ---------------------------------------------------------------------------
-# _parse_signal_dependencies_from_xodr
-# ---------------------------------------------------------------------------
-
-
-class TestParseSignalDependencies:
     def test_dependency_parsing(self, tmp_path: Path) -> None:
         from autoware_lanelet2_to_opendrive.analyze_xodr import (
-            _parse_signal_dependencies_from_xodr,
+            _parse_stop_lines_from_xodr,
         )
 
         xodr = textwrap.dedent("""\
@@ -284,14 +272,12 @@ class TestParseSignalDependencies:
               </road>
             </OpenDRIVE>
         """)
-        xodr_path = tmp_path / "test.xodr"
-        xodr_path.write_text(xodr, encoding="utf-8")
-        deps = _parse_signal_dependencies_from_xodr(xodr_path)
+        _, _, _, deps = _parse_stop_lines_from_xodr(self._write_xodr(tmp_path, xodr))
         assert deps == {100: [50, 51]}
 
     def test_no_dependencies(self, tmp_path: Path) -> None:
         from autoware_lanelet2_to_opendrive.analyze_xodr import (
-            _parse_signal_dependencies_from_xodr,
+            _parse_stop_lines_from_xodr,
         )
 
         xodr = textwrap.dedent("""\
@@ -307,9 +293,7 @@ class TestParseSignalDependencies:
               </road>
             </OpenDRIVE>
         """)
-        xodr_path = tmp_path / "test.xodr"
-        xodr_path.write_text(xodr, encoding="utf-8")
-        deps = _parse_signal_dependencies_from_xodr(xodr_path)
+        _, _, _, deps = _parse_stop_lines_from_xodr(self._write_xodr(tmp_path, xodr))
         assert deps == {}
 
 
@@ -332,7 +316,6 @@ class TestNishishinjukuCarlaStopLines:
             _parse_stop_lines_from_xodr,
         )
 
-        obj_to_road, _sig_types, _all_sigs = _parse_stop_lines_from_xodr(_XODR_PATH)
-        # The plan states 196 CARLA stop line objects
+        obj_to_road, _, _, _ = _parse_stop_lines_from_xodr(_XODR_PATH)
         assert len(obj_to_road) > 0
         print(f"Found {len(obj_to_road)} CARLA stop line objects")

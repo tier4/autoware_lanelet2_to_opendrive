@@ -1070,10 +1070,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_marking_stop_line_ids=road_marking_stop_line_ids,
         )
 
-        # Store stop line mapping data for post-conversion validation
-        self._stop_line_mapping = stop_line_mapping
-        self._skipped_stop_lines = skipped_stop_lines
-
         # Step 6.8: Add back-references to traffic light signals pointing to stop lines
         if tl_signal_to_stop_line_signal_ids:
             from autoware_lanelet2_to_opendrive.opendrive.signal import Reference
@@ -1109,14 +1105,20 @@ class _Lanelet2ToOpenDRIVEConverter:
             all_roads, junctions, signals_and_controllers
         )
 
-        return opendrive, mapping, lanelet_to_road_and_lane
+        return (
+            opendrive,
+            mapping,
+            lanelet_to_road_and_lane,
+            stop_line_mapping,
+            skipped_stop_lines,
+        )
 
 
 def convert_lanelet2_to_opendrive(
     lanelet_map: lanelet2.core.LaneletMap,
     config: ConversionConfig,
     mgrs_code: Optional[str] = None,
-) -> Tuple[OpenDRIVE, RoadLaneletMapping, Dict[int, Tuple[int, int]]]:
+) -> Tuple[OpenDRIVE, RoadLaneletMapping, Dict[int, Tuple[int, int]], Dict, Dict]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
 
@@ -1135,34 +1137,18 @@ def convert_lanelet2_to_opendrive(
     Returns:
         Tuple of:
             - OpenDRIVE object representing the converted map
-            - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
+            - RoadLaneletMapping containing bidirectional mapping
             - Mapping from lanelet ID to (road_id, lane_id) for all lanes
-
-    Note:
-        After calling this function, stop line mapping data is available via
-        the module-level ``_last_stop_line_mapping`` and
-        ``_last_skipped_stop_lines`` variables.
+            - Stop line mapping (linestring_id -> StopLineMappingEntry)
+            - Skipped stop lines (linestring_id -> SkippedStopLineEntry)
     """
-    global _last_stop_line_mapping, _last_skipped_stop_lines
-
     # Merge legacy mgrs_code argument into config.origin so the converter has
     # a single, consistent source of truth for the MGRS grid code.
     if mgrs_code is not None:
         config = config.with_mgrs_code(mgrs_code)
 
     converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config)
-    result = converter.convert()
-
-    # Expose stop line mapping data for post-conversion use
-    _last_stop_line_mapping = getattr(converter, "_stop_line_mapping", None)
-    _last_skipped_stop_lines = getattr(converter, "_skipped_stop_lines", None)
-
-    return result
-
-
-# Module-level storage for stop line mapping data from the last conversion
-_last_stop_line_mapping: Optional[Dict] = None
-_last_skipped_stop_lines: Optional[Dict] = None
+    return converter.convert()
 
 
 def parse_origin_from_config(
@@ -1460,9 +1446,13 @@ def preprocess_and_convert_with_hydra(
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;
     # no need to pass it as a separate argument.
-    opendrive, mapping, lanelet_to_road_and_lane = convert_lanelet2_to_opendrive(
-        lanelet_map, conversion_config
-    )
+    (
+        opendrive,
+        mapping,
+        lanelet_to_road_and_lane,
+        stop_line_mapping,
+        skipped_stop_lines,
+    ) = convert_lanelet2_to_opendrive(lanelet_map, conversion_config)
 
     logger.info("Conversion completed successfully!")
     logger.info(
@@ -1487,8 +1477,8 @@ def preprocess_and_convert_with_hydra(
             osm_path=input_map_path,
             mgrs_offset=(offset_x, offset_y),
             preprocessing_log=preprocessing_log_dict,
-            stop_line_mapping=_last_stop_line_mapping,
-            skipped_stop_lines=_last_skipped_stop_lines,
+            stop_line_mapping=stop_line_mapping,
+            skipped_stop_lines=skipped_stop_lines,
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`

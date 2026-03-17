@@ -348,20 +348,21 @@ def _load_map_for_validation(
 # ---------------------------------------------------------------------------
 
 
-def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
+def run_mapping_validation(
+    xodr_path: Path,
+    osm_path: Path,
+    shared: tuple | None = None,
+) -> bool:
     """Run mapping cross-validation between XODR and OSM files.
-
-    Loads the Lanelet2 map from *osm_path*, parses the XODR to extract road
-    reference lines and lane IDs, and checks that the ``.mapping.json`` next
-    to the XODR is consistent with the geometric boundary comparison.
 
     Args:
         xodr_path: Path to the OpenDRIVE file.
         osm_path: Path to the Lanelet2 OSM file.
+        shared: Pre-loaded validation context from ``_load_map_for_validation``.
+            If *None*, the context is loaded internally.
 
     Returns:
-        ``True`` if mapping validation passed or was skipped (no mapping file),
-        ``False`` if a mismatch was detected.
+        ``True`` if validation passed or was skipped, ``False`` on mismatch.
     """
     from .road_lanelet_geo_mapping import (
         MappingMismatchError,
@@ -370,11 +371,11 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
         validate_mapping_consistency,
     )
 
-    result = _load_map_for_validation(xodr_path, osm_path)
-    if result is None:
+    ctx = shared or _load_map_for_validation(xodr_path, osm_path)
+    if ctx is None:
         return True
 
-    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm = result
+    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm = ctx
 
     print(f"\n  Mapping file : {xodr_path.parent / (xodr_path.stem + '.mapping.json')}")
     print(f"  Entries      : {len(conv_mapping.lanelet_to_road_and_lane)}")
@@ -408,18 +409,20 @@ _STOP_LINE_SIGNAL_RE = re.compile(r"^(StopLine|StopSign|YieldSign)_(\d+)$")
 
 def _parse_stop_lines_from_xodr(
     xodr_path: Path,
-) -> tuple[dict[int, int], dict[int, list[int]], set[int]]:
-    """Parse stop line objects, signals, and all signal IDs from an XODR file.
+) -> tuple[dict[int, int], dict[int, list[int]], set[int], dict[int, list[int]]]:
+    """Parse stop line objects, signals, dependencies, and all signal IDs.
+
+    Performs a single XML parse pass to extract all stop-line-related data.
 
     Args:
         xodr_path: Path to the OpenDRIVE file.
 
     Returns:
         Tuple of:
-        - ``object_to_road``: Mapping from stop line object ID to road ID.
-        - ``linestring_to_signal_types``: Mapping from linestring ID (extracted
-          from signal name) to list of signal type integers.
-        - ``all_signal_ids``: Set of all signal IDs in the XODR.
+        - ``object_to_road``: stop line object ID -> road ID.
+        - ``linestring_to_signal_types``: linestring ID -> signal type list.
+        - ``all_signal_ids``: set of all signal IDs in the XODR.
+        - ``signal_dependencies``: stop line signal ID -> dependency ID list.
     """
     import lxml.etree as ET
 
@@ -429,75 +432,57 @@ def _parse_stop_lines_from_xodr(
     object_to_road: dict[int, int] = {}
     linestring_to_signal_types: dict[int, list[int]] = {}
     all_signal_ids: set[int] = set()
+    signal_dependencies: dict[int, list[int]] = {}
 
     for road_elem in root.iter("road"):
         road_id = int(road_elem.get("id", "-1"))
 
-        # Parse stop line objects
         for obj_elem in road_elem.iter("object"):
             obj_type = obj_elem.get("type", "")
             obj_name = obj_elem.get("name", "")
             obj_id_str = obj_elem.get("id", "")
             if not obj_id_str:
                 continue
-
-            # Standard format: type="stopLine"
-            # CARLA format: type="-1" and name="Stencil_STOP"
-            is_stop_line = obj_type == "stopLine" or (
+            # Standard: type="stopLine", CARLA: type="-1" + name="Stencil_STOP"
+            if obj_type == "stopLine" or (
                 obj_type == "-1" and obj_name == "Stencil_STOP"
-            )
-            if is_stop_line:
+            ):
                 object_to_road[int(obj_id_str)] = road_id
 
-        # Parse signals
         for signal_elem in road_elem.iter("signal"):
             sig_id_str = signal_elem.get("id", "")
-            if sig_id_str:
-                all_signal_ids.add(int(sig_id_str))
+            if not sig_id_str:
+                continue
+            sig_id = int(sig_id_str)
+            all_signal_ids.add(sig_id)
 
             sig_name = signal_elem.get("name", "")
-            sig_type_str = signal_elem.get("type", "")
             match = _STOP_LINE_SIGNAL_RE.match(sig_name)
-            if match and sig_type_str:
+            if not match:
+                continue
+
+            sig_type_str = signal_elem.get("type", "")
+            if sig_type_str:
                 linestring_id = int(match.group(2))
-                signal_type = int(sig_type_str)
                 linestring_to_signal_types.setdefault(linestring_id, []).append(
-                    signal_type
+                    int(sig_type_str)
                 )
 
-    return object_to_road, linestring_to_signal_types, all_signal_ids
+            # Collect dependencies in the same pass
+            deps = [
+                int(d.get("id", ""))
+                for d in signal_elem.findall("dependency")
+                if d.get("id", "")
+            ]
+            if deps:
+                signal_dependencies[sig_id] = deps
 
-
-def _parse_signal_dependencies_from_xodr(
-    xodr_path: Path,
-) -> dict[int, list[int]]:
-    """Parse dependency references from stop line signals in the XODR.
-
-    Returns:
-        Mapping from signal ID to list of dependency IDs.
-    """
-    import lxml.etree as ET
-
-    tree = ET.parse(str(xodr_path))
-    root = tree.getroot()
-
-    signal_dependencies: dict[int, list[int]] = {}
-    for signal_elem in root.iter("signal"):
-        sig_name = signal_elem.get("name", "")
-        sig_id_str = signal_elem.get("id", "")
-        if not _STOP_LINE_SIGNAL_RE.match(sig_name) or not sig_id_str:
-            continue
-
-        sig_id = int(sig_id_str)
-        deps: list[int] = []
-        for dep_elem in signal_elem.findall("dependency"):
-            dep_id_str = dep_elem.get("id", "")
-            if dep_id_str:
-                deps.append(int(dep_id_str))
-        if deps:
-            signal_dependencies[sig_id] = deps
-
-    return signal_dependencies
+    return (
+        object_to_road,
+        linestring_to_signal_types,
+        all_signal_ids,
+        signal_dependencies,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +490,11 @@ def _parse_signal_dependencies_from_xodr(
 # ---------------------------------------------------------------------------
 
 
-def run_stop_line_validation(xodr_path: Path, osm_path: Path) -> bool:
+def run_stop_line_validation(
+    xodr_path: Path,
+    osm_path: Path,
+    shared: tuple | None = None,
+) -> bool:
     """Run stop line cross-validation between XODR, OSM, and .mapping.json.
 
     Checks:
@@ -517,27 +506,27 @@ def run_stop_line_validation(xodr_path: Path, osm_path: Path) -> bool:
     Args:
         xodr_path: Path to the OpenDRIVE file.
         osm_path: Path to the Lanelet2 OSM file.
+        shared: Pre-loaded validation context from ``_load_map_for_validation``.
+            If *None*, the context is loaded internally.
 
     Returns:
         ``True`` if validation passed, ``False`` if errors were found.
     """
-    result = _load_map_for_validation(xodr_path, osm_path)
-    if result is None:
+    ctx = shared or _load_map_for_validation(xodr_path, osm_path)
+    if ctx is None:
         print("  Skipping stop line validation (no mapping data).")
         return True
 
-    lanelet_map, _offset_x, _offset_y, conv_mapping, _effective_osm = result
+    lanelet_map, _offset_x, _offset_y, conv_mapping, _effective_osm = ctx
 
-    # Check if mapping has stop line data (version 4)
     if conv_mapping.stop_line_mapping is None:
-        print("  Mapping file has no stop_line_mapping (version < 4); skipping.")
+        print("  Mapping file has no stop_line_mapping; skipping.")
         return True
 
-    # Parse XODR stop line information
-    xodr_objects, xodr_signal_types, all_signal_ids = _parse_stop_lines_from_xodr(
-        xodr_path
+    # Single-pass XODR parse for objects, signals, and dependencies
+    xodr_objects, xodr_signal_types, all_signal_ids, signal_deps = (
+        _parse_stop_lines_from_xodr(xodr_path)
     )
-    signal_deps = _parse_signal_dependencies_from_xodr(xodr_path)
 
     # Get LL2 stop line IDs
     ll2_stop_line_ids: set[int] = set()
@@ -726,12 +715,15 @@ def run_analysis(
     if use_temp:
         Path(rf).unlink(missing_ok=True)
 
+    # ── Load shared validation context once ──────────────────────────────
+    shared_ctx = _load_map_for_validation(xodr_path, osm_path)
+
     # ── Mapping cross-validation ───────────────────────────────────────────
     print(f"\n{'=' * 72}")
     print("  Mapping Cross-Validation")
     print(f"{'=' * 72}")
 
-    mapping_ok = run_mapping_validation(xodr_path, osm_path)
+    mapping_ok = run_mapping_validation(xodr_path, osm_path, shared=shared_ctx)
     if not mapping_ok:
         error_count += 1
 
@@ -740,7 +732,7 @@ def run_analysis(
     print("  Stop Line Validation")
     print(f"{'=' * 72}")
 
-    stop_line_ok = run_stop_line_validation(xodr_path, osm_path)
+    stop_line_ok = run_stop_line_validation(xodr_path, osm_path, shared=shared_ctx)
     if not stop_line_ok:
         error_count += 1
 

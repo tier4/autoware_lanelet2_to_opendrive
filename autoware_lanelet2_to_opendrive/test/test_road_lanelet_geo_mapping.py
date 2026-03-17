@@ -112,7 +112,7 @@ class TestSaveMappingJson:
         result_path = save_mapping_json(mapping, xodr_path)
 
         data = json.loads(result_path.read_text(encoding="utf-8"))
-        assert data["version"] == 4
+        assert "version" not in data
         assert data["xodr_sha256"] == "abc"
         assert data["osm_sha256"] == "def"
         assert "10" in data["lanelet_to_road_and_lane"]

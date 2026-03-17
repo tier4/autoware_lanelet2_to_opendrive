@@ -184,7 +184,7 @@ def _convert_lanelet2_to_xodr_cached(
     lanelet_map = lanelet2.io.load(lanelet2_path, projector)
 
     # mgrs_code is already in config.origin.mgrs_code (merged above).
-    opendrive, _, lanelet_to_road_and_lane = convert_lanelet2_to_opendrive(
+    opendrive, _, lanelet_to_road_and_lane, _, _ = convert_lanelet2_to_opendrive(
         lanelet_map, config
     )
 
