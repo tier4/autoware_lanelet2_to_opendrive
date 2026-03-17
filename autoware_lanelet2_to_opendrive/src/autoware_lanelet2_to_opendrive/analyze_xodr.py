@@ -23,6 +23,7 @@ import logging
 import re
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -268,22 +269,48 @@ def print_report(
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers for validation phases
+# Validation context
 # ---------------------------------------------------------------------------
 
 
-def _load_map_for_validation(
+@dataclass
+class ValidationContext:
+    """Pre-loaded data shared across validation phases.
+
+    Created once by :func:`_load_validation_context` and passed to each
+    ``run_*_validation`` function so that the Lanelet2 map and XODR XML
+    are parsed only once.
+    """
+
+    lanelet_map: object
+    """Loaded Lanelet2 map (``lanelet2.LaneletMap``)."""
+
+    offset_x: float
+    """MGRS projection X offset."""
+
+    offset_y: float
+    """MGRS projection Y offset."""
+
+    conv_mapping: object
+    """``GeoRoadLaneletMapping`` loaded from ``.mapping.json``."""
+
+    effective_osm: Path
+    """OSM path actually used (may be a preprocessed variant)."""
+
+    xodr_root: object
+    """Parsed XODR XML root element (``lxml.etree.Element``)."""
+
+
+def _load_validation_context(
     xodr_path: Path,
     osm_path: Path,
-) -> tuple | None:
+) -> ValidationContext | None:
     """Load Lanelet2 map and parse XODR for validation.
 
     Handles preprocessed-OSM detection via the ``.mapping.json`` sidecar.
 
     Returns:
-        ``(lanelet_map, offset_x, offset_y, conv_mapping, effective_osm, xodr_root)``
-        or ``None`` if loading is not possible.  The *xodr_root* element is
-        the parsed XODR XML root, shared to avoid re-parsing.
+        A :class:`ValidationContext` or ``None`` if loading is not possible.
     """
     import json
 
@@ -342,16 +369,14 @@ def _load_map_for_validation(
     lanelet_map = lanelet2.io.load(str(effective_osm), projector)
 
     fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
-    offset_x = fwd.x
-    offset_y = fwd.y
 
-    return (
-        lanelet_map,
-        offset_x,
-        offset_y,
-        conv_mapping,
-        effective_osm,
-        tree.getroot(),
+    return ValidationContext(
+        lanelet_map=lanelet_map,
+        offset_x=fwd.x,
+        offset_y=fwd.y,
+        conv_mapping=conv_mapping,
+        effective_osm=effective_osm,
+        xodr_root=tree.getroot(),
     )
 
 
@@ -363,15 +388,15 @@ def _load_map_for_validation(
 def run_mapping_validation(
     xodr_path: Path,
     osm_path: Path,
-    shared: tuple | None = None,
+    validation_context: ValidationContext | None = None,
 ) -> bool:
     """Run mapping cross-validation between XODR and OSM files.
 
     Args:
         xodr_path: Path to the OpenDRIVE file.
         osm_path: Path to the Lanelet2 OSM file.
-        shared: Pre-loaded validation context from ``_load_map_for_validation``.
-            If *None*, the context is loaded internally.
+        validation_context: Pre-loaded context from
+            ``_load_validation_context``.  If *None*, loaded internally.
 
     Returns:
         ``True`` if validation passed or was skipped, ``False`` on mismatch.
@@ -383,27 +408,27 @@ def run_mapping_validation(
         validate_mapping_consistency,
     )
 
-    ctx = shared or _load_map_for_validation(xodr_path, osm_path)
+    ctx = validation_context or _load_validation_context(xodr_path, osm_path)
     if ctx is None:
         return True
 
-    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm, xodr_root = ctx
-
     print(f"\n  Mapping file : {xodr_path.parent / (xodr_path.stem + '.mapping.json')}")
-    print(f"  Entries      : {len(conv_mapping.lanelet_to_road_and_lane)}")
+    print(f"  Entries      : {len(ctx.conv_mapping.lanelet_to_road_and_lane)}")
 
-    roads = parse_roads_from_xodr(xodr_path, xodr_root=xodr_root)
+    roads = parse_roads_from_xodr(xodr_path, xodr_root=ctx.xodr_root)
 
     geo_mapping = build_mapping(
-        lanelet_map,
+        ctx.lanelet_map,
         roads,
-        (offset_x, offset_y),
-        conv_mapping.xodr_sha256,
-        conv_mapping.osm_sha256,
+        (ctx.offset_x, ctx.offset_y),
+        ctx.conv_mapping.xodr_sha256,
+        ctx.conv_mapping.osm_sha256,
     )
 
     try:
-        validate_mapping_consistency(conv_mapping.lanelet_to_road_and_lane, geo_mapping)
+        validate_mapping_consistency(
+            ctx.conv_mapping.lanelet_to_road_and_lane, geo_mapping
+        )
         print("  Mapping cross-validation: PASSED")
         return True
     except MappingMismatchError as e:
@@ -577,7 +602,7 @@ def _evaluate_road_xy(
 def run_stop_line_validation(
     xodr_path: Path,
     osm_path: Path,
-    shared: tuple | None = None,
+    validation_context: ValidationContext | None = None,
 ) -> bool:
     """Run stop line cross-validation between XODR, OSM, and .mapping.json.
 
@@ -590,20 +615,18 @@ def run_stop_line_validation(
     Args:
         xodr_path: Path to the OpenDRIVE file.
         osm_path: Path to the Lanelet2 OSM file.
-        shared: Pre-loaded validation context from ``_load_map_for_validation``.
-            If *None*, the context is loaded internally.
+        validation_context: Pre-loaded context from
+            ``_load_validation_context``.  If *None*, loaded internally.
 
     Returns:
         ``True`` if validation passed, ``False`` if errors were found.
     """
-    ctx = shared or _load_map_for_validation(xodr_path, osm_path)
+    ctx = validation_context or _load_validation_context(xodr_path, osm_path)
     if ctx is None:
         print("  Skipping stop line validation (no mapping data).")
         return True
 
-    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm, xodr_root = ctx
-
-    if conv_mapping.stop_line_mapping is None:
+    if ctx.conv_mapping.stop_line_mapping is None:
         print("  Mapping file has no stop_line_mapping; skipping.")
         return True
 
@@ -611,16 +634,16 @@ def run_stop_line_validation(
 
     # Single-pass XODR parse for objects, signals, dependencies, positions
     xodr_objects, xodr_signal_types, all_signal_ids, signal_deps, object_positions = (
-        _parse_stop_lines_from_xodr(xodr_path, xodr_root=xodr_root)
+        _parse_stop_lines_from_xodr(xodr_path, xodr_root=ctx.xodr_root)
     )
 
     # Build road lookup for position evaluation
-    roads = parse_roads_from_xodr(xodr_path, xodr_root=xodr_root)
+    roads = parse_roads_from_xodr(xodr_path, xodr_root=ctx.xodr_root)
     road_by_id: dict[int, "ConverterRoad"] = {r.id: r for r in roads}
 
     # Get LL2 stop line IDs
     ll2_stop_line_ids: set[int] = set()
-    for ls in lanelet_map.lineStringLayer:
+    for ls in ctx.lanelet_map.lineStringLayer:
         if "type" in ls.attributes and ls.attributes["type"] == "stop_line":
             ll2_stop_line_ids.add(ls.id)
 
@@ -646,12 +669,12 @@ def run_stop_line_validation(
             ll2_not_in_xodr.append(ls_id)
             # Check if we have a skip reason from conversion
             if (
-                conv_mapping.skipped_stop_lines
-                and ls_id in conv_mapping.skipped_stop_lines
+                ctx.conv_mapping.skipped_stop_lines
+                and ls_id in ctx.conv_mapping.skipped_stop_lines
             ):
-                reason = conv_mapping.skipped_stop_lines[ls_id].reason
+                reason = ctx.conv_mapping.skipped_stop_lines[ls_id].reason
                 print(f"  linestring {ls_id}: skipped (reason: {reason})")
-            elif ls_id in conv_mapping.stop_line_mapping:
+            elif ls_id in ctx.conv_mapping.stop_line_mapping:
                 # In mapping but not in XODR objects -> unexpected
                 warnings.append(
                     f"  linestring {ls_id}: in mapping but missing from XODR objects"
@@ -667,7 +690,7 @@ def run_stop_line_validation(
     cross_fail = 0
     pos_ok = 0
     pos_fail = 0
-    for ls_id, entry in conv_mapping.stop_line_mapping.items():
+    for ls_id, entry in ctx.conv_mapping.stop_line_mapping.items():
         # Check road_id
         xodr_road = xodr_objects.get(ls_id)
         if xodr_road is None:
@@ -699,11 +722,11 @@ def run_stop_line_validation(
             xodr_xy = _evaluate_road_xy(road, st[0], st[1])
             if xodr_xy is not None:
                 try:
-                    ll2_ls = lanelet_map.lineStringLayer[ls_id]
+                    ll2_ls = ctx.lanelet_map.lineStringLayer[ls_id]
                     pts = [(float(p.x), float(p.y)) for p in ll2_ls]
                     if pts:
-                        cx = sum(x for x, _ in pts) / len(pts) - offset_x
-                        cy = sum(y for _, y in pts) / len(pts) - offset_y
+                        cx = sum(x for x, _ in pts) / len(pts) - ctx.offset_x
+                        cy = sum(y for _, y in pts) / len(pts) - ctx.offset_y
                         dist = ((cx - xodr_xy[0]) ** 2 + (cy - xodr_xy[1]) ** 2) ** 0.5
                         if dist > _STOP_LINE_POSITION_TOLERANCE:
                             errors.append(
@@ -754,6 +777,114 @@ def run_stop_line_validation(
         return False
 
     print("  Stop line validation: PASSED")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Junction lanelet validation
+# ---------------------------------------------------------------------------
+
+
+def _parse_road_junction_map(
+    xodr_root: object,
+) -> dict[int, int]:
+    """Build a road_id -> junction_id mapping from the XODR root.
+
+    A road with ``junction="-1"`` is not part of any junction.
+    A road with ``junction >= 0`` belongs to that junction.
+
+    Args:
+        xodr_root: Pre-parsed XML root element.
+
+    Returns:
+        Dictionary mapping road ID to junction ID.
+    """
+    road_to_junction: dict[int, int] = {}
+    for road_elem in xodr_root.iter("road"):  # type: ignore[union-attr]
+        road_id = int(road_elem.get("id", "-1"))
+        junction = int(road_elem.get("junction", "-1"))
+        road_to_junction[road_id] = junction
+    return road_to_junction
+
+
+def run_junction_lanelet_validation(
+    xodr_path: Path,
+    osm_path: Path,
+    validation_context: ValidationContext | None = None,
+) -> bool:
+    """Validate that lanelets with turn_direction map to junction roads in XODR.
+
+    A lanelet with a ``turn_direction`` attribute is expected to correspond to
+    an OpenDRIVE road that belongs to a junction (``junction >= 0``).  If the
+    mapped road is *not* part of a junction, this is reported as an error.
+
+    Args:
+        xodr_path: Path to the OpenDRIVE file.
+        osm_path: Path to the Lanelet2 OSM file.
+        validation_context: Pre-loaded context from
+            ``_load_validation_context``.  If *None*, loaded internally.
+
+    Returns:
+        ``True`` if validation passed, ``False`` if errors were found.
+    """
+    ctx = validation_context or _load_validation_context(xodr_path, osm_path)
+    if ctx is None:
+        print("  Skipping junction lanelet validation (no mapping data).")
+        return True
+
+    # Build road_id -> junction_id map from XODR
+    road_to_junction = _parse_road_junction_map(ctx.xodr_root)
+
+    # Collect lanelets with turn_direction
+    turn_direction_lanelets: list[tuple[int, str]] = []
+    for lanelet in ctx.lanelet_map.laneletLayer:
+        if "turn_direction" in lanelet.attributes:
+            turn_direction_lanelets.append(
+                (lanelet.id, lanelet.attributes["turn_direction"])
+            )
+
+    if not turn_direction_lanelets:
+        print("  No lanelets with turn_direction found; nothing to validate.")
+        return True
+
+    errors: list[str] = []
+    ok_count = 0
+    unmapped_count = 0
+
+    for lanelet_id, turn_dir in sorted(turn_direction_lanelets):
+        mapping_entry = ctx.conv_mapping.lanelet_to_road_and_lane.get(lanelet_id)
+        if mapping_entry is None:
+            unmapped_count += 1
+            continue
+
+        road_id, _lane_id = mapping_entry
+        junction_id = road_to_junction.get(road_id, -1)
+
+        if junction_id >= 0:
+            ok_count += 1
+        else:
+            errors.append(
+                f"  lanelet {lanelet_id} (turn_direction={turn_dir}): "
+                f"road {road_id} is not part of a junction (junction={junction_id})"
+            )
+
+    # ── Summary
+    print(f"\n  Lanelets with turn_direction: {len(turn_direction_lanelets)}")
+    print(f"  Mapped to junction road    : {ok_count}")
+    print(f"  NOT in junction (error)    : {len(errors)}")
+    if unmapped_count > 0:
+        print(f"  Not in mapping (skipped)   : {unmapped_count}")
+
+    if errors:
+        print(f"\n  Errors ({len(errors)}):")
+        for e in errors[:20]:
+            print(e)
+        if len(errors) > 20:
+            print(f"  ... and {len(errors) - 20} more")
+        print("  Junction lanelet validation: FAILED")
+        return False
+
+    print("  Junction lanelet validation: PASSED")
     return True
 
 
@@ -834,15 +965,15 @@ def run_analysis(
     if use_temp:
         Path(rf).unlink(missing_ok=True)
 
-    # ── Load shared validation context once ──────────────────────────────
-    shared_ctx = _load_map_for_validation(xodr_path, osm_path)
+    # ── Load validation context once ─────────────────────────────────────
+    val_ctx = _load_validation_context(xodr_path, osm_path)
 
     # ── Mapping cross-validation ───────────────────────────────────────────
     print(f"\n{'=' * 72}")
     print("  Mapping Cross-Validation")
     print(f"{'=' * 72}")
 
-    mapping_ok = run_mapping_validation(xodr_path, osm_path, shared=shared_ctx)
+    mapping_ok = run_mapping_validation(xodr_path, osm_path, validation_context=val_ctx)
     if not mapping_ok:
         error_count += 1
 
@@ -851,8 +982,21 @@ def run_analysis(
     print("  Stop Line Validation")
     print(f"{'=' * 72}")
 
-    stop_line_ok = run_stop_line_validation(xodr_path, osm_path, shared=shared_ctx)
+    stop_line_ok = run_stop_line_validation(
+        xodr_path, osm_path, validation_context=val_ctx
+    )
     if not stop_line_ok:
+        error_count += 1
+
+    # ── Junction lanelet validation ──────────────────────────────────────
+    print(f"\n{'=' * 72}")
+    print("  Junction Lanelet Validation")
+    print(f"{'=' * 72}")
+
+    junction_ok = run_junction_lanelet_validation(
+        xodr_path, osm_path, validation_context=val_ctx
+    )
+    if not junction_ok:
         error_count += 1
 
     # ── Final summary ──────────────────────────────────────────────────────
