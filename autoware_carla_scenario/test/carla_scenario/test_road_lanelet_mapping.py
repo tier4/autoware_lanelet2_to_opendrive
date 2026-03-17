@@ -73,7 +73,7 @@ class TestSerialization:
 
     def test_version_field(self):
         m = GeoRoadLaneletMapping(xodr_sha256="a", osm_sha256="b")
-        assert m.to_dict()["version"] == 3
+        assert m.to_dict()["version"] == 4
 
     def test_empty_mapping(self):
         m = GeoRoadLaneletMapping(xodr_sha256="a", osm_sha256="b")

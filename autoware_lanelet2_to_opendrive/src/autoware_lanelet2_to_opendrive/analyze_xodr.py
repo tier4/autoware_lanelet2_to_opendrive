@@ -264,6 +264,86 @@ def print_report(
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers for validation phases
+# ---------------------------------------------------------------------------
+
+
+def _load_map_for_validation(
+    xodr_path: Path,
+    osm_path: Path,
+) -> tuple | None:
+    """Load Lanelet2 map using geoReference from the XODR file.
+
+    Handles preprocessed-OSM detection via the ``.mapping.json`` sidecar.
+
+    Returns:
+        ``(lanelet_map, offset_x, offset_y, conv_mapping, effective_osm)``
+        or ``None`` if loading is not possible.
+    """
+    import json
+
+    import lanelet2
+    import lxml.etree as ET
+    from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
+
+    from .projection import latlon_to_lanelet2_origin
+    from .road_lanelet_geo_mapping import (
+        GeoRoadLaneletMapping,
+        _cache_path_for,
+        _preprocessed_osm_path_for,
+    )
+
+    mapping_path = _cache_path_for(xodr_path)
+    if not mapping_path.exists():
+        print(f"\n  Mapping file not found: {mapping_path}")
+        print("  Skipping validation (no mapping file).")
+        return None
+
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
+    conv_mapping = GeoRoadLaneletMapping.from_dict(data)
+
+    effective_osm = osm_path
+    if conv_mapping.preprocessing_log is not None:
+        preprocessed_osm = _preprocessed_osm_path_for(xodr_path)
+        if preprocessed_osm.exists():
+            effective_osm = preprocessed_osm
+            print(f"  Using preprocessed OSM: {preprocessed_osm}")
+        else:
+            print(
+                f"  WARNING: Mapping has preprocessing_log but "
+                f"{preprocessed_osm.name} not found.\n"
+                f"  Validation would compare against a different lanelet set; skipping."
+            )
+            return None
+
+    tree = ET.parse(str(xodr_path))
+    geo_ref_elem = tree.find(".//geoReference")
+    if geo_ref_elem is None or geo_ref_elem.text is None:
+        print("  WARNING: No geoReference in XODR; skipping validation.")
+        return None
+
+    proj_string = geo_ref_elem.text.strip()
+    lat_match = re.search(r"\+lat_0=([\d.eE+-]+)", proj_string)
+    lon_match = re.search(r"\+lon_0=([\d.eE+-]+)", proj_string)
+    if not lat_match or not lon_match:
+        print("  WARNING: Cannot parse lat_0/lon_0 from geoReference; skipping.")
+        return None
+
+    origin_lat = float(lat_match.group(1))
+    origin_lon = float(lon_match.group(1))
+
+    origin = latlon_to_lanelet2_origin(origin_lat, origin_lon)
+    projector = MGRSProjector(origin)
+    lanelet_map = lanelet2.io.load(str(effective_osm), projector)
+
+    fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
+    offset_x = fwd.x
+    offset_y = fwd.y
+
+    return (lanelet_map, offset_x, offset_y, conv_mapping, effective_osm)
+
+
+# ---------------------------------------------------------------------------
 # Mapping cross-validation (standalone, for CLI use without convert context)
 # ---------------------------------------------------------------------------
 
@@ -283,86 +363,24 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
         ``True`` if mapping validation passed or was skipped (no mapping file),
         ``False`` if a mismatch was detected.
     """
-    import json
-
-    import lanelet2
-    import lxml.etree as ET
-    from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
-
-    from .projection import latlon_to_lanelet2_origin
     from .road_lanelet_geo_mapping import (
-        GeoRoadLaneletMapping,
         MappingMismatchError,
-        _cache_path_for,
-        _preprocessed_osm_path_for,
         build_mapping,
         parse_roads_from_xodr,
         validate_mapping_consistency,
     )
 
-    # Check for .mapping.json next to the XODR
-    mapping_path = _cache_path_for(xodr_path)
-    if not mapping_path.exists():
-        print(f"\n  Mapping file not found: {mapping_path}")
-        print("  Skipping mapping cross-validation.")
+    result = _load_map_for_validation(xodr_path, osm_path)
+    if result is None:
         return True
 
-    data = json.loads(mapping_path.read_text(encoding="utf-8"))
-    conv_mapping = GeoRoadLaneletMapping.from_dict(data)
+    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm = result
 
-    print(f"\n  Mapping file : {mapping_path}")
+    print(f"\n  Mapping file : {xodr_path.parent / (xodr_path.stem + '.mapping.json')}")
     print(f"  Entries      : {len(conv_mapping.lanelet_to_road_and_lane)}")
 
-    # If the mapping contains a preprocessing_log, the conversion used a
-    # preprocessed OSM.  Look for the companion file saved by the converter.
-    effective_osm = osm_path
-    if conv_mapping.preprocessing_log is not None:
-        preprocessed_osm = _preprocessed_osm_path_for(xodr_path)
-        if preprocessed_osm.exists():
-            effective_osm = preprocessed_osm
-            print(f"  Using preprocessed OSM: {preprocessed_osm}")
-        else:
-            print(
-                f"  WARNING: Mapping has preprocessing_log but "
-                f"{preprocessed_osm.name} not found.\n"
-                f"  Validation would compare against a different lanelet set; skipping."
-            )
-            return False
-
-    # Parse geoReference from XODR to determine origin
-    tree = ET.parse(str(xodr_path))
-    geo_ref_elem = tree.find(".//geoReference")
-    if geo_ref_elem is None or geo_ref_elem.text is None:
-        print("  WARNING: No geoReference in XODR; skipping mapping validation.")
-        return True
-
-    proj_string = geo_ref_elem.text.strip()
-    lat_match = re.search(r"\+lat_0=([\d.eE+-]+)", proj_string)
-    lon_match = re.search(r"\+lon_0=([\d.eE+-]+)", proj_string)
-    if not lat_match or not lon_match:
-        print("  WARNING: Cannot parse lat_0/lon_0 from geoReference; skipping.")
-        return True
-
-    origin_lat = float(lat_match.group(1))
-    origin_lon = float(lon_match.group(1))
-
-    # Load Lanelet2 map with the same origin
-    origin = latlon_to_lanelet2_origin(origin_lat, origin_lon)
-    projector = MGRSProjector(origin)
-    lanelet_map = lanelet2.io.load(str(effective_osm), projector)
-
-    # Recover MGRS offset: forward-project the geoReference origin to get the
-    # MGRS absolute coordinates of the XODR origin.  The XODR uses local
-    # coordinates = MGRS_absolute - offset, so we need this offset to bring
-    # lanelet coordinates into the same space as the XODR roads.
-    fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
-    offset_x = fwd.x
-    offset_y = fwd.y
-
-    # Parse XODR XML to build Road objects (avoids pyxodr dependency)
     roads = parse_roads_from_xodr(xodr_path)
 
-    # Reuse SHA256 from the loaded mapping JSON to avoid re-hashing large files.
     geo_mapping = build_mapping(
         lanelet_map,
         roads,
@@ -378,6 +396,257 @@ def run_mapping_validation(xodr_path: Path, osm_path: Path) -> bool:
     except MappingMismatchError as e:
         print(f"  Mapping cross-validation: FAILED\n  {e}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Stop line XODR parsing
+# ---------------------------------------------------------------------------
+
+# Signal name patterns for stop line related signals
+_STOP_LINE_SIGNAL_RE = re.compile(r"^(StopLine|StopSign|YieldSign)_(\d+)$")
+
+
+def _parse_stop_lines_from_xodr(
+    xodr_path: Path,
+) -> tuple[dict[int, int], dict[int, list[int]], set[int]]:
+    """Parse stop line objects, signals, and all signal IDs from an XODR file.
+
+    Args:
+        xodr_path: Path to the OpenDRIVE file.
+
+    Returns:
+        Tuple of:
+        - ``object_to_road``: Mapping from stop line object ID to road ID.
+        - ``linestring_to_signal_types``: Mapping from linestring ID (extracted
+          from signal name) to list of signal type integers.
+        - ``all_signal_ids``: Set of all signal IDs in the XODR.
+    """
+    import lxml.etree as ET
+
+    tree = ET.parse(str(xodr_path))
+    root = tree.getroot()
+
+    object_to_road: dict[int, int] = {}
+    linestring_to_signal_types: dict[int, list[int]] = {}
+    all_signal_ids: set[int] = set()
+
+    for road_elem in root.iter("road"):
+        road_id = int(road_elem.get("id", "-1"))
+
+        # Parse stop line objects
+        for obj_elem in road_elem.iter("object"):
+            obj_type = obj_elem.get("type", "")
+            obj_name = obj_elem.get("name", "")
+            obj_id_str = obj_elem.get("id", "")
+            if not obj_id_str:
+                continue
+
+            # Standard format: type="stopLine"
+            # CARLA format: type="-1" and name="Stencil_STOP"
+            is_stop_line = obj_type == "stopLine" or (
+                obj_type == "-1" and obj_name == "Stencil_STOP"
+            )
+            if is_stop_line:
+                object_to_road[int(obj_id_str)] = road_id
+
+        # Parse signals
+        for signal_elem in road_elem.iter("signal"):
+            sig_id_str = signal_elem.get("id", "")
+            if sig_id_str:
+                all_signal_ids.add(int(sig_id_str))
+
+            sig_name = signal_elem.get("name", "")
+            sig_type_str = signal_elem.get("type", "")
+            match = _STOP_LINE_SIGNAL_RE.match(sig_name)
+            if match and sig_type_str:
+                linestring_id = int(match.group(2))
+                signal_type = int(sig_type_str)
+                linestring_to_signal_types.setdefault(linestring_id, []).append(
+                    signal_type
+                )
+
+    return object_to_road, linestring_to_signal_types, all_signal_ids
+
+
+def _parse_signal_dependencies_from_xodr(
+    xodr_path: Path,
+) -> dict[int, list[int]]:
+    """Parse dependency references from stop line signals in the XODR.
+
+    Returns:
+        Mapping from signal ID to list of dependency IDs.
+    """
+    import lxml.etree as ET
+
+    tree = ET.parse(str(xodr_path))
+    root = tree.getroot()
+
+    signal_dependencies: dict[int, list[int]] = {}
+    for signal_elem in root.iter("signal"):
+        sig_name = signal_elem.get("name", "")
+        sig_id_str = signal_elem.get("id", "")
+        if not _STOP_LINE_SIGNAL_RE.match(sig_name) or not sig_id_str:
+            continue
+
+        sig_id = int(sig_id_str)
+        deps: list[int] = []
+        for dep_elem in signal_elem.findall("dependency"):
+            dep_id_str = dep_elem.get("id", "")
+            if dep_id_str:
+                deps.append(int(dep_id_str))
+        if deps:
+            signal_dependencies[sig_id] = deps
+
+    return signal_dependencies
+
+
+# ---------------------------------------------------------------------------
+# Stop line validation
+# ---------------------------------------------------------------------------
+
+
+def run_stop_line_validation(xodr_path: Path, osm_path: Path) -> bool:
+    """Run stop line cross-validation between XODR, OSM, and .mapping.json.
+
+    Checks:
+    1. XODR -> LL2 existence: stop line objects in XODR must exist in LL2 (FAIL if not)
+    2. LL2 -> XODR existence: LL2 stop lines not in XODR are PASS (with logged reason)
+    3. Cross-validation: road_id and signal_types must match between mapping and XODR
+    4. Dependency integrity: dependency IDs must reference existing signals
+
+    Args:
+        xodr_path: Path to the OpenDRIVE file.
+        osm_path: Path to the Lanelet2 OSM file.
+
+    Returns:
+        ``True`` if validation passed, ``False`` if errors were found.
+    """
+    result = _load_map_for_validation(xodr_path, osm_path)
+    if result is None:
+        print("  Skipping stop line validation (no mapping data).")
+        return True
+
+    lanelet_map, _offset_x, _offset_y, conv_mapping, _effective_osm = result
+
+    # Check if mapping has stop line data (version 4)
+    if conv_mapping.stop_line_mapping is None:
+        print("  Mapping file has no stop_line_mapping (version < 4); skipping.")
+        return True
+
+    # Parse XODR stop line information
+    xodr_objects, xodr_signal_types, all_signal_ids = _parse_stop_lines_from_xodr(
+        xodr_path
+    )
+    signal_deps = _parse_signal_dependencies_from_xodr(xodr_path)
+
+    # Get LL2 stop line IDs
+    ll2_stop_line_ids: set[int] = set()
+    for ls in lanelet_map.lineStringLayer:
+        if "type" in ls.attributes and ls.attributes["type"] == "stop_line":
+            ll2_stop_line_ids.add(ls.id)
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # ── Check 1: XODR → LL2 existence (FAIL if XODR has stop lines not in LL2)
+    xodr_only_objects: list[int] = []
+    for obj_id in xodr_objects:
+        if obj_id not in ll2_stop_line_ids:
+            xodr_only_objects.append(obj_id)
+    if xodr_only_objects:
+        for obj_id in xodr_only_objects:
+            errors.append(
+                f"  XODR object {obj_id} (road {xodr_objects[obj_id]}): "
+                f"not found in LL2 stop lines"
+            )
+
+    # ── Check 2: LL2 → XODR existence (PASS, log reason)
+    ll2_not_in_xodr: list[int] = []
+    for ls_id in sorted(ll2_stop_line_ids):
+        if ls_id not in xodr_objects:
+            ll2_not_in_xodr.append(ls_id)
+            # Check if we have a skip reason from conversion
+            if (
+                conv_mapping.skipped_stop_lines
+                and ls_id in conv_mapping.skipped_stop_lines
+            ):
+                reason = conv_mapping.skipped_stop_lines[ls_id].reason
+                print(f"  linestring {ls_id}: skipped (reason: {reason})")
+            elif ls_id in conv_mapping.stop_line_mapping:
+                # In mapping but not in XODR objects -> unexpected
+                warnings.append(
+                    f"  linestring {ls_id}: in mapping but missing from XODR objects"
+                )
+            else:
+                warnings.append(
+                    f"  linestring {ls_id}: not in mapping or skipped_stop_lines "
+                    f"(possible recording gap)"
+                )
+
+    # ── Check 3: Cross-validation (mapping vs XODR)
+    cross_ok = 0
+    cross_fail = 0
+    for ls_id, entry in conv_mapping.stop_line_mapping.items():
+        # Check road_id
+        xodr_road = xodr_objects.get(ls_id)
+        if xodr_road is None:
+            # Object not in XODR — already covered by check 2 warnings
+            continue
+        if xodr_road != entry.road_id:
+            errors.append(
+                f"  linestring {ls_id}: road_id mismatch — "
+                f"mapping={entry.road_id}, XODR={xodr_road}"
+            )
+            cross_fail += 1
+            continue
+
+        # Check signal_types
+        xodr_types = sorted(xodr_signal_types.get(ls_id, []))
+        mapping_types = sorted(entry.signal_types)
+        if xodr_types != mapping_types:
+            errors.append(
+                f"  linestring {ls_id}: signal_types mismatch — "
+                f"mapping={mapping_types}, XODR={xodr_types}"
+            )
+            cross_fail += 1
+        else:
+            cross_ok += 1
+
+    # ── Check 4: Dependency integrity
+    dep_errors = 0
+    for sig_id, dep_ids in signal_deps.items():
+        for dep_id in dep_ids:
+            if dep_id not in all_signal_ids:
+                errors.append(
+                    f"  signal {sig_id}: dependency {dep_id} not found "
+                    f"in XODR signal IDs"
+                )
+                dep_errors += 1
+
+    # ── Summary
+    print(f"\n  LL2 stop lines       : {len(ll2_stop_line_ids)}")
+    print(f"  XODR stop line objects: {len(xodr_objects)}")
+    print(f"  LL2-only (skipped)   : {len(ll2_not_in_xodr)}")
+    print(f"  XODR-only (invalid)  : {len(xodr_only_objects)}")
+    print(f"  Cross-validation     : {cross_ok} ok, {cross_fail} mismatch")
+    print(f"  Dependency integrity : {dep_errors} error(s)")
+
+    if warnings:
+        print(f"\n  Warnings ({len(warnings)}):")
+        for w in warnings:
+            print(w)
+
+    if errors:
+        print(f"\n  Errors ({len(errors)}):")
+        for e in errors[:20]:
+            print(e)
+        if len(errors) > 20:
+            print(f"  ... and {len(errors) - 20} more")
+        print("  Stop line validation: FAILED")
+        return False
+
+    print("  Stop line validation: PASSED")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +733,15 @@ def run_analysis(
 
     mapping_ok = run_mapping_validation(xodr_path, osm_path)
     if not mapping_ok:
+        error_count += 1
+
+    # ── Stop line validation ──────────────────────────────────────────────
+    print(f"\n{'=' * 72}")
+    print("  Stop Line Validation")
+    print(f"{'=' * 72}")
+
+    stop_line_ok = run_stop_line_validation(xodr_path, osm_path)
+    if not stop_line_ok:
         error_count += 1
 
     # ── Final summary ──────────────────────────────────────────────────────

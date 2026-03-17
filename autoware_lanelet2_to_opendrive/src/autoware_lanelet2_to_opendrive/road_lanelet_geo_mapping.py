@@ -54,6 +54,40 @@ _ENDPOINT_WEIGHT: float = 0.1
 
 
 # ---------------------------------------------------------------------------
+# Stop line mapping dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StopLineMappingEntry:
+    """Stop line mapping entry recorded during conversion."""
+
+    road_id: int
+    signal_types: list[int]
+
+    def to_dict(self) -> dict:
+        return {"road_id": self.road_id, "signal_types": self.signal_types}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StopLineMappingEntry":
+        return cls(road_id=data["road_id"], signal_types=data["signal_types"])
+
+
+@dataclass
+class SkippedStopLineEntry:
+    """Skipped stop line entry recorded during conversion."""
+
+    reason: str
+
+    def to_dict(self) -> dict:
+        return {"reason": self.reason}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SkippedStopLineEntry":
+        return cls(reason=data["reason"])
+
+
+# ---------------------------------------------------------------------------
 # Internal dataclass for 3-phase matching
 # ---------------------------------------------------------------------------
 
@@ -85,6 +119,8 @@ class GeoRoadLaneletMapping:
     osm_sha256: str
     lanelet_to_road_and_lane: dict[int, tuple[int, int]] = field(default_factory=dict)
     preprocessing_log: dict | None = None
+    stop_line_mapping: dict[int, StopLineMappingEntry] | None = None
+    skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
         init=False,
@@ -108,20 +144,46 @@ class GeoRoadLaneletMapping:
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dictionary."""
         result: dict = {
-            "version": 3,
+            "version": 4,
             "xodr_sha256": self.xodr_sha256,
             "osm_sha256": self.osm_sha256,
             "lanelet_to_road_and_lane": {
                 str(k): list(v) for k, v in self.lanelet_to_road_and_lane.items()
             },
         }
+        if self.stop_line_mapping is not None:
+            result["stop_line_mapping"] = {
+                str(k): v.to_dict() for k, v in self.stop_line_mapping.items()
+            }
+        if self.skipped_stop_lines is not None:
+            result["skipped_stop_lines"] = {
+                str(k): v.to_dict() for k, v in self.skipped_stop_lines.items()
+            }
         if self.preprocessing_log is not None:
             result["preprocessing_log"] = self.preprocessing_log
         return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "GeoRoadLaneletMapping":
-        """Deserialize from a JSON-compatible dictionary."""
+        """Deserialize from a JSON-compatible dictionary.
+
+        Supports version 3 (no stop line info) and version 4 (with stop line info).
+        """
+        stop_line_mapping: dict[int, StopLineMappingEntry] | None = None
+        skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None
+
+        raw_slm = data.get("stop_line_mapping")
+        if raw_slm is not None:
+            stop_line_mapping = {
+                int(k): StopLineMappingEntry.from_dict(v) for k, v in raw_slm.items()
+            }
+
+        raw_ssl = data.get("skipped_stop_lines")
+        if raw_ssl is not None:
+            skipped_stop_lines = {
+                int(k): SkippedStopLineEntry.from_dict(v) for k, v in raw_ssl.items()
+            }
+
         return cls(
             xodr_sha256=data["xodr_sha256"],
             osm_sha256=data["osm_sha256"],
@@ -130,6 +192,8 @@ class GeoRoadLaneletMapping:
                 for k, v in data["lanelet_to_road_and_lane"].items()
             },
             preprocessing_log=data.get("preprocessing_log"),
+            stop_line_mapping=stop_line_mapping,
+            skipped_stop_lines=skipped_stop_lines,
         )
 
 
@@ -615,28 +679,83 @@ def _resolve_conflicts(
             claimants.sort(key=lambda x: (x[1], all_rc[x[0]].road_id))
 
             if len(claimants) == 2:
-                # 2-way conflict with "save the drowning" logic:
-                # if the greedy loser would be dropped (no more candidates)
-                # but the winner has alternatives, swap the assignment to
-                # save the loser from being dropped entirely.
-                winner_idx, _ = claimants[0]
-                loser_idx, _ = claimants[1]
+                # 2-way conflict with cost-aware tie-breaking.
+                winner_idx, winner_dist = claimants[0]
+                loser_idx, loser_dist = claimants[1]
 
                 next_loser = assignment[loser_idx] + 1
                 loser_exhausted = next_loser >= len(all_rc[loser_idx].candidates)
+                next_winner = assignment[winner_idx] + 1
+                winner_exhausted = next_winner >= len(all_rc[winner_idx].candidates)
 
-                if loser_exhausted:
-                    # Loser would be dropped — check if winner has alt
-                    next_winner = assignment[winner_idx] + 1
-                    winner_has_alt = next_winner < len(all_rc[winner_idx].candidates)
-                    if winner_has_alt:
-                        # Save the loser: advance the winner instead
-                        assignment[winner_idx] += 1
-                        had_conflict = True
-                        continue
+                if loser_exhausted and not winner_exhausted:
+                    # Save the loser: advance the winner instead
+                    logger.debug(
+                        "Conflict on lanelet %d: save-the-drowning — "
+                        "advance winner road %d (loser road %d exhausted)",
+                        lid,
+                        all_rc[winner_idx].road_id,
+                        all_rc[loser_idx].road_id,
+                    )
+                    assignment[winner_idx] += 1
+                    had_conflict = True
+                    continue
 
-                # Default greedy: advance the loser
-                assignment[loser_idx] += 1
+                if winner_exhausted and not loser_exhausted:
+                    # Winner exhausted but loser has alternatives — advance loser
+                    logger.debug(
+                        "Conflict on lanelet %d: advance loser road %d "
+                        "(winner road %d exhausted)",
+                        lid,
+                        all_rc[loser_idx].road_id,
+                        all_rc[winner_idx].road_id,
+                    )
+                    assignment[loser_idx] += 1
+                    had_conflict = True
+                    continue
+
+                if loser_exhausted and winner_exhausted:
+                    # Both exhausted — loser is dropped
+                    logger.debug(
+                        "Conflict on lanelet %d: both exhausted — "
+                        "drop loser road %d",
+                        lid,
+                        all_rc[loser_idx].road_id,
+                    )
+                    assignment[loser_idx] += 1
+                    had_conflict = True
+                    continue
+
+                # Both have alternatives — compare total cost
+                loser_next_dist = all_rc[loser_idx].candidates[next_loser][0]
+                winner_next_dist = all_rc[winner_idx].candidates[next_winner][0]
+                cost_advance_loser = winner_dist + loser_next_dist
+                cost_advance_winner = loser_dist + winner_next_dist
+
+                if cost_advance_winner < cost_advance_loser:
+                    # Advancing the winner yields lower total cost
+                    logger.debug(
+                        "Conflict on lanelet %d: cost-aware — "
+                        "advance winner road %d "
+                        "(cost_adv_winner=%.3f < cost_adv_loser=%.3f)",
+                        lid,
+                        all_rc[winner_idx].road_id,
+                        cost_advance_winner,
+                        cost_advance_loser,
+                    )
+                    assignment[winner_idx] += 1
+                else:
+                    # Default: advance the loser
+                    logger.debug(
+                        "Conflict on lanelet %d: cost-aware — "
+                        "advance loser road %d "
+                        "(cost_adv_loser=%.3f <= cost_adv_winner=%.3f)",
+                        lid,
+                        all_rc[loser_idx].road_id,
+                        cost_advance_loser,
+                        cost_advance_winner,
+                    )
+                    assignment[loser_idx] += 1
                 had_conflict = True
             else:
                 # Multi-way conflict: greedy distance-based resolution
@@ -976,6 +1095,7 @@ def build_mapping(
     # against currently unmatched lanelets.
     _RESCUE_THRESHOLD: float = _MATCH_THRESHOLD * 1.5
     assigned_rc_indices = set(assignment.keys())
+    rescued_road_ids: set[int] = set()
     for rc_idx in range(len(all_rc)):
         if rc_idx in assigned_rc_indices:
             continue
@@ -1010,6 +1130,7 @@ def build_mapping(
             for lid, rid, lane_id in walk_result_rescue:
                 mapping[lid] = (rid, lane_id)
                 matched_lanelets.add(lid)
+            rescued_road_ids.add(rc.road_id)
             logger.info(
                 "Rescue: road %d recovered via lanelet %d (dist=%.3f, lanes=%d/%d)",
                 rc.road_id,
@@ -1065,13 +1186,24 @@ def build_mapping(
                     f"(lanelet {diag['nearest_lid']})"
                 )
     if roads_dropped_phase2:
-        msg = (
-            f"  [Diag] Phase 2: {len(roads_dropped_phase2)} roads dropped "
-            f"in conflict resolution: "
-            f"road IDs = {sorted(roads_dropped_phase2)[:30]}"
-        )
-        tqdm.write(msg)
-        logger.warning(msg)
+        unrecovered = roads_dropped_phase2 - rescued_road_ids
+        rescued = roads_dropped_phase2 & rescued_road_ids
+        if unrecovered:
+            msg = (
+                f"  [Diag] Phase 2: {len(unrecovered)} roads dropped "
+                f"in conflict resolution (unrecovered): "
+                f"road IDs = {sorted(unrecovered)[:30]}"
+            )
+            tqdm.write(msg)
+            logger.warning(msg)
+        if rescued:
+            msg = (
+                f"  [Diag] Phase 2: {len(rescued)} roads dropped "
+                f"in conflict resolution but rescued: "
+                f"road IDs = {sorted(rescued)[:30]}"
+            )
+            tqdm.write(msg)
+            logger.info(msg)
     if roads_not_fully_mapped:
         msg = (
             f"  [Diag] Phase 3: {len(roads_not_fully_mapped)} roads not "
@@ -1232,6 +1364,8 @@ def validate_and_save_mapping(
     osm_path: Path,
     mgrs_offset: tuple[float, float],
     preprocessing_log: dict | None = None,
+    stop_line_mapping: dict[int, StopLineMappingEntry] | None = None,
+    skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
@@ -1252,6 +1386,9 @@ def validate_and_save_mapping(
         mgrs_offset: ``(offset_x, offset_y)`` coordinate offset.
         preprocessing_log: Optional preprocessing log dict to embed in the
             mapping JSON and annotate cross-validation mismatches.
+        stop_line_mapping: Optional mapping of linestring ID to stop line
+            conversion info (road_id, signal_types).
+        skipped_stop_lines: Optional mapping of linestring ID to skip reason.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
@@ -1270,6 +1407,8 @@ def validate_and_save_mapping(
         osm_sha256=osm_sha256,
         lanelet_to_road_and_lane=lanelet_to_road_and_lane,
         preprocessing_log=preprocessing_log,
+        stop_line_mapping=stop_line_mapping,
+        skipped_stop_lines=skipped_stop_lines,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)

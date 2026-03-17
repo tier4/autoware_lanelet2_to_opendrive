@@ -644,7 +644,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         stop_sign_stop_line_ids: Optional[Set[int]] = None,
         starting_signal_id: int = 0,
         road_marking_stop_line_ids: Optional[Set[int]] = None,
-    ) -> Dict[int, List[int]]:
+    ) -> Tuple[Dict[int, List[int]], Dict, Dict]:
         """Extract stop line linestrings and assign them as objects to nearest roads.
 
         For each linestring with type="stop_line", this method:
@@ -673,8 +673,14 @@ class _Lanelet2ToOpenDRIVEConverter:
                 and StopLine (294) signal pairs.
 
         Returns:
-            Dictionary mapping traffic light signal ID to list of stop line signal IDs,
-            used to add back-references (Reference elements) to traffic light signals.
+            Tuple of:
+            - Dictionary mapping traffic light signal ID to list of stop line signal
+              IDs, used to add back-references (Reference elements) to traffic light
+              signals.
+            - Dictionary mapping linestring ID to StopLineMappingEntry for
+              successfully converted stop lines.
+            - Dictionary mapping linestring ID to SkippedStopLineEntry for
+              stop lines that were skipped during conversion.
         """
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
             StopLineObject,
@@ -685,12 +691,18 @@ class _Lanelet2ToOpenDRIVEConverter:
             Dependency,
             SignalType,
         )
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            StopLineMappingEntry,
+            SkippedStopLineEntry,
+        )
 
         print("\n=== Extracting stop lines ===")
         stop_line_ids_seen: set = set()
         road_objects: Dict[int, List] = {}
         road_stop_line_signals: Dict[int, List] = {}
         tl_signal_to_stop_line_signal_ids: Dict[int, List[int]] = {}
+        stop_line_mapping: Dict[int, StopLineMappingEntry] = {}
+        skipped_stop_lines: Dict[int, SkippedStopLineEntry] = {}
         stop_line_signal_id_counter = starting_signal_id
         # Resolve Optional to a concrete dict for type narrowing
         resolved_tl_signal_ids: Dict[int, List[int]] = (
@@ -717,6 +729,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
             best_road = find_nearest_road_for_linestring(ls, all_roads)
             if best_road is None:
+                skipped_stop_lines[ls.id] = SkippedStopLineEntry(
+                    reason="no_nearest_road"
+                )
                 continue
 
             obj = StopLineObject.construct_from_linestring(
@@ -727,9 +742,13 @@ class _Lanelet2ToOpenDRIVEConverter:
                 carla_format=self.config.stopline.carla_stop_line,
             )
             if obj is None:
+                skipped_stop_lines[ls.id] = SkippedStopLineEntry(
+                    reason="construction_failed"
+                )
                 continue
 
             road_objects.setdefault(best_road.id, []).append(obj)
+            current_signal_types: List[int] = []
 
             # Use half of road width at s for signal t coordinate
             signal_t = best_road.get_half_width_at_s(obj.s)
@@ -783,6 +802,7 @@ class _Lanelet2ToOpenDRIVEConverter:
 
                 stop_line_signal_id_counter += 1
                 stop_line_294_count += 1
+                current_signal_types.append(SignalType.STOP_LINE)
 
             # Create StopSign signal (type 206) for stop lines referenced by
             # a traffic_sign regulatory element with a stop_sign refers member
@@ -796,6 +816,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 )
                 stop_line_signal_id_counter += 1
                 stop_sign_206_count += 1
+                current_signal_types.append(SignalType.STOP_SIGN)
 
             # Create YieldSign (type 205) + StopLine (type 294) for road marking
             # stop lines.  Skip if already handled by traffic_light (avoids
@@ -827,6 +848,15 @@ class _Lanelet2ToOpenDRIVEConverter:
                 )
                 stop_line_signal_id_counter += 1
                 road_marking_294_count += 1
+                current_signal_types.extend(
+                    [SignalType.YIELD_SIGN, SignalType.STOP_LINE]
+                )
+
+            # Record mapping for this successfully converted stop line
+            stop_line_mapping[ls.id] = StopLineMappingEntry(
+                road_id=best_road.id,
+                signal_types=current_signal_types,
+            )
 
         stop_line_count = sum(len(v) for v in road_objects.values())
         print(
@@ -859,7 +889,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     road.signals = []
                 road.signals.extend(road_stop_line_signals[road.id])
 
-        return tl_signal_to_stop_line_signal_ids
+        return tl_signal_to_stop_line_signal_ids, stop_line_mapping, skipped_stop_lines
 
     def _write_opendrive_output(
         self,
@@ -1028,13 +1058,21 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Step 6.7: Extract stop lines and assign as road objects (with signal dependencies)
         next_signal_id = len(signals_and_controllers.signals)
-        tl_signal_to_stop_line_signal_ids = self._extract_and_assign_stop_lines(
+        (
+            tl_signal_to_stop_line_signal_ids,
+            stop_line_mapping,
+            skipped_stop_lines,
+        ) = self._extract_and_assign_stop_lines(
             all_roads,
             stop_line_to_tl_signal_ids,
             stop_sign_stop_line_ids,
             next_signal_id,
             road_marking_stop_line_ids=road_marking_stop_line_ids,
         )
+
+        # Store stop line mapping data for post-conversion validation
+        self._stop_line_mapping = stop_line_mapping
+        self._skipped_stop_lines = skipped_stop_lines
 
         # Step 6.8: Add back-references to traffic light signals pointing to stop lines
         if tl_signal_to_stop_line_signal_ids:
@@ -1099,14 +1137,32 @@ def convert_lanelet2_to_opendrive(
             - OpenDRIVE object representing the converted map
             - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
             - Mapping from lanelet ID to (road_id, lane_id) for all lanes
+
+    Note:
+        After calling this function, stop line mapping data is available via
+        the module-level ``_last_stop_line_mapping`` and
+        ``_last_skipped_stop_lines`` variables.
     """
+    global _last_stop_line_mapping, _last_skipped_stop_lines
+
     # Merge legacy mgrs_code argument into config.origin so the converter has
     # a single, consistent source of truth for the MGRS grid code.
     if mgrs_code is not None:
         config = config.with_mgrs_code(mgrs_code)
 
     converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config)
-    return converter.convert()
+    result = converter.convert()
+
+    # Expose stop line mapping data for post-conversion use
+    _last_stop_line_mapping = getattr(converter, "_stop_line_mapping", None)
+    _last_skipped_stop_lines = getattr(converter, "_skipped_stop_lines", None)
+
+    return result
+
+
+# Module-level storage for stop line mapping data from the last conversion
+_last_stop_line_mapping: Optional[Dict] = None
+_last_skipped_stop_lines: Optional[Dict] = None
 
 
 def parse_origin_from_config(
@@ -1431,6 +1487,8 @@ def preprocess_and_convert_with_hydra(
             osm_path=input_map_path,
             mgrs_offset=(offset_x, offset_y),
             preprocessing_log=preprocessing_log_dict,
+            stop_line_mapping=_last_stop_line_mapping,
+            skipped_stop_lines=_last_skipped_stop_lines,
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`
