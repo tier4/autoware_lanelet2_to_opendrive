@@ -30,6 +30,7 @@ Usage examples::
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -280,6 +281,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
     )
 
     cooldown = float(first_cfg.server.get("cooldown_seconds", 0.0))
+    cooldown_max_retries = int(first_cfg.server.get("cooldown_max_retries", 0))
 
     # Batch mode bypasses @hydra.main, so we create the output directory
     # ourselves following Hydra's timestamped convention.
@@ -293,6 +295,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         lanelet2_path=lanelet2_path,
         map_name=first_cfg.map.name,
         cooldown_seconds=cooldown,
+        cooldown_max_retries=cooldown_max_retries,
         output_dir=output_dir,
     )
 
@@ -387,6 +390,7 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
     )
 
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
+    cooldown_max_retries = int(cfg.server.get("cooldown_max_retries", 0))
 
     # Retrieve the Hydra output directory (works regardless of
     # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
@@ -400,6 +404,7 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
         lanelet2_path=lanelet2_path,
         map_name=cfg.map.name,
         cooldown_seconds=cooldown,
+        cooldown_max_retries=cooldown_max_retries,
         output_dir=output_dir,
     )
     queue.add(scenario)
@@ -430,8 +435,57 @@ def _hydra_main(cfg: DictConfig) -> None:
         sys.exit(0 if result.passed else 1)
 
 
+def _extract_resume_from(argv: list[str]) -> tuple[int, list[str]]:
+    """Extract ``--resume-from N`` from *argv* and return the value and cleaned argv.
+
+    Returns:
+        A 2-tuple of ``(resume_from, remaining_argv)``.
+        *resume_from* is 0 when the flag is absent.
+    """
+    resume_from = 0
+    remaining: list[str] = []
+    skip_next = False
+    for i, arg in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--resume-from":
+            if i + 1 < len(argv):
+                try:
+                    resume_from = int(argv[i + 1])
+                except ValueError:
+                    print(  # noqa: T201
+                        f"Error: --resume-from requires an integer, got '{argv[i + 1]}'"
+                    )
+                    sys.exit(1)
+                skip_next = True
+            else:
+                print("Error: --resume-from requires a value")  # noqa: T201
+                sys.exit(1)
+        elif arg.startswith("--resume-from="):
+            try:
+                resume_from = int(arg.split("=", 1)[1])
+            except ValueError:
+                print(  # noqa: T201
+                    f"Error: --resume-from requires an integer, got '{arg.split('=', 1)[1]}'"
+                )
+                sys.exit(1)
+        else:
+            remaining.append(arg)
+    return resume_from, remaining
+
+
 def main() -> None:
     """CLI entry point: detect glob patterns and dispatch accordingly."""
+    # Extract --resume-from before Hydra sees the argv.
+    resume_from, cleaned_argv = _extract_resume_from(sys.argv)
+    sys.argv = cleaned_argv
+
+    # Pass via environment variable so the sweeper can read it without
+    # going through Hydra's CLI parser (which rejects unknown overrides).
+    if resume_from > 0:
+        os.environ["SWEEP_RESUME_FROM"] = str(resume_from)
+
     scenario_value, remaining = _extract_scenario_override(sys.argv)
     if scenario_value is not None and _is_glob_pattern(scenario_value):
         logging.basicConfig(

@@ -30,6 +30,11 @@ class ServerConfig:
     #: before the next scenario connects.  0 disables the cooldown.
     cooldown_seconds: float = 3.0
 
+    #: Maximum number of retries when a scenario run fails after cooldown
+    #: (e.g. due to CARLA communication errors or initialization failures).
+    #: 0 means no retries — a failure is immediately propagated.
+    cooldown_max_retries: int = 0
+
 
 @dataclass
 class MapConfig:
@@ -202,6 +207,10 @@ class SweepConfig:
     #: this duration (e.g. CARLA hangs), it is forcefully interrupted and
     #: the sweep continues with the next lanelet.  0 disables the timeout.
     job_timeout_seconds: int = 120
+
+    #: 1-indexed job number to resume from.  Jobs before this index are
+    #: skipped.  0 (default) means execute all jobs from the beginning.
+    resume_from: int = 0
 
 
 # ---------------------------------------------------------------------------

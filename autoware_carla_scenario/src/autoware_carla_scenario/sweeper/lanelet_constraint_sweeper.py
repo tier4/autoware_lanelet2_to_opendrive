@@ -13,6 +13,7 @@ sweeper:
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
 from typing import Any
@@ -39,12 +40,74 @@ logger = logging.getLogger(__name__)
 _DEFAULT_JOB_TIMEOUT = 120
 
 
-class _JobTimeoutError(Exception):
-    """Raised by the SIGALRM handler when a job exceeds its time budget."""
+def _launch_job_isolated(
+    launcher: Any,
+    batch: tuple[str, ...],
+    idx: int,
+    timeout: int,
+) -> tuple[bool, int | None]:
+    """Fork a child process to run a single job, isolating SIGSEGV crashes.
 
+    Args:
+        launcher: Hydra job launcher instance.
+        batch: Override tuple for this job.
+        idx: 0-based job index.
+        timeout: Hard timeout in seconds (0 = no timeout).
 
-def _alarm_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
-    raise _JobTimeoutError
+    Returns:
+        ``(succeeded, exit_code)`` where *exit_code* is 0 on success,
+        a positive int on normal failure, a negative int (``-signal_number``)
+        on signal death, or ``None`` on timeout.
+    """
+    child_pid = os.fork()
+
+    if child_pid == 0:
+        # ---- child process ----
+        # Create a new process group so the parent can kill the entire tree.
+        os.setpgrp()
+        # Reset any inherited SIGALRM handler so it doesn't fire in the child.
+        signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        signal.alarm(0)
+        try:
+            launcher.launch([batch], initial_job_idx=idx)
+        except SystemExit as exc:
+            os._exit(exc.code if isinstance(exc.code, int) else 1)
+        except Exception:
+            logger.exception("Job raised an exception in child process")
+            os._exit(1)
+        os._exit(0)
+
+    # ---- parent process ----
+    timed_out = False
+
+    def _kill_child(signum: int, frame: Any) -> None:  # noqa: ARG001
+        nonlocal timed_out
+        timed_out = True
+        try:
+            os.killpg(child_pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    prev_handler = signal.getsignal(signal.SIGALRM)
+    try:
+        if timeout > 0:
+            signal.signal(signal.SIGALRM, _kill_child)
+            signal.alarm(timeout)
+
+        _, status = os.waitpid(child_pid, 0)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, prev_handler)
+
+    if timed_out:
+        return False, None
+
+    if os.WIFSIGNALED(status):
+        sig = os.WTERMSIG(status)
+        return False, -sig
+
+    exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+    return exit_code == 0, exit_code
 
 
 class LaneletConstraintSweeper(Sweeper):
@@ -170,65 +233,131 @@ class LaneletConstraintSweeper(Sweeper):
             [b[0] for b in batches],
         )
 
-        # -- 7. Resolve per-job timeout and cooldown -------------------------
+        # -- 7. Resolve per-job timeout, cooldown, retry count, and resume ---
         job_timeout: int = int(
             sweep_dict.get("job_timeout_seconds", _DEFAULT_JOB_TIMEOUT)
         )
         cooldown: float = float(
             OmegaConf.select(cfg, "server.cooldown_seconds", default=0.0)
         )
+        max_retries: int = int(
+            OmegaConf.select(cfg, "server.cooldown_max_retries", default=0)
+        )
+        max_attempts = 1 + max_retries
+        resume_from: int = int(
+            sweep_dict.get("resume_from", 0) or os.environ.get("SWEEP_RESUME_FROM", "0")
+        )
 
-        # -- 8. Launch batches one-by-one (continue on failure / timeout) --
+        # -- 8. Apply resume: skip jobs before the resume point (1-indexed) --
+        if resume_from > 1:
+            skip_count = min(resume_from - 1, len(batches))
+            logger.info(
+                "Resuming from job %d — skipping %d/%d job(s).",
+                resume_from,
+                skip_count,
+                len(batches),
+            )
+            batches = batches[skip_count:]
+            # Offset indices so logs still show the original 1-based position.
+            idx_offset = skip_count
+        else:
+            idx_offset = 0
+
+        # -- 9. Launch batches one-by-one via fork isolation --
         all_returns: list[Any] = []
         failed_count = 0
         timed_out_count = 0
+        first_job = True
 
-        for idx, batch in enumerate(batches):
-            # Cooldown between consecutive jobs.
-            if idx > 0 and cooldown > 0:
-                _wait_with_progress(cooldown, desc="CARLA cooldown")
+        for local_idx, batch in enumerate(batches):
+            idx = local_idx + idx_offset
 
-            logger.info("[%d/%d] Launching: %s", idx + 1, len(batches), batch)
-            prev_handler = signal.getsignal(signal.SIGALRM)
-            try:
-                if job_timeout > 0:
-                    signal.signal(signal.SIGALRM, _alarm_handler)
-                    signal.alarm(job_timeout)
+            succeeded = False
+            for attempt in range(max_attempts):
+                # Cooldown in the parent process (no CARLA state, SIGSEGV-safe).
+                # Skip cooldown before the very first job of this run.
+                if (not first_job or attempt > 0) and cooldown > 0:
+                    _wait_with_progress(
+                        cooldown,
+                        desc="CARLA cooldown"
+                        if attempt == 0
+                        else "CARLA cooldown (retry)",
+                    )
 
-                ret = self.launcher.launch([batch], initial_job_idx=idx)
-                all_returns.extend(ret)
-
-            except _JobTimeoutError:
-                timed_out_count += 1
-                logger.error(
-                    "[%d/%d] Job TIMED OUT after %ds for overrides %s — continuing.",
+                logger.info(
+                    "[%d/%d] Launching (attempt %d/%d): %s",
                     idx + 1,
-                    len(batches),
-                    job_timeout,
+                    idx_offset + len(batches),
+                    attempt + 1,
+                    max_attempts,
                     batch,
                 )
-                all_returns.append(None)
 
-            except Exception:
+                ok, exit_code = _launch_job_isolated(
+                    self.launcher, batch, idx, job_timeout
+                )
+                if ok:
+                    succeeded = True
+                    break
+
+                # Log based on exit code.
+                if exit_code is None:
+                    logger.error(
+                        "[%d/%d] Job TIMED OUT after %ds (attempt %d/%d) "
+                        "for overrides %s",
+                        idx + 1,
+                        idx_offset + len(batches),
+                        job_timeout,
+                        attempt + 1,
+                        max_attempts,
+                        batch,
+                    )
+                elif exit_code < 0:
+                    logger.error(
+                        "[%d/%d] Job CRASHED (signal %d) (attempt %d/%d) "
+                        "for overrides %s",
+                        idx + 1,
+                        idx_offset + len(batches),
+                        -exit_code,
+                        attempt + 1,
+                        max_attempts,
+                        batch,
+                    )
+                else:
+                    logger.error(
+                        "[%d/%d] Job FAILED (exit code %d) (attempt %d/%d) "
+                        "for overrides %s",
+                        idx + 1,
+                        idx_offset + len(batches),
+                        exit_code,
+                        attempt + 1,
+                        max_attempts,
+                        batch,
+                    )
+
+            first_job = False
+            # Result JSON is written to disk by the child; parent only
+            # tracks success/failure.
+            all_returns.append(None)
+            if not succeeded:
+                # Distinguish timeouts from other failures for the summary.
+                if exit_code is None:
+                    timed_out_count += 1
                 failed_count += 1
                 logger.error(
-                    "[%d/%d] Job FAILED for overrides %s — continuing.",
+                    "[%d/%d] Job FAILED after %d attempt(s) for overrides %s "
+                    "— continuing.",
                     idx + 1,
-                    len(batches),
+                    idx_offset + len(batches),
+                    max_attempts,
                     batch,
-                    exc_info=True,
                 )
-                all_returns.append(None)
 
-            finally:
-                # Always cancel pending alarm and restore the previous handler.
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, prev_handler)
-
+        executed = len(batches)
         logger.info(
-            "Sweep complete: %d/%d succeeded, %d failed, %d timed out.",
-            len(batches) - failed_count - timed_out_count,
-            len(batches),
+            "Sweep complete: %d/%d succeeded, %d failed (%d timed out).",
+            executed - failed_count,
+            executed,
             failed_count,
             timed_out_count,
         )
