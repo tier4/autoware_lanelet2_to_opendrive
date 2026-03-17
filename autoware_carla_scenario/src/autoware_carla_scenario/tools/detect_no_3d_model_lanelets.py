@@ -40,6 +40,9 @@ import logging
 import sys
 from pathlib import Path
 
+import os
+import shutil
+
 import carla
 import lanelet2.core
 import lanelet2.geometry
@@ -52,6 +55,7 @@ from tqdm import tqdm
 from autoware_carla_scenario.coordinate.map_manager import (
     _parse_geo_reference,
 )
+from autoware_carla_scenario.scenario_runner import _map_name_to_env_var
 
 logger = logging.getLogger(__name__)
 
@@ -331,15 +335,15 @@ def _update_yaml(yaml_path: Path, lanelet_ids: list[int]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_map_paths(yaml_path: Path) -> tuple[Path, Path]:
-    """Read ``xodr_path`` and ``lanelet2_path`` from a map configuration YAML.
+def _resolve_map_config(yaml_path: Path) -> tuple[str, Path, Path]:
+    """Read ``name``, ``xodr_path``, and ``lanelet2_path`` from a map config YAML.
 
     OmegaConf resolves ``${oc.env:VAR,default}`` interpolations automatically.
 
     Returns
     -------
-    tuple[Path, Path]
-        ``(xodr_path, lanelet2_path)`` as ``Path`` objects.
+    tuple[str, Path, Path]
+        ``(map_name, xodr_path, lanelet2_path)``.
 
     Raises
     ------
@@ -361,6 +365,10 @@ def _resolve_map_paths(yaml_path: Path) -> tuple[Path, Path]:
             f"got {type(map_cfg).__name__}"
         )
 
+    map_name = map_cfg.get("name")
+    if map_name is None:
+        raise ValueError(f"map.name not found in {yaml_path}")
+
     xodr_raw = map_cfg.get("xodr_path")
     ll2_raw = map_cfg.get("lanelet2_path")
 
@@ -381,7 +389,7 @@ def _resolve_map_paths(yaml_path: Path) -> tuple[Path, Path]:
             f"Lanelet2 file not found: {ll2_path} (resolved from {yaml_path})"
         )
 
-    return xodr_path, ll2_path
+    return str(map_name), xodr_path, ll2_path
 
 
 # ---------------------------------------------------------------------------
@@ -454,15 +462,16 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        xodr_path, lanelet2_path = _resolve_map_paths(args.yaml_path)
+        map_name, xodr_path, lanelet2_path = _resolve_map_config(args.yaml_path)
     except (ValueError, FileNotFoundError) as exc:
         logger.error("%s", exc)
         sys.exit(1)
+    logger.info("Map name: %s", map_name)
     logger.info("XODR:     %s", xodr_path)
     logger.info("Lanelet2: %s", lanelet2_path)
 
     # ------------------------------------------------------------------
-    # Connect to CARLA
+    # Connect to CARLA and load the map
     # ------------------------------------------------------------------
     logger.info("Connecting to CARLA at %s:%d ...", args.host, args.port)
     client = carla.Client(args.host, args.port)
@@ -474,7 +483,22 @@ def main() -> None:
         logger.error("Cannot connect to CARLA server: %s", exc)
         sys.exit(1)
 
-    world = client.get_world()
+    # Overwrite the CARLA-internal XODR and load the map (same as
+    # ScenarioRunner.load_map_by_overwriting_xodr).
+    env_var = _map_name_to_env_var(map_name)
+    dest_str = os.environ.get(env_var)
+    if dest_str:
+        dest = Path(dest_str)
+        logger.info("Overwriting CARLA XODR: %s -> %s", xodr_path, dest)
+        shutil.copy2(xodr_path, dest)
+    else:
+        logger.info(
+            "Environment variable %s not set; loading map without XODR overwrite",
+            env_var,
+        )
+
+    logger.info("Loading CARLA map %s ...", map_name)
+    world = client.load_world(map_name)
 
     # ------------------------------------------------------------------
     # Load maps and compute offsets
