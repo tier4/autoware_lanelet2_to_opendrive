@@ -450,7 +450,7 @@ def _refine_z_with_ground_projection(
             "The physics mesh may not be loaded."
         ) from exc
 
-    if result is None or result.label == _carla.CityObjectLabel.NONE:
+    if result is None:
         raise RuntimeError(
             f"ground_projection returned no hit at ({x:.2f}, {y:.2f}) "
             f"with z_estimate={z_estimate:.3f}. "
