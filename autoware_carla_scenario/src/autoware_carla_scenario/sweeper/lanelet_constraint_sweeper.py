@@ -13,6 +13,7 @@ sweeper:
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
 from typing import Any
@@ -45,6 +46,74 @@ class _JobTimeoutError(Exception):
 
 def _alarm_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
     raise _JobTimeoutError
+
+
+def _launch_job_isolated(
+    launcher: Any,
+    batch: tuple[str, ...],
+    idx: int,
+    timeout: int,
+) -> tuple[bool, int | None]:
+    """Fork a child process to run a single job, isolating SIGSEGV crashes.
+
+    Args:
+        launcher: Hydra job launcher instance.
+        batch: Override tuple for this job.
+        idx: 0-based job index.
+        timeout: Hard timeout in seconds (0 = no timeout).
+
+    Returns:
+        ``(succeeded, exit_code)`` where *exit_code* is 0 on success,
+        a positive int on normal failure, a negative int (``-signal_number``)
+        on signal death, or ``None`` on timeout.
+    """
+    child_pid = os.fork()
+
+    if child_pid == 0:
+        # ---- child process ----
+        # Reset any inherited SIGALRM handler so it doesn't fire in the child.
+        signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        signal.alarm(0)
+        try:
+            launcher.launch([batch], initial_job_idx=idx)
+        except SystemExit as exc:
+            os._exit(exc.code if isinstance(exc.code, int) else 1)
+        except Exception:
+            logger.exception("Job raised an exception in child process")
+            os._exit(1)
+        os._exit(0)
+
+    # ---- parent process ----
+    timed_out = False
+
+    def _kill_child(signum: int, frame: Any) -> None:  # noqa: ARG001
+        nonlocal timed_out
+        timed_out = True
+        try:
+            os.kill(child_pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    prev_handler = signal.getsignal(signal.SIGALRM)
+    try:
+        if timeout > 0:
+            signal.signal(signal.SIGALRM, _kill_child)
+            signal.alarm(timeout)
+
+        _, status = os.waitpid(child_pid, 0)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, prev_handler)
+
+    if timed_out:
+        return False, None
+
+    if os.WIFSIGNALED(status):
+        sig = os.WTERMSIG(status)
+        return False, -sig
+
+    exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+    return exit_code == 0, exit_code
 
 
 class LaneletConstraintSweeper(Sweeper):
@@ -170,7 +239,7 @@ class LaneletConstraintSweeper(Sweeper):
             [b[0] for b in batches],
         )
 
-        # -- 7. Resolve per-job timeout, cooldown, and retry count -----------
+        # -- 7. Resolve per-job timeout, cooldown, retry count, and resume ---
         job_timeout: int = int(
             sweep_dict.get("job_timeout_seconds", _DEFAULT_JOB_TIMEOUT)
         )
@@ -181,48 +250,55 @@ class LaneletConstraintSweeper(Sweeper):
             OmegaConf.select(cfg, "server.cooldown_max_retries", default=0)
         )
         max_attempts = 1 + max_retries
+        resume_from: int = int(os.environ.get("SWEEP_RESUME_FROM", "0"))
 
-        # -- 8. Launch batches one-by-one (continue on failure / timeout) --
+        # -- 8. Launch batches one-by-one via fork isolation --
         all_returns: list[Any] = []
         failed_count = 0
         timed_out_count = 0
 
         for idx, batch in enumerate(batches):
+            # Resume logic: skip jobs before the resume point (1-indexed).
+            if resume_from > 0 and (idx + 1) < resume_from:
+                logger.info(
+                    "[%d/%d] SKIPPED (resume_from=%d): %s",
+                    idx + 1,
+                    len(batches),
+                    resume_from,
+                    batch,
+                )
+                all_returns.append(None)
+                continue
+
             succeeded = False
             for attempt in range(max_attempts):
-                prev_handler = signal.getsignal(signal.SIGALRM)
-                try:
-                    # Cooldown: between consecutive jobs on the first attempt,
-                    # or as a recovery wait on retry attempts.  Placed inside
-                    # try/except so that crashes during the cooldown phase
-                    # (e.g. CARLA communication errors) are caught and trigger
-                    # a retry.
-                    if (idx > 0 or attempt > 0) and cooldown > 0:
-                        _wait_with_progress(
-                            cooldown,
-                            desc="CARLA cooldown"
-                            if attempt == 0
-                            else "CARLA cooldown (retry)",
-                        )
-
-                    logger.info(
-                        "[%d/%d] Launching (attempt %d/%d): %s",
-                        idx + 1,
-                        len(batches),
-                        attempt + 1,
-                        max_attempts,
-                        batch,
+                # Cooldown in the parent process (no CARLA state, SIGSEGV-safe).
+                if (idx > 0 or attempt > 0) and cooldown > 0:
+                    _wait_with_progress(
+                        cooldown,
+                        desc="CARLA cooldown"
+                        if attempt == 0
+                        else "CARLA cooldown (retry)",
                     )
-                    if job_timeout > 0:
-                        signal.signal(signal.SIGALRM, _alarm_handler)
-                        signal.alarm(job_timeout)
 
-                    ret = self.launcher.launch([batch], initial_job_idx=idx)
-                    all_returns.extend(ret)
+                logger.info(
+                    "[%d/%d] Launching (attempt %d/%d): %s",
+                    idx + 1,
+                    len(batches),
+                    attempt + 1,
+                    max_attempts,
+                    batch,
+                )
+
+                ok, exit_code = _launch_job_isolated(
+                    self.launcher, batch, idx, job_timeout
+                )
+                if ok:
                     succeeded = True
                     break
 
-                except _JobTimeoutError:
+                # Log based on exit code.
+                if exit_code is None:
                     logger.error(
                         "[%d/%d] Job TIMED OUT after %ds (attempt %d/%d) "
                         "for overrides %s",
@@ -233,23 +309,32 @@ class LaneletConstraintSweeper(Sweeper):
                         max_attempts,
                         batch,
                     )
-
-                except Exception:
+                elif exit_code < 0:
                     logger.error(
-                        "[%d/%d] Job FAILED (attempt %d/%d) for overrides %s",
+                        "[%d/%d] Job CRASHED (signal %d) (attempt %d/%d) "
+                        "for overrides %s",
                         idx + 1,
                         len(batches),
+                        -exit_code,
                         attempt + 1,
                         max_attempts,
                         batch,
-                        exc_info=True,
+                    )
+                else:
+                    logger.error(
+                        "[%d/%d] Job FAILED (exit code %d) (attempt %d/%d) "
+                        "for overrides %s",
+                        idx + 1,
+                        len(batches),
+                        exit_code,
+                        attempt + 1,
+                        max_attempts,
+                        batch,
                     )
 
-                finally:
-                    # Always cancel pending alarm and restore the previous handler.
-                    signal.alarm(0)
-                    signal.signal(signal.SIGALRM, prev_handler)
-
+            # Result JSON is written to disk by the child; parent only
+            # tracks success/failure.
+            all_returns.append(None)
             if not succeeded:
                 failed_count += 1
                 logger.error(
@@ -260,7 +345,6 @@ class LaneletConstraintSweeper(Sweeper):
                     max_attempts,
                     batch,
                 )
-                all_returns.append(None)
 
         logger.info(
             "Sweep complete: %d/%d succeeded, %d failed, %d timed out.",

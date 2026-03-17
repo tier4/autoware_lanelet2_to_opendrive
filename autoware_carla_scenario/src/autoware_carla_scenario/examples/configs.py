@@ -208,6 +208,10 @@ class SweepConfig:
     #: the sweep continues with the next lanelet.  0 disables the timeout.
     job_timeout_seconds: int = 120
 
+    #: 1-indexed job number to resume from.  Jobs before this index are
+    #: skipped.  0 (default) means execute all jobs from the beginning.
+    resume_from: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Top-level Hydra config
