@@ -177,6 +177,7 @@ jobs:
       run: |
         set -o pipefail
         uv run analyze nishishinjuku_carla.xodr \
+          autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm \
           --output nishishinjuku_carla_qc_report.xqar \
           | tee analyze_result.txt
 
