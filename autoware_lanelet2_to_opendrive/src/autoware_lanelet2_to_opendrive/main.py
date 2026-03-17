@@ -1436,20 +1436,15 @@ def preprocess_and_convert_with_hydra(
         logger.info(f"Mapping JSON saved to: {json_path}")
 
         # Cross-validation with geometric mapping
-        try:
-            from pyxodr import RoadNetwork
+        from pyxodr import RoadNetwork
 
-            road_network = RoadNetwork.from_file(str(xodr_path))
-            mgrs_offset = (offset_x, offset_y)
-            geo_mapping = build_mapping(
-                lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
-            )
-            validate_mapping_consistency(lanelet_to_road_and_lane, geo_mapping)
-            logger.info("Cross-validation passed successfully!")
-        except ImportError:
-            logger.warning("pyxodr not installed; skipping geometric cross-validation")
-        except Exception as e:
-            logger.warning(f"Geometric cross-validation failed: {e}")
+        road_network = RoadNetwork.from_file(str(xodr_path))
+        mgrs_offset = (offset_x, offset_y)
+        geo_mapping = build_mapping(
+            lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
+        )
+        validate_mapping_consistency(lanelet_to_road_and_lane, geo_mapping)
+        logger.info("Cross-validation passed successfully!")
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
