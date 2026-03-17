@@ -24,6 +24,10 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .opendrive.road import Road as ConverterRoad
 
 from qc_baselib import Configuration, IssueSeverity, Result
 from qc_opendrive import constants
@@ -418,7 +422,13 @@ _STOP_LINE_SIGNAL_RE = re.compile(r"^(StopLine|StopSign|YieldSign)_(\d+)$")
 def _parse_stop_lines_from_xodr(
     xodr_path: Path,
     xodr_root: object | None = None,
-) -> tuple[dict[int, int], dict[int, list[int]], set[int], dict[int, list[int]]]:
+) -> tuple[
+    dict[int, int],
+    dict[int, list[int]],
+    set[int],
+    dict[int, list[int]],
+    dict[int, tuple[float, float]],
+]:
     """Parse stop line objects, signals, dependencies, and all signal IDs.
 
     Performs a single XML parse pass to extract all stop-line-related data.
@@ -435,6 +445,7 @@ def _parse_stop_lines_from_xodr(
         - ``linestring_to_signal_types``: linestring ID -> signal type list.
         - ``all_signal_ids``: set of all signal IDs in the XODR.
         - ``signal_dependencies``: stop line signal ID -> dependency ID list.
+        - ``object_positions``: stop line object ID -> (s, t) on the road.
     """
     import lxml.etree as ET
 
@@ -447,6 +458,7 @@ def _parse_stop_lines_from_xodr(
     linestring_to_signal_types: dict[int, list[int]] = {}
     all_signal_ids: set[int] = set()
     signal_dependencies: dict[int, list[int]] = {}
+    object_positions: dict[int, tuple[float, float]] = {}
 
     for road_elem in root.iter("road"):
         road_id = int(road_elem.get("id", "-1"))
@@ -461,7 +473,12 @@ def _parse_stop_lines_from_xodr(
             if obj_type == "stopLine" or (
                 obj_type == "-1" and obj_name == "Stencil_STOP"
             ):
-                object_to_road[int(obj_id_str)] = road_id
+                obj_id = int(obj_id_str)
+                object_to_road[obj_id] = road_id
+                object_positions[obj_id] = (
+                    float(obj_elem.get("s", "0")),
+                    float(obj_elem.get("t", "0")),
+                )
 
         for signal_elem in road_elem.iter("signal"):
             sig_id_str = signal_elem.get("id", "")
@@ -496,7 +513,43 @@ def _parse_stop_lines_from_xodr(
         linestring_to_signal_types,
         all_signal_ids,
         signal_dependencies,
+        object_positions,
     )
+
+
+# ---------------------------------------------------------------------------
+# Stop line position helpers
+# ---------------------------------------------------------------------------
+
+#: Maximum distance (m) between LL2 centroid and XODR reference-line point
+#: for a stop line to be considered positionally consistent.
+_STOP_LINE_POSITION_TOLERANCE: float = 5.0
+
+
+def _evaluate_road_xy(road: "ConverterRoad", s: float) -> tuple[float, float] | None:
+    """Evaluate global (x, y) on a road's reference line at parameter *s*.
+
+    Uses the ParamPoly3 geometry segments in the road's plan view.
+    Returns ``None`` if the road has no geometry.
+    """
+    import math
+
+    if road.plan_view is None or not road.plan_view.geometries:
+        return None
+
+    # Find the geometry segment containing s (fall back to last segment)
+    geom = road.plan_view.geometries[-1]
+    for g in road.plan_view.geometries:
+        if g.s <= s <= g.s + g.length:
+            geom = g
+            break
+
+    p = s - geom.s
+    u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
+    v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
+    cos_h = math.cos(geom.hdg)
+    sin_h = math.sin(geom.hdg)
+    return (geom.x + cos_h * u - sin_h * v, geom.y + sin_h * u + cos_h * v)
 
 
 # ---------------------------------------------------------------------------
@@ -531,16 +584,22 @@ def run_stop_line_validation(
         print("  Skipping stop line validation (no mapping data).")
         return True
 
-    lanelet_map, _offset_x, _offset_y, conv_mapping, _effective_osm, xodr_root = ctx
+    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm, xodr_root = ctx
 
     if conv_mapping.stop_line_mapping is None:
         print("  Mapping file has no stop_line_mapping; skipping.")
         return True
 
-    # Single-pass XODR parse for objects, signals, and dependencies
-    xodr_objects, xodr_signal_types, all_signal_ids, signal_deps = (
+    from .road_lanelet_geo_mapping import parse_roads_from_xodr
+
+    # Single-pass XODR parse for objects, signals, dependencies, positions
+    xodr_objects, xodr_signal_types, all_signal_ids, signal_deps, object_positions = (
         _parse_stop_lines_from_xodr(xodr_path, xodr_root=xodr_root)
     )
+
+    # Build road lookup for position evaluation
+    roads = parse_roads_from_xodr(xodr_path, xodr_root=xodr_root)
+    road_by_id: dict[int, "ConverterRoad"] = {r.id: r for r in roads}
 
     # Get LL2 stop line IDs
     ll2_stop_line_ids: set[int] = set()
@@ -586,9 +645,11 @@ def run_stop_line_validation(
                     f"(possible recording gap)"
                 )
 
-    # ── Check 3: Cross-validation (mapping vs XODR)
+    # ── Check 3: Cross-validation (mapping vs XODR) — ID, type, position
     cross_ok = 0
     cross_fail = 0
+    pos_ok = 0
+    pos_fail = 0
     for ls_id, entry in conv_mapping.stop_line_mapping.items():
         # Check road_id
         xodr_road = xodr_objects.get(ls_id)
@@ -612,8 +673,34 @@ def run_stop_line_validation(
                 f"mapping={mapping_types}, XODR={xodr_types}"
             )
             cross_fail += 1
-        else:
-            cross_ok += 1
+            continue
+
+        # Check position: LL2 linestring centroid vs XODR reference-line point
+        road = road_by_id.get(xodr_road)
+        st = object_positions.get(ls_id)
+        if road is not None and st is not None:
+            xodr_xy = _evaluate_road_xy(road, st[0])
+            if xodr_xy is not None:
+                try:
+                    ll2_ls = lanelet_map.lineStringLayer[ls_id]
+                    pts = [(float(p.x), float(p.y)) for p in ll2_ls]
+                    if pts:
+                        cx = sum(x for x, _ in pts) / len(pts) - offset_x
+                        cy = sum(y for _, y in pts) / len(pts) - offset_y
+                        dist = ((cx - xodr_xy[0]) ** 2 + (cy - xodr_xy[1]) ** 2) ** 0.5
+                        if dist > _STOP_LINE_POSITION_TOLERANCE:
+                            errors.append(
+                                f"  linestring {ls_id}: position mismatch — "
+                                f"dist={dist:.2f}m > {_STOP_LINE_POSITION_TOLERANCE}m"
+                            )
+                            pos_fail += 1
+                            cross_fail += 1
+                            continue
+                        pos_ok += 1
+                except KeyError:
+                    pass  # linestring not in map (already caught by check 1)
+
+        cross_ok += 1
 
     # ── Check 4: Dependency integrity
     dep_errors = 0
@@ -632,6 +719,7 @@ def run_stop_line_validation(
     print(f"  LL2-only (skipped)   : {len(ll2_not_in_xodr)}")
     print(f"  XODR-only (invalid)  : {len(xodr_only_objects)}")
     print(f"  Cross-validation     : {cross_ok} ok, {cross_fail} mismatch")
+    print(f"  Position check       : {pos_ok} ok, {pos_fail} mismatch")
     print(f"  Dependency integrity : {dep_errors} error(s)")
 
     if warnings:

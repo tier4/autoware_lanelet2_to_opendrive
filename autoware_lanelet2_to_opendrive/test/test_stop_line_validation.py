@@ -156,13 +156,14 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        obj_to_road, sig_types, all_sigs, deps = _parse_stop_lines_from_xodr(
+        obj_to_road, sig_types, all_sigs, deps, positions = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert obj_to_road == {1812: 5}
         assert sig_types == {}
         assert all_sigs == set()
         assert deps == {}
+        assert positions == {1812: (10.0, 0.0)}
 
     def test_carla_stop_line_object(self, tmp_path: Path) -> None:
         from autoware_lanelet2_to_opendrive.analyze_xodr import (
@@ -182,7 +183,7 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        obj_to_road, _, _, _ = _parse_stop_lines_from_xodr(
+        obj_to_road, _, _, _, _ = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert obj_to_road == {999: 12}
@@ -217,7 +218,7 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        _, sig_types, all_sigs, _ = _parse_stop_lines_from_xodr(
+        _, sig_types, all_sigs, _, _ = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert sig_types[1812] == [294]
@@ -243,7 +244,7 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        obj_to_road, _, _, _ = _parse_stop_lines_from_xodr(
+        obj_to_road, _, _, _, _ = _parse_stop_lines_from_xodr(
             self._write_xodr(tmp_path, xodr)
         )
         assert obj_to_road == {}
@@ -272,7 +273,7 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        _, _, _, deps = _parse_stop_lines_from_xodr(self._write_xodr(tmp_path, xodr))
+        _, _, _, deps, _ = _parse_stop_lines_from_xodr(self._write_xodr(tmp_path, xodr))
         assert deps == {100: [50, 51]}
 
     def test_no_dependencies(self, tmp_path: Path) -> None:
@@ -293,7 +294,7 @@ class TestParseStopLinesFromXodr:
               </road>
             </OpenDRIVE>
         """)
-        _, _, _, deps = _parse_stop_lines_from_xodr(self._write_xodr(tmp_path, xodr))
+        _, _, _, deps, _ = _parse_stop_lines_from_xodr(self._write_xodr(tmp_path, xodr))
         assert deps == {}
 
 
@@ -316,6 +317,7 @@ class TestNishishinjukuCarlaStopLines:
             _parse_stop_lines_from_xodr,
         )
 
-        obj_to_road, _, _, _ = _parse_stop_lines_from_xodr(_XODR_PATH)
+        obj_to_road, _, _, _, positions = _parse_stop_lines_from_xodr(_XODR_PATH)
         assert len(obj_to_road) > 0
+        assert len(positions) == len(obj_to_road)
         print(f"Found {len(obj_to_road)} CARLA stop line objects")
