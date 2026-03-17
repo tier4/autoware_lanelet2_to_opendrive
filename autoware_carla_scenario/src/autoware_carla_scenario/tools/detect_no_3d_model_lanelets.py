@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -50,61 +49,16 @@ from autoware_lanelet2_extension_python.projection import MGRSProjector
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
+from autoware_carla_scenario.coordinate.map_manager import (
+    _parse_geo_reference,
+)
+
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
-
-
-def _parse_geo_reference(xodr_content: str) -> tuple[float, float, float]:
-    """Extract (lat, lon, alt) from the geoReference PROJ string in an XODR file.
-
-    Returns
-    -------
-    tuple[float, float, float]
-        (latitude, longitude, altitude).  Altitude defaults to 0.0 if absent.
-    """
-    geo_ref_match = re.search(
-        r"<geoReference>\s*<!\[CDATA\[(.*?)\]\]>\s*</geoReference>",
-        xodr_content,
-        re.DOTALL,
-    )
-    if geo_ref_match is None:
-        geo_ref_match = re.search(
-            r"<geoReference>(.*?)</geoReference>",
-            xodr_content,
-            re.DOTALL,
-        )
-    if geo_ref_match is None:
-        raise ValueError("No <geoReference> element found in XODR file.")
-
-    proj_string = geo_ref_match.group(1)
-
-    lat_match = re.search(r"\+lat_0=([-\d.]+)", proj_string)
-    lon_match = re.search(r"\+lon_0=([-\d.]+)", proj_string)
-    if lat_match is None:
-        raise ValueError(f"Could not find +lat_0 in geoReference: {proj_string!r}")
-    if lon_match is None:
-        raise ValueError(f"Could not find +lon_0 in geoReference: {proj_string!r}")
-
-    lat = float(lat_match.group(1))
-    lon = float(lon_match.group(1))
-
-    alt_match = re.search(r"\+h_0=([-\d.]+)", proj_string)
-    alt = float(alt_match.group(1)) if alt_match else 0.0
-
-    return lat, lon, alt
-
-
-def _centerline_length_2d(points: list[tuple[float, float, float]]) -> float:
-    """Compute total 2D arc length of a centerline polyline."""
-    if len(points) < 2:
-        return 0.0
-    pts = np.array(points)
-    diffs = np.diff(pts[:, :2], axis=0)
-    return float(np.sum(np.linalg.norm(diffs, axis=1)))
 
 
 def _interpolate_at_s(
@@ -233,15 +187,17 @@ def detect_no_3d_model_lanelets(
         Sorted lanelet IDs where ground projection found no hit.
     """
     no_model_ids: list[int] = []
-    lanelets = list(lanelet_map.laneletLayer)
+    total = len(lanelet_map.laneletLayer)
 
-    for lanelet in tqdm(lanelets, desc="Checking lanelets"):
-        points = [(p.x, p.y, p.z) for p in lanelet.centerline]
-        length = _centerline_length_2d(points)
+    for lanelet in tqdm(
+        lanelet_map.laneletLayer, total=total, desc="Checking lanelets"
+    ):
+        length = lanelet2.geometry.length2d(lanelet)
         if length < 1e-6:
             logger.warning("Lanelet %d has near-zero length, skipping", lanelet.id)
             continue
 
+        points = [(p.x, p.y, p.z) for p in lanelet.centerline]
         s_mid = length / 2.0
         mgrs_x, mgrs_y, mgrs_z = _interpolate_at_s(points, s_mid)
 
@@ -260,11 +216,10 @@ def detect_no_3d_model_lanelets(
         try:
             result = world.ground_projection(origin, search_distance)
         except AttributeError:
-            logger.error(
+            raise RuntimeError(
                 "world.ground_projection() is not available in this CARLA version. "
                 "A CARLA build that supports ground_projection is required."
-            )
-            sys.exit(1)
+            ) from None
         except RuntimeError as exc:
             logger.warning(
                 "ground_projection raised RuntimeError for lanelet %d "
@@ -384,43 +339,47 @@ def _resolve_map_paths(yaml_path: Path) -> tuple[Path, Path]:
     Returns
     -------
     tuple[Path, Path]
-        ``(xodr_path, lanelet2_path)`` as absolute ``Path`` objects.
+        ``(xodr_path, lanelet2_path)`` as ``Path`` objects.
 
     Raises
     ------
-    SystemExit
-        If either path key is missing or the resolved file does not exist.
+    ValueError
+        If the YAML structure is unexpected or required keys are missing.
+    FileNotFoundError
+        If either resolved file does not exist.
     """
     raw = OmegaConf.load(yaml_path)
     if not isinstance(raw, DictConfig):
-        logger.error("Expected a YAML mapping in %s, got a sequence", yaml_path)
-        sys.exit(1)
+        raise ValueError(f"Expected a YAML mapping in {yaml_path}, got a sequence")
 
     # The YAML may have the paths nested under a ``map:`` key (Hydra
     # package style) or at the top level.
     map_cfg = raw.get("map", raw)
+    if not isinstance(map_cfg, DictConfig):
+        raise ValueError(
+            f"Expected 'map' to be a mapping in {yaml_path}, "
+            f"got {type(map_cfg).__name__}"
+        )
 
     xodr_raw = map_cfg.get("xodr_path")
     ll2_raw = map_cfg.get("lanelet2_path")
 
     if xodr_raw is None:
-        logger.error("xodr_path not found in %s", yaml_path)
-        sys.exit(1)
+        raise ValueError(f"xodr_path not found in {yaml_path}")
     if ll2_raw is None:
-        logger.error("lanelet2_path not found in %s", yaml_path)
-        sys.exit(1)
+        raise ValueError(f"lanelet2_path not found in {yaml_path}")
 
     xodr_path = Path(str(xodr_raw))
     ll2_path = Path(str(ll2_raw))
 
     if not xodr_path.exists():
-        logger.error("XODR file not found: %s (resolved from %s)", xodr_path, yaml_path)
-        sys.exit(1)
-    if not ll2_path.exists():
-        logger.error(
-            "Lanelet2 file not found: %s (resolved from %s)", ll2_path, yaml_path
+        raise FileNotFoundError(
+            f"XODR file not found: {xodr_path} (resolved from {yaml_path})"
         )
-        sys.exit(1)
+    if not ll2_path.exists():
+        raise FileNotFoundError(
+            f"Lanelet2 file not found: {ll2_path} (resolved from {yaml_path})"
+        )
 
     return xodr_path, ll2_path
 
@@ -494,7 +453,11 @@ def main() -> None:
         logger.error("YAML config not found: %s", args.yaml_path)
         sys.exit(1)
 
-    xodr_path, lanelet2_path = _resolve_map_paths(args.yaml_path)
+    try:
+        xodr_path, lanelet2_path = _resolve_map_paths(args.yaml_path)
+    except (ValueError, FileNotFoundError) as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
     logger.info("XODR:     %s", xodr_path)
     logger.info("Lanelet2: %s", lanelet2_path)
 
@@ -525,7 +488,7 @@ def main() -> None:
     lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
     logger.info(
         "Loaded Lanelet2 map with %d lanelets",
-        len(list(lanelet_map.laneletLayer)),
+        len(lanelet_map.laneletLayer),
     )
 
     fwd = projector.forward(lanelet2.core.GPSPoint(lat, lon, alt))
@@ -546,7 +509,7 @@ def main() -> None:
         ray_distance_lower=args.ray_lower,
     )
 
-    total = len(list(lanelet_map.laneletLayer))
+    total = len(lanelet_map.laneletLayer)
     logger.info(
         "Detection complete: %d / %d lanelets have no 3D model",
         len(no_model_ids),
