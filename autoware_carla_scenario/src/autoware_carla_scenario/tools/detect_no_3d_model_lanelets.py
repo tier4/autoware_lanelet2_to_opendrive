@@ -55,36 +55,12 @@ from tqdm import tqdm
 from autoware_carla_scenario.coordinate.map_manager import (
     _parse_geo_reference,
 )
+from autoware_carla_scenario.coordinate.transform import (
+    _interpolate_at_s as _interpolate_at_s_4,
+)
 from autoware_carla_scenario.scenario_runner import _map_name_to_env_var
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Geometry helpers
-# ---------------------------------------------------------------------------
-
-
-def _interpolate_at_s(
-    points: list[tuple[float, float, float]], s: float
-) -> tuple[float, float, float]:
-    """Interpolate (x, y, z) at arc length *s* along a 3D polyline."""
-    xs = np.array([p[0] for p in points])
-    ys = np.array([p[1] for p in points])
-    zs = np.array([p[2] for p in points])
-
-    pts_2d = np.column_stack([xs, ys])
-    diffs = np.diff(pts_2d, axis=0)
-    seg_lengths = np.linalg.norm(diffs, axis=1)
-    arc = np.zeros(len(points))
-    arc[1:] = np.cumsum(seg_lengths)
-
-    s_clamped = float(np.clip(s, arc[0], arc[-1]))
-    x = float(np.interp(s_clamped, arc, xs))
-    y = float(np.interp(s_clamped, arc, ys))
-    z = float(np.interp(s_clamped, arc, zs))
-
-    return x, y, z
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +179,7 @@ def detect_no_3d_model_lanelets(
 
         points = [(p.x, p.y, p.z) for p in lanelet.centerline]
         s_mid = length / 2.0
-        mgrs_x, mgrs_y, mgrs_z = _interpolate_at_s(points, s_mid)
+        mgrs_x, mgrs_y, mgrs_z, _ = _interpolate_at_s_4(points, s_mid)
 
         # MGRS -> CARLA world coordinates
         carla_x = mgrs_x - mgrs_offset[0]
