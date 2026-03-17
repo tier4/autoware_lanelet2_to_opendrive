@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -66,11 +66,11 @@ class StopLineMappingEntry:
     signal_types: list[int]
 
     def to_dict(self) -> dict:
-        return {"road_id": self.road_id, "signal_types": self.signal_types}
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> "StopLineMappingEntry":
-        return cls(road_id=data["road_id"], signal_types=data["signal_types"])
+        return cls(**data)
 
 
 @dataclass
@@ -80,11 +80,11 @@ class SkippedStopLineEntry:
     reason: str
 
     def to_dict(self) -> dict:
-        return {"reason": self.reason}
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> "SkippedStopLineEntry":
-        return cls(reason=data["reason"])
+        return cls(**data)
 
 
 # ---------------------------------------------------------------------------
@@ -357,18 +357,18 @@ def _sha256_of_file(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_roads_from_xodr(xodr_path: Path) -> list["ConverterRoad"]:
+def parse_roads_from_xodr(
+    xodr_path: Path, xodr_root: object | None = None
+) -> list["ConverterRoad"]:
     """Parse XODR XML and construct converter-compatible Road objects.
 
     Reads ``<road>`` elements from the XODR file, extracting ``<planView>``
     geometries (``<paramPoly3>``) and lane IDs from ``<laneSection>``.
     Returns a list of ``Road`` objects usable by :func:`build_mapping`.
 
-    This utility allows callers that only have an XODR file (not converter
-    Road objects) to build the geometric mapping without pyxodr.
-
     Args:
-        xodr_path: Path to the OpenDRIVE file.
+        xodr_path: Path to the OpenDRIVE file (unused when *xodr_root* given).
+        xodr_root: Pre-parsed XML root element.  Avoids re-parsing the file.
 
     Returns:
         List of converter ``Road`` objects with ``plan_view`` and ``lanes``
@@ -384,8 +384,10 @@ def parse_roads_from_xodr(xodr_path: Path) -> list["ConverterRoad"]:
     from .opendrive.reference_line import ReferenceLine
     from .opendrive.road import Road
 
-    tree = ET.parse(str(xodr_path))
-    root = tree.getroot()
+    if xodr_root is not None:
+        root = xodr_root
+    else:
+        root = ET.parse(str(xodr_path)).getroot()
     roads: list[Road] = []
 
     for road_elem in root.findall(".//road"):

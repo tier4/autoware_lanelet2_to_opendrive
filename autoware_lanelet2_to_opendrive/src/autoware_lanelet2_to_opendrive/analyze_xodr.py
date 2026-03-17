@@ -272,13 +272,14 @@ def _load_map_for_validation(
     xodr_path: Path,
     osm_path: Path,
 ) -> tuple | None:
-    """Load Lanelet2 map using geoReference from the XODR file.
+    """Load Lanelet2 map and parse XODR for validation.
 
     Handles preprocessed-OSM detection via the ``.mapping.json`` sidecar.
 
     Returns:
-        ``(lanelet_map, offset_x, offset_y, conv_mapping, effective_osm)``
-        or ``None`` if loading is not possible.
+        ``(lanelet_map, offset_x, offset_y, conv_mapping, effective_osm, xodr_root)``
+        or ``None`` if loading is not possible.  The *xodr_root* element is
+        the parsed XODR XML root, shared to avoid re-parsing.
     """
     import json
 
@@ -340,7 +341,14 @@ def _load_map_for_validation(
     offset_x = fwd.x
     offset_y = fwd.y
 
-    return (lanelet_map, offset_x, offset_y, conv_mapping, effective_osm)
+    return (
+        lanelet_map,
+        offset_x,
+        offset_y,
+        conv_mapping,
+        effective_osm,
+        tree.getroot(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -375,12 +383,12 @@ def run_mapping_validation(
     if ctx is None:
         return True
 
-    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm = ctx
+    lanelet_map, offset_x, offset_y, conv_mapping, _effective_osm, xodr_root = ctx
 
     print(f"\n  Mapping file : {xodr_path.parent / (xodr_path.stem + '.mapping.json')}")
     print(f"  Entries      : {len(conv_mapping.lanelet_to_road_and_lane)}")
 
-    roads = parse_roads_from_xodr(xodr_path)
+    roads = parse_roads_from_xodr(xodr_path, xodr_root=xodr_root)
 
     geo_mapping = build_mapping(
         lanelet_map,
@@ -409,13 +417,17 @@ _STOP_LINE_SIGNAL_RE = re.compile(r"^(StopLine|StopSign|YieldSign)_(\d+)$")
 
 def _parse_stop_lines_from_xodr(
     xodr_path: Path,
+    xodr_root: object | None = None,
 ) -> tuple[dict[int, int], dict[int, list[int]], set[int], dict[int, list[int]]]:
     """Parse stop line objects, signals, dependencies, and all signal IDs.
 
     Performs a single XML parse pass to extract all stop-line-related data.
 
     Args:
-        xodr_path: Path to the OpenDRIVE file.
+        xodr_path: Path to the OpenDRIVE file (used only when *xodr_root* is
+            not provided).
+        xodr_root: Pre-parsed XML root element.  When given, the file at
+            *xodr_path* is **not** re-read.
 
     Returns:
         Tuple of:
@@ -426,8 +438,10 @@ def _parse_stop_lines_from_xodr(
     """
     import lxml.etree as ET
 
-    tree = ET.parse(str(xodr_path))
-    root = tree.getroot()
+    if xodr_root is not None:
+        root = xodr_root
+    else:
+        root = ET.parse(str(xodr_path)).getroot()
 
     object_to_road: dict[int, int] = {}
     linestring_to_signal_types: dict[int, list[int]] = {}
@@ -517,7 +531,7 @@ def run_stop_line_validation(
         print("  Skipping stop line validation (no mapping data).")
         return True
 
-    lanelet_map, _offset_x, _offset_y, conv_mapping, _effective_osm = ctx
+    lanelet_map, _offset_x, _offset_y, conv_mapping, _effective_osm, xodr_root = ctx
 
     if conv_mapping.stop_line_mapping is None:
         print("  Mapping file has no stop_line_mapping; skipping.")
@@ -525,7 +539,7 @@ def run_stop_line_validation(
 
     # Single-pass XODR parse for objects, signals, and dependencies
     xodr_objects, xodr_signal_types, all_signal_ids, signal_deps = (
-        _parse_stop_lines_from_xodr(xodr_path)
+        _parse_stop_lines_from_xodr(xodr_path, xodr_root=xodr_root)
     )
 
     # Get LL2 stop line IDs
