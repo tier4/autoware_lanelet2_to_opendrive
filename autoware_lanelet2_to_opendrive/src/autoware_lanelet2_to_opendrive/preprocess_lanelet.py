@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Union, Any
+from typing import Any, List, Optional, Union
 from pathlib import Path
 import yaml  # type: ignore
 import logging
@@ -141,6 +141,79 @@ class RemoveTurnDirectionOperation:
     lanelet_ids: List[int] = field(
         default_factory=list
     )  # Empty list means all lanelets
+
+
+@dataclass
+class PreprocessingLogEntry:
+    """A single preprocessing operation log entry."""
+
+    operation: str  # "merge", "remove", "move_point", "delete_point", etc.
+    input_ids: list[int]  # Original lanelet/point IDs
+    output_ids: list[int]  # Newly created IDs (if any)
+    details: str  # Human-readable description
+
+
+@dataclass
+class PreprocessingLog:
+    """Aggregated log of all preprocessing operations."""
+
+    entries: list[PreprocessingLogEntry] = field(default_factory=list)
+    config_path: str | None = None
+
+    def to_dict(self) -> dict:
+        """Serialize to a JSON-compatible dictionary."""
+        return {
+            "config_path": self.config_path,
+            "entries": [
+                {
+                    "operation": e.operation,
+                    "input_ids": e.input_ids,
+                    "output_ids": e.output_ids,
+                    "details": e.details,
+                }
+                for e in self.entries
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PreprocessingLog":
+        """Deserialize from a JSON-compatible dictionary."""
+        entries = [
+            PreprocessingLogEntry(
+                operation=e["operation"],
+                input_ids=e["input_ids"],
+                output_ids=e["output_ids"],
+                details=e["details"],
+            )
+            for e in data.get("entries", [])
+        ]
+        return cls(entries=entries, config_path=data.get("config_path"))
+
+    def get_merge_output_ids(self) -> set[int]:
+        """Return all IDs created by merge operations."""
+        ids: set[int] = set()
+        for e in self.entries:
+            if e.operation == "merge":
+                ids.update(e.output_ids)
+        return ids
+
+    def get_removed_ids(self) -> set[int]:
+        """Return all IDs removed by any operation."""
+        ids: set[int] = set()
+        for e in self.entries:
+            if e.operation in ("remove", "remove_lanelet"):
+                ids.update(e.input_ids)
+        return ids
+
+    def get_merge_source_for(self, lanelet_id: int) -> list[int] | None:
+        """Return the original input IDs that produced *lanelet_id* via merge.
+
+        Returns None if the lanelet was not created by a merge.
+        """
+        for e in self.entries:
+            if e.operation == "merge" and lanelet_id in e.output_ids:
+                return list(e.input_ids)
+        return None
 
 
 @dataclass
@@ -567,7 +640,7 @@ class LaneletPreprocessor:
 
     def execute_merge_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
+    ) -> tuple[lanelet2.core.LaneletMap, list[PreprocessingLogEntry]]:
         """Execute all merge operations.
 
         First performs all merges to create new lanelets, then removes the original
@@ -577,8 +650,10 @@ class LaneletPreprocessor:
             lanelet_map: Current lanelet map
 
         Returns:
-            Updated lanelet map
+            Tuple of (updated lanelet map, list of log entries).
         """
+        log_entries: list[PreprocessingLogEntry] = []
+
         # Track all lanelets to be removed after merging
         all_lanelets_to_remove = set()
         merged_lanelets = []
@@ -619,9 +694,27 @@ class LaneletPreprocessor:
                 all_lanelets_to_remove.update(op.lanelet_ids)
                 logger.info(f"    Created merged lanelet with ID: {merged_lanelet.id}")
 
-                # Increment counter to ensure next merge gets unique IDs
-                # Each merge uses base_id, base_id+1, base_id+2, base_id+3
-                current_id_counter = unique_base_id + 10  # Leave gap for safety
+                log_entries.append(
+                    PreprocessingLogEntry(
+                        operation="merge",
+                        input_ids=list(op.lanelet_ids),
+                        output_ids=[merged_lanelet.id],
+                        details=(
+                            f"Merged {len(op.lanelet_ids)} lanelets "
+                            f"{op.lanelet_ids} into lanelet {merged_lanelet.id}"
+                        ),
+                    )
+                )
+
+                # Increment counter to ensure next merge gets unique IDs.
+                # merge_lanelets uses base_id+1..+3 for each pair; for N
+                # lanelets the maximum ID is base_id + (N-1)*10 + 3.
+                n = len(op.lanelet_ids)
+                if n <= 2:
+                    ids_consumed = 10
+                else:
+                    ids_consumed = (n - 1) * 10 + 4
+                current_id_counter = unique_base_id + ids_consumed
 
             except ValueError as e:
                 logger.warning(f"    Merge operation failed: {e}")
@@ -646,21 +739,22 @@ class LaneletPreprocessor:
                 f"with {len(merged_lanelets)} merged lanelets"
             )
 
-            return new_map
+            return new_map, log_entries
 
-        return lanelet_map
+        return lanelet_map, log_entries
 
     def execute_remove_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
+    ) -> tuple[lanelet2.core.LaneletMap, list[PreprocessingLogEntry]]:
         """Execute all remove operations.
 
         Args:
             lanelet_map: Current lanelet map
 
         Returns:
-            Updated lanelet map
+            Tuple of (updated lanelet map, list of log entries).
         """
+        log_entries: list[PreprocessingLogEntry] = []
         for i, op in enumerate(self.config.remove_operations):
             logger.info(
                 f"Executing remove operation {i + 1}/{len(self.config.remove_operations)}"
@@ -671,19 +765,29 @@ class LaneletPreprocessor:
             lanelet_map = remove_lanelets(lanelet_map, op.lanelet_ids)
             logger.info(f"  Removed {len(op.lanelet_ids)} lanelets")
 
-        return lanelet_map
+            log_entries.append(
+                PreprocessingLogEntry(
+                    operation="remove",
+                    input_ids=list(op.lanelet_ids),
+                    output_ids=[],
+                    details=f"Removed {len(op.lanelet_ids)} lanelets: {op.lanelet_ids}",
+                )
+            )
+
+        return lanelet_map, log_entries
 
     def execute_replace_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
+    ) -> tuple[lanelet2.core.LaneletMap, list[PreprocessingLogEntry]]:
         """Execute all replace operations.
 
         Args:
             lanelet_map: Current lanelet map
 
         Returns:
-            Updated lanelet map
+            Tuple of (updated lanelet map, list of log entries).
         """
+        log_entries: list[PreprocessingLogEntry] = []
         for i, op in enumerate(self.config.replace_operations):
             logger.info(
                 f"Executing replace operation {i + 1}/{len(self.config.replace_operations)}"
@@ -706,12 +810,24 @@ class LaneletPreprocessor:
                 max_id = get_max_lanelet_id(lanelet_map)
                 logger.info(f"  Replaced with new lanelet ID: {max_id}")
 
+                log_entries.append(
+                    PreprocessingLogEntry(
+                        operation="replace",
+                        input_ids=list(op.lanelet_ids),
+                        output_ids=[max_id],
+                        details=(
+                            f"Replaced lanelets {op.lanelet_ids} "
+                            f"with merged lanelet {max_id}"
+                        ),
+                    )
+                )
+
             except ValueError as e:
                 logger.warning(f"  Replace operation failed: {e}")
                 if not self.config.dry_run:
                     raise
 
-        return lanelet_map
+        return lanelet_map, log_entries
 
     def execute_validate_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
@@ -747,17 +863,18 @@ class LaneletPreprocessor:
 
     def execute_move_point_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
+    ) -> tuple[lanelet2.core.LaneletMap, list[PreprocessingLogEntry]]:
         """Execute all move point operations.
 
         Args:
             lanelet_map: Current lanelet map
 
         Returns:
-            Updated lanelet map
+            Tuple of (updated lanelet map, list of log entries).
         """
         from .lanelet import move_point_in_map
 
+        log_entries: list[PreprocessingLogEntry] = []
         for i, op in enumerate(self.config.move_point_operations):
             logger.info(
                 f"Executing move point operation {i + 1}/{len(self.config.move_point_operations)}"
@@ -772,26 +889,38 @@ class LaneletPreprocessor:
 
             if success:
                 logger.info(f"  Successfully moved point {op.point_id}")
+                log_entries.append(
+                    PreprocessingLogEntry(
+                        operation="move_point",
+                        input_ids=[op.point_id],
+                        output_ids=[],
+                        details=(
+                            f"Moved point {op.point_id} to "
+                            f"({op.new_x}, {op.new_y}, {op.new_z})"
+                        ),
+                    )
+                )
             else:
                 logger.warning(f"  Failed to move point {op.point_id}")
                 if not self.config.dry_run:
                     raise RuntimeError(f"Failed to move point {op.point_id}")
 
-        return lanelet_map
+        return lanelet_map, log_entries
 
     def execute_delete_point_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
+    ) -> tuple[lanelet2.core.LaneletMap, list[PreprocessingLogEntry]]:
         """Execute all delete point operations.
 
         Args:
             lanelet_map: Current lanelet map
 
         Returns:
-            Updated lanelet map
+            Tuple of (updated lanelet map, list of log entries).
         """
         from .lanelet import delete_points_from_map
 
+        log_entries: list[PreprocessingLogEntry] = []
         for i, op in enumerate(self.config.delete_point_operations):
             logger.info(
                 f"Executing delete point operation {i + 1}/{len(self.config.delete_point_operations)}"
@@ -805,25 +934,39 @@ class LaneletPreprocessor:
                 f"  Deleted {successful}/{len(op.point_ids)} points successfully"
             )
 
+            deleted_ids = [pid for pid, success in results.items() if success]
+            log_entries.append(
+                PreprocessingLogEntry(
+                    operation="delete_point",
+                    input_ids=list(op.point_ids),
+                    output_ids=[],
+                    details=(
+                        f"Deleted {successful}/{len(op.point_ids)} points: "
+                        f"{deleted_ids}"
+                    ),
+                )
+            )
+
             if not self.config.dry_run and successful < len(op.point_ids):
                 failed_points = [pid for pid, success in results.items() if not success]
                 logger.warning(f"  Failed to delete points: {failed_points}")
 
-        return lanelet_map
+        return lanelet_map, log_entries
 
     def execute_remove_lanelet_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
+    ) -> tuple[lanelet2.core.LaneletMap, list[PreprocessingLogEntry]]:
         """Execute all remove lanelet operations.
 
         Args:
             lanelet_map: Current lanelet map
 
         Returns:
-            Updated lanelet map with specified lanelets removed
+            Tuple of (updated lanelet map, list of log entries).
         """
+        log_entries: list[PreprocessingLogEntry] = []
         if not self.config.remove_lanelet_operations:
-            return lanelet_map
+            return lanelet_map, log_entries
 
         # Collect all lanelet IDs to remove
         all_lanelets_to_remove = set()
@@ -855,21 +998,33 @@ class LaneletPreprocessor:
             if missing:
                 logger.warning(f"  Lanelets not found: {missing}")
 
-        return new_map
+        log_entries.append(
+            PreprocessingLogEntry(
+                operation="remove_lanelet",
+                input_ids=sorted(all_lanelets_to_remove),
+                output_ids=[],
+                details=(
+                    f"Removed {removed_count}/{len(all_lanelets_to_remove)} lanelets"
+                ),
+            )
+        )
+
+        return new_map, log_entries
 
     def execute_remove_turn_direction_operations(
         self, lanelet_map: lanelet2.core.LaneletMap
-    ) -> lanelet2.core.LaneletMap:
+    ) -> tuple[lanelet2.core.LaneletMap, list[PreprocessingLogEntry]]:
         """Execute all remove turn direction operations.
 
         Args:
             lanelet_map: Current lanelet map
 
         Returns:
-            Updated lanelet map with turn_direction attributes removed
+            Tuple of (updated lanelet map, list of log entries).
         """
+        log_entries: list[PreprocessingLogEntry] = []
         if not self.config.remove_turn_direction_operations:
-            return lanelet_map
+            return lanelet_map, log_entries
 
         for i, op in enumerate(self.config.remove_turn_direction_operations):
             logger.info(
@@ -898,11 +1053,13 @@ class LaneletPreprocessor:
             # Remove turn_direction attribute from target lanelets
             removed_count = 0
             skipped_count = 0
+            affected_ids: list[int] = []
 
             for ll in target_lanelets:
                 if "turn_direction" in ll.attributes:
                     del ll.attributes["turn_direction"]
                     removed_count += 1
+                    affected_ids.append(ll.id)
                     logger.debug(f"    Removed turn_direction from lanelet {ll.id}")
                 else:
                     skipped_count += 1
@@ -912,13 +1069,24 @@ class LaneletPreprocessor:
                 f"(skipped {skipped_count} without the attribute)"
             )
 
-        return lanelet_map
+            log_entries.append(
+                PreprocessingLogEntry(
+                    operation="remove_turn_direction",
+                    input_ids=affected_ids,
+                    output_ids=[],
+                    details=(f"Removed turn_direction from {removed_count} lanelets"),
+                )
+            )
 
-    def process(self) -> lanelet2.core.LaneletMap:
+        return lanelet_map, log_entries
+
+    def process(
+        self,
+    ) -> tuple[lanelet2.core.LaneletMap, PreprocessingLog]:
         """Execute all preprocessing operations.
 
         Returns:
-            The processed LaneletMap
+            Tuple of (processed LaneletMap, PreprocessingLog).
 
         Raises:
             FileNotFoundError: If input file doesn't exist
@@ -926,16 +1094,19 @@ class LaneletPreprocessor:
         """
         # Load the map
         lanelet_map = self.load_map()
+        all_entries: list[PreprocessingLogEntry] = []
 
         # Execute operations in order
         # 1. Point operations (modify individual points)
         if self.config.move_point_operations:
             logger.info("Running move point operations...")
-            lanelet_map = self.execute_move_point_operations(lanelet_map)
+            lanelet_map, entries = self.execute_move_point_operations(lanelet_map)
+            all_entries.extend(entries)
 
         if self.config.delete_point_operations:
             logger.info("Running delete point operations...")
-            lanelet_map = self.execute_delete_point_operations(lanelet_map)
+            lanelet_map, entries = self.execute_delete_point_operations(lanelet_map)
+            all_entries.extend(entries)
 
         # 2. Validations (just for checking)
         if self.config.validate_operations:
@@ -945,32 +1116,43 @@ class LaneletPreprocessor:
         # 3. Replace operations (modifies map)
         if self.config.replace_operations:
             logger.info("Running replace operations...")
-            lanelet_map = self.execute_replace_operations(lanelet_map)
+            lanelet_map, entries = self.execute_replace_operations(lanelet_map)
+            all_entries.extend(entries)
 
         # 4. Merge operations (adds new lanelets)
         if self.config.merge_operations:
             logger.info("Running merge operations...")
-            lanelet_map = self.execute_merge_operations(lanelet_map)
+            lanelet_map, entries = self.execute_merge_operations(lanelet_map)
+            all_entries.extend(entries)
 
         # 5. Remove operations (removes lanelets - old style)
         if self.config.remove_operations:
             logger.info("Running remove operations...")
-            lanelet_map = self.execute_remove_operations(lanelet_map)
+            lanelet_map, entries = self.execute_remove_operations(lanelet_map)
+            all_entries.extend(entries)
 
         # 6. Remove lanelet operations (removes entire lanelets)
         if self.config.remove_lanelet_operations:
             logger.info("Running remove lanelet operations...")
-            lanelet_map = self.execute_remove_lanelet_operations(lanelet_map)
+            lanelet_map, entries = self.execute_remove_lanelet_operations(lanelet_map)
+            all_entries.extend(entries)
 
         # 7. Remove turn direction operations (removes turn_direction attributes)
         if self.config.remove_turn_direction_operations:
             logger.info("Running remove turn_direction operations...")
-            lanelet_map = self.execute_remove_turn_direction_operations(lanelet_map)
+            lanelet_map, entries = self.execute_remove_turn_direction_operations(
+                lanelet_map
+            )
+            all_entries.extend(entries)
 
         # Save the processed map
         self.save_map(lanelet_map)
 
-        return lanelet_map
+        preprocessing_log = PreprocessingLog(
+            entries=all_entries,
+            config_path=self.config.input_map_path,
+        )
+        return lanelet_map, preprocessing_log
 
 
 def main() -> int:
@@ -1051,10 +1233,13 @@ def main() -> int:
     # Process the map
     try:
         preprocessor = LaneletPreprocessor(config)
-        processed_map = preprocessor.process()
+        processed_map, preprocessing_log = preprocessor.process()
 
         logger.info("Preprocessing completed successfully")
         logger.info(f"Final map has {len(processed_map.laneletLayer)} lanelets")
+        logger.info(
+            f"Preprocessing log: {len(preprocessing_log.entries)} operations recorded"
+        )
 
     except Exception as e:
         logger.error(f"Preprocessing failed: {e}")

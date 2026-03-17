@@ -2,6 +2,7 @@
 """Main script to convert Lanelet2 maps to OpenDRIVE format."""
 
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -288,7 +289,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_to_lanelet_ids: Dict[int, List[int]],
         lanelet_to_road_id: Dict[int, int],
         junctions: List[Junction],
-    ) -> None:
+    ) -> Dict[int, Tuple[int, int]]:
         """
         Set up predecessor/successor connections for roads and lanes.
 
@@ -298,6 +299,9 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
             lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
             junctions: All junctions
+
+        Returns:
+            Mapping from lanelet ID to (road_id, lane_id) for all lanes.
         """
         # Set road links for connecting roads
         print("\n=== Building road links for connecting roads ===")
@@ -317,7 +321,8 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Set lane links for all roads
         print("\n=== Building lane links for all roads ===")
-        Road.set_all_lane_links(self.lanelet_map, all_roads)
+        lanelet_to_road_and_lane = Road.set_all_lane_links(self.lanelet_map, all_roads)
+        return lanelet_to_road_and_lane
 
     def _extract_and_assign_signals(
         self,
@@ -924,7 +929,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return opendrive
 
-    def convert(self) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
+    def convert(
+        self,
+    ) -> Tuple[OpenDRIVE, RoadLaneletMapping, Dict[int, Tuple[int, int]]]:
         """
         Convert Lanelet2 map to OpenDRIVE format.
 
@@ -934,6 +941,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             Tuple of:
                 - OpenDRIVE object representing the converted map
                 - RoadLaneletMapping containing bidirectional mapping
+                - Mapping from lanelet ID to (road_id, lane_id) for all lanes
         """
         print("Converting Lanelet2 map to OpenDRIVE format...")
 
@@ -963,7 +971,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         )
 
         # Step 4: Set up road and lane connections
-        self._setup_connections(
+        lanelet_to_road_and_lane = self._setup_connections(
             all_roads,
             connecting_roads,
             mapping.road_to_lanelets,
@@ -1063,14 +1071,14 @@ class _Lanelet2ToOpenDRIVEConverter:
             all_roads, junctions, signals_and_controllers
         )
 
-        return opendrive, mapping
+        return opendrive, mapping, lanelet_to_road_and_lane
 
 
 def convert_lanelet2_to_opendrive(
     lanelet_map: lanelet2.core.LaneletMap,
     config: ConversionConfig,
     mgrs_code: Optional[str] = None,
-) -> Tuple[OpenDRIVE, RoadLaneletMapping]:
+) -> Tuple[OpenDRIVE, RoadLaneletMapping, Dict[int, Tuple[int, int]]]:
     """
     Convert Lanelet2 map to OpenDRIVE format.
 
@@ -1090,6 +1098,7 @@ def convert_lanelet2_to_opendrive(
         Tuple of:
             - OpenDRIVE object representing the converted map
             - RoadLaneletMapping containing bidirectional mapping between roads and lanelets
+            - Mapping from lanelet ID to (road_id, lane_id) for all lanes
     """
     # Merge legacy mgrs_code argument into config.origin so the converter has
     # a single, consistent source of truth for the MGRS grid code.
@@ -1288,6 +1297,8 @@ def preprocess_and_convert_with_hydra(
         ]
     )
 
+    preprocessing_log_dict: dict | None = None
+
     if has_preprocessing:
         logger.info("Running preprocessing operations...")
 
@@ -1304,12 +1315,14 @@ def preprocess_and_convert_with_hydra(
 
         # Run preprocessing
         preprocessor = LaneletPreprocessor(config)
-        preprocessor.process()
+        _lanelet_map, preprocessing_log = preprocessor.process()
+        preprocessing_log_dict = preprocessing_log.to_dict()
 
         # Update input path to use preprocessed map
         input_map_path = preprocessed_path
         logger.info(
-            f"Preprocessing completed. Using preprocessed map from: {input_map_path}"
+            f"Preprocessing completed ({len(preprocessing_log.entries)} ops). "
+            f"Using preprocessed map from: {input_map_path}"
         )
 
     # Load the (possibly preprocessed) Lanelet2 map
@@ -1391,13 +1404,50 @@ def preprocess_and_convert_with_hydra(
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;
     # no need to pass it as a separate argument.
-    opendrive, mapping = convert_lanelet2_to_opendrive(lanelet_map, conversion_config)
+    opendrive, mapping, lanelet_to_road_and_lane = convert_lanelet2_to_opendrive(
+        lanelet_map, conversion_config
+    )
 
     logger.info("Conversion completed successfully!")
     logger.info(
         f"Road-Lanelet mapping: {len(mapping.road_to_lanelets)} roads, "
         f"{len(mapping.lanelet_to_road)} lanelets"
     )
+
+    # Save mapping JSON and cross-validate against geometric mapping
+    if conversion_config.output_path:
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _preprocessed_osm_path_for,
+            validate_and_save_mapping,
+        )
+
+        xodr_path = Path(conversion_config.output_path)
+
+        validate_and_save_mapping(
+            lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+            lanelet_map=lanelet_map,
+            roads=opendrive.roads,
+            xodr_path=xodr_path,
+            osm_path=input_map_path,
+            mgrs_offset=(offset_x, offset_y),
+            preprocessing_log=preprocessing_log_dict,
+        )
+
+        # Save preprocessed OSM next to XODR so that standalone `analyze`
+        # can reproduce the same lanelet map without re-running preprocessing.
+        if has_preprocessing:
+            preprocessed_osm_dest = _preprocessed_osm_path_for(xodr_path)
+            shutil.copy2(input_map_path, preprocessed_osm_dest)
+            logger.info(f"Preprocessed OSM saved to: {preprocessed_osm_dest}")
+
+        # Run ASAM QC analysis + mapping cross-validation
+        from autoware_lanelet2_to_opendrive.analyze_xodr import run_analysis
+
+        logger.info("Running post-conversion analysis...")
+        run_analysis(
+            xodr_path=xodr_path,
+            osm_path=input_map_path,
+        )
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")

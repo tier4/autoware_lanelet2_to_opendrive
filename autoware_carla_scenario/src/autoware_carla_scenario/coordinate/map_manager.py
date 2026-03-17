@@ -153,12 +153,16 @@ class MapManager:
         # Build lanelet -> (road_id, lane_id) mapping for direct conversion.
         try:
             from .road_lanelet_mapping import load_or_build_mapping  # noqa: PLC0415
+            from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+                parse_roads_from_xodr,
+            )
 
+            parsed_roads = parse_roads_from_xodr(xodr_path)
             self._road_lanelet_mapping = load_or_build_mapping(
                 xodr_path=xodr_path,
                 osm_path=lanelet2_path,
                 lanelet_map=self.lanelet_map,
-                road_network=self.road_network,
+                roads=parsed_roads,
                 mgrs_offset=self._mgrs_offset,
             )
         except Exception:
