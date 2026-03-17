@@ -26,7 +26,7 @@ sweep:
           - type: is_junction
           - type: lanelet_ids
             ids:
-              - 31
+              - 297
   bindings:
     ego.spawn_s:
       type: stop_line_offset
