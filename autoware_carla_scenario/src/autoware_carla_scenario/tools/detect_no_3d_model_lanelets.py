@@ -44,78 +44,17 @@ import os
 import shutil
 
 import carla
-import lanelet2.core
 import lanelet2.geometry
-import lanelet2.io
-import numpy as np
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from autoware_carla_scenario.coordinate.map_manager import (
-    _parse_geo_reference,
-)
+from autoware_carla_scenario.coordinate.map_manager import MapManager
 from autoware_carla_scenario.coordinate.transform import (
     _interpolate_at_s as _interpolate_at_s_4,
 )
 from autoware_carla_scenario.scenario_runner import _map_name_to_env_var
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Z-offset computation
-# ---------------------------------------------------------------------------
-
-
-def _compute_z_offset(
-    lanelet_map: lanelet2.core.LaneletMap,
-    mgrs_offset: tuple[float, float],
-    world: carla.World,
-) -> float:
-    """Compute ``lanelet2_z - carla_z`` using CARLA spawn points.
-
-    Averages the per-point offset ``(lanelet2_z - carla_spawn_z)`` across
-    all spawn points that are within 10 m of a lanelet centerline.
-    """
-    spawn_points = world.get_map().get_spawn_points()
-    if not spawn_points:
-        logger.warning("No spawn points found; using z_offset=0.0")
-        return 0.0
-
-    offset_x, offset_y = mgrs_offset
-    offsets: list[float] = []
-
-    for sp in spawn_points:
-        mgrs_x = sp.location.x + offset_x
-        mgrs_y = -sp.location.y + offset_y
-
-        query = lanelet2.core.BasicPoint2d(mgrs_x, mgrs_y)
-        results = lanelet2.geometry.findNearest(lanelet_map.laneletLayer, query, 1)
-        if not results:
-            continue
-
-        if results[0][0] > 10.0:
-            continue
-
-        lanelet = results[0][1]
-        best_d2 = float("inf")
-        ll2_z = 0.0
-        for pt in lanelet.centerline:
-            d2 = (pt.x - mgrs_x) ** 2 + (pt.y - mgrs_y) ** 2
-            if d2 < best_d2:
-                best_d2 = d2
-                ll2_z = pt.z
-
-        offsets.append(ll2_z - sp.location.z)
-
-    if not offsets:
-        logger.warning("No usable spawn points for z_offset; using 0.0")
-        return 0.0
-
-    z_offset = float(np.mean(offsets))
-    logger.info("Computed z_offset=%.4f from %d spawn points", z_offset, len(offsets))
-    return z_offset
 
 
 # ---------------------------------------------------------------------------
@@ -477,39 +416,35 @@ def main() -> None:
     world = client.load_world(map_name)
 
     # ------------------------------------------------------------------
-    # Load maps and compute offsets
+    # Initialize MapManager (loads lanelet2, computes mgrs_offset & z_offset)
     # ------------------------------------------------------------------
-    xodr_content = xodr_path.read_text(encoding="utf-8")
-    lat, lon, alt = _parse_geo_reference(xodr_content)
-    logger.info("geoReference: lat=%.6f, lon=%.6f, alt=%.2f", lat, lon, alt)
-
-    origin = lanelet2.io.Origin(lat, lon)
-    projector = MGRSProjector(origin)
-    lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
+    MapManager.reset()
+    mm = MapManager.get_instance()
+    mm.initialize(
+        xodr_path=xodr_path,
+        lanelet2_path=lanelet2_path,
+        carla_world=world,
+    )
     logger.info(
         "Loaded Lanelet2 map with %d lanelets",
-        len(lanelet_map.laneletLayer),
+        len(mm.lanelet_map.laneletLayer),
     )
-
-    fwd = projector.forward(lanelet2.core.GPSPoint(lat, lon, alt))
-    mgrs_offset = (fwd.x, fwd.y)
-    logger.info("MGRS offset: (%.4f, %.4f)", mgrs_offset[0], mgrs_offset[1])
-
-    z_offset = _compute_z_offset(lanelet_map, mgrs_offset, world)
+    logger.info("MGRS offset: (%.4f, %.4f)", mm.mgrs_offset[0], mm.mgrs_offset[1])
+    logger.info("z_offset: %.4f", mm.z_offset)
 
     # ------------------------------------------------------------------
     # Detect lanelets without 3D model
     # ------------------------------------------------------------------
     no_model_ids = detect_no_3d_model_lanelets(
         world=world,
-        lanelet_map=lanelet_map,
-        mgrs_offset=mgrs_offset,
-        z_offset=z_offset,
+        lanelet_map=mm.lanelet_map,
+        mgrs_offset=mm.mgrs_offset,
+        z_offset=mm.z_offset,
         ray_distance_upper=args.ray_upper,
         ray_distance_lower=args.ray_lower,
     )
 
-    total = len(lanelet_map.laneletLayer)
+    total = len(mm.lanelet_map.laneletLayer)
     logger.info(
         "Detection complete: %d / %d lanelets have no 3D model",
         len(no_model_ids),
