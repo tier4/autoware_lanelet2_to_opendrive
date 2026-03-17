@@ -63,6 +63,13 @@ class EgoVehicleConfig:
     #: Longitudinal offset along the lanelet centerline.
     spawn_s: float = 25.0
 
+    #: Height offset (m) above the estimated z when casting the ground
+    #: projection ray for spawn-height refinement.
+    ground_projection_ray_offset: float = 5.0
+
+    #: Maximum downward search distance (m) for the ground projection ray.
+    ground_projection_search_distance: float = 10.0
+
 
 # ---------------------------------------------------------------------------
 # Scenario-specific configs
