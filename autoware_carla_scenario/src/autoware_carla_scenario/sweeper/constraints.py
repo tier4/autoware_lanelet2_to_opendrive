@@ -200,7 +200,7 @@ class NotConstraint:
 # ---------------------------------------------------------------------------
 
 
-def _create_routing_graph(lanelet_map: Any) -> Any:
+def create_routing_graph(lanelet_map: Any) -> Any:
     """Build a routing graph for *lanelet_map* using default traffic rules."""
     import lanelet2.routing
     import lanelet2.traffic_rules
@@ -224,10 +224,13 @@ class PreviousOfConstraint:
 
     constraints: tuple[Constraint, ...] = field(default_factory=tuple)
 
-    def find_matching_ids(self, lanelet_map: Any) -> set[int]:
+    def find_matching_ids(
+        self, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> set[int]:
         """Return IDs of lanelets previous to the inner-constraint matches."""
         inner_matched = find_matching_lanelets(list(self.constraints), lanelet_map)
-        routing_graph = _create_routing_graph(lanelet_map)
+        if routing_graph is None:
+            routing_graph = create_routing_graph(lanelet_map)
         result: set[int] = set()
         for lid in inner_matched:
             lanelet = lanelet_map.laneletLayer[lid]
@@ -250,10 +253,13 @@ class FollowingOfConstraint:
 
     constraints: tuple[Constraint, ...] = field(default_factory=tuple)
 
-    def find_matching_ids(self, lanelet_map: Any) -> set[int]:
+    def find_matching_ids(
+        self, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> set[int]:
         """Return IDs of lanelets following the inner-constraint matches."""
         inner_matched = find_matching_lanelets(list(self.constraints), lanelet_map)
-        routing_graph = _create_routing_graph(lanelet_map)
+        if routing_graph is None:
+            routing_graph = create_routing_graph(lanelet_map)
         result: set[int] = set()
         for lid in inner_matched:
             lanelet = lanelet_map.laneletLayer[lid]
@@ -266,7 +272,9 @@ class FollowingOfConstraint:
         return lanelet.id in self._cached_ids  # type: ignore[attr-defined]
 
 
-def _bind_set_level_constraints(constraint: Any, lanelet_map: Any) -> None:
+def _bind_set_level_constraints(
+    constraint: Any, lanelet_map: Any, routing_graph: Any | None = None
+) -> None:
     """Recursively pre-compute cached IDs for set-level constraints.
 
     Walks the constraint tree and, for every
@@ -275,13 +283,13 @@ def _bind_set_level_constraints(constraint: Any, lanelet_map: Any) -> None:
     ``object.__setattr__`` (the dataclasses are frozen).
     """
     if isinstance(constraint, (PreviousOfConstraint, FollowingOfConstraint)):
-        ids = constraint.find_matching_ids(lanelet_map)
+        ids = constraint.find_matching_ids(lanelet_map, routing_graph)
         object.__setattr__(constraint, "_cached_ids", ids)
     if hasattr(constraint, "constraints"):
         for child in constraint.constraints:
-            _bind_set_level_constraints(child, lanelet_map)
+            _bind_set_level_constraints(child, lanelet_map, routing_graph)
     if hasattr(constraint, "constraint"):
-        _bind_set_level_constraints(constraint.constraint, lanelet_map)
+        _bind_set_level_constraints(constraint.constraint, lanelet_map, routing_graph)
 
 
 # ---------------------------------------------------------------------------
@@ -379,12 +387,15 @@ def parse_constraint(cfg: dict[str, Any]) -> Constraint:
 def find_matching_lanelets(
     constraints: list[Constraint],
     lanelet_map: Any,
+    routing_graph: Any | None = None,
 ) -> list[int]:
     """Return IDs of lanelets satisfying *all* constraints.
 
     Args:
         constraints: List of constraint objects to evaluate.
         lanelet_map: A ``lanelet2.core.LaneletMap`` instance.
+        routing_graph: Optional pre-built routing graph.  When *None* a new
+            graph is created internally only if set-level constraints exist.
 
     Returns:
         Sorted list of lanelet IDs that pass every constraint.
@@ -392,7 +403,7 @@ def find_matching_lanelets(
     # Pre-compute cached IDs for set-level constraints (previous_of, following_of)
     # so that their evaluate() calls become simple set-membership checks.
     for c in constraints:
-        _bind_set_level_constraints(c, lanelet_map)
+        _bind_set_level_constraints(c, lanelet_map, routing_graph)
 
     matched: list[int] = []
     for lanelet in lanelet_map.laneletLayer:

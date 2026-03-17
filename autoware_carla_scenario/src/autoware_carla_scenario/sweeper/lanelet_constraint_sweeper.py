@@ -24,7 +24,12 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from .bindings import Binding, parse_binding
-from .constraints import Constraint, find_matching_lanelets, parse_constraint
+from .constraints import (
+    Constraint,
+    create_routing_graph,
+    find_matching_lanelets,
+    parse_constraint,
+)
 from .map_loader import load_lanelet2_map
 
 logger = logging.getLogger(__name__)
@@ -119,8 +124,11 @@ class LaneletConstraintSweeper(Sweeper):
         if not all_constraints or constraint_target_key is None:
             raise ValueError("No valid constraints found in sweep.constraints.")
 
-        # -- 4. Find matching lanelets -------------------------------------
-        matched_ids = find_matching_lanelets(all_constraints, lanelet_map)
+        # -- 4. Build routing graph (once) and find matching lanelets --------
+        routing_graph = create_routing_graph(lanelet_map)
+        matched_ids = find_matching_lanelets(
+            all_constraints, lanelet_map, routing_graph
+        )
         if not matched_ids:
             logger.warning("No lanelets match the given constraints. Nothing to sweep.")
             return []
@@ -137,7 +145,7 @@ class LaneletConstraintSweeper(Sweeper):
             overrides: list[str] = [f"{constraint_target_key}={lid}"]
             for binding in bindings:
                 try:
-                    value = binding.resolve(lid, lanelet_map)
+                    value = binding.resolve(lid, lanelet_map, routing_graph)
                     overrides.append(f"{binding.target_key}={value}")
                 except Exception:
                     logger.warning(

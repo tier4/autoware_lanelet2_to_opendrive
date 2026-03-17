@@ -514,6 +514,10 @@ class ScenarioRunner:
             settings.synchronous_mode = original_synchronous
             settings.fixed_delta_seconds = original_delta
             world.apply_settings(settings)
+            # Tick once to flush destroyed actors and applied settings on
+            # the server side, ensuring the world is in a clean state
+            # before the next scenario starts.
+            world.tick()
             logger.info("[%s] World settings restored", scenario_name)
             logger.info("[%s] === Cleanup done ===", scenario_name)
 

@@ -32,7 +32,9 @@ class Binding(Protocol):
         """Hydra override key this binding writes to (e.g. ``ego.spawn_s``)."""
         ...
 
-    def resolve(self, lanelet_id: int, lanelet_map: Any) -> float:
+    def resolve(
+        self, lanelet_id: int, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> float:
         """Compute the parameter value for the given lanelet."""
         ...
 
@@ -49,46 +51,90 @@ class StopLineOffsetBinding:
     target_key: str
     offset: float = 15.0
 
-    def resolve(self, lanelet_id: int, lanelet_map: Any) -> float:
-        """Return the arc-length position *offset* metres before the stop line."""
-        lanelet = lanelet_map.laneletLayer[lanelet_id]
-
-        # Collect stop lines from this lanelet's regulatory elements.
-        seen_ids: set[int] = set()
-        stop_lines = _collect_stop_lines_from_reg_elems(
-            lanelet.regulatoryElements, seen_ids
-        )
-        if not stop_lines:
-            raise ValueError(
-                f"Lanelet {lanelet_id} has no stop line; "
-                "cannot resolve stop_line_offset binding."
-            )
-
-        # Use the first stop line (same convention as get_stop_line_poses).
-        ls = stop_lines[0]
+    @staticmethod
+    def _project_stop_line(ls: Any, lanelet: Any) -> float:
+        """Project stop line centroid onto lanelet centerline, return arc-length."""
         points = list(ls)
         if not points:
-            raise ValueError(
-                f"Stop line linestring on lanelet {lanelet_id} has no points."
-            )
-
+            raise ValueError("Stop line linestring has no points.")
         cx = sum(p.x for p in points) / len(points)
         cy = sum(p.y for p in points) / len(points)
-
         pt = lanelet2.core.BasicPoint2d(cx, cy)
         centerline_2d = lanelet2.geometry.to2D(lanelet.centerline)
         arc = lanelet2.geometry.toArcCoordinates(centerline_2d, pt)
-        stop_s = arc.length
+        return arc.length
 
-        result = max(0.0, stop_s - self.offset)
-        logger.debug(
-            "Lanelet %d: stop_line_s=%.2f, offset=%.2f -> spawn_s=%.2f",
-            lanelet_id,
-            stop_s,
-            self.offset,
-            result,
+    def resolve(
+        self, lanelet_id: int, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> float:
+        """Return the arc-length position *offset* metres before the stop line.
+
+        Walks the spawn lanelet and its following lanelets (BFS via routing
+        graph) searching for the nearest stop line.  The result is
+        ``accumulated + stop_s - offset``, clamped to
+        ``[0, spawn_lanelet_length]`` so the vehicle stays within the spawn
+        lanelet.
+
+        The search terminates when the accumulated distance from the spawn
+        lanelet end exceeds the offset (further stop lines would only clamp
+        the result to ``spawn_lanelet_length``).
+        """
+        lanelet = lanelet_map.laneletLayer[lanelet_id]
+        spawn_lanelet_length = lanelet2.geometry.length2d(lanelet)
+
+        if routing_graph is None:
+            from .constraints import create_routing_graph
+
+            routing_graph = create_routing_graph(lanelet_map)
+
+        # BFS over the lanelet chain: spawn -> following -> following -> ...
+        # Each entry is (lanelet_object, arc_length_from_spawn_lanelet_start).
+        candidates: list[tuple[Any, float]] = [(lanelet, 0.0)]
+        visited: set[int] = {lanelet_id}
+        seen_ids: set[int] = set()
+
+        while candidates:
+            next_candidates: list[tuple[Any, float]] = []
+            for current, accumulated in candidates:
+                stop_lines = _collect_stop_lines_from_reg_elems(
+                    current.regulatoryElements, seen_ids
+                )
+                if stop_lines:
+                    stop_s = self._project_stop_line(stop_lines[0], current)
+                    total_arc = accumulated + stop_s
+                    result = max(
+                        0.0, min(total_arc - self.offset, spawn_lanelet_length)
+                    )
+                    logger.debug(
+                        "Lanelet %d: stop line found on lanelet %d "
+                        "(stop_s=%.2f, accumulated=%.2f, offset=%.2f) "
+                        "-> spawn_s=%.2f",
+                        lanelet_id,
+                        current.id,
+                        stop_s,
+                        accumulated,
+                        self.offset,
+                        result,
+                    )
+                    return result
+
+                new_accumulated = accumulated + lanelet2.geometry.length2d(current)
+
+                # Stop expanding beyond offset from spawn lanelet end.
+                if new_accumulated - spawn_lanelet_length > self.offset:
+                    continue
+
+                for fll in routing_graph.following(current):
+                    if fll.id not in visited:
+                        visited.add(fll.id)
+                        next_candidates.append((fll, new_accumulated))
+
+            candidates = next_candidates
+
+        raise ValueError(
+            f"Lanelet {lanelet_id} and its following lanelets have no stop line; "
+            "cannot resolve stop_line_offset binding."
         )
-        return result
 
 
 # ---------------------------------------------------------------------------
