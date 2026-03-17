@@ -12,13 +12,16 @@ sweeper:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
 import time
+from pathlib import Path
 from typing import Any
 
 from hydra.core.plugins import Plugins
+from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.sweeper import Sweeper
 from hydra.types import HydraContext
 from omegaconf import DictConfig, OmegaConf
@@ -38,6 +41,55 @@ logger = logging.getLogger(__name__)
 # Default hard timeout per job (seconds).  Can be overridden via
 # ``sweep.job_timeout_seconds`` in the scenario YAML.
 _DEFAULT_JOB_TIMEOUT = 120
+
+
+def _check_result_json_in_dir(working_dir: str | None) -> bool | None:
+    """Read the scenario result JSON from a job's output directory.
+
+    Args:
+        working_dir: The Hydra job output directory (from ``JobReturn.working_dir``).
+
+    Returns:
+        ``True`` if the scenario passed, ``False`` if it failed or the
+        result file is missing (e.g. spawn failure prevented the scenario
+        from running), or ``None`` if *working_dir* is not available.
+    """
+    if not working_dir:
+        return None
+    output_dir = Path(working_dir)
+    if not output_dir.is_dir():
+        return None
+    result_files = sorted(output_dir.glob("*_result.json"))
+    if not result_files:
+        # Output directory exists but no result JSON — the scenario did
+        # not complete (e.g. spawn failure raised before ScenarioRunner
+        # could write the result).
+        return False
+    try:
+        data = json.loads(result_files[0].read_text(encoding="utf-8"))
+        return bool(data.get("passed", True))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def _get_job_output_dir(ret: JobReturn) -> str | None:
+    """Return the Hydra output directory for a completed job.
+
+    ``JobReturn.working_dir`` is the *current working directory* at
+    execution time, which equals the project root when
+    ``hydra.job.chdir=False`` (the default since Hydra 1.2).
+    The actual output directory where :class:`ScenarioRunner` writes
+    result JSONs is ``hydra.runtime.output_dir`` inside the job's
+    ``hydra_cfg``.
+    """
+    hydra_cfg = getattr(ret, "hydra_cfg", None)
+    if hydra_cfg is not None:
+        try:
+            return str(OmegaConf.select(hydra_cfg, "hydra.runtime.output_dir"))
+        except Exception:
+            pass
+    # Fallback: working_dir (correct only when hydra.job.chdir=True).
+    return getattr(ret, "working_dir", None)
 
 
 def _launch_job_isolated(
@@ -69,12 +121,29 @@ def _launch_job_isolated(
         signal.signal(signal.SIGALRM, signal.SIG_DFL)
         signal.alarm(0)
         try:
-            launcher.launch([batch], initial_job_idx=idx)
+            job_returns = launcher.launch([batch], initial_job_idx=idx)
         except SystemExit as exc:
             os._exit(exc.code if isinstance(exc.code, int) else 1)
         except Exception:
             logger.exception("Job raised an exception in child process")
             os._exit(1)
+        # launcher.launch() completes without error even when the scenario
+        # *fails* (in --multirun mode _hydra_main does not sys.exit).
+        # Hydra catches task-function exceptions internally and stores them
+        # in JobReturn with status=FAILED, so we must inspect the status
+        # and the result JSON to determine the actual outcome.
+        if job_returns:
+            ret = job_returns[0]
+            # If the task function raised (e.g. spawn failure), Hydra
+            # sets status to FAILED without re-raising the exception.
+            if ret.status != JobStatus.COMPLETED:
+                os._exit(1)
+            # Use hydra_cfg.hydra.runtime.output_dir — NOT working_dir,
+            # which equals cwd (unchanged) when hydra.job.chdir=False
+            # (the default since Hydra 1.2).
+            output_dir = _get_job_output_dir(ret)
+            if _check_result_json_in_dir(output_dir) is False:
+                os._exit(1)
         os._exit(0)
 
     # ---- parent process ----
