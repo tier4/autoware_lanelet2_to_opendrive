@@ -17,6 +17,20 @@ combinations::
     - type: not
       constraint:
         type: has_traffic_light_stop_line
+
+Set-level relational constraints (``previous_of``, ``following_of``) evaluate
+inner constraints across all lanelets first, then resolve to the
+previous/following neighbours via the routing graph::
+
+    # Lanelets immediately before those with a traffic light stop line
+    - type: previous_of
+      constraints:
+        - type: has_traffic_light_stop_line
+
+    # Lanelets immediately after those with a stop line
+    - type: following_of
+      constraints:
+        - type: has_stop_line
 """
 
 from __future__ import annotations
@@ -143,6 +157,95 @@ class NotConstraint:
 
 
 # ---------------------------------------------------------------------------
+# Set-level relational constraints (previous_of / following_of)
+# ---------------------------------------------------------------------------
+
+
+def _create_routing_graph(lanelet_map: Any) -> Any:
+    """Build a routing graph for *lanelet_map* using default traffic rules."""
+    import lanelet2.routing
+    import lanelet2.traffic_rules
+
+    traffic_rules = lanelet2.traffic_rules.create(
+        lanelet2.traffic_rules.Locations.Germany,
+        lanelet2.traffic_rules.Participants.Vehicle,
+    )
+    return lanelet2.routing.RoutingGraph(lanelet_map, traffic_rules)
+
+
+@dataclass(frozen=True)
+class PreviousOfConstraint:
+    """Matches lanelets that are *previous* neighbours of the inner result set.
+
+    Inner constraints are evaluated against the full map first.  Then the
+    routing graph is queried for the **previous** lanelets (depth=1) of
+    every match.  The resulting IDs are cached so that the per-lanelet
+    ``evaluate()`` call is a simple set-membership check.
+    """
+
+    constraints: tuple[Constraint, ...] = field(default_factory=tuple)
+
+    def find_matching_ids(self, lanelet_map: Any) -> set[int]:
+        """Return IDs of lanelets previous to the inner-constraint matches."""
+        inner_matched = find_matching_lanelets(list(self.constraints), lanelet_map)
+        routing_graph = _create_routing_graph(lanelet_map)
+        result: set[int] = set()
+        for lid in inner_matched:
+            lanelet = lanelet_map.laneletLayer[lid]
+            for prev_ll in routing_graph.previous(lanelet):
+                result.add(prev_ll.id)
+        return result
+
+    def evaluate(self, lanelet: Any) -> bool:
+        """Check membership in pre-computed previous set."""
+        return lanelet.id in self._cached_ids  # type: ignore[attr-defined]
+
+
+@dataclass(frozen=True)
+class FollowingOfConstraint:
+    """Matches lanelets that are *following* neighbours of the inner result set.
+
+    Behaves identically to :class:`PreviousOfConstraint` but queries
+    ``routing_graph.following()`` instead.
+    """
+
+    constraints: tuple[Constraint, ...] = field(default_factory=tuple)
+
+    def find_matching_ids(self, lanelet_map: Any) -> set[int]:
+        """Return IDs of lanelets following the inner-constraint matches."""
+        inner_matched = find_matching_lanelets(list(self.constraints), lanelet_map)
+        routing_graph = _create_routing_graph(lanelet_map)
+        result: set[int] = set()
+        for lid in inner_matched:
+            lanelet = lanelet_map.laneletLayer[lid]
+            for fol_ll in routing_graph.following(lanelet):
+                result.add(fol_ll.id)
+        return result
+
+    def evaluate(self, lanelet: Any) -> bool:
+        """Check membership in pre-computed following set."""
+        return lanelet.id in self._cached_ids  # type: ignore[attr-defined]
+
+
+def _bind_set_level_constraints(constraint: Any, lanelet_map: Any) -> None:
+    """Recursively pre-compute cached IDs for set-level constraints.
+
+    Walks the constraint tree and, for every
+    :class:`PreviousOfConstraint` / :class:`FollowingOfConstraint`, calls
+    ``find_matching_ids`` and stores the result as ``_cached_ids`` using
+    ``object.__setattr__`` (the dataclasses are frozen).
+    """
+    if isinstance(constraint, (PreviousOfConstraint, FollowingOfConstraint)):
+        ids = constraint.find_matching_ids(lanelet_map)
+        object.__setattr__(constraint, "_cached_ids", ids)
+    if hasattr(constraint, "constraints"):
+        for child in constraint.constraints:
+            _bind_set_level_constraints(child, lanelet_map)
+    if hasattr(constraint, "constraint"):
+        _bind_set_level_constraints(constraint.constraint, lanelet_map)
+
+
+# ---------------------------------------------------------------------------
 # Parsing & matching helpers
 # ---------------------------------------------------------------------------
 
@@ -162,6 +265,10 @@ def parse_constraint(cfg: dict[str, Any]) -> Constraint:
     * ``and`` — requires a ``constraints`` list of child configs.
     * ``or``  — requires a ``constraints`` list of child configs.
     * ``not`` — requires a single ``constraint`` child config.
+    * ``previous_of`` — requires a ``constraints`` list; resolves to
+      lanelets immediately *before* the inner matches via routing graph.
+    * ``following_of`` — requires a ``constraints`` list; resolves to
+      lanelets immediately *after* the inner matches via routing graph.
 
     All other ``type`` values are looked up in the leaf registry.
 
@@ -201,13 +308,25 @@ def parse_constraint(cfg: dict[str, Any]) -> Constraint:
             raise ValueError("'not' constraint requires a 'constraint' mapping.")
         return NotConstraint(constraint=parse_constraint(child_cfg))
 
+    # --- set-level: previous_of / following_of ---
+    if constraint_type in ("previous_of", "following_of"):
+        children_cfg = cfg.get("constraints")
+        if not children_cfg:
+            raise ValueError(
+                f"'{constraint_type}' constraint requires a 'constraints' list."
+            )
+        children = tuple(parse_constraint(c) for c in children_cfg)
+        if constraint_type == "previous_of":
+            return PreviousOfConstraint(constraints=children)
+        return FollowingOfConstraint(constraints=children)
+
     # --- leaf ---
     cls = _LEAF_REGISTRY.get(constraint_type)
     if cls is None:
         raise ValueError(
             f"Unknown constraint type: {constraint_type!r}. "
             f"Available leaves: {list(_LEAF_REGISTRY)}, "
-            f"composites: ['and', 'or', 'not']"
+            f"composites: ['and', 'or', 'not', 'previous_of', 'following_of']"
         )
     kwargs = {k: v for k, v in cfg.items() if k != "type"}
     # Convert list values to tuples for frozen dataclasses.
@@ -230,6 +349,11 @@ def find_matching_lanelets(
     Returns:
         Sorted list of lanelet IDs that pass every constraint.
     """
+    # Pre-compute cached IDs for set-level constraints (previous_of, following_of)
+    # so that their evaluate() calls become simple set-membership checks.
+    for c in constraints:
+        _bind_set_level_constraints(c, lanelet_map)
+
     matched: list[int] = []
     for lanelet in lanelet_map.laneletLayer:
         if all(c.evaluate(lanelet) for c in constraints):
