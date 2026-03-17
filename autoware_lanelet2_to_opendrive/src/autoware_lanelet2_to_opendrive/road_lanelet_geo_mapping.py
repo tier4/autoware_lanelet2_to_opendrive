@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from tqdm import tqdm
 
+from .opendrive.enums import TrafficRule
+
 if TYPE_CHECKING:
     from .opendrive.road import Road as ConverterRoad
 
@@ -37,10 +39,18 @@ class MappingMismatchError(Exception):
 #: Mapping cache files are stored next to the source XODR file.
 
 #: Maximum mean distance (m) between a road reference line and a lanelet
-#: boundary for them to be considered a match.  This should be larger than
-#: the spline fitting error (~1 m) but smaller than a typical lane width
-#: (~3 m) so that we never confuse adjacent boundaries.
-_MATCH_THRESHOLD: float = 2.0
+#: boundary for them to be considered a match.  This must be larger than
+#: the spline fitting error (max_avg_error=2.0 m in config) but smaller
+#: than a typical lane width (~3.5 m) so that we never confuse adjacent
+#: boundaries.
+_MATCH_THRESHOLD: float = 3.5
+
+#: Weight for endpoint proximity penalty added to candidate distance.
+#: The penalty = (start_dist + end_dist) * weight, where start_dist and
+#: end_dist are the minimum distances from the reference line endpoints
+#: to either endpoint of the candidate boundary.  This helps disambiguate
+#: geometrically similar junction lanelets that connect different roads.
+_ENDPOINT_WEIGHT: float = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +68,7 @@ class _RoadCandidates:
     is_rht: bool
     ref_line: np.ndarray
     candidates: list[tuple[float, int]]  # [(distance, lanelet_id), ...] ascending
+    walk_lane_ids: list[int] = field(default_factory=list)  # Geometric walk order
 
 
 # ---------------------------------------------------------------------------
@@ -403,14 +414,19 @@ def _compute_all_candidates(
     lanelet_right: dict[int, np.ndarray],
     lanelet_left_bbox: dict[int, tuple[float, float, float, float]],
     lanelet_right_bbox: dict[int, tuple[float, float, float, float]],
-) -> list[_RoadCandidates]:
+) -> tuple[list[_RoadCandidates], dict[int, dict]]:
     """Phase 1: compute candidate lanelet lists for every road.
 
     For each road, applies bbox -> direction -> distance filtering against
     **all** lanelets (no ``matched_lanelets`` exclusion) and returns candidates
     sorted by ascending distance.
+
+    Returns:
+        Tuple of (candidate list, diagnostic dict keyed by road_id for
+        roads with zero candidates).
     """
     all_rc: list[_RoadCandidates] = []
+    no_candidate_diag: dict[int, dict] = {}
 
     for road in roads:
         ref_line = _sample_reference_line_from_road(road)
@@ -421,24 +437,110 @@ def _compute_all_candidates(
         if not lane_ids:
             continue
 
-        is_rht = all(lid < 0 for lid in lane_ids)
+        # Determine RHT/LHT from road's traffic rule when available.
+        # The traffic rule determines which lanelet boundary the reference
+        # line was built from:
+        #   RHT → left boundary  →  search lanelet_left
+        #   LHT → right boundary →  search lanelet_right
+        if road.rule is not None:
+            is_rht = road.rule == TrafficRule.RHT
+        else:
+            is_rht = all(lid < 0 for lid in lane_ids)
+
         boundaries = lanelet_left if is_rht else lanelet_right
         bboxes = lanelet_left_bbox if is_rht else lanelet_right_bbox
         ref_bbox = _bbox(ref_line)
 
+        # Progressive fallback search with 3 levels:
+        #   1. Symmetric distance + direction check  (strictest)
+        #   2. Symmetric distance, no direction check (curved/long roads)
+        #   3. Directed distance, no direction check  (length mismatch)
+        #
+        # Symmetric distance is preferred because it penalises partial
+        # overlaps (e.g. an adjacent lane boundary covering part of a long
+        # reference line).  Directed distance is only used as a last resort
+        # for roads where the reference line is much longer than any single
+        # lanelet boundary.
+        _FALLBACK_LEVELS: list[tuple[bool, str]] = [
+            (True, "symmetric"),
+            (False, "symmetric"),
+            (False, "directed"),
+        ]
+
         candidates: list[tuple[float, int]] = []
-        for lid, boundary in boundaries.items():
-            if not _bboxes_overlap(ref_bbox, bboxes[lid]):
-                continue
-            if not _same_direction(ref_line, boundary):
-                continue
-            dist = _symmetric_mean_distance(ref_line, boundary)
-            if dist <= _MATCH_THRESHOLD:
-                candidates.append((dist, lid))
+        best_rejected_dist: float = float("inf")
+        best_rejected_lid: Optional[int] = None
+        n_bbox_skip = 0
+        n_dir_skip = 0
+
+        # Pre-compute reference line endpoints for endpoint penalty
+        ref_start = ref_line[0]
+        ref_end = ref_line[-1]
+
+        for require_dir, metric in _FALLBACK_LEVELS:
+            candidates.clear()
+            best_rejected_dist = float("inf")
+            best_rejected_lid = None
+            n_bbox_skip = 0
+            n_dir_skip = 0
+
+            for lid, boundary in boundaries.items():
+                if not _bboxes_overlap(ref_bbox, bboxes[lid]):
+                    n_bbox_skip += 1
+                    continue
+                if require_dir and not _same_direction(ref_line, boundary):
+                    n_dir_skip += 1
+                    continue
+                if metric == "symmetric":
+                    dist = _symmetric_mean_distance(boundary, ref_line)
+                else:
+                    dist = _directed_mean_distance(boundary, ref_line)
+                if dist <= _MATCH_THRESHOLD:
+                    # Endpoint proximity penalty for candidate ranking.
+                    # Correct matches have aligned start/end points;
+                    # wrong junction lanelets connect different roads and
+                    # have divergent endpoints.
+                    ep_start = min(
+                        float(np.linalg.norm(ref_start - boundary[0])),
+                        float(np.linalg.norm(ref_start - boundary[-1])),
+                    )
+                    ep_end = min(
+                        float(np.linalg.norm(ref_end - boundary[0])),
+                        float(np.linalg.norm(ref_end - boundary[-1])),
+                    )
+                    ranking_dist = dist + (ep_start + ep_end) * _ENDPOINT_WEIGHT
+                    candidates.append((ranking_dist, lid))
+                elif dist < best_rejected_dist:
+                    best_rejected_dist = dist
+                    best_rejected_lid = lid
+
+            if candidates:
+                if metric != "symmetric" or not require_dir:
+                    logger.debug(
+                        "Road %d: found %d candidates at fallback level "
+                        "(dir=%s, metric=%s)",
+                        road.id,
+                        len(candidates),
+                        require_dir,
+                        metric,
+                    )
+                break  # found candidates, no need to fall back further
 
         candidates.sort()  # ascending by distance
 
         if candidates:
+            # Compute geometric walk order for lane IDs.
+            # RHT walks right (leftmost → rightmost):
+            #   positive IDs descending + negative IDs ascending by abs
+            # LHT walks left (rightmost → leftmost):
+            #   negative IDs descending by abs + positive IDs ascending
+            positive = sorted([lid for lid in lane_ids if lid > 0])
+            negative = sorted([lid for lid in lane_ids if lid < 0], key=abs)
+            if is_rht:
+                walk_lane_ids = list(reversed(positive)) + negative
+            else:
+                walk_lane_ids = list(reversed(negative)) + positive
+
             all_rc.append(
                 _RoadCandidates(
                     road=road,
@@ -447,16 +549,35 @@ def _compute_all_candidates(
                     is_rht=is_rht,
                     ref_line=ref_line,
                     candidates=candidates,
+                    walk_lane_ids=walk_lane_ids,
                 )
             )
+        else:
+            no_candidate_diag[road.id] = {
+                "lane_ids": lane_ids,
+                "is_rht": is_rht,
+                "rule": str(road.rule) if road.rule else None,
+                "ref_pts": len(ref_line),
+                "n_bbox_skip": n_bbox_skip,
+                "n_dir_skip": n_dir_skip,
+                "nearest_dist": round(best_rejected_dist, 3)
+                if best_rejected_lid is not None
+                else None,
+                "nearest_lid": best_rejected_lid,
+            }
 
-    return all_rc
+    return all_rc, no_candidate_diag
 
 
 def _resolve_conflicts(
     all_rc: list[_RoadCandidates],
 ) -> dict[int, int]:
     """Phase 2: iteratively resolve conflicts when multiple roads claim the same lanelet.
+
+    For two-way conflicts, uses cost-aware tie-breaking: picks the resolution
+    that minimises the total distance of the two involved roads (current
+    assignment plus the loser's next-best alternative).  This prevents
+    suboptimal greedy choices that lead to unnecessary drops or swaps.
 
     Returns a mapping ``rc_index -> candidates_list_index`` indicating which
     candidate each road should use as its reference lanelet.  Roads that
@@ -479,22 +600,107 @@ def _resolve_conflicts(
         for lid, claimants in claims.items():
             if len(claimants) <= 1:
                 continue
-            # Sort by (distance, road_id) for deterministic tie-breaking
+
+            # Sort by (distance, road_id) for deterministic greedy order
             claimants.sort(key=lambda x: (x[1], all_rc[x[0]].road_id))
-            # Winner = closest; losers advance to next candidate
-            for rc_idx, _ in claimants[1:]:
-                assignment[rc_idx] += 1
+
+            if len(claimants) == 2:
+                # 2-way conflict with "save the drowning" logic:
+                # if the greedy loser would be dropped (no more candidates)
+                # but the winner has alternatives, swap the assignment to
+                # save the loser from being dropped entirely.
+                winner_idx, _ = claimants[0]
+                loser_idx, _ = claimants[1]
+
+                next_loser = assignment[loser_idx] + 1
+                loser_exhausted = next_loser >= len(all_rc[loser_idx].candidates)
+
+                if loser_exhausted:
+                    # Loser would be dropped — check if winner has alt
+                    next_winner = assignment[winner_idx] + 1
+                    winner_has_alt = next_winner < len(all_rc[winner_idx].candidates)
+                    if winner_has_alt:
+                        # Save the loser: advance the winner instead
+                        assignment[winner_idx] += 1
+                        had_conflict = True
+                        continue
+
+                # Default greedy: advance the loser
+                assignment[loser_idx] += 1
                 had_conflict = True
+            else:
+                # Multi-way conflict: greedy distance-based resolution
+                for rc_idx, _ in claimants[1:]:
+                    assignment[rc_idx] += 1
+                    had_conflict = True
 
         if not had_conflict:
             break
 
     # Remove entries where the candidate index is out of range
-    return {
+    valid = {
         rc_idx: cand_idx
         for rc_idx, cand_idx in assignment.items()
         if cand_idx < len(all_rc[rc_idx].candidates)
     }
+
+    # --- Swap detection: fix pairwise assignment swaps that greedy missed ---
+    # Two roads A, B may each hold the other's ideal lanelet.  When swapping
+    # reduces the total distance, apply the swap.  Safe because each assigned
+    # lanelet is unique and the swap preserves uniqueness.
+    swap_found = True
+    while swap_found:
+        swap_found = False
+        items = list(valid.items())
+        for i in range(len(items)):
+            rc_a, cand_a = items[i]
+            dist_a, lid_a = all_rc[rc_a].candidates[cand_a]
+            for j in range(i + 1, len(items)):
+                rc_b, cand_b = items[j]
+                dist_b, lid_b = all_rc[rc_b].candidates[cand_b]
+
+                # Does A have lid_b? Does B have lid_a?
+                swap_a = next(
+                    (
+                        (ci, d)
+                        for ci, (d, cand_lid) in enumerate(all_rc[rc_a].candidates)
+                        if cand_lid == lid_b
+                    ),
+                    None,
+                )
+                if swap_a is None:
+                    continue
+                swap_b = next(
+                    (
+                        (ci, d)
+                        for ci, (d, cand_lid) in enumerate(all_rc[rc_b].candidates)
+                        if cand_lid == lid_a
+                    ),
+                    None,
+                )
+                if swap_b is None:
+                    continue
+
+                ci_a_new, dist_a_new = swap_a
+                ci_b_new, dist_b_new = swap_b
+                if dist_a_new + dist_b_new < dist_a + dist_b:
+                    valid[rc_a] = ci_a_new
+                    valid[rc_b] = ci_b_new
+                    swap_found = True
+                    logger.debug(
+                        "Swap fix: roads %d↔%d (lanelets %d↔%d, " "cost %.3f→%.3f)",
+                        all_rc[rc_a].road_id,
+                        all_rc[rc_b].road_id,
+                        lid_a,
+                        lid_b,
+                        dist_a + dist_b,
+                        dist_a_new + dist_b_new,
+                    )
+                    break
+            if swap_found:
+                break
+
+    return valid
 
 
 # ---------------------------------------------------------------------------
@@ -635,7 +841,7 @@ def build_mapping(
     matched_lanelets: set[int] = set()
 
     # Phase 1: compute candidate lists for every road (no exclusion)
-    all_rc = _compute_all_candidates(
+    all_rc, no_candidate_diag = _compute_all_candidates(
         roads,
         lanelet_left,
         lanelet_right,
@@ -665,16 +871,20 @@ def build_mapping(
         _, best_lid = rc.candidates[cand_idx]
         road_id = rc.road_id
 
+        # Walk from the Phase-1/2 reference lanelet.
+        # If the walk is incomplete (fewer lanes than expected) for a
+        # multi-lane road, retry with a pre-walk that walks in the
+        # opposite direction to find the true edge lanelet.  This
+        # corrects for spline fitting error causing Phase 1 to pick a
+        # non-edge lanelet (e.g. 2nd instead of 1st).
         current = best_lid
-        for lane_id in rc.lane_ids:
-            mapping[current] = (int(road_id), lane_id)
-            matched_lanelets.add(current)
+        walk_result: list[tuple[int, int, int]] = []  # [(lid, road_id, lane_id)]
 
-            # Advance: RHT walks right, LHT walks left
+        for lane_id in rc.walk_lane_ids:
+            walk_result.append((current, int(road_id), lane_id))
             next_ll = _right_neighbor(current) if rc.is_rht else _left_neighbor(current)
             if next_ll is None:
                 break
-            # Guard: do not step into another road's resolved reference lanelet
             if (
                 next_ll in resolved_references
                 and resolved_references[next_ll] != rc_idx
@@ -682,11 +892,136 @@ def build_mapping(
                 break
             current = next_ll
 
+        # Fallback pre-walk: only when initial walk is incomplete
+        if len(walk_result) < len(rc.walk_lane_ids) and len(rc.walk_lane_ids) > 1:
+            max_prewalk = len(rc.walk_lane_ids) - 1
+            edge = best_lid
+            for _ in range(max_prewalk):
+                neighbor = _left_neighbor(edge) if rc.is_rht else _right_neighbor(edge)
+                if neighbor is None:
+                    break
+                if neighbor in matched_lanelets:
+                    break
+                if (
+                    neighbor in resolved_references
+                    and resolved_references[neighbor] != rc_idx
+                ):
+                    break
+                edge = neighbor
+
+            if edge != best_lid:
+                # Trial walk from edge to verify coverage
+                trial = edge
+                trial_count = 1
+                for _ in range(len(rc.walk_lane_ids) - 1):
+                    next_ll = (
+                        _right_neighbor(trial) if rc.is_rht else _left_neighbor(trial)
+                    )
+                    if next_ll is None:
+                        break
+                    if (
+                        next_ll in resolved_references
+                        and resolved_references[next_ll] != rc_idx
+                    ):
+                        break
+                    trial = next_ll
+                    trial_count += 1
+
+                if trial_count > len(walk_result):
+                    # Pre-walk yields better coverage — redo walk
+                    logger.debug(
+                        "Road %d: pre-walk corrected reference from "
+                        "lanelet %d to %d (coverage %d→%d)",
+                        road_id,
+                        best_lid,
+                        edge,
+                        len(walk_result),
+                        trial_count,
+                    )
+                    walk_result.clear()
+                    current = edge
+                    for lane_id in rc.walk_lane_ids:
+                        walk_result.append((current, int(road_id), lane_id))
+                        next_ll = (
+                            _right_neighbor(current)
+                            if rc.is_rht
+                            else _left_neighbor(current)
+                        )
+                        if next_ll is None:
+                            break
+                        if (
+                            next_ll in resolved_references
+                            and resolved_references[next_ll] != rc_idx
+                        ):
+                            break
+                        current = next_ll
+
+        # Commit walk results
+        for lid, rid, lane_id in walk_result:
+            mapping[lid] = (rid, lane_id)
+            matched_lanelets.add(lid)
+
+    # -- Diagnostic summary ------------------------------------------------
+    all_road_ids = {road.id for road in roads if road.plan_view and road.lanes}
+    rc_road_ids = {rc.road_id for rc in all_rc}
+    assigned_road_ids = {all_rc[rc_idx].road_id for rc_idx in assignment}
+
+    roads_no_candidates = all_road_ids - rc_road_ids
+    roads_dropped_phase2 = rc_road_ids - assigned_road_ids
+    roads_not_fully_mapped: list[tuple[int, tuple[int, ...]]] = []
+    for rc_idx, cand_idx in assignment.items():
+        rc = all_rc[rc_idx]
+        mapped_lanes = {v[1] for k, v in mapping.items() if v[0] == rc.road_id}
+        expected_lanes = set(rc.walk_lane_ids)
+        if mapped_lanes != expected_lanes:
+            missing_lanes = expected_lanes - mapped_lanes
+            roads_not_fully_mapped.append(
+                (rc.road_id, tuple(sorted(missing_lanes, key=abs)))
+            )
+
     logger.info(
         "Built lanelet-to-road mapping: %d lanelets -> %d unique roads",
         len(mapping),
         len({v[0] for v in mapping.values()}),
     )
+    if roads_no_candidates:
+        msg = (
+            f"  [Diag] Phase 1: {len(roads_no_candidates)} roads had 0 "
+            f"candidates (threshold={_MATCH_THRESHOLD}m): "
+            f"road IDs = {sorted(roads_no_candidates)[:30]}"
+        )
+        tqdm.write(msg)
+        logger.warning(msg)
+        # Print detailed diagnostics for roads without candidates
+        for rid in sorted(roads_no_candidates)[:10]:
+            diag = no_candidate_diag.get(rid)
+            if diag:
+                tqdm.write(
+                    f"    road {rid}: rule={diag['rule']}, "
+                    f"is_rht={diag['is_rht']}, "
+                    f"lanes={diag['lane_ids']}, "
+                    f"ref_pts={diag['ref_pts']}, "
+                    f"bbox_skip={diag['n_bbox_skip']}, "
+                    f"dir_skip={diag['n_dir_skip']}, "
+                    f"nearest_dist={diag['nearest_dist']}m "
+                    f"(lanelet {diag['nearest_lid']})"
+                )
+    if roads_dropped_phase2:
+        msg = (
+            f"  [Diag] Phase 2: {len(roads_dropped_phase2)} roads dropped "
+            f"in conflict resolution: "
+            f"road IDs = {sorted(roads_dropped_phase2)[:30]}"
+        )
+        tqdm.write(msg)
+        logger.warning(msg)
+    if roads_not_fully_mapped:
+        msg = (
+            f"  [Diag] Phase 3: {len(roads_not_fully_mapped)} roads not "
+            f"fully mapped (walk stopped early): "
+            f"{sorted(roads_not_fully_mapped)[:30]}"
+        )
+        tqdm.write(msg)
+        logger.warning(msg)
 
     return GeoRoadLaneletMapping(
         xodr_sha256=xodr_sha256,
