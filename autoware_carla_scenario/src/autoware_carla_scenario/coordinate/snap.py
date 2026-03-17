@@ -28,13 +28,18 @@ _SPAWN_POINT_WARN_DISTANCE: float = 10.0
 
 @dataclass
 class GroundProjectionConfig:
-    """Tunable parameters for the ground-projection z-refinement."""
+    """Tunable parameters for the ground-projection z-refinement.
 
-    #: Height offset (m) above the estimated z when casting the ray.
-    ray_offset: float = 5.0
+    The ray is cast downward from ``z_estimate + ray_distance_upper`` and
+    searches a total of ``ray_distance_upper + ray_distance_lower`` metres,
+    i.e. from ``z_estimate + upper`` to ``z_estimate - lower``.
+    """
 
-    #: Maximum downward search distance (m) for the ray.
-    search_distance: float = 10.0
+    #: Search range (m) above the estimated z.
+    ray_distance_upper: float = 5.0
+
+    #: Search range (m) below the estimated z.
+    ray_distance_lower: float = 5.0
 
 
 _ground_projection_config = GroundProjectionConfig()
@@ -42,8 +47,8 @@ _ground_projection_config = GroundProjectionConfig()
 
 def configure_ground_projection(
     *,
-    ray_offset: float | None = None,
-    search_distance: float | None = None,
+    ray_distance_upper: float | None = None,
+    ray_distance_lower: float | None = None,
 ) -> None:
     """Update the module-level :class:`GroundProjectionConfig`.
 
@@ -51,14 +56,14 @@ def configure_ground_projection(
     Call this before any :func:`snap_to_carla_road` invocation so that the
     snap pipeline uses the desired values.
     """
-    if ray_offset is not None:
-        _ground_projection_config.ray_offset = ray_offset
-    if search_distance is not None:
-        _ground_projection_config.search_distance = search_distance
+    if ray_distance_upper is not None:
+        _ground_projection_config.ray_distance_upper = ray_distance_upper
+    if ray_distance_lower is not None:
+        _ground_projection_config.ray_distance_lower = ray_distance_lower
     logger.info(
-        "Ground projection config updated: ray_offset=%.2f, search_distance=%.2f",
-        _ground_projection_config.ray_offset,
-        _ground_projection_config.search_distance,
+        "Ground projection config updated: ray_distance_upper=%.2f, ray_distance_lower=%.2f",
+        _ground_projection_config.ray_distance_upper,
+        _ground_projection_config.ray_distance_lower,
     )
 
 
@@ -427,11 +432,12 @@ def _refine_z_with_ground_projection(
     origin = _carla.Location(
         x=x,
         y=y,
-        z=z_estimate + cfg.ray_offset,
+        z=z_estimate + cfg.ray_distance_upper,
     )
+    search_distance = cfg.ray_distance_upper + cfg.ray_distance_lower
 
     try:
-        result = world.ground_projection(origin, cfg.search_distance)
+        result = world.ground_projection(origin, search_distance)
     except AttributeError:
         raise RuntimeError(
             "world.ground_projection() is not available in this CARLA version. "

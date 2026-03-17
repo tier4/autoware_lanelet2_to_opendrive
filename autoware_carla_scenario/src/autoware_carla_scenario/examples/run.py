@@ -318,8 +318,8 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     """Instantiate the correct scenario class based on ``cfg.scenario.name``."""
     # Apply ground projection parameters from ego config before building.
     configure_ground_projection(
-        ray_offset=float(cfg.ego.ground_projection_ray_offset),
-        search_distance=float(cfg.ego.ground_projection_search_distance),
+        ray_distance_upper=float(cfg.ego.ground_projection_ray_distance_upper),
+        ray_distance_lower=float(cfg.ego.ground_projection_ray_distance_lower),
     )
 
     scenario_name: str = cfg.scenario.name

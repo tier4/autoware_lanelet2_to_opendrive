@@ -5,7 +5,7 @@ ego:
   spawn_lanelet_id: 242
   spawn_s: 25.0
   # Ground projection parameters for spawn-height refinement.
-  # ray_offset: height (m) above the estimated z to start the downward ray.
-  # search_distance: maximum downward distance (m) for the ray.
-  ground_projection_ray_offset: 5.0
-  ground_projection_search_distance: 10.0
+  # ray_distance_upper: search range (m) above the estimated z.
+  # ray_distance_lower: search range (m) below the estimated z.
+  ground_projection_ray_distance_upper: 5.0
+  ground_projection_ray_distance_lower: 5.0
