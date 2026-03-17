@@ -140,10 +140,14 @@ class InSetConstraint:
             values: ${map.no_3d_model_lanelet_ids}
     """
 
-    values: tuple[int | str, ...] = field(default_factory=tuple)
+    values: tuple[int, ...] = field(default_factory=tuple)
+    _lookup: frozenset[int] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_lookup", frozenset(self.values))
 
     def evaluate(self, lanelet: Any) -> bool:
-        return lanelet.id in self.values
+        return lanelet.id in self._lookup
 
 
 @dataclass(frozen=True)
