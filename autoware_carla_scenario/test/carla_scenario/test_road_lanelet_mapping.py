@@ -71,9 +71,9 @@ class TestSerialization:
         restored = GeoRoadLaneletMapping.from_dict(mapping.to_dict())
         assert restored.lanelet_to_road_and_lane == mapping.lanelet_to_road_and_lane
 
-    def test_version_field(self):
+    def test_no_version_field(self):
         m = GeoRoadLaneletMapping(xodr_sha256="a", osm_sha256="b")
-        assert m.to_dict()["version"] == 3
+        assert "version" not in m.to_dict()
 
     def test_empty_mapping(self):
         m = GeoRoadLaneletMapping(xodr_sha256="a", osm_sha256="b")
