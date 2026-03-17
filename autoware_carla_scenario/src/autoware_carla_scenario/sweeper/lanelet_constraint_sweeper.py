@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from hydra.core.plugins import Plugins
+from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.sweeper import Sweeper
 from hydra.types import HydraContext
 from omegaconf import DictConfig, OmegaConf
@@ -71,6 +72,26 @@ def _check_result_json_in_dir(working_dir: str | None) -> bool | None:
         return False
 
 
+def _get_job_output_dir(ret: JobReturn) -> str | None:
+    """Return the Hydra output directory for a completed job.
+
+    ``JobReturn.working_dir`` is the *current working directory* at
+    execution time, which equals the project root when
+    ``hydra.job.chdir=False`` (the default since Hydra 1.2).
+    The actual output directory where :class:`ScenarioRunner` writes
+    result JSONs is ``hydra.runtime.output_dir`` inside the job's
+    ``hydra_cfg``.
+    """
+    hydra_cfg = getattr(ret, "hydra_cfg", None)
+    if hydra_cfg is not None:
+        try:
+            return str(OmegaConf.select(hydra_cfg, "hydra.runtime.output_dir"))
+        except Exception:
+            pass
+    # Fallback: working_dir (correct only when hydra.job.chdir=True).
+    return getattr(ret, "working_dir", None)
+
+
 def _launch_job_isolated(
     launcher: Any,
     batch: tuple[str, ...],
@@ -109,16 +130,19 @@ def _launch_job_isolated(
         # launcher.launch() completes without error even when the scenario
         # *fails* (in --multirun mode _hydra_main does not sys.exit).
         # Hydra catches task-function exceptions internally and stores them
-        # in JobReturn.return_value, so we must inspect the return value
+        # in JobReturn with status=FAILED, so we must inspect the status
         # and the result JSON to determine the actual outcome.
         if job_returns:
             ret = job_returns[0]
-            # If the task function raised (e.g. spawn failure), Hydra stores
-            # the exception as return_value instead of re-raising it.
-            if isinstance(getattr(ret, "return_value", None), Exception):
+            # If the task function raised (e.g. spawn failure), Hydra
+            # sets status to FAILED without re-raising the exception.
+            if ret.status != JobStatus.COMPLETED:
                 os._exit(1)
-            working_dir = getattr(ret, "working_dir", None)
-            if _check_result_json_in_dir(working_dir) is False:
+            # Use hydra_cfg.hydra.runtime.output_dir — NOT working_dir,
+            # which equals cwd (unchanged) when hydra.job.chdir=False
+            # (the default since Hydra 1.2).
+            output_dir = _get_job_output_dir(ret)
+            if _check_result_json_in_dir(output_dir) is False:
                 os._exit(1)
         os._exit(0)
 
