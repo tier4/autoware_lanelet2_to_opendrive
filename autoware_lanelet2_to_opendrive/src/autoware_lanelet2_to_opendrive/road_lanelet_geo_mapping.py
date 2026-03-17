@@ -1126,15 +1126,19 @@ def validate_mapping_consistency(
         MappingMismatchError: When at least one entry differs between the two
             mappings.
     """
-    # Build a set of merge-produced IDs and a lookup from the log
+    # Build a set of merge-produced IDs and a lookup from the log.
+    # Uses PreprocessingLog typed methods instead of raw dict parsing.
     merge_output_ids: set[int] = set()
     merge_sources: dict[int, list[int]] = {}
     if preprocessing_log:
-        for entry in preprocessing_log.get("entries", []):
-            if entry.get("operation") == "merge":
-                for oid in entry.get("output_ids", []):
-                    merge_output_ids.add(oid)
-                    merge_sources[oid] = entry.get("input_ids", [])
+        from .preprocess_lanelet import PreprocessingLog
+
+        log_obj = PreprocessingLog.from_dict(preprocessing_log)
+        merge_output_ids = log_obj.get_merge_output_ids()
+        for mid in merge_output_ids:
+            src = log_obj.get_merge_source_for(mid)
+            if src is not None:
+                merge_sources[mid] = src
 
     mismatches: list[str] = []
     geo = geo_mapping.lanelet_to_road_and_lane
