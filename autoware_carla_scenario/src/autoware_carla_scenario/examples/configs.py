@@ -30,6 +30,11 @@ class ServerConfig:
     #: before the next scenario connects.  0 disables the cooldown.
     cooldown_seconds: float = 3.0
 
+    #: Maximum number of retries when a scenario run fails after cooldown
+    #: (e.g. due to CARLA communication errors or initialization failures).
+    #: 0 means no retries — a failure is immediately propagated.
+    cooldown_max_retries: int = 0
+
 
 @dataclass
 class MapConfig:

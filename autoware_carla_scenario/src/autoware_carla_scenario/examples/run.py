@@ -280,6 +280,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
     )
 
     cooldown = float(first_cfg.server.get("cooldown_seconds", 0.0))
+    cooldown_max_retries = int(first_cfg.server.get("cooldown_max_retries", 0))
 
     # Batch mode bypasses @hydra.main, so we create the output directory
     # ourselves following Hydra's timestamped convention.
@@ -293,6 +294,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
         lanelet2_path=lanelet2_path,
         map_name=first_cfg.map.name,
         cooldown_seconds=cooldown,
+        cooldown_max_retries=cooldown_max_retries,
         output_dir=output_dir,
     )
 
@@ -387,6 +389,7 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
     )
 
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
+    cooldown_max_retries = int(cfg.server.get("cooldown_max_retries", 0))
 
     # Retrieve the Hydra output directory (works regardless of
     # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
@@ -400,6 +403,7 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
         lanelet2_path=lanelet2_path,
         map_name=cfg.map.name,
         cooldown_seconds=cooldown,
+        cooldown_max_retries=cooldown_max_retries,
         output_dir=output_dir,
     )
     queue.add(scenario)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Callable, Generator
@@ -16,6 +17,8 @@ from .constants import DEFAULT_TM_PORT
 from .coordinate.map_manager import MapManager
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
+
+logger = logging.getLogger(__name__)
 
 
 class ScenarioQueue:
@@ -61,6 +64,7 @@ class ScenarioQueue:
         output_dir: Path = Path("scenario_outputs"),
         server_extra_args: Optional[List[str]] = None,
         cooldown_seconds: float = 0.0,
+        cooldown_max_retries: int = 0,
     ) -> None:
         """Create a scenario queue.
 
@@ -87,6 +91,10 @@ class ScenarioQueue:
             cooldown_seconds: Wait time (seconds) between consecutive scenario
                 runs.  Gives the CARLA server time to finish cleanup before the
                 next scenario connects.  0 disables the cooldown.
+            cooldown_max_retries: Maximum number of retries when a scenario run
+                fails (e.g. due to CARLA communication errors).  After each
+                failed attempt a cooldown wait is inserted before the next
+                retry.  0 means no retries.
         """
         if server is not None:
             self._server = server
@@ -108,6 +116,7 @@ class ScenarioQueue:
         self._timeout_seconds = timeout_seconds
         self._output_dir = output_dir
         self._cooldown_seconds = cooldown_seconds
+        self._cooldown_max_retries = cooldown_max_retries
 
         self._scenarios: List[BaseScenario] = []
         self._results: List[ScenarioResult] = []
@@ -149,16 +158,44 @@ class ScenarioQueue:
                 "Use the context manager ('with queue:') or call start() first."
             )
         results: List[ScenarioResult] = []
+        max_attempts = 1 + self._cooldown_max_retries
         for i, scenario in enumerate(self._scenarios):
-            # Cooldown between consecutive scenarios.
-            if i > 0 and self._cooldown_seconds > 0:
-                _wait_with_progress(
-                    self._cooldown_seconds,
-                    desc="CARLA cooldown",
-                )
-            result = self._runner.run_scenario(scenario)
-            self._scenario_results[id(scenario)] = result
-            results.append(result)
+            last_error: Optional[Exception] = None
+            for attempt in range(max_attempts):
+                try:
+                    # Cooldown: between consecutive scenarios on the first
+                    # attempt, or as a recovery wait on retry attempts.
+                    # Placed inside try/except so that crashes during the
+                    # cooldown phase (e.g. CARLA communication errors) are
+                    # caught and trigger a retry.
+                    if (i > 0 or attempt > 0) and self._cooldown_seconds > 0:
+                        _wait_with_progress(
+                            self._cooldown_seconds,
+                            desc="CARLA cooldown"
+                            if attempt == 0
+                            else "CARLA cooldown (retry)",
+                        )
+                    result = self._runner.run_scenario(scenario)
+                    self._scenario_results[id(scenario)] = result
+                    results.append(result)
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "[%d/%d] Scenario attempt %d/%d failed: %s",
+                        i + 1,
+                        len(self._scenarios),
+                        attempt + 1,
+                        max_attempts,
+                        exc,
+                    )
+            else:
+                # All attempts exhausted — re-raise the last error.
+                raise RuntimeError(
+                    f"Scenario {type(scenario).__name__} failed after "
+                    f"{max_attempts} attempt(s)"
+                ) from last_error
+
         self._results = results
         return results
 
