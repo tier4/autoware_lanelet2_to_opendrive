@@ -27,6 +27,7 @@ from .road_lanelet_geo_mapping import (
     GeoRoadLaneletMapping,
     MappingMismatchError,
     validate_mapping_consistency,
+    validate_and_save_mapping,
 )
 
 __all__ = [
@@ -49,4 +50,5 @@ __all__ = [
     "GeoRoadLaneletMapping",
     "MappingMismatchError",
     "validate_mapping_consistency",
+    "validate_and_save_mapping",
 ]

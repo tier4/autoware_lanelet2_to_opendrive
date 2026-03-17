@@ -1409,42 +1409,19 @@ def preprocess_and_convert_with_hydra(
         f"{len(mapping.lanelet_to_road)} lanelets"
     )
 
-    # Save mapping JSON and run cross-validation if output path is set
+    # Save mapping JSON and cross-validate against geometric mapping
     if conversion_config.output_path:
         from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
-            GeoRoadLaneletMapping,
-            _sha256_of_file,
-            save_mapping_json,
-            build_mapping,
-            validate_mapping_consistency,
+            validate_and_save_mapping,
         )
 
-        xodr_path = Path(conversion_config.output_path)
-        osm_path = input_map_path
-
-        # Compute SHA256 checksums
-        xodr_sha256 = _sha256_of_file(xodr_path)
-        osm_sha256 = _sha256_of_file(osm_path)
-
-        # Build GeoRoadLaneletMapping from conversion-time mapping and save
-        conv_geo_mapping = GeoRoadLaneletMapping(
-            xodr_sha256=xodr_sha256,
-            osm_sha256=osm_sha256,
+        validate_and_save_mapping(
             lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+            lanelet_map=lanelet_map,
+            xodr_path=Path(conversion_config.output_path),
+            osm_path=input_map_path,
+            mgrs_offset=(offset_x, offset_y),
         )
-        json_path = save_mapping_json(conv_geo_mapping, xodr_path)
-        logger.info(f"Mapping JSON saved to: {json_path}")
-
-        # Cross-validation with geometric mapping
-        from pyxodr import RoadNetwork
-
-        road_network = RoadNetwork.from_file(str(xodr_path))
-        mgrs_offset = (offset_x, offset_y)
-        geo_mapping = build_mapping(
-            lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
-        )
-        validate_mapping_consistency(lanelet_to_road_and_lane, geo_mapping)
-        logger.info("Cross-validation passed successfully!")
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")

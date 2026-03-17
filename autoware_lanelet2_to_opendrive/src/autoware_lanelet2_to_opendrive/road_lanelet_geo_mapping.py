@@ -479,6 +479,68 @@ def save_mapping_json(
 
 
 # ---------------------------------------------------------------------------
+# Validate and save (single entry-point for post-conversion)
+# ---------------------------------------------------------------------------
+
+
+def validate_and_save_mapping(
+    lanelet_to_road_and_lane: dict[int, tuple[int, int]],
+    lanelet_map,
+    xodr_path: Path,
+    osm_path: Path,
+    mgrs_offset: tuple[float, float],
+) -> Path:
+    """Save mapping JSON and cross-validate against geometric mapping.
+
+    This is the single entry-point called at the end of conversion to:
+
+    1. Compute SHA256 checksums of the XODR and OSM files.
+    2. Build a :class:`GeoRoadLaneletMapping` from the conversion-time mapping
+       and save it as ``.mapping.json`` next to the XODR file.
+    3. Re-parse the XODR with ``pyxodr``, build the geometric mapping via
+       :func:`build_mapping`, and cross-validate the two mappings.
+
+    Args:
+        lanelet_to_road_and_lane: Mapping produced during conversion.
+        lanelet_map: The Lanelet2 map used for conversion.
+        xodr_path: Path to the generated XODR file.
+        osm_path: Path to the source OSM file.
+        mgrs_offset: ``(offset_x, offset_y)`` coordinate offset.
+
+    Returns:
+        Path to the saved ``.mapping.json`` file.
+
+    Raises:
+        MappingMismatchError: When the conversion-time mapping disagrees with
+            the geometric mapping.
+    """
+    from pyxodr.road_objects.network import RoadNetwork
+
+    # 1. SHA256
+    xodr_sha256 = _sha256_of_file(xodr_path)
+    osm_sha256 = _sha256_of_file(osm_path)
+
+    # 2. Save mapping JSON
+    conv_mapping = GeoRoadLaneletMapping(
+        xodr_sha256=xodr_sha256,
+        osm_sha256=osm_sha256,
+        lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+    )
+    json_path = save_mapping_json(conv_mapping, xodr_path)
+    logger.info("Mapping JSON saved to %s", json_path)
+
+    # 3. Cross-validate with geometric mapping
+    road_network = RoadNetwork.from_file(str(xodr_path))
+    geo_mapping = build_mapping(
+        lanelet_map, road_network, mgrs_offset, xodr_sha256, osm_sha256
+    )
+    validate_mapping_consistency(lanelet_to_road_and_lane, geo_mapping)
+    logger.info("Cross-validation passed successfully!")
+
+    return json_path
+
+
+# ---------------------------------------------------------------------------
 # Load or build
 # ---------------------------------------------------------------------------
 
