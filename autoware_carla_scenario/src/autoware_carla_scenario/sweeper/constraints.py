@@ -33,6 +33,10 @@ Simple value constraints::
     - type: equals
       value: 3002141
 
+    # Match any lanelet (useful for debugging)
+    - type: equals
+      value: any
+
 Set-level relational constraints (``previous_of``, ``following_of``) evaluate
 inner constraints across all lanelets first, then resolve to the
 previous/following neighbours via the routing graph::
@@ -103,11 +107,18 @@ class EqualsConstraint:
 
         - type: equals
           value: 3002141
+
+    Use ``"any"`` to match all lanelets (useful for debugging)::
+
+        - type: equals
+          value: any
     """
 
-    value: int = 0
+    value: int | str = 0
 
     def evaluate(self, lanelet: Any) -> bool:
+        if self.value == "any":
+            return True
         return lanelet.id == self.value
 
 
