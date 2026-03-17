@@ -526,10 +526,13 @@ def _parse_stop_lines_from_xodr(
 _STOP_LINE_POSITION_TOLERANCE: float = 5.0
 
 
-def _evaluate_road_xy(road: "ConverterRoad", s: float) -> tuple[float, float] | None:
-    """Evaluate global (x, y) on a road's reference line at parameter *s*.
+def _evaluate_road_xy(
+    road: "ConverterRoad", s: float, t: float = 0.0
+) -> tuple[float, float] | None:
+    """Evaluate global (x, y) on a road at Frenet coordinate (*s*, *t*).
 
     Uses the ParamPoly3 geometry segments in the road's plan view.
+    *t* is the lateral offset: positive = left of the reference line.
     Returns ``None`` if the road has no geometry.
     """
     import math
@@ -549,7 +552,21 @@ def _evaluate_road_xy(road: "ConverterRoad", s: float) -> tuple[float, float] | 
     v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
     cos_h = math.cos(geom.hdg)
     sin_h = math.sin(geom.hdg)
-    return (geom.x + cos_h * u - sin_h * v, geom.y + sin_h * u + cos_h * v)
+    x_ref = geom.x + cos_h * u - sin_h * v
+    y_ref = geom.y + sin_h * u + cos_h * v
+
+    if t == 0.0:
+        return (x_ref, y_ref)
+
+    # Apply lateral offset: compute tangent direction at p, then go
+    # perpendicular by t.  Positive t = left of travel direction.
+    du = geom.bU + 2.0 * geom.cU * p + 3.0 * geom.dU * p**2
+    dv = geom.bV + 2.0 * geom.cV * p + 3.0 * geom.dV * p**2
+    tangent_hdg = geom.hdg + math.atan2(dv, du)
+    return (
+        x_ref - t * math.sin(tangent_hdg),
+        y_ref + t * math.cos(tangent_hdg),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -675,11 +692,11 @@ def run_stop_line_validation(
             cross_fail += 1
             continue
 
-        # Check position: LL2 linestring centroid vs XODR reference-line point
+        # Check position: LL2 linestring centroid vs XODR (s, t) point
         road = road_by_id.get(xodr_road)
         st = object_positions.get(ls_id)
         if road is not None and st is not None:
-            xodr_xy = _evaluate_road_xy(road, st[0])
+            xodr_xy = _evaluate_road_xy(road, st[0], st[1])
             if xodr_xy is not None:
                 try:
                     ll2_ls = lanelet_map.lineStringLayer[ls_id]
