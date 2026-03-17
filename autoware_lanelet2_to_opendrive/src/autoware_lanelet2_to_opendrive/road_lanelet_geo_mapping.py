@@ -155,6 +155,27 @@ def _symmetric_mean_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
     )
 
 
+def _polyline_direction(pts: np.ndarray) -> np.ndarray:
+    """Return the unit direction vector of a polyline (first to last point).
+
+    Returns the zero vector when the polyline has negligible length.
+    """
+    d = pts[-1] - pts[0]
+    norm = float(np.linalg.norm(d))
+    if norm < 1e-10:
+        return np.zeros(2)
+    return d / norm
+
+
+def _same_direction(line_a: np.ndarray, line_b: np.ndarray) -> bool:
+    """Return True if two polylines run in roughly the same direction.
+
+    Uses the dot product of overall direction vectors; a non-negative
+    value (angle <= 90 degrees) is considered "same direction".
+    """
+    return bool(np.dot(_polyline_direction(line_a), _polyline_direction(line_b)) >= 0.0)
+
+
 # ---------------------------------------------------------------------------
 # Reference-line sampling from converter Road objects
 # ---------------------------------------------------------------------------
@@ -491,7 +512,15 @@ def build_mapping(
     mapping: dict[int, tuple[int, int]] = {}
     matched_lanelets: set[int] = set()
 
-    for road in tqdm(roads, desc="Matching roads to lanelets", unit="road"):
+    # Sort roads by lane count ascending so that roads with fewer lanes are
+    # matched first.  Single-lane roads have no flexibility in their reference-
+    # lanelet choice, whereas multi-lane roads can shift their starting point
+    # if their first-choice reference lanelet is already claimed.  This avoids
+    # a greedy allocation error where a multi-lane road "steals" a lanelet
+    # that should belong to a neighbouring single-lane road.
+    sorted_roads = sorted(roads, key=lambda r: len(_get_driving_lane_ids_from_road(r)))
+
+    for road in tqdm(sorted_roads, desc="Matching roads to lanelets", unit="road"):
         ref_line = _sample_reference_line_from_road(road)
         if len(ref_line) < 2:
             continue
@@ -519,6 +548,10 @@ def build_mapping(
             if lid in matched_lanelets:
                 continue
             if not _bboxes_overlap(ref_bbox, bboxes[lid]):
+                continue
+            # Reject opposing-direction lanelets: the road reference line
+            # and the lanelet boundary must run in the same direction.
+            if not _same_direction(ref_line, boundary):
                 continue
             dist = _symmetric_mean_distance(ref_line, boundary)
             if dist < best_dist:
