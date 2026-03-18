@@ -301,6 +301,9 @@ class ValidationContext:
     xodr_root: object
     """Parsed XODR XML root element (``lxml.etree.Element``)."""
 
+    traffic_light_config: object | None = None
+    """``TrafficLightConfig`` restored from ``.mapping.json``, or ``None``."""
+
 
 def _load_validation_context(
     xodr_path: Path,
@@ -371,6 +374,19 @@ def _load_validation_context(
 
     fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
 
+    # Restore TrafficLightConfig from the mapping sidecar (if saved)
+    tl_config = None
+    tl_dict = conv_mapping.traffic_light_config
+    if tl_dict is not None:
+        from .conversion_config import TrafficLightConfig
+
+        tl_config = TrafficLightConfig(
+            offset_x=tl_dict.get("offset_x", 0.0),
+            offset_y=tl_dict.get("offset_y", 0.0),
+            offset_z=tl_dict.get("offset_z", 0.0),
+            hdg_offset=tl_dict.get("hdg_offset", TrafficLightConfig.hdg_offset),
+        )
+
     return ValidationContext(
         lanelet_map=lanelet_map,
         offset_x=fwd.x,
@@ -378,6 +394,7 @@ def _load_validation_context(
         conv_mapping=conv_mapping,
         effective_osm=effective_osm,
         xodr_root=tree.getroot(),
+        traffic_light_config=tl_config,
     )
 
 
@@ -443,6 +460,9 @@ def run_mapping_validation(
 
 # Signal name patterns for stop line related signals
 _STOP_LINE_SIGNAL_RE = re.compile(r"^(StopLine|StopSign|YieldSign)_(\d+)$")
+
+# Signal name pattern for traffic light signals: TrafficLight_{regelem_id}_{linestring_id}
+_TRAFFIC_LIGHT_SIGNAL_RE = re.compile(r"^TrafficLight_(\d+)_(\d+)$")
 
 
 def _parse_stop_lines_from_xodr(
@@ -550,6 +570,12 @@ def _parse_stop_lines_from_xodr(
 #: Maximum distance (m) between LL2 centroid and XODR reference-line point
 #: for a stop line to be considered positionally consistent.
 _STOP_LINE_POSITION_TOLERANCE: float = 5.0
+
+#: Maximum 2D distance (m) between LL2 linestring centroid and the
+#: offset-corrected positionInertial for a traffic light to be considered
+#: positionally consistent.  The TrafficLightConfig offset is reversed
+#: before comparison so this can be tight.
+_TRAFFIC_LIGHT_POSITION_TOLERANCE: float = 1.0
 
 
 def _evaluate_road_xy(
@@ -782,6 +808,196 @@ def run_stop_line_validation(
 
 
 # ---------------------------------------------------------------------------
+# Traffic light position validation
+# ---------------------------------------------------------------------------
+
+
+def _parse_traffic_light_signals_from_xodr(
+    xodr_root: object,
+) -> dict[int, list[tuple[str, int, float, float, float, float]]]:
+    """Parse traffic light signals with positionInertial from XODR.
+
+    Scans all ``<signal>`` elements whose name matches the
+    ``TrafficLight_{regelem_id}_{linestring_id}`` pattern and extracts the
+    physical position from the child ``<positionInertial>`` element.
+
+    Args:
+        xodr_root: Pre-parsed XML root element.
+
+    Returns:
+        Dictionary mapping ``linestring_id`` to a list of tuples
+        ``(signal_name, signal_id, x, y, z, hdg)`` where ``(x, y, z, hdg)``
+        comes from the ``<positionInertial>`` element.
+    """
+    linestring_signals: dict[
+        int, list[tuple[str, int, float, float, float, float]]
+    ] = {}
+
+    for signal_elem in xodr_root.iter("signal"):  # type: ignore[union-attr]
+        sig_name = signal_elem.get("name", "")
+        match = _TRAFFIC_LIGHT_SIGNAL_RE.match(sig_name)
+        if not match:
+            continue
+
+        ls_id = int(match.group(2))
+        sig_id = int(signal_elem.get("id", "-1"))
+
+        # positionInertial determines the physical position of the signal
+        pos_elem = signal_elem.find("positionInertial")
+        if pos_elem is None:
+            continue
+
+        x = float(pos_elem.get("x", "0"))
+        y = float(pos_elem.get("y", "0"))
+        z = float(pos_elem.get("z", "0"))
+        hdg = float(pos_elem.get("hdg", "0"))
+
+        linestring_signals.setdefault(ls_id, []).append(
+            (sig_name, sig_id, x, y, z, hdg)
+        )
+
+    return linestring_signals
+
+
+def run_traffic_light_position_validation(
+    xodr_path: Path,
+    osm_path: Path,
+    validation_context: ValidationContext | None = None,
+) -> bool:
+    """Validate traffic light physical positions between XODR and Lanelet2.
+
+    For each ``TrafficLight_{regelem_id}_{linestring_id}`` signal in the XODR,
+    this function:
+
+    1. Extracts the linestring ID from the signal name.
+    2. Looks up the corresponding LineString in the Lanelet2 map.
+    3. Computes the LineString centroid (adjusted by the MGRS coordinate offset).
+    4. Reverses the TrafficLightConfig offset applied during conversion
+       (using positionInertial's *hdg*) to recover the pre-offset centroid.
+       The config is read from ``.mapping.json`` automatically.
+    5. Compares the two centroids in 2D Cartesian coordinates.
+    6. Reports an error if the distance exceeds
+       :data:`_TRAFFIC_LIGHT_POSITION_TOLERANCE`.
+
+    The comparison uses 2D (XY) distance because the Z coordinate offset
+    used during conversion is not available in the validation context
+    (only the MGRS XY offset is recomputed from the geoReference).
+
+    Args:
+        xodr_path: Path to the OpenDRIVE file.
+        osm_path: Path to the Lanelet2 OSM file.
+        validation_context: Pre-loaded context from
+            ``_load_validation_context``.  If *None*, loaded internally.
+
+    Returns:
+        ``True`` if validation passed, ``False`` if errors were found.
+    """
+    import math
+
+    from .conversion_config import TrafficLightConfig
+
+    ctx = validation_context or _load_validation_context(xodr_path, osm_path)
+    if ctx is None:
+        print("  Skipping traffic light position validation (no mapping data).")
+        return True
+
+    # Parse traffic light signals with positionInertial from XODR
+    linestring_signals = _parse_traffic_light_signals_from_xodr(ctx.xodr_root)
+
+    if not linestring_signals:
+        print("  No TrafficLight signals with positionInertial found.")
+        return True
+
+    # Use the TrafficLightConfig saved in .mapping.json during conversion
+    tl_cfg = ctx.traffic_light_config or TrafficLightConfig()
+
+    errors: list[str] = []
+    ok_count = 0
+    skip_count = 0
+    total_signals = sum(len(sigs) for sigs in linestring_signals.values())
+
+    for ls_id, signals in sorted(linestring_signals.items()):
+        # Look up LineString in Lanelet2 map
+        try:
+            ll2_ls = ctx.lanelet_map.lineStringLayer[ls_id]
+        except KeyError:
+            skip_count += len(signals)
+            for sig_name, _sig_id, _, _, _, _ in signals:
+                errors.append(f"  {sig_name}: linestring {ls_id} not found in LL2")
+            continue
+
+        # Compute centroid of LineString in local coordinates
+        pts = [(float(p.x), float(p.y)) for p in ll2_ls]
+        if not pts:
+            skip_count += len(signals)
+            continue
+
+        n = len(pts)
+        cx = sum(x for x, _ in pts) / n - ctx.offset_x
+        cy = sum(y for _, y in pts) / n - ctx.offset_y
+
+        for sig_name, _sig_id, sx, sy, _sz, hdg in signals:
+            # Reverse the offset applied during conversion:
+            #   posInertial = centroid - rotated(offset_x, offset_y)
+            # Therefore:
+            #   centroid_recovered = posInertial + rotated(offset_x, offset_y)
+            cos_hdg = math.cos(hdg)
+            sin_hdg = math.sin(hdg)
+            world_dx = tl_cfg.offset_x * cos_hdg - tl_cfg.offset_y * sin_hdg
+            world_dy = tl_cfg.offset_x * sin_hdg + tl_cfg.offset_y * cos_hdg
+            recovered_x = sx + world_dx
+            recovered_y = sy + world_dy
+
+            dist_2d = ((cx - recovered_x) ** 2 + (cy - recovered_y) ** 2) ** 0.5
+
+            if dist_2d > _TRAFFIC_LIGHT_POSITION_TOLERANCE:
+                errors.append(
+                    f"  {sig_name} (ls={ls_id}): position mismatch — "
+                    f"dist2D={dist_2d:.2f}m "
+                    f"> {_TRAFFIC_LIGHT_POSITION_TOLERANCE}m "
+                    f"(centroid=({cx:.2f}, {cy:.2f}), "
+                    f"recovered=({recovered_x:.2f}, {recovered_y:.2f}))"
+                )
+            else:
+                ok_count += 1
+
+    fail_count = len(errors)
+
+    # ── Summary
+    has_offset = (
+        tl_cfg.offset_x != 0.0 or tl_cfg.offset_y != 0.0 or tl_cfg.offset_z != 0.0
+    )
+    offset_info = (
+        f"  TL offset           : ({tl_cfg.offset_x}, {tl_cfg.offset_y}, "
+        f"{tl_cfg.offset_z})"
+        if has_offset
+        else "  TL offset           : (none)"
+    )
+
+    print(f"\n  TrafficLight signals : {total_signals}")
+    print(f"  Unique linestrings  : {len(linestring_signals)}")
+    print(offset_info)
+    print(f"  Position check      : {ok_count} ok, {fail_count} mismatch")
+    if skip_count > 0:
+        print(f"  Skipped (no LL2 LS) : {skip_count}")
+    print(
+        f"  Tolerance           : {_TRAFFIC_LIGHT_POSITION_TOLERANCE}m (2D Cartesian)"
+    )
+
+    if errors:
+        print(f"\n  Errors ({len(errors)}):")
+        for e in errors[:20]:
+            print(e)
+        if len(errors) > 20:
+            print(f"  ... and {len(errors) - 20} more")
+        print("  Traffic light position validation: FAILED")
+        return False
+
+    print("  Traffic light position validation: PASSED")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Junction lanelet validation
 # ---------------------------------------------------------------------------
 
@@ -1000,6 +1216,17 @@ def run_analysis(
     if not junction_ok:
         error_count += 1
 
+    # ── Traffic light position validation ─────────────────────────────────
+    print(f"\n{'=' * 72}")
+    print("  Traffic Light Position Validation")
+    print(f"{'=' * 72}")
+
+    tl_pos_ok = run_traffic_light_position_validation(
+        xodr_path, osm_path, validation_context=val_ctx
+    )
+    if not tl_pos_ok:
+        error_count += 1
+
     # ── Final summary ──────────────────────────────────────────────────────
     print(f"\n{'=' * 72}")
     if error_count > 0:
@@ -1093,7 +1320,6 @@ def main() -> None:
             "By default these known false positives are suppressed."
         ),
     )
-
     args = parser.parse_args()
 
     if args.verbose:
