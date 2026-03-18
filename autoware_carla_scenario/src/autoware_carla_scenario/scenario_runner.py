@@ -195,14 +195,13 @@ def _unique_path(path: Path) -> Path:
 def _destroy_all_dynamic_actors(world: "carla.World", scenario_name: str) -> None:
     """Destroy all vehicles and sensors in the world for a clean state."""
     destroyed = 0
-    for actor in world.get_actors():
-        tid = actor.type_id
-        if tid.startswith("vehicle.") or tid.startswith("sensor."):
-            try:
-                actor.destroy()
-                destroyed += 1
-            except RuntimeError:
-                pass
+    actors = world.get_actors()
+    for actor in [*actors.filter("vehicle.*"), *actors.filter("sensor.*")]:
+        try:
+            actor.destroy()
+            destroyed += 1
+        except RuntimeError:
+            pass
     if destroyed:
         world.tick()
         logger.info("[%s] Destroyed %d leftover actor(s)", scenario_name, destroyed)

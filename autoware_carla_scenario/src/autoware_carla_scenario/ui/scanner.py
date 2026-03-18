@@ -461,9 +461,9 @@ def load_scenario(
     # Detect recorded video file in the job directory.
     video_filename: str | None = None
     if job_dir:
-        mp4_files = sorted(job_dir.glob("*.mp4"))
-        if mp4_files:
-            video_filename = mp4_files[0].name
+        first_mp4 = next(job_dir.glob("*.mp4"), None)
+        if first_mp4 is not None:
+            video_filename = first_mp4.name
 
     result = ScenarioResultView(
         passed=data.get("passed"),

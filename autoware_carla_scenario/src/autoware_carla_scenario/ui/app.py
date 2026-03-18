@@ -38,6 +38,20 @@ def _base_path() -> Path:
     return BASE_PATH
 
 
+def _resolve_scenario_names(scenario: str) -> list[str]:
+    """Expand a scenario pattern to concrete config names.
+
+    If *scenario* contains glob metacharacters the pattern is matched
+    against available configs.  Otherwise the name is returned as-is.
+    """
+    if _is_glob_pattern(scenario):
+        import fnmatch  # noqa: PLC0415
+
+        all_names = scanner.list_scenario_configs()
+        return [n for n in all_names if fnmatch.fnmatch(n, scenario)]
+    return [scenario]
+
+
 # ── Page routes ──────────────────────────────────────────────────────────
 
 
@@ -119,8 +133,12 @@ async def serve_video(
     else:
         job_dir = _base_path() / "outputs" / date / time
 
-    video_path = job_dir / filename
-    if not video_path.is_file() or not filename.endswith(".mp4"):
+    video_path = (job_dir / filename).resolve()
+    if (
+        not video_path.is_relative_to(_base_path().resolve())
+        or not video_path.is_file()
+        or video_path.suffix != ".mp4"
+    ):
         raise HTTPException(status_code=404, detail="Video not found")
     return FileResponse(video_path, media_type="video/mp4")
 
@@ -189,15 +207,7 @@ async def run_scenarios(request: Request) -> dict[str, str]:
         # override lists, which are then run as individual subprocesses.
         from .sweep_resolver import resolve_sweep  # noqa: PLC0415
 
-        # Resolve glob to concrete scenario names first.
-        if _is_glob_pattern(scenario):
-            import fnmatch  # noqa: PLC0415
-
-            all_names = scanner.list_scenario_configs()
-            scenario_names = [n for n in all_names if fnmatch.fnmatch(n, scenario)]
-        else:
-            scenario_names = [scenario]
-
+        scenario_names = _resolve_scenario_names(scenario)
         if not scenario_names:
             return {"status": "error", "message": f"No scenarios match '{scenario}'"}
 
@@ -228,32 +238,17 @@ async def run_scenarios(request: Request) -> dict[str, str]:
     else:
         # No sweeper: expand globs into individual jobs so progress
         # tracking reports each scenario separately (e.g. [2/5]).
-        if _is_glob_pattern(scenario):
-            import fnmatch  # noqa: PLC0415
-
-            all_names = scanner.list_scenario_configs()
-            scenario_names = [n for n in all_names if fnmatch.fnmatch(n, scenario)]
-            if not scenario_names:
-                return {
-                    "status": "error",
-                    "message": f"No scenarios match '{scenario}'",
-                }
-            overrides_list = [[f"scenario={name}"] for name in scenario_names]
-            runner.start_run(
-                overrides_list,
-                base_path=_base_path(),
-                extra_overrides=extra_overrides,
-                timeout=timeout,
-                group_as_multirun=True,
-            )
-        else:
-            overrides_list = [[f"scenario={scenario}"]]
-            runner.start_run(
-                overrides_list,
-                base_path=_base_path(),
-                extra_overrides=extra_overrides,
-                timeout=timeout,
-            )
+        scenario_names = _resolve_scenario_names(scenario)
+        if not scenario_names:
+            return {"status": "error", "message": f"No scenarios match '{scenario}'"}
+        overrides_list = [[f"scenario={name}"] for name in scenario_names]
+        runner.start_run(
+            overrides_list,
+            base_path=_base_path(),
+            extra_overrides=extra_overrides,
+            timeout=timeout,
+            group_as_multirun=len(scenario_names) > 1,
+        )
 
     return {"status": "started"}
 
