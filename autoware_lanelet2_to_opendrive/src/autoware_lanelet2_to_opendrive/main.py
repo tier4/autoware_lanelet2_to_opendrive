@@ -51,6 +51,7 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     OriginSpec,
     ParamPoly3Config,
     StopLineConfig,
+    TrafficLightConfig,
     WidthEstimationConfig,
 )
 
@@ -357,6 +358,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             roads=all_roads,
             exclude_non_junction_signals=self.config.exclude_non_junction_signals,
             junction_lanelet_ids=junction_lanelet_ids,
+            traffic_light_config=self.config.traffic_light,
         )
         print(
             f"Extracted {len(signals_and_controllers.signals)} signals and "
@@ -1429,6 +1431,19 @@ def preprocess_and_convert_with_hydra(
         f"carla_stop_line={stopline_config.carla_stop_line}"
     )
 
+    # Build TrafficLightConfig from Hydra config
+    # Priority: map config > target config > default
+    tl_dict = cfg.map.get("traffic_light") or cfg.target.get("traffic_light", {})
+    tl_config = TrafficLightConfig(
+        offset_x=tl_dict.get("offset_x", 0.0) if tl_dict else 0.0,
+        offset_y=tl_dict.get("offset_y", 0.0) if tl_dict else 0.0,
+        offset_z=tl_dict.get("offset_z", 0.0) if tl_dict else 0.0,
+    )
+    logger.info(
+        f"Traffic light config: offset=({tl_config.offset_x}, "
+        f"{tl_config.offset_y}, {tl_config.offset_z})"
+    )
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -1442,6 +1457,7 @@ def preprocess_and_convert_with_hydra(
         parampoly3=parampoly3_config,
         width_estimation=width_config,
         stopline=stopline_config,
+        traffic_light=tl_config,
     )
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;

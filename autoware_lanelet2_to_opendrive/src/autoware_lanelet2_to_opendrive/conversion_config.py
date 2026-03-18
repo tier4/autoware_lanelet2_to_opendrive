@@ -124,6 +124,31 @@ class StopLineConfig:
 
 
 @dataclass
+class TrafficLightConfig:
+    """Configuration for traffic light actor spawn offset.
+
+    When spawning traffic light actors in CARLA, their position may need
+    fine-tuning. These offsets are applied to the positionInertial
+    calculation: the (offset_x, offset_y) values are rotated by the
+    signal's hdg angle and then subtracted from the centroid position.
+
+    Attributes:
+        offset_x: Offset along the signal's facing direction (hdg) in meters.
+            Positive values shift the signal forward (away from approaching
+            traffic). Default 0.0 (no offset).
+        offset_y: Offset perpendicular to the signal's facing direction in
+            meters. Positive values shift the signal to the left when facing
+            in the hdg direction. Default 0.0 (no offset).
+        offset_z: Vertical offset in meters. Subtracted directly from the
+            z coordinate. Default 0.0 (no offset).
+    """
+
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+    offset_z: float = 0.0
+
+
+@dataclass
 class ConversionConfig:
     """Configuration for Lanelet2 to OpenDRIVE conversion.
 
@@ -143,6 +168,9 @@ class ConversionConfig:
         width_estimation: Configuration for width spline sampling
         stopline: Configuration for stop line object generation.
             Set stopline.carla_stop_line=True to enable CARLA Stencil_STOP format
+        traffic_light: Configuration for traffic light actor spawn offset.
+            The offsets are rotated by hdg and subtracted from positionInertial
+            coordinates to adjust signal placement in CARLA.
     """
 
     output_path: Optional[Path] = None
@@ -155,6 +183,7 @@ class ConversionConfig:
         default_factory=WidthEstimationConfig
     )
     stopline: StopLineConfig = field(default_factory=StopLineConfig)
+    traffic_light: TrafficLightConfig = field(default_factory=TrafficLightConfig)
 
     def __post_init__(self):
         """Validate configuration after initialization."""

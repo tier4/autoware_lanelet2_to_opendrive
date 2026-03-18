@@ -10,6 +10,7 @@ from .signal import Signal, Controller, ControlEntry, PositionInertial
 from .enums import TrafficRule
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
 from ..config import COORDINATE_OFFSET
+from ..conversion_config import TrafficLightConfig
 
 if TYPE_CHECKING:
     from .road import Road
@@ -81,6 +82,7 @@ class SignalsAndControllers:
         roads: Optional[List] = None,
         exclude_non_junction_signals: bool = False,
         junction_lanelet_ids: Optional[Set[int]] = None,
+        traffic_light_config: Optional[TrafficLightConfig] = None,
     ) -> "SignalsAndControllers":
         """
         Construct signals and controllers from Lanelet2 map.
@@ -99,6 +101,9 @@ class SignalsAndControllers:
                   compatibility, as CARLA does not support signals outside junctions.
             junction_lanelet_ids: Set of lanelet IDs that belong to junctions.
                   Required when exclude_non_junction_signals is True.
+            traffic_light_config: Configuration for traffic light actor spawn offset.
+                  If provided, the offsets are rotated by hdg and subtracted from
+                  positionInertial coordinates.
 
         Returns:
             SignalsAndControllers object with populated signals and controllers
@@ -194,6 +199,7 @@ class SignalsAndControllers:
                             light_linestring=light_linestring,
                             road=matching_road,
                             road_s=s,
+                            traffic_light_config=traffic_light_config,
                         )
                     )
 
@@ -411,6 +417,7 @@ class SignalsAndControllers:
         light_linestring,
         road: Optional["Road"] = None,
         road_s: Optional[float] = None,
+        traffic_light_config: Optional[TrafficLightConfig] = None,
     ) -> PositionInertial:
         """Calculate physical position of a signal from Light Bulb LineString centroid.
 
@@ -418,6 +425,9 @@ class SignalsAndControllers:
             light_linestring: Light Bulb LineString (list of 3D points)
             road: Optional Road object (reserved for future use)
             road_s: Optional s coordinate on road (reserved for future use)
+            traffic_light_config: Optional traffic light config with spawn offsets.
+                The (offset_x, offset_y) are rotated by hdg and subtracted from the
+                centroid position to adjust signal placement.
 
         Returns:
             PositionInertial with centroid coordinates and heading
@@ -447,5 +457,25 @@ class SignalsAndControllers:
             dx = float(last.x) - float(first.x)
             dy = float(last.y) - float(first.y)
             hdg = math.atan2(dy, dx) - math.pi / 2
+
+        # Apply traffic light spawn offset (hdg-aware coordinate transformation).
+        # The offset is specified in the signal's local frame:
+        #   offset_x: along the facing direction (hdg)
+        #   offset_y: perpendicular to hdg (positive = left)
+        # Transform to world coordinates and subtract.
+        if traffic_light_config is not None:
+            cos_hdg = math.cos(hdg)
+            sin_hdg = math.sin(hdg)
+            world_dx = (
+                traffic_light_config.offset_x * cos_hdg
+                - traffic_light_config.offset_y * sin_hdg
+            )
+            world_dy = (
+                traffic_light_config.offset_x * sin_hdg
+                + traffic_light_config.offset_y * cos_hdg
+            )
+            x -= world_dx
+            y -= world_dy
+            z -= traffic_light_config.offset_z
 
         return PositionInertial(x=x, y=y, z=z, hdg=hdg)
