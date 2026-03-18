@@ -9,8 +9,9 @@
   display: inline-block;
 }
 
-/* Condition tree toggle arrow transition */
-.toggle-arrow {
+/* Arrow toggle transition (condition tree + detail parameters) */
+.toggle-arrow,
+.detail-arrow {
   transition: transform 0.15s ease-in-out;
 }
 

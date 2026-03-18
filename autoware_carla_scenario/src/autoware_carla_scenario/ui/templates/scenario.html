@@ -53,26 +53,28 @@
     {% endif %}
   </div>
 
-  {# Message (for top-level conditions) #}
+  {# Message (human-readable condition status) #}
   {% if node.message %}
-    <div class="ml-11 text-xs text-gray-500 font-mono mt-0.5 mb-1 break-words">{{ node.message }}</div>
+    <div class="ml-11 text-xs text-gray-600 mt-0.5 mb-1 break-words">
+      <span class="font-medium">{{ node.message }}</span>
+    </div>
   {% endif %}
 
-  {# Details (non-structural keys) #}
+  {# Details (non-structural keys) — collapsible #}
   {% if node.details %}
-    {% set display_details = {} %}
-    {% for k, v in node.details.items() %}
-      {% if k not in ['operator', 'wrapper', 'children', 'child'] %}
-        {% if display_details.update({k: v}) %}{% endif %}
-      {% endif %}
-    {% endfor %}
-    {% if display_details %}
-    <div class="ml-11 mb-1">
-      {% for k, v in display_details.items() %}
-        <span class="inline-flex items-center text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded mr-1 mb-0.5 font-mono">{{ k }}={{ v }}</span>
-      {% endfor %}
+    <div class="ml-11 mb-1 detail-section">
+      <button class="detail-toggle flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors" type="button">
+        <svg class="detail-arrow h-3 w-3 transform rotate-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+        <span>Parameters</span>
+      </button>
+      <div class="detail-content hidden mt-1">
+        {% for k, v in node.details.items() %}
+          <span class="inline-flex items-center text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded mr-1 mb-0.5 font-mono">{{ k }}={{ v }}</span>
+        {% endfor %}
+      </div>
     </div>
-    {% endif %}
   {% endif %}
 
   {# Children (recursive) #}
@@ -204,6 +206,23 @@
       if (children) {
         children.classList.toggle('hidden');
         const arrow = el.querySelector('.toggle-arrow');
+        if (arrow) {
+          arrow.classList.toggle('rotate-90');
+          arrow.classList.toggle('rotate-0');
+        }
+      }
+    });
+  });
+
+  // Toggle condition detail parameters visibility
+  document.querySelectorAll('.detail-toggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const section = btn.closest('.detail-section');
+      const content = section.querySelector('.detail-content');
+      const arrow = btn.querySelector('.detail-arrow');
+      if (content) {
+        content.classList.toggle('hidden');
         if (arrow) {
           arrow.classList.toggle('rotate-90');
           arrow.classList.toggle('rotate-0');

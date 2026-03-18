@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -120,6 +121,32 @@ class BaseCondition(ABC):
                 "Provide a non-empty string to identify this condition."
             )
         self.label = label
+        self._last_satisfied: bool = False
+        self._last_message: str = ""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Auto-wrap ``check()`` to track the latest result for UI display."""
+        super().__init_subclass__(**kwargs)
+        if "check" in cls.__dict__:
+            original = cls.__dict__["check"]
+
+            @functools.wraps(original)
+            def _tracking_check(
+                self: "BaseCondition",
+                world: "carla.World",
+                elapsed: float,
+                _orig: Any = original,
+            ) -> Optional[ScenarioResult]:
+                result = _orig(self, world, elapsed)
+                if result is not None:
+                    self._last_satisfied = result.passed
+                    self._last_message = result.message
+                elif getattr(self, "_last_satisfied", False):
+                    self._last_satisfied = False
+                    self._last_message = ""
+                return result
+
+            cls.check = _tracking_check  # type: ignore[method-assign]
 
     @abstractmethod
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
@@ -145,11 +172,14 @@ class BaseCondition(ABC):
     def to_summary_dict(self) -> dict[str, Any]:
         """Return a summary dict identifying this condition and its details.
 
-        Combines ``condition_type``, ``label``, and :meth:`get_details`
-        into a single dict suitable for nesting inside parent conditions.
+        Combines ``condition_type``, ``label``, runtime status, and
+        :meth:`get_details` into a single dict suitable for nesting
+        inside parent conditions.
         """
         return {
             "condition_type": type(self).__name__,
             "label": self.label,
+            "satisfied": self._last_satisfied,
+            "message": self._last_message,
             **self.get_details(),
         }
