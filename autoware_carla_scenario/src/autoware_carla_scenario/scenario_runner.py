@@ -178,6 +178,20 @@ def _collect_condition_statuses(
     return statuses
 
 
+def _unique_path(path: Path) -> Path:
+    """Return *path* if it does not exist, otherwise append ``_1``, ``_2``, … ."""
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    counter = 1
+    while True:
+        candidate = path.with_name(f"{stem}_{counter}{suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 def _destroy_all_dynamic_actors(world: "carla.World", scenario_name: str) -> None:
     """Destroy all vehicles and sensors in the world for a clean state."""
     destroyed = 0
@@ -664,7 +678,7 @@ class ScenarioRunner:
             and scenario._spectator_camera_config is not None
         ):
             log_path = self.output_dir / f"{scenario_name}.log"
-            mp4_path = self.output_dir / f"{scenario_name}.mp4"
+            mp4_path = _unique_path(self.output_dir / f"{scenario_name}.mp4")
             self._render_video_from_recording(
                 log_path=log_path,
                 mp4_path=mp4_path,

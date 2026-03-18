@@ -226,14 +226,34 @@ async def run_scenarios(request: Request) -> dict[str, str]:
             group_as_multirun=True,
         )
     else:
-        # No sweeper: pass scenario pattern as-is.
-        overrides_list = [[f"scenario={scenario}"]]
-        runner.start_run(
-            overrides_list,
-            base_path=_base_path(),
-            extra_overrides=extra_overrides,
-            timeout=timeout,
-        )
+        # No sweeper: expand globs into individual jobs so progress
+        # tracking reports each scenario separately (e.g. [2/5]).
+        if _is_glob_pattern(scenario):
+            import fnmatch  # noqa: PLC0415
+
+            all_names = scanner.list_scenario_configs()
+            scenario_names = [n for n in all_names if fnmatch.fnmatch(n, scenario)]
+            if not scenario_names:
+                return {
+                    "status": "error",
+                    "message": f"No scenarios match '{scenario}'",
+                }
+            overrides_list = [[f"scenario={name}"] for name in scenario_names]
+            runner.start_run(
+                overrides_list,
+                base_path=_base_path(),
+                extra_overrides=extra_overrides,
+                timeout=timeout,
+                group_as_multirun=True,
+            )
+        else:
+            overrides_list = [[f"scenario={scenario}"]]
+            runner.start_run(
+                overrides_list,
+                base_path=_base_path(),
+                extra_overrides=extra_overrides,
+                timeout=timeout,
+            )
 
     return {"status": "started"}
 
