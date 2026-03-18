@@ -1,0 +1,4320 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Convert Lanelet2 map format to OpenDRIVE format for Autoware autonomous driving software">
+      
+      
+      
+        <link rel="canonical" href="https://tier4.github.io/autoware_lanelet2_to_opendrive/2.45.0/carla_opendrive_lanelet2_mapping/">
+      
+      
+        <link rel="prev" href="../usage/">
+      
+      
+        <link rel="next" href="../limitations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>CARLA OpenDRIVE Mapping - Autoware Lanelet2 to OpenDRIVE</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../css/timeago.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#carla-opendrive-and-lanelet2-tag-mapping" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Autoware Lanelet2 to OpenDRIVE" class="md-header__button md-logo" aria-label="Autoware Lanelet2 to OpenDRIVE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Autoware Lanelet2 to OpenDRIVE
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CARLA OpenDRIVE Mapping
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../usage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CARLA OpenDRIVE Mapping
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../limitations/" class="md-tabs__link">
+          
+  
+  
+  Known Limitations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../signals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Signals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../crosswalk_objects/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Crosswalk Objects
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../stop_line_objects/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Stop Line Objects
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../conversion-process/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Conversion Process
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../development/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Development
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Autoware Lanelet2 to OpenDRIVE" class="md-nav__button md-logo" aria-label="Autoware Lanelet2 to OpenDRIVE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Autoware Lanelet2 to OpenDRIVE
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CARLA OpenDRIVE Mapping
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CARLA OpenDRIVE Mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opendrive-tags-in-carla" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenDRIVE Tags in CARLA
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OpenDRIVE Tags in CARLA">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parser-specific-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parser-Specific Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parser-Specific Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#georeferenceparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GeoReferenceParser
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#roadparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RoadParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RoadParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-lane-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Lane Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#speed-limit-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Speed Limit Hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#geometryparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GeometryParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GeometryParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-geometry-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Geometry Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#laneparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LaneParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LaneParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#width-vs-border-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Width vs Border Specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#additional-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additional Attributes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#profilesparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ProfilesParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ProfilesParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parsing-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parsing Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#junctionparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JunctionParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JunctionParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-mapbuilder-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related MapBuilder Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#junction-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Junction Semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signalparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SignalParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SignalParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-signal-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Signal Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#position-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position Specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal References
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#controllerparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ControllerParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ControllerParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-elements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Elements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#objectparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ObjectParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ObjectParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-object-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Object Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#object-geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Geometry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#roadrunner-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RoadRunner Integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficgroupparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TrafficGroupParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TrafficGroupParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-status-stubbed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Status: STUBBED
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intended-purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intended Purpose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#xml-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        XML Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#future-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#carla-specific-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CARLA-Specific Considerations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CARLA-Specific Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#required-elements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required Elements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-but-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional but Recommended
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal-and-object-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal and Object Support
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#elements-not-used-by-carla" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Elements Not Used by CARLA
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preprocessing-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preprocessing Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Preprocessing Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lanelet-boundary-length-normalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet Boundary Length Normalization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conversion-challenges-and-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversion Challenges and Solutions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="References">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#carla-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CARLA Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opendrive-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenDRIVE Specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#converter-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Converter Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#related-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Known Limitations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/stop-line-position/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stop Line Position
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/lane-width/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lane Width
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/special-signals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Special Signals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/priority-right-of-way/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Priority Right-of-Way
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/geometric-approximation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Geometric Approximation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/coordinate-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coordinate System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Signals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../crosswalk_objects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crosswalk Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stop_line_objects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stop Line Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../conversion-process/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion Process
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opendrive-tags-in-carla" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenDRIVE Tags in CARLA
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OpenDRIVE Tags in CARLA">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parser-specific-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parser-Specific Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parser-Specific Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#georeferenceparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GeoReferenceParser
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#roadparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RoadParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RoadParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-lane-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Lane Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#speed-limit-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Speed Limit Hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#geometryparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GeometryParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GeometryParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-geometry-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Geometry Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#laneparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LaneParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LaneParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#width-vs-border-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Width vs Border Specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#additional-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additional Attributes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#profilesparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ProfilesParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ProfilesParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parsing-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parsing Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#junctionparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JunctionParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JunctionParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-mapbuilder-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related MapBuilder Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#junction-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Junction Semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signalparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SignalParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SignalParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-signal-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Signal Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#position-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position Specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal References
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#controllerparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ControllerParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ControllerParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-elements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Elements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#objectparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ObjectParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ObjectParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-object-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Object Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#object-geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Geometry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#roadrunner-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RoadRunner Integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficgroupparser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TrafficGroupParser
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TrafficGroupParser">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-status-stubbed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Status: STUBBED
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intended-purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intended Purpose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#xml-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        XML Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet2-mapping_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#future-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#carla-specific-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CARLA-Specific Considerations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CARLA-Specific Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#required-elements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required Elements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-but-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional but Recommended
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal-and-object-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal and Object Support
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#elements-not-used-by-carla" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Elements Not Used by CARLA
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preprocessing-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preprocessing Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Preprocessing Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lanelet-boundary-length-normalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet Boundary Length Normalization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conversion-challenges-and-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversion Challenges and Solutions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="References">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#carla-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CARLA Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opendrive-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenDRIVE Specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#converter-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Converter Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#related-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="carla-opendrive-and-lanelet2-tag-mapping">CARLA OpenDRIVE and Lanelet2 Tag Mapping<a class="headerlink" href="#carla-opendrive-and-lanelet2-tag-mapping" title="Permanent link">&para;</a></h1>
+<p>This document describes how OpenDRIVE tags are used within CARLA and how Lanelet2 tags are processed and mapped to OpenDRIVE format.</p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>CARLA UE5 uses a modular OpenDRIVE parser system located in <a href="https://github.com/carla-simulator/carla/tree/master/LibCarla/source/carla/opendrive"><code>LibCarla/source/carla/opendrive/</code></a> directory. The parser consists of specialized components that handle different aspects of the OpenDRIVE specification:</p>
+<ul>
+<li><strong>XML Parsing</strong>: Uses the <code>pugixml</code> library for XML processing</li>
+<li><strong>Modular Architecture</strong>: Separate parser classes for different OpenDRIVE elements</li>
+<li><strong>Map Building</strong>: Constructs CARLA's internal road network representation from parsed data</li>
+</ul>
+<p>This document focuses on which OpenDRIVE tags CARLA reads and how they are used internally, which is essential for understanding what needs to be generated when converting from Lanelet2 format.</p>
+<h2 id="opendrive-tags-in-carla">OpenDRIVE Tags in CARLA<a class="headerlink" href="#opendrive-tags-in-carla" title="Permanent link">&para;</a></h2>
+<p>This section provides a comprehensive reference of OpenDRIVE tags, showing how they are used in CARLA's parser and how Lanelet2 elements map to these tags during conversion.</p>
+<p><strong>Table columns:</strong></p>
+<ul>
+<li><strong>Parser Module</strong>: CARLA parser component (click to jump to detailed notes)</li>
+<li><strong>OpenDRIVE Tag/Attribute</strong>: Tag name in OpenDRIVE format</li>
+<li><strong>CARLA Purpose</strong>: How CARLA uses this tag</li>
+<li><strong>CARLA Code Location</strong>: Link to source code</li>
+<li><strong>Lanelet2 Mapping</strong>: How this tag is generated from Lanelet2 data</li>
+<li><strong>Status</strong>: Implementation status (see legend below)</li>
+<li><strong>Conversion Notes</strong>: Important considerations for conversion</li>
+<li><strong>CARLA NPC Behavior Impact</strong>: How this tag affects NPC vehicle/pedestrian behavior in simulation</li>
+<li><strong>NPC Behavior Source</strong>: Source code references for NPC behavior implementation (comma-separated if multiple)</li>
+</ul>
+<p><strong>Legend:</strong></p>
+<ul>
+<li>✅ Fully implemented (direct mapping from Lanelet2)</li>
+<li>⚠️ Partially implemented or requires generation/calculation</li>
+<li>⛔ Not in Lanelet2 specification (concept doesn't exist in Lanelet2)</li>
+<li>📋 Enhancement required (not currently implemented, could be added)</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Parser Module</th>
+<th>OpenDRIVE Tag/Attribute</th>
+<th>CARLA Purpose</th>
+<th>CARLA Code Location</th>
+<th>Lanelet2 Mapping</th>
+<th>Status</th>
+<th>Conversion Notes</th>
+<th>CARLA NPC Behavior Impact</th>
+<th>NPC Behavior Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#georeferenceparser">GeoReferenceParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/08_coordinate_systems/08_05_geo_referencing.html"><code>header/geoReference</code></a></td>
+<td>PROJ format georeference string, Geographic coordinate system definition</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp#L62"><code>GeoReferenceParser.cpp</code> L62</a></td>
+<td>Lanelet2 origin (MGRS or lat/lon)</td>
+<td>✅</td>
+<td>Convert MGRS to lat/lon, generate PROJ string</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#georeferenceparser">GeoReferenceParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/08_coordinate_systems/08_05_geo_referencing.html"><code>+lat_0=</code></a></td>
+<td>Latitude origin, Origin point for coordinate transformation</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp#L28-L50"><code>GeoReferenceParser.cpp</code> L28-L50</a></td>
+<td>Lanelet2 origin latitude</td>
+<td>✅</td>
+<td>Direct extraction from origin</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#georeferenceparser">GeoReferenceParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/08_coordinate_systems/08_05_geo_referencing.html"><code>+lon_0=</code></a></td>
+<td>Longitude origin, Origin point for coordinate transformation</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp#L28-L50"><code>GeoReferenceParser.cpp</code> L28-L50</a></td>
+<td>Lanelet2 origin longitude</td>
+<td>✅</td>
+<td>Direct extraction from origin</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_01_introduction.html"><code>road@id</code></a></td>
+<td>Road identifier, Unique road identification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120"><code>RoadParser.cpp</code> L113-L120</a></td>
+<td>Auto-generated</td>
+<td>⚠️</td>
+<td>Group adjacent lanelets into roads</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_01_introduction.html"><code>road@name</code></a></td>
+<td>Road name, Road naming/labeling</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120"><code>RoadParser.cpp</code> L113-L120</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Can use lanelet IDs or custom names</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_01_introduction.html"><code>road@length</code></a></td>
+<td>Road length (meters), Road geometry calculation</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120"><code>RoadParser.cpp</code> L113-L120</a></td>
+<td>Calculated from Lanelet2 centerline</td>
+<td>⚠️</td>
+<td>Sum of geometry segment lengths</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_01_introduction.html"><code>road@junction</code></a></td>
+<td>Junction ID reference, Links road to junction</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L113-L120"><code>RoadParser.cpp</code> L113-L120</a></td>
+<td>Lanelet2 <code>turn_direction</code> tag</td>
+<td>✅</td>
+<td>Lanelets with turn_direction → junction roads</td>
+<td>NPC uses junction navigation logic for turns</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L30-L150">local_planner.py L30-150</a></td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_03_road_linkage.html"><code>road/link/predecessor@elementId</code></a></td>
+<td>Previous road ID, Road connectivity</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L122-L130"><code>RoadParser.cpp</code> L122-L130</a></td>
+<td>Lanelet2 predecessor connectivity</td>
+<td>✅</td>
+<td>Map lanelet to road connectivity</td>
+<td>Affects route planning and road connectivity</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L30-L150">local_planner.py L30-150</a></td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_03_road_linkage.html"><code>road/link/successor@elementId</code></a></td>
+<td>Next road ID, Road connectivity</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L122-L130"><code>RoadParser.cpp</code> L122-L130</a></td>
+<td>Lanelet2 successor connectivity</td>
+<td>✅</td>
+<td>Map lanelet to road connectivity</td>
+<td>Affects route planning and road connectivity</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L30-L150">local_planner.py L30-150</a></td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_04_road_type.html"><code>road/type@s</code></a></td>
+<td>Start position, Road type section position</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145"><code>RoadParser.cpp</code> L133-L145</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Segment start positions</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_04_road_type.html"><code>road/type@type</code></a></td>
+<td>Road type, Road classification (town, highway, etc.)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145"><code>RoadParser.cpp</code> L133-L145</a></td>
+<td>Lanelet2 <code>location</code> tag</td>
+<td>✅</td>
+<td>urban→TOWN, highway→MOTORWAY, rural→RURAL</td>
+<td>Highway: higher cruise speed; Town: slower, more cautious</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L50-L100">RoadParser.cpp L50-100</a>, <a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/behavior_agent.py#L50-L100">behavior_agent.py L50-100</a></td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_04_road_type.html"><code>road/type/speed@max</code></a></td>
+<td>Maximum speed, Speed limit</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145"><code>RoadParser.cpp</code> L133-L145</a></td>
+<td>Lanelet2 <code>speed_limit</code> tag</td>
+<td>✅</td>
+<td>Direct value (km/h)</td>
+<td>Sets NPC cruise speed limit</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L50-L60">SignalParser.cpp L50-60</a>, <a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/behavior_agent.py#L100-L150">behavior_agent.py L100-150</a></td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_04_road_type.html"><code>road/type/speed@unit</code></a></td>
+<td>Speed unit, Speed unit (km/h, mph, etc.)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L133-L145"><code>RoadParser.cpp</code> L133-L145</a></td>
+<td>Default km/h</td>
+<td>⚠️</td>
+<td>Lanelet2 uses km/h</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_01_introduction.html"><code>road/lanes/laneOffset@s,a,b,c,d</code></a></td>
+<td>Lane offset parameters, Lane lateral offset polynomial</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L147-L155"><code>RoadParser.cpp</code> L147-L155</a></td>
+<td>Default 0</td>
+<td>⚠️</td>
+<td>Lanelet2 has no lane offset concept</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_01_introduction.html"><code>road/lanes/laneSection@s</code></a></td>
+<td>Lane section start, Lane section definition</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180"><code>RoadParser.cpp</code> L157-L180</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Section start positions from lanelet groups</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_03_lane_sections.html"><code>lane@id</code></a></td>
+<td>Lane identifier, Lane identification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180"><code>RoadParser.cpp</code> L157-L180</a></td>
+<td>Generated from ordering</td>
+<td>⚠️</td>
+<td>Sequential lane numbering</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_03_lane_sections.html"><code>lane@type</code></a></td>
+<td>Lane type, Lane classification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180"><code>RoadParser.cpp</code> L157-L180</a></td>
+<td>Lanelet2 <code>subtype</code> tag</td>
+<td>✅</td>
+<td>road→driving, walkway→sidewalk, bicycle_lane→biking</td>
+<td>NPCs only drive in 'driving' lanes; ignore sidewalk/biking</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L30-L90">LaneParser.cpp L30-90</a>, <a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/LocalizationStage.cpp#L30-L100">LocalizationStage.cpp L30-100</a></td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_03_lane_sections.html"><code>lane@level</code></a></td>
+<td>Lane level, Stacked lane handling</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180"><code>RoadParser.cpp</code> L157-L180</a></td>
+<td>Default 0</td>
+<td>⚠️</td>
+<td>Lanelet2 has no stacked lanes</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_05_lane_link.html"><code>lane/link/predecessor</code></a></td>
+<td>Previous lane, Lane connectivity</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180"><code>RoadParser.cpp</code> L157-L180</a></td>
+<td>Lanelet2 predecessor lanelet</td>
+<td>✅</td>
+<td>Lane connectivity mapping</td>
+<td>Used for lane-level route planning</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L30-L150">local_planner.py L30-150</a></td>
+</tr>
+<tr>
+<td><a href="#roadparser">RoadParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_05_lane_link.html"><code>lane/link/successor</code></a></td>
+<td>Next lane, Lane connectivity</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L157-L180"><code>RoadParser.cpp</code> L157-L180</a></td>
+<td>Lanelet2 successor lanelet</td>
+<td>✅</td>
+<td>Lane connectivity mapping</td>
+<td>Used for lane-level route planning</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L30-L150">local_planner.py L30-150</a></td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_01_introduction.html"><code>geometry@s</code></a></td>
+<td>Start position along road, Geometry segment positioning</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84"><code>GeometryParser.cpp</code> L77-L84</a></td>
+<td>Lanelet2 centerline segments</td>
+<td>✅</td>
+<td>Cumulative distance along reference line</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_01_introduction.html"><code>geometry@x</code></a></td>
+<td>X coordinate, Geometry start point</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84"><code>GeometryParser.cpp</code> L77-L84</a></td>
+<td>Lanelet2 centerline points</td>
+<td>✅</td>
+<td>Extract x-coordinate from points</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_01_introduction.html"><code>geometry@y</code></a></td>
+<td>Y coordinate, Geometry start point</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84"><code>GeometryParser.cpp</code> L77-L84</a></td>
+<td>Lanelet2 centerline points</td>
+<td>✅</td>
+<td>Extract y-coordinate from points</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_01_introduction.html"><code>geometry@hdg</code></a></td>
+<td>Heading angle, Geometry orientation</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84"><code>GeometryParser.cpp</code> L77-L84</a></td>
+<td>Lanelet2 centerline direction</td>
+<td>✅</td>
+<td>Calculate heading from consecutive points</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_01_introduction.html"><code>geometry@length</code></a></td>
+<td>Geometry length, Segment length</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L77-L84"><code>GeometryParser.cpp</code> L77-L84</a></td>
+<td>Lanelet2 centerline segments</td>
+<td>✅</td>
+<td>Distance between consecutive points</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_03_straight_line.html"><code>geometry/line</code></a></td>
+<td>Straight line, Linear road segment</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L89"><code>GeometryParser.cpp</code> L89, L120</a></td>
+<td>Lanelet2 centerline (simple)</td>
+<td>✅</td>
+<td>Direct point-to-point conversion</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_05_arc.html"><code>geometry/arc@curvature</code></a></td>
+<td>Arc curvature, Curved road segment</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L88-L91"><code>GeometryParser.cpp</code> L88-91, L122-123</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Requires curve fitting</td>
+<td>Affects steering behavior on curves</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/controller.py#L20-L80">controller.py L20-80</a></td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_04_spiral.html"><code>geometry/spiral@curvStart</code></a></td>
+<td>Spiral start curvature, Clothoid transition</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L91-L94"><code>GeometryParser.cpp</code> L91-94, L124-131</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Requires clothoid fitting</td>
+<td>Affects steering behavior on transitions</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/controller.py#L20-L80">controller.py L20-80</a></td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_04_spiral.html"><code>geometry/spiral@curvEnd</code></a></td>
+<td>Spiral end curvature, Clothoid transition</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L91-L94"><code>GeometryParser.cpp</code> L91-94, L124-131</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Requires clothoid fitting</td>
+<td>Affects steering behavior on transitions</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/controller.py#L20-L80">controller.py L20-80</a></td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_07_poly3.html"><code>geometry/poly3@a,b,c,d</code></a></td>
+<td>Cubic polynomial coefficients, Parametric road shape</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L94-L99"><code>GeometryParser.cpp</code> L94-99, L133-144</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Requires polynomial fitting</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_06_param_poly3.html"><code>geometry/paramPoly3@aU,bU,cU,dU</code></a></td>
+<td>U-direction polynomial, Parametric curve U</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L99-L110"><code>GeometryParser.cpp</code> L99-110, L144-159</a></td>
+<td>Lanelet2 centerline (advanced)</td>
+<td>✅</td>
+<td>B-spline fitting for smoother roads</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_06_param_poly3.html"><code>geometry/paramPoly3@aV,bV,cV,dV</code></a></td>
+<td>V-direction polynomial, Parametric curve V</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L99-L110"><code>GeometryParser.cpp</code> L99-110, L144-159</a></td>
+<td>Lanelet2 centerline (advanced)</td>
+<td>✅</td>
+<td>B-spline fitting for smoother roads</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#geometryparser">GeometryParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/09_geometries/09_06_param_poly3.html"><code>geometry/paramPoly3@pRange</code></a></td>
+<td>Parameter range, Parametric curve range</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp#L99-L110"><code>GeometryParser.cpp</code> L99-110, L144-159</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>arcLength for parameter range</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_06_lane_geometry.html"><code>lane/width@sOffset,a,b,c,d</code></a></td>
+<td>Lane width polynomial, Lane width calculation</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Calculated from Lanelet2 boundaries</td>
+<td>⚠️</td>
+<td>Distance between left/right bounds (not preferred)</td>
+<td>Narrow lanes: NPCs drive more cautiously</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/behavior_agent.py#L700-L800">behavior_agent.py L700-800</a></td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_06_lane_geometry.html"><code>lane/border@sOffset,a,b,c,d</code></a></td>
+<td>Lane border polynomial, Lane boundary definition</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Lanelet2 left/right boundaries</td>
+<td>✅</td>
+<td>Polynomial fit of boundary points (preferred)</td>
+<td>Defines drivable area boundaries</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L30-L150">local_planner.py L30-150</a></td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_08_road_markings.html"><code>lane/roadMark@*</code></a></td>
+<td>Road marking attributes, Lane markings/striping</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no road marking data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_08_road_markings.html"><code>lane/roadMark/type/line@*</code></a></td>
+<td>Line marking details, Detailed marking geometry</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no detailed marking geometry</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/material@*</code></a></td>
+<td>Lane surface material, Surface properties</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no material data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/speed@sOffset</code></a></td>
+<td>Speed limit start position, Lane-specific speed limit</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Section start positions</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/speed@max</code></a></td>
+<td>Maximum speed, Lane speed restriction</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Lanelet2 <code>speed_limit</code> tag</td>
+<td>✅</td>
+<td>Lane-specific speed (overrides road)</td>
+<td>Overrides road speed; sets NPC cruise speed for this lane</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L50-L60">SignalParser.cpp L50-60</a>, <a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/behavior_agent.py#L100-L150">behavior_agent.py L100-150</a></td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/speed@unit</code></a></td>
+<td>Speed unit, Speed unit specification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Default km/h</td>
+<td>⚠️</td>
+<td>Lanelet2 uses km/h</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/access@sOffset</code></a></td>
+<td>Access rule start position, Lane access restrictions</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no access restriction data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/access@rule</code></a></td>
+<td>Access rule type, Access control</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no access rules</td>
+<td>Could restrict NPC vehicle types (not fully implemented)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/LocalizationStage.cpp#L30-L100">LocalizationStage.cpp L30-100</a></td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/access@restriction</code></a></td>
+<td>Restriction details, Detailed access rules</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no detailed restrictions</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/height@sOffset</code></a></td>
+<td>Height change position, Vertical lane offset</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no height offset data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/height@inner</code></a></td>
+<td>Inner edge height, Height at inner boundary</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no height data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/height@outer</code></a></td>
+<td>Outer edge height, Height at outer boundary</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no height data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_09_specific_lane_rules.html"><code>lane/rule@sOffset,value</code></a></td>
+<td>Lane rule position/value, Lane-specific rules</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no lane rules</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#laneparser">LaneParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/11_lanes/11_07_lane_properties.html"><code>lane/visibility@*</code></a></td>
+<td>Visibility attributes, Lane visibility properties</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp#L17-L185"><code>LaneParser.cpp</code> L17-L185</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no visibility data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#profilesparser">ProfilesParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_05_elevation.html"><code>elevationProfile/elevation@s</code></a></td>
+<td>Elevation start position, Vertical profile positioning</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80"><code>ProfilesParser.cpp</code> L46-L80</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Segment start positions</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#profilesparser">ProfilesParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_05_elevation.html"><code>elevationProfile/elevation@a,b,c,d</code></a></td>
+<td>Elevation polynomial, Vertical road shape</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80"><code>ProfilesParser.cpp</code> L46-L80</a></td>
+<td>Lanelet2 z-coordinates</td>
+<td>✅</td>
+<td>Polynomial fit of elevation points</td>
+<td>Steep grades: NPCs adjust speed accordingly</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/controller.py#L20-L80">controller.py L20-80</a></td>
+</tr>
+<tr>
+<td><a href="#profilesparser">ProfilesParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_06_road_surface.html"><code>lateralProfile/superelevation@s</code></a></td>
+<td>Superelevation start, Banking start position</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80"><code>ProfilesParser.cpp</code> L46-L80</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no superelevation data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#profilesparser">ProfilesParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_06_road_surface.html"><code>lateralProfile/superelevation@a,b,c,d</code></a></td>
+<td>Superelevation polynomial, Road banking/tilt</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80"><code>ProfilesParser.cpp</code> L46-L80</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no banking data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#profilesparser">ProfilesParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_06_road_surface.html"><code>lateralProfile/shape@s</code></a></td>
+<td>Shape change start, Lateral shape positioning</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80"><code>ProfilesParser.cpp</code> L46-L80</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no lateral shape data</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#profilesparser">ProfilesParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_06_road_surface.html"><code>lateralProfile/shape@t</code></a></td>
+<td>Lateral offset, Transverse position</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80"><code>ProfilesParser.cpp</code> L46-L80</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no lateral offset</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#profilesparser">ProfilesParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/10_roads/10_06_road_surface.html"><code>lateralProfile/shape@a,b,c,d</code></a></td>
+<td>Shape polynomial, Lateral profile shape</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp#L46-L80"><code>ProfilesParser.cpp</code> L46-L80</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no shape profile</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction@id</code></a></td>
+<td>Junction identifier, Unique junction identification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>From lanelets with turn_direction tag</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction@name</code></a></td>
+<td>Junction name, Junction naming/labeling</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Can use custom names</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/connection@id</code></a></td>
+<td>Connection identifier, Connection identification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Sequential connection numbering</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/connection@incomingRoad</code></a></td>
+<td>Incoming road ID, Junction entry point</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Lanelet2 junction predecessor</td>
+<td>✅</td>
+<td>Map incoming lanelet group to road</td>
+<td>Defines NPC turning options at intersections</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L18-L40">local_planner.py L18-40</a></td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/connection@connectingRoad</code></a></td>
+<td>Connecting road ID, Junction internal path</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Lanelet2 junction lanelet</td>
+<td>✅</td>
+<td>Map junction lanelet to connecting road</td>
+<td>NPC follows connecting road through junction</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L18-L40">local_planner.py L18-40</a></td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/connection@contactPoint</code></a></td>
+<td>Connection point type, Start/end specification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Determined from junction geometry</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/connection/laneLink@from</code></a></td>
+<td>Source lane ID, Lane-level connection source</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Lanelet2 source lane</td>
+<td>✅</td>
+<td>Lane connectivity through junction</td>
+<td>Determines valid lane-to-lane turns for NPCs</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L18-L40">local_planner.py L18-40</a></td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/connection/laneLink@to</code></a></td>
+<td>Target lane ID, Lane-level connection target</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Lanelet2 target lane</td>
+<td>✅</td>
+<td>Lane connectivity through junction</td>
+<td>Determines valid lane-to-lane turns for NPCs</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/local_planner.py#L18-L40">local_planner.py L18-40</a></td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@s</code></a></td>
+<td>Signal S-coordinate position, Longitudinal position along road</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L47"><code>SignalParser.cpp</code> L47</a></td>
+<td>Lanelet2 regulatory_element position</td>
+<td>✅</td>
+<td>Calculate from regulatory_element refers</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@t</code></a></td>
+<td>Signal T-coordinate position, Lateral offset from reference line</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L48"><code>SignalParser.cpp</code> L48</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Default lateral offset for signal placement</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@id</code></a></td>
+<td>Signal identifier, Unique signal identification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L49"><code>SignalParser.cpp</code> L49</a></td>
+<td>Lanelet2 regulatory_element ID</td>
+<td>✅</td>
+<td>Use regulatory_element ID directly</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@name</code></a></td>
+<td>Signal name, Signal naming/labeling</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L50"><code>SignalParser.cpp</code> L50</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Can use regulatory_element subtype</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@dynamic</code></a></td>
+<td>Dynamic signal flag, Indicates if signal state changes</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L51"><code>SignalParser.cpp</code> L51</a></td>
+<td>Lanelet2 traffic_light type</td>
+<td>✅</td>
+<td>yes for traffic_light, no for traffic_sign</td>
+<td>Dynamic signals (traffic lights): NPCs obey state changes</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L20-L70">SignalParser.cpp L20-70</a>, <a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75">TrafficLightStage.cpp L45-75</a></td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@orientation</code></a></td>
+<td>Signal orientation, Signal facing direction (+/- for lane direction)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L52"><code>SignalParser.cpp</code> L52</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Determine from lane direction</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@zOffset</code></a></td>
+<td>Signal Z-offset, Vertical position above road surface</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L53"><code>SignalParser.cpp</code> L53</a></td>
+<td>Default height</td>
+<td>⚠️</td>
+<td>Use standard signal height (e.g., 5m)</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@country</code></a></td>
+<td>Country code, Signal standard specification (e.g., OpenDRIVE)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L54"><code>SignalParser.cpp</code> L54</a></td>
+<td>Default OpenDRIVE</td>
+<td>⚠️</td>
+<td>Use OpenDRIVE standard codes</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@type</code></a></td>
+<td>Signal type code, Signal classification (1000003=red/yellow/green)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L55"><code>SignalParser.cpp</code> L55</a></td>
+<td>Lanelet2 subtype mapping</td>
+<td>✅</td>
+<td>Map Lanelet2 subtypes to OpenDRIVE codes</td>
+<td>Determines signal meaning: traffic light, speed limit, stop, etc.</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L45-L80">SignalParser.cpp L45-80</a></td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@subtype</code></a></td>
+<td>Signal subtype, Detailed signal classification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L56"><code>SignalParser.cpp</code> L56</a></td>
+<td>Lanelet2 subtype details</td>
+<td>✅</td>
+<td>Detailed type from regulatory_element</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@value</code></a></td>
+<td>Signal value, Numeric value (e.g., speed limit number)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L57"><code>SignalParser.cpp</code> L57</a></td>
+<td>Lanelet2 speed_limit or other values</td>
+<td>✅</td>
+<td>Extract value from regulatory_element</td>
+<td>Speed limit value: NPCs adjust speed to comply</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L50-L60">SignalParser.cpp L50-60</a>, <a href="https://github.com/carla-simulator/carla/blob/master/PythonAPI/carla/agents/navigation/behavior_agent.py#L100-L150">behavior_agent.py L100-150</a></td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@unit</code></a></td>
+<td>Signal unit, Unit of measurement for value</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L58"><code>SignalParser.cpp</code> L58</a></td>
+<td>Default unit</td>
+<td>⚠️</td>
+<td>km/h for speed, m for distance</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@height</code></a></td>
+<td>Signal height, Physical signal height</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L59"><code>SignalParser.cpp</code> L59</a></td>
+<td>Default dimensions</td>
+<td>⚠️</td>
+<td>Standard signal dimensions</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@width</code></a></td>
+<td>Signal width, Physical signal width</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L60"><code>SignalParser.cpp</code> L60</a></td>
+<td>Default dimensions</td>
+<td>⚠️</td>
+<td>Standard signal dimensions</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@text</code></a></td>
+<td>Signal text, Displayed text on signal</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L61"><code>SignalParser.cpp</code> L61</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Textual signal information if available</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@hOffset</code></a></td>
+<td>Signal horizontal offset, Additional horizontal displacement</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L62"><code>SignalParser.cpp</code> L62</a></td>
+<td>Default 0</td>
+<td>⚠️</td>
+<td>Typically 0 unless specific placement needed</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@pitch</code></a></td>
+<td>Signal pitch angle, Vertical tilt angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L63"><code>SignalParser.cpp</code> L63</a></td>
+<td>Default 0</td>
+<td>⚠️</td>
+<td>Default vertical orientation</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signal@roll</code></a></td>
+<td>Signal roll angle, Horizontal tilt angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L64"><code>SignalParser.cpp</code> L64</a></td>
+<td>Default 0</td>
+<td>⚠️</td>
+<td>Default roll orientation</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/validity@fromLane</code></a></td>
+<td>Validity start lane, Signal applies from this lane ID</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L25"><code>SignalParser.cpp</code> L25</a></td>
+<td>Lanelet2 refers lanelets</td>
+<td>✅</td>
+<td>Map referenced lanelets to lane IDs</td>
+<td>Signals only affect NPCs in specified lane range</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L20-L70">SignalParser.cpp L20-70</a></td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/validity@toLane</code></a></td>
+<td>Validity end lane, Signal applies up to this lane ID</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L26"><code>SignalParser.cpp</code> L26</a></td>
+<td>Lanelet2 refers lanelets</td>
+<td>✅</td>
+<td>Map referenced lanelets to lane IDs</td>
+<td>Signals only affect NPCs in specified lane range</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L20-L70">SignalParser.cpp L20-70</a></td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/dependency@id</code></a></td>
+<td>Dependency signal ID, References another signal</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L110"><code>SignalParser.cpp</code> L110</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no signal dependency concept</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/dependency@type</code></a></td>
+<td>Dependency type, Type of signal dependency</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L111"><code>SignalParser.cpp</code> L111</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Lanelet2 has no dependency types</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/positionInertial@x</code></a></td>
+<td>Inertial X position, Absolute X coordinate</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L116"><code>SignalParser.cpp</code> L116</a></td>
+<td>Calculate from road coordinates</td>
+<td>⚠️</td>
+<td>Transform from s,t to absolute X,Y</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/positionInertial@y</code></a></td>
+<td>Inertial Y position, Absolute Y coordinate</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L117"><code>SignalParser.cpp</code> L117</a></td>
+<td>Calculate from road coordinates</td>
+<td>⚠️</td>
+<td>Transform from s,t to absolute X,Y</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/positionInertial@z</code></a></td>
+<td>Inertial Z position, Absolute Z coordinate</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L118"><code>SignalParser.cpp</code> L118</a></td>
+<td>Calculate from elevation + zOffset</td>
+<td>⚠️</td>
+<td>Road elevation + signal zOffset</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/positionInertial@hdg</code></a></td>
+<td>Inertial heading, Absolute heading angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L119"><code>SignalParser.cpp</code> L119</a></td>
+<td>Calculate from road heading</td>
+<td>⚠️</td>
+<td>Road heading at signal position</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/positionInertial@pitch</code></a></td>
+<td>Inertial pitch, Absolute pitch angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L120"><code>SignalParser.cpp</code> L120</a></td>
+<td>Default 0</td>
+<td>⚠️</td>
+<td>Combined with signal pitch</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>signal/positionInertial@roll</code></a></td>
+<td>Inertial roll, Absolute roll angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L121"><code>SignalParser.cpp</code> L121</a></td>
+<td>Default 0</td>
+<td>⚠️</td>
+<td>Combined with signal roll</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signalReference@s</code></a></td>
+<td>Signal reference S position, Reference to signal at position</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L129"><code>SignalParser.cpp</code> L129</a></td>
+<td>Same as signal@s</td>
+<td>⚠️</td>
+<td>Cross-reference to signal definition</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signalReference@t</code></a></td>
+<td>Signal reference T position, Lateral reference position</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L130"><code>SignalParser.cpp</code> L130</a></td>
+<td>Same as signal@t</td>
+<td>⚠️</td>
+<td>Cross-reference lateral offset</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signalReference@id</code></a></td>
+<td>Signal reference ID, References signal by ID</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L131"><code>SignalParser.cpp</code> L131</a></td>
+<td>Lanelet2 regulatory_element ref</td>
+<td>✅</td>
+<td>Links road to signal definition</td>
+<td>Links signal to road segment for NPC awareness</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L45-L80">SignalParser.cpp L45-80</a></td>
+</tr>
+<tr>
+<td><a href="#signalparser">SignalParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>road/signals/signalReference@orientation</code></a></td>
+<td>Signal reference orientation, Reference direction</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp#L133"><code>SignalParser.cpp</code> L133</a></td>
+<td>Generated</td>
+<td>⚠️</td>
+<td>Match signal orientation</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#controllerparser">ControllerParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>controller@id</code></a></td>
+<td>Controller identifier, Unique controller identification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L27"><code>ControllerParser.cpp</code> L27</a></td>
+<td>Generated from traffic_light groups</td>
+<td>⚠️</td>
+<td>Group related traffic_lights</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#controllerparser">ControllerParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>controller@name</code></a></td>
+<td>Controller name, Controller naming/labeling</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L28"><code>ControllerParser.cpp</code> L28</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Can use intersection name</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#controllerparser">ControllerParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>controller@sequence</code></a></td>
+<td>Controller sequence, Signal phase sequence number</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L29"><code>ControllerParser.cpp</code> L29</a></td>
+<td>Not in Lanelet2 specification</td>
+<td>⛔</td>
+<td>Lanelet2 has no phase sequence data</td>
+<td>Signal phase sequence: affects NPC waiting time at lights</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75">TrafficLightStage.cpp L45-75</a></td>
+</tr>
+<tr>
+<td><a href="#controllerparser">ControllerParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>controller/control@signalId</code></a></td>
+<td>Controlled signal ID, References signal under control</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L39"><code>ControllerParser.cpp</code> L39</a></td>
+<td>Lanelet2 traffic_light IDs in group</td>
+<td>✅</td>
+<td>Map traffic_light refs to signal IDs</td>
+<td>Groups signals for coordinated NPC traffic flow</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75">TrafficLightStage.cpp L45-75</a></td>
+</tr>
+<tr>
+<td><a href="#controllerparser">ControllerParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html"><code>controller/control@type</code></a></td>
+<td>Control type, Type of controller (not yet used in CARLA)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L41"><code>ControllerParser.cpp</code> L41</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Currently not used by CARLA</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@type</code></a></td>
+<td>Object type classification, Type of road object (crosswalk, etc.)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L34"><code>ObjectParser.cpp</code> L34</a></td>
+<td>Lanelet2 area/polygon type</td>
+<td>⚠️</td>
+<td>crosswalk only (speed sign, stop line not implemented)</td>
+<td>Crosswalk: used for pedestrian pathfinding only; NPC vehicles do NOT yield to pedestrians at crosswalks</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@name</code></a></td>
+<td>Object name, Object identification name</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L35"><code>ObjectParser.cpp</code> L35</a></td>
+<td>Lanelet2 area/polygon ID or name</td>
+<td>✅</td>
+<td>Speed_*, Stencil_STOP patterns</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@id</code></a></td>
+<td>Object identifier, Unique object identification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L78"><code>ObjectParser.cpp</code> L78</a></td>
+<td>Lanelet2 area/polygon ID</td>
+<td>✅</td>
+<td>Direct ID mapping</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@s</code></a></td>
+<td>Object S position, Longitudinal position along road</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L79"><code>ObjectParser.cpp</code> L79</a></td>
+<td>Project crosswalk centroid onto nearest road reference line</td>
+<td>✅</td>
+<td>Arc-length position from road start; computed via ParamPoly3 sampling</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@t</code></a></td>
+<td>Object T position, Lateral offset from reference line</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L80"><code>ObjectParser.cpp</code> L80</a></td>
+<td>Signed lateral distance from nearest road sample point</td>
+<td>✅</td>
+<td>Positive = left of reference line</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@zOffset</code></a></td>
+<td>Object Z offset, Vertical position above road</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L84"><code>ObjectParser.cpp</code> L84</a></td>
+<td>Road-surface-relative height at crosswalk s-position</td>
+<td>✅</td>
+<td>crosswalk_absolute_z − road_elevation_at_s (cubic polynomial evaluation of road elevation profile); result ≈ 0.0 for on-road crosswalks</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@hdg</code></a></td>
+<td>Object heading, Orientation angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L93"><code>ObjectParser.cpp</code> L93</a></td>
+<td>Angle of leftBound direction relative to road heading</td>
+<td>✅</td>
+<td>Normalized to (−π, π); 0 = aligned with road direction</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@pitch</code></a></td>
+<td>Object pitch, Vertical tilt angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L94"><code>ObjectParser.cpp</code> L94</a></td>
+<td>Fixed 0.0</td>
+<td>✅</td>
+<td>Flat surface assumption</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@roll</code></a></td>
+<td>Object roll, Horizontal tilt angle</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L95"><code>ObjectParser.cpp</code> L95</a></td>
+<td>Fixed 0.0</td>
+<td>✅</td>
+<td>Flat surface assumption</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@orientation</code></a></td>
+<td>Object orientation, Direction relative to road (+/-/none)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L83"><code>ObjectParser.cpp</code> L83</a></td>
+<td>Fixed "none"</td>
+<td>✅</td>
+<td>Crosswalks apply to both directions</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@width</code></a></td>
+<td>Object width, Physical width dimension</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L91"><code>ObjectParser.cpp</code> L91</a></td>
+<td>Distance between leftBound[0] and rightBound[0]</td>
+<td>✅</td>
+<td>Span across road (road-parallel direction)</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@length</code></a></td>
+<td>Object length, Physical length dimension</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L63"><code>ObjectParser.cpp</code> L63</a></td>
+<td>Average of leftBound and rightBound lengths</td>
+<td>✅</td>
+<td>Crossing distance (road-perpendicular direction)</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>road/objects/object@height</code></a></td>
+<td>Object height, Physical height dimension</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L90"><code>ObjectParser.cpp</code> L90</a></td>
+<td>Default height</td>
+<td>⚠️</td>
+<td>Standard object height</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>object/outline/cornerLocal@u</code></a></td>
+<td>Corner U coordinate, Local U coordinate of outline point</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L43"><code>ObjectParser.cpp</code> L43</a></td>
+<td>Lanelet2 area vertices</td>
+<td>✅</td>
+<td>Transform area vertices to local U,V</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>object/outline/cornerLocal@v</code></a></td>
+<td>Corner V coordinate, Local V coordinate of outline point</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L44"><code>ObjectParser.cpp</code> L44</a></td>
+<td>Lanelet2 area vertices</td>
+<td>✅</td>
+<td>Transform area vertices to local U,V</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#objectparser">ObjectParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html"><code>object/outline/cornerLocal@z</code></a></td>
+<td>Corner Z coordinate, Local Z coordinate of outline point</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L45"><code>ObjectParser.cpp</code> L45</a></td>
+<td>Lanelet2 area vertex Z</td>
+<td>⚠️</td>
+<td>Use Z from vertices if 3D</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#trafficgroupparser">TrafficGroupParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/07_additional_data/07_02_user_data.html"><code>userData/trafficGroup@id</code></a></td>
+<td>Traffic group identifier, Signal group identification (STUBBED)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L37"><code>TrafficGroupParser.cpp</code> L37</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Feature currently stubbed in CARLA</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><a href="#trafficgroupparser">TrafficGroupParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/07_additional_data/07_02_user_data.html"><code>userData/trafficGroup@redTime</code></a></td>
+<td>Red signal duration, Red phase timing in seconds (STUBBED)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L38"><code>TrafficGroupParser.cpp</code> L38</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Timing data not in Lanelet2</td>
+<td>Red duration: NPCs wait at red light (if implemented)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75">TrafficLightStage.cpp L45-75</a></td>
+</tr>
+<tr>
+<td><a href="#trafficgroupparser">TrafficGroupParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/07_additional_data/07_02_user_data.html"><code>userData/trafficGroup@yellowTime</code></a></td>
+<td>Yellow signal duration, Yellow phase timing in seconds (STUBBED)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L39"><code>TrafficGroupParser.cpp</code> L39</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Timing data not in Lanelet2</td>
+<td>Yellow duration: NPCs prepare to stop (if implemented)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75">TrafficLightStage.cpp L45-75</a></td>
+</tr>
+<tr>
+<td><a href="#trafficgroupparser">TrafficGroupParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/07_additional_data/07_02_user_data.html"><code>userData/trafficGroup@greenTime</code></a></td>
+<td>Green signal duration, Green phase timing in seconds (STUBBED)</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp#L40"><code>TrafficGroupParser.cpp</code> L40</a></td>
+<td>Enhancement required</td>
+<td>⛔</td>
+<td>Timing data not in Lanelet2</td>
+<td>Green duration: NPCs proceed through intersection</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75">TrafficLightStage.cpp L45-75</a></td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/controller@id</code></a></td>
+<td>Controller ID, Traffic signal reference</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Generated from traffic_light groups</td>
+<td>⚠️</td>
+<td>Lanelet2 has no controller concept; auto-generated</td>
+<td>Links junction to traffic signal controller</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75">TrafficLightStage.cpp L45-75</a></td>
+</tr>
+<tr>
+<td><a href="#junctionparser">JunctionParser</a></td>
+<td><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/12_junctions/12_01_introduction.html"><code>junction/controller@type</code></a></td>
+<td>Controller type, Controller classification</td>
+<td><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp#L17-L50"><code>JunctionParser.cpp</code> L17-L50</a></td>
+<td>Optional</td>
+<td>⚠️</td>
+<td>Default controller type</td>
+<td>-</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h3 id="parser-specific-notes">Parser-Specific Notes<a class="headerlink" href="#parser-specific-notes" title="Permanent link">&para;</a></h3>
+<h4 id="georeferenceparser">GeoReferenceParser<a class="headerlink" href="#georeferenceparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeoReferenceParser.cpp"><code>GeoReferenceParser.cpp</code></a></p>
+<ul>
+<li>CARLA only reads latitude/longitude origins; UTM/MGRS zones are not directly supported</li>
+<li>Geographic reference is optional in OpenDRIVE but recommended for proper geo-location</li>
+</ul>
+<h4 id="roadparser">RoadParser<a class="headerlink" href="#roadparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp"><code>RoadParser.cpp</code></a></p>
+<h5 id="supported-lane-types">Supported Lane Types<a class="headerlink" href="#supported-lane-types" title="Permanent link">&para;</a></h5>
+<p>(<a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/RoadParser.cpp#L66-L110"><code>RoadParser.cpp</code> L66-L110</a>)</p>
+<ul>
+<li><code>driving</code>, <code>bidirectional</code>, <code>stop</code>, <code>shoulder</code>, <code>biking</code>, <code>sidewalk</code></li>
+<li><code>parking</code>, <code>border</code>, <code>restricted</code>, <code>median</code>, <code>entry</code>, <code>exit</code></li>
+<li><code>onRamp</code>, <code>offRamp</code>, <code>rail</code>, <code>tram</code>, <code>roadWorks</code></li>
+<li><code>special1</code>, <code>special2</code>, <code>special3</code>, <code>none</code></li>
+</ul>
+<h5 id="speed-limit-hierarchy">Speed Limit Hierarchy<a class="headerlink" href="#speed-limit-hierarchy" title="Permanent link">&para;</a></h5>
+<ul>
+<li>Lane speed limits override road speed limits (OpenDRIVE spec 11.7)</li>
+<li>Signal speed limits have highest priority</li>
+<li>See Conversion Challenges for road grouping from Lanelet2</li>
+</ul>
+<h4 id="geometryparser">GeometryParser<a class="headerlink" href="#geometryparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/GeometryParser.cpp"><code>GeometryParser.cpp</code></a></p>
+<h5 id="supported-geometry-types">Supported Geometry Types<a class="headerlink" href="#supported-geometry-types" title="Permanent link">&para;</a></h5>
+<ul>
+<li><code>&lt;line&gt;</code>: Straight segments (always supported)</li>
+<li><code>&lt;arc&gt;</code>: Circular arcs</li>
+<li><code>&lt;spiral&gt;</code>: Clothoid curves</li>
+<li><code>&lt;poly3&gt;</code>, <code>&lt;paramPoly3&gt;</code>: Polynomial curves</li>
+</ul>
+<p>See Conversion Challenges for Lanelet2 centerline conversion approaches</p>
+<h4 id="laneparser">LaneParser<a class="headerlink" href="#laneparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/LaneParser.cpp"><code>LaneParser.cpp</code></a></p>
+<h5 id="width-vs-border-specification">Width vs Border Specification<a class="headerlink" href="#width-vs-border-specification" title="Permanent link">&para;</a></h5>
+<p>(OpenDRIVE Spec 1.8c)</p>
+<ul>
+<li><code>&lt;width&gt;</code> and <code>&lt;border&gt;</code> are mutually exclusive within the same lane group</li>
+<li>If both exist, applications <strong>must use</strong> <code>&lt;width&gt;</code> elements per spec</li>
+<li>See CARLA-Specific Considerations for Lanelet2 conversion recommendations</li>
+</ul>
+<h5 id="additional-attributes">Additional Attributes<a class="headerlink" href="#additional-attributes" title="Permanent link">&para;</a></h5>
+<ul>
+<li>Road markings, material, speed limits, access rules parsed but usage in CARLA varies</li>
+<li>Height and visibility attributes have limited CARLA support</li>
+</ul>
+<h4 id="profilesparser">ProfilesParser<a class="headerlink" href="#profilesparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ProfilesParser.cpp"><code>ProfilesParser.cpp</code></a></p>
+<h5 id="parsing-details">Parsing Details<a class="headerlink" href="#parsing-details" title="Permanent link">&para;</a></h5>
+<ul>
+<li>Reads elevation, superelevation, and lateral shape profiles</li>
+<li>Polynomial coefficients (a, b, c, d) define profile shape</li>
+<li>See CARLA-Specific Considerations for elevation profile requirements</li>
+</ul>
+<h4 id="junctionparser">JunctionParser<a class="headerlink" href="#junctionparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/JunctionParser.cpp"><code>JunctionParser.cpp</code></a></p>
+<h5 id="related-mapbuilder-functions">Related MapBuilder Functions<a class="headerlink" href="#related-mapbuilder-functions" title="Permanent link">&para;</a></h5>
+<ul>
+<li><code>AddJunction</code>: <a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L566"><code>MapBuilder.cpp</code> L566</a></li>
+<li><code>AddConnection</code>: <a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L570"><code>MapBuilder.cpp</code> L570</a></li>
+<li><code>AddLaneLink</code>: <a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/road/MapBuilder.cpp#L580"><code>MapBuilder.cpp</code> L580</a></li>
+</ul>
+<h5 id="junction-semantics">Junction Semantics<a class="headerlink" href="#junction-semantics" title="Permanent link">&para;</a></h5>
+<ul>
+<li><strong>laneLink</strong>: Defines lane-level connectivity within junction</li>
+<li><strong>connection</strong>: Defines road-level connectivity (which roads connect to junction)</li>
+<li><strong>Road Assignment</strong>: Roads must specify which junction they belong to via <code>road@junction</code> attribute</li>
+</ul>
+<h4 id="signalparser">SignalParser<a class="headerlink" href="#signalparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/SignalParser.cpp"><code>SignalParser.cpp</code></a></p>
+<h5 id="supported-signal-types">Supported Signal Types<a class="headerlink" href="#supported-signal-types" title="Permanent link">&para;</a></h5>
+<ul>
+<li><strong>Traffic Signals</strong>: Dynamic signals (traffic lights with changing states)</li>
+<li><strong>Traffic Signs</strong>: Static signals (speed limits, stop signs, etc.)</li>
+<li><strong>Signal Validity</strong>: Lane-specific signal applicability via <code>fromLane</code>/<code>toLane</code></li>
+<li><strong>Signal Dependencies</strong>: Cross-referencing between related signals</li>
+</ul>
+<h5 id="position-specification">Position Specification<a class="headerlink" href="#position-specification" title="Permanent link">&para;</a></h5>
+<p>Signals can be positioned using two methods:</p>
+<ul>
+<li><strong>Road coordinates</strong> (<code>s</code>, <code>t</code>, <code>zOffset</code>): Position relative to road reference line</li>
+<li><strong>Inertial coordinates</strong> (<code>x</code>, <code>y</code>, <code>z</code>, <code>hdg</code>, <code>pitch</code>, <code>roll</code>): Absolute world position</li>
+</ul>
+<h5 id="signal-references">Signal References<a class="headerlink" href="#signal-references" title="Permanent link">&para;</a></h5>
+<ul>
+<li><strong><code>&lt;signal&gt;</code></strong>: Full signal definition with all attributes</li>
+<li><strong><code>&lt;signalReference&gt;</code></strong>: Lightweight reference to existing signal by ID</li>
+<li>References allow multiple roads to share the same signal definition</li>
+</ul>
+<h5 id="lanelet2-mapping">Lanelet2 Mapping<a class="headerlink" href="#lanelet2-mapping" title="Permanent link">&para;</a></h5>
+<ul>
+<li><code>regulatory_element</code> with <code>traffic_light</code> or <code>traffic_sign</code> subtypes map to signals</li>
+<li>Signal ID: Use regulatory_element ID</li>
+<li>Signal type: Map Lanelet2 subtype to OpenDRIVE type codes (e.g., 1000003 for red/yellow/green)</li>
+<li>Signal position: Calculate s-coordinate from regulatory_element refers</li>
+<li>Signal validity: Map refers lanelets to fromLane/toLane range</li>
+</ul>
+<h4 id="controllerparser">ControllerParser<a class="headerlink" href="#controllerparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp"><code>ControllerParser.cpp</code></a></p>
+<h5 id="purpose">Purpose<a class="headerlink" href="#purpose" title="Permanent link">&para;</a></h5>
+<p>Controllers manage groups of traffic signals, coordinating their states and sequencing (e.g., traffic light phases at an intersection).</p>
+<h5 id="key-elements">Key Elements<a class="headerlink" href="#key-elements" title="Permanent link">&para;</a></h5>
+<ul>
+<li><strong>Controller ID</strong>: Unique identifier for signal group</li>
+<li><strong>Sequence</strong>: Phase sequence number (order of signal state changes)</li>
+<li><strong>Control</strong>: List of signal IDs managed by this controller</li>
+</ul>
+<h5 id="lanelet2-mapping_1">Lanelet2 Mapping<a class="headerlink" href="#lanelet2-mapping_1" title="Permanent link">&para;</a></h5>
+<ul>
+<li>Lanelet2 has no built-in signal controller concept</li>
+<li>Controllers can be generated from traffic_light groups at intersections</li>
+<li>Group all traffic_lights affecting the same junction into one controller</li>
+<li>Sequence number requires external phase timing data (not in Lanelet2)</li>
+</ul>
+<h5 id="current-status">Current Status<a class="headerlink" href="#current-status" title="Permanent link">&para;</a></h5>
+<p>Controllers are parsed but signal phase timing logic is not fully integrated in CARLA's map builder.</p>
+<h4 id="objectparser">ObjectParser<a class="headerlink" href="#objectparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp"><code>ObjectParser.cpp</code></a></p>
+<h5 id="supported-object-types">Supported Object Types<a class="headerlink" href="#supported-object-types" title="Permanent link">&para;</a></h5>
+<p>CARLA recognizes specific object types for autonomous driving scenarios:</p>
+<ul>
+<li><strong><code>crosswalk</code></strong>: Pedestrian crossing areas with detailed outline geometry</li>
+<li><strong>Speed signs</strong>: Objects named <code>Speed_*</code> (e.g., <code>Speed_30</code>, <code>Speed_50</code>)</li>
+<li><strong>Stop lines</strong>: Objects named <code>Stencil_STOP</code> for stop sign markings</li>
+</ul>
+<h5 id="object-geometry">Object Geometry<a class="headerlink" href="#object-geometry" title="Permanent link">&para;</a></h5>
+<ul>
+<li><strong>Simple objects</strong>: Defined by position, dimensions (width, length, height), and orientation</li>
+<li><strong>Outline objects</strong>: Defined by polygon vertices using <code>&lt;outline&gt;/&lt;cornerLocal&gt;</code> with U,V,Z coordinates</li>
+</ul>
+<h5 id="lanelet2-mapping_2">Lanelet2 Mapping<a class="headerlink" href="#lanelet2-mapping_2" title="Permanent link">&para;</a></h5>
+<ul>
+<li><strong>Crosswalks</strong>: Map from Lanelet2 <strong>lanelets</strong> with <code>subtype="crosswalk"</code> (not Lanelet2 <code>area</code> elements)</li>
+<li>Centroid of four boundary vertices projected onto nearest road reference line → <code>s</code>, <code>t</code></li>
+<li><code>leftBound</code> direction relative to road heading → <code>hdg</code></li>
+<li>Boundary geometry → <code>width</code>, <code>length</code>, <code>&lt;outline&gt;&lt;cornerLocal&gt;</code> polygon</li>
+<li>See <a href="../crosswalk_objects/">Crosswalk Objects</a> for full algorithm details</li>
+<li><strong>Speed signs</strong>: Generate from <code>speed_limit</code> regulatory_elements</li>
+<li><strong>Stop lines</strong>: Map from <code>stop_line</code> regulatory_elements</li>
+<li>Object position: Project lanelet/element center onto road to get s,t coordinates</li>
+<li>Object outline: Transform polygon vertices to local U,V coordinates</li>
+</ul>
+<h5 id="roadrunner-integration">RoadRunner Integration<a class="headerlink" href="#roadrunner-integration" title="Permanent link">&para;</a></h5>
+<p>This parser is designed to work with RoadRunner-generated OpenDRIVE files, which use object naming patterns like <code>Speed_*</code> and <code>Stencil_STOP</code> for signal-like elements.</p>
+<h4 id="trafficgroupparser">TrafficGroupParser<a class="headerlink" href="#trafficgroupparser" title="Permanent link">&para;</a></h4>
+<p><a href="https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/TrafficGroupParser.cpp"><code>TrafficGroupParser.cpp</code></a></p>
+<h5 id="current-status-stubbed">Current Status: STUBBED<a class="headerlink" href="#current-status-stubbed" title="Permanent link">&para;</a></h5>
+<p><strong>Important</strong>: This parser exists in CARLA's codebase but is <strong>currently disabled</strong> (all parsing code is commented out).</p>
+<h5 id="intended-purpose">Intended Purpose<a class="headerlink" href="#intended-purpose" title="Permanent link">&para;</a></h5>
+<p>Parse traffic signal timing groups with phase durations:</p>
+<ul>
+<li><strong>Red time</strong>: Duration of red signal phase (seconds)</li>
+<li><strong>Yellow time</strong>: Duration of yellow signal phase (seconds)</li>
+<li><strong>Green time</strong>: Duration of green signal phase (seconds)</li>
+</ul>
+<h5 id="xml-structure">XML Structure<a class="headerlink" href="#xml-structure" title="Permanent link">&para;</a></h5>
+<p>Located in <code>&lt;userData&gt;</code> section as custom extension:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">&lt;userData&gt;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">&lt;trafficGroup</span><span class="w"> </span><span class="na">id=</span><span class="s">&quot;group1&quot;</span><span class="w"> </span><span class="na">redTime=</span><span class="s">&quot;30&quot;</span><span class="w"> </span><span class="na">yellowTime=</span><span class="s">&quot;5&quot;</span><span class="w"> </span><span class="na">greenTime=</span><span class="s">&quot;25&quot;</span><span class="nt">/&gt;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">&lt;/userData&gt;</span>
+</code></pre></div>
+<h5 id="lanelet2-mapping_3">Lanelet2 Mapping<a class="headerlink" href="#lanelet2-mapping_3" title="Permanent link">&para;</a></h5>
+<p>Not applicable - Lanelet2 has no signal timing data. This would require external timing configuration or simulation-specific data.</p>
+<h5 id="future-implementation">Future Implementation<a class="headerlink" href="#future-implementation" title="Permanent link">&para;</a></h5>
+<p>If enabled, this would allow CARLA to simulate realistic traffic signal timing patterns, but requires:</p>
+<ol>
+<li>Uncommenting parser code in TrafficGroupParser.cpp</li>
+<li>Integrating timing data into MapBuilder's signal management</li>
+<li>External timing configuration source (Lanelet2 doesn't provide this)</li>
+</ol>
+<h2 id="carla-specific-considerations">CARLA-Specific Considerations<a class="headerlink" href="#carla-specific-considerations" title="Permanent link">&para;</a></h2>
+<details class="info">
+<summary>CARLA Compatibility Requirements and Recommendations</summary>
+<p>Based on the CARLA parser analysis, the following considerations are important for CARLA compatibility:</p>
+<h3 id="required-elements">Required Elements<a class="headerlink" href="#required-elements" title="Permanent link">&para;</a></h3>
+<p>CARLA <strong>requires</strong> these elements for proper map loading:</p>
+<ol>
+<li><strong>Geographic Reference</strong> (<code>header/geoReference</code>):</li>
+<li>Must include <code>+lat_0=</code> and <code>+lon_0=</code> parameters</li>
+<li>
+<p>CARLA uses this for coordinate system initialization</p>
+</li>
+<li>
+<p><strong>Road Geometry</strong> (<code>road/planView/geometry</code>):</p>
+</li>
+<li>At least one geometry element per road</li>
+<li>
+<p><code>&lt;line&gt;</code> is the simplest and always supported</p>
+</li>
+<li>
+<p><strong>Lane Sections</strong> (<code>road/lanes/laneSection</code>):</p>
+</li>
+<li>At least one lane section per road</li>
+<li>
+<p>Lane count changes require new lane sections</p>
+</li>
+<li>
+<p><strong>Elevation Profile</strong> (<code>road/elevationProfile</code>):</p>
+</li>
+<li>Optional in OpenDRIVE spec but critical for CARLA</li>
+<li>Without this, roads may appear at incorrect heights</li>
+</ol>
+<h3 id="optional-but-recommended">Optional but Recommended<a class="headerlink" href="#optional-but-recommended" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Lane Borders</strong> (<code>lane/border</code>):</li>
+<li>Preferred over <code>lane/width</code> for geometric accuracy</li>
+<li>
+<p>More direct mapping from Lanelet2 boundaries</p>
+</li>
+<li>
+<p><strong>Speed Limits</strong>:</p>
+</li>
+<li>Can be specified at road level (<code>road/type/speed</code>) or lane level (<code>lane/speed</code>)</li>
+<li>
+<p>Signal speed limits override road/lane speeds</p>
+</li>
+<li>
+<p><strong>Junction Connections</strong>:</p>
+</li>
+<li>Required for intersection navigation</li>
+<li>Must include <code>laneLink</code> for lane-level routing</li>
+</ol>
+<h3 id="signal-and-object-support">Signal and Object Support<a class="headerlink" href="#signal-and-object-support" title="Permanent link">&para;</a></h3>
+<p>CARLA <strong>does support</strong> the following elements:</p>
+<ol>
+<li><strong>Traffic Signals</strong> (<code>road/signals/signal</code>):</li>
+<li>Fully parsed via SignalParser</li>
+<li>Supports both static signs and dynamic traffic lights</li>
+<li>Includes signal validity ranges, dependencies, and positioning</li>
+<li>
+<p>See SignalParser section for detailed mapping</p>
+</li>
+<li>
+<p><strong>Road Objects</strong> (<code>road/objects/object</code>):</p>
+</li>
+<li>Parsed via ObjectParser for specific types</li>
+<li>Supported: crosswalks, speed signs (Speed_*), stop lines (Stencil_STOP)</li>
+<li>
+<p>Objects can have outline geometry for precise boundaries</p>
+</li>
+<li>
+<p><strong>Traffic Controllers</strong> (<code>controller</code>):</p>
+</li>
+<li>Parsed via ControllerParser</li>
+<li>Manages signal groups and sequencing</li>
+<li>Phase timing integration is partial</li>
+</ol>
+<h3 id="elements-not-used-by-carla">Elements Not Used by CARLA<a class="headerlink" href="#elements-not-used-by-carla" title="Permanent link">&para;</a></h3>
+<p>The following OpenDRIVE elements are <strong>not</strong> currently parsed or have limited support:</p>
+<ul>
+<li><code>road/surface</code> (road surface properties) - Not parsed</li>
+<li><code>lane/userData</code> (custom lane data) - Not parsed</li>
+<li><code>userData/trafficGroup</code> (signal timing) - Parser exists but stubbed out</li>
+<li>Complex geometry types (e.g., <code>&lt;spiral&gt;</code> support varies by CARLA version)</li>
+</ul>
+</details>
+<h2 id="preprocessing-requirements">Preprocessing Requirements<a class="headerlink" href="#preprocessing-requirements" title="Permanent link">&para;</a></h2>
+<p>Before converting Lanelet2 maps to OpenDRIVE format, the following preprocessing steps are <strong>required</strong> to ensure data quality and compatibility with CARLA:</p>
+<h3 id="lanelet-boundary-length-normalization">Lanelet Boundary Length Normalization<a class="headerlink" href="#lanelet-boundary-length-normalization" title="Permanent link">&para;</a></h3>
+<p><strong>⚠️ Critical Requirement</strong>: When adjacent lanelets have significantly different left and right boundary lengths, they must be preprocessed to equalize the lengths. Mismatched boundary lengths can cause:</p>
+<ul>
+<li>Incorrect lane width calculations in OpenDRIVE</li>
+<li>Geometry interpolation errors in CARLA</li>
+<li>Visual artifacts and vehicle positioning issues</li>
+</ul>
+<p><strong>Required Operations</strong>:</p>
+<p>To address boundary length mismatches, apply combinations of the following Lanelet2 preprocessing operations:</p>
+<ol>
+<li><strong>Merge Operations</strong> (<code>merge</code>)</li>
+<li>Combine multiple short lanelets into longer segments to match adjacent lane lengths</li>
+<li>
+<p>Reduces unnecessary segmentation and improves geometric consistency</p>
+</li>
+<li>
+<p><strong>Split Operations</strong> (<code>split</code>)</p>
+</li>
+<li>Divide long lanelets into smaller segments to align with shorter adjacent lanes</li>
+<li>
+<p>Ensures proper correspondence between lane boundaries</p>
+</li>
+<li>
+<p><strong>Delete Operations</strong> (<code>delete</code>)</p>
+</li>
+<li>Remove redundant or problematic lanelet segments that cannot be normalized</li>
+<li>Use cautiously and only when other operations are insufficient</li>
+</ol>
+<p><strong>Implementation Guidelines</strong>:</p>
+<ul>
+<li><strong>Threshold</strong>: Define acceptable boundary length difference ratio (e.g., max 10% deviation)</li>
+<li><strong>Priority</strong>: Prefer merge operations over split operations to minimize segmentation</li>
+<li><strong>Validation</strong>: Verify that preprocessing maintains lane connectivity and topology</li>
+<li><strong>Documentation</strong>: Record all preprocessing operations for reproducibility</li>
+</ul>
+<p><strong>Example Scenario</strong>:</p>
+<p><strong>Real-World Example: Curved Road with Boundary Length Mismatch</strong></p>
+<p>In areas with high curvature (tight curves, intersections), the inner and outer boundaries naturally have different arc lengths. This geometric property can cause significant boundary length mismatches between adjacent lanelets.</p>
+<p><img alt="Boundary Length Mismatch in Curved Roads" src="../image/polygon_flip.png" /></p>
+<p><em>Figure: Lanelet2 map showing curved roads and intersections where inner boundaries (shorter arc) and outer boundaries (longer arc) have significantly different lengths due to road curvature.</em></p>
+<p><strong>Impact on OpenDRIVE Conversion</strong>:</p>
+<p>When boundary length mismatches occur, the B-spline interpolation algorithm used to calculate <code>paramPoly3</code> lane boundary geometries fails to work correctly. This is because the algorithm expects corresponding points on left and right boundaries to align at similar arc length positions. Severe mismatches cause the interpolation to produce invalid geometries, resulting in <strong>polygon flipping</strong> artifacts where lane boundaries cross over each other or invert.</p>
+<p><strong>Numeric Example</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Before preprocessing:
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  Lane A: left boundary = 50m, right boundary = 50m
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  Lane B: left boundary = 100m, right boundary = 25m  ← Mismatch!
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>After preprocessing (merge Lane B with adjacent segments):
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  Lane A: left boundary = 50m, right boundary = 50m
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  Lane B: left boundary = 50m, right boundary = 50m  ✓ Normalized
+</code></pre></div>
+<hr />
+<h2 id="conversion-challenges-and-solutions">Conversion Challenges and Solutions<a class="headerlink" href="#conversion-challenges-and-solutions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Challenge</th>
+<th>Description</th>
+<th>Solution Approach</th>
+<th>Implementation Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Road Grouping</td>
+<td>Lanelet2 has no "Road" concept</td>
+<td>Group connected lanelets by connectivity</td>
+<td>✅ Implemented</td>
+</tr>
+<tr>
+<td>Lane Width</td>
+<td>Lanelet2 lacks width calculation</td>
+<td>Compute from boundary separation</td>
+<td>✅ Implemented</td>
+</tr>
+<tr>
+<td>Smooth Geometry</td>
+<td>Line segments vs. curves</td>
+<td>B-spline fitting to centerline</td>
+<td>✅ Implemented (optional)</td>
+</tr>
+<tr>
+<td>Junction Detection</td>
+<td>Must identify intersections</td>
+<td>Use <code>turn_direction</code> tag</td>
+<td>✅ Implemented</td>
+</tr>
+<tr>
+<td>Elevation Profile</td>
+<td>Convert z-coordinates to polynomial</td>
+<td>Fit cubic polynomial to elevation data</td>
+<td>⚠️ Basic implementation</td>
+</tr>
+<tr>
+<td>Signal Positioning</td>
+<td>Convert to (s, t) coordinates</td>
+<td>Project signal position onto road</td>
+<td>✅ Implemented</td>
+</tr>
+<tr>
+<td>Lane Connectivity</td>
+<td>OpenDRIVE uses Road+Lane IDs</td>
+<td>Map Lanelet IDs to Road+Lane pairs</td>
+<td>✅ Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Legend:</strong></p>
+<ul>
+<li>✅ Fully implemented</li>
+<li>⚠️ Partially implemented or basic support</li>
+<li>❌ Not implemented</li>
+</ul>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<h3 id="carla-documentation">CARLA Documentation<a class="headerlink" href="#carla-documentation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://github.com/carla-simulator/carla/tree/master/LibCarla/source/carla/opendrive/parser">CARLA OpenDRIVE Parser Source Code</a></li>
+<li><a href="https://tier4.atlassian.net/wiki/spaces/T4DC/pages/4573266027/OpenDRIVE">CARLA UE5 OpenDRIVE Integration</a> (Internal Tier4 documentation)</li>
+</ul>
+<h3 id="opendrive-specification">OpenDRIVE Specification<a class="headerlink" href="#opendrive-specification" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/v1.8.1/specification/">ASAM OpenDRIVE Specification v1.8</a></li>
+<li><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/v1.8.1/specification/08_coordinate_systems/08_05_geo_referencing.html">OpenDRIVE Coordinate Systems</a></li>
+<li><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/v1.8.1/specification/09_geometries/09_01_introduction.html">OpenDRIVE Geometries</a></li>
+<li><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/v1.8.1/specification/12_junctions/12_04_connecting_roads.html">OpenDRIVE Junctions</a></li>
+<li><a href="https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/v1.8.1/specification/11.7_additional_lane_properties/README.html">OpenDRIVE Lane Properties</a></li>
+</ul>
+<h3 id="converter-documentation">Converter Documentation<a class="headerlink" href="#converter-documentation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="../conversion-process/">Conversion Process Flow</a> - Detailed conversion pipeline documentation</li>
+<li><a href="../signals/">Signals Documentation</a> - Traffic signal conversion details</li>
+<li><a href="../limitations/">Known Limitations</a> - Current converter limitations and CARLA compatibility notes</li>
+</ul>
+<h3 id="related-tools">Related Tools<a class="headerlink" href="#related-tools" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://github.com/fzi-forschungszentrum-informatik/Lanelet2">Lanelet2</a> - Lanelet2 library and format specification</li>
+<li><a href="https://commonroad.in.tum.de/">CommonRoad Scenario Designer</a> - Alternative Lanelet2 to OpenDRIVE converter</li>
+</ul>
+
+
+
+
+
+
+
+  
+    
+  
+  
+    
+  
+
+
+  <aside class="md-source-file">
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Last update">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 19, 2026 03:56:18 UTC"><span class="timeago" datetime="2026-02-19T03:56:18+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 19, 2026 03:56:18 UTC">2026-02-19</span>
+  </span>
+
+    
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Created">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 4, 2026 05:38:41 UTC"><span class="timeago" datetime="2026-02-04T05:38:41+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 4, 2026 05:38:41 UTC">2026-02-04</span>
+  </span>
+
+    
+    
+    
+  </aside>
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../js/timeago.min.js"></script>
+      
+        <script src="../js/timeago_mkdocs_material.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+      
+    
+  </body>
+</html>
