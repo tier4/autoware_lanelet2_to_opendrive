@@ -208,7 +208,16 @@
       }
     }
 
-    // Update the command preview in real-time
+    // Debounce helper
+    function debounce(fn, ms) {
+      let timer;
+      return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), ms);
+      };
+    }
+
+    // Update the command preview (debounced calls go through debouncedPreview)
     function updateCmdPreview() {
       const opts = collectRunOptions();
       fetch('/api/run/preview', {
@@ -248,14 +257,18 @@
       });
     }
 
+    // Debounced helpers (300ms delay to avoid flooding the server / localStorage)
+    const debouncedPreview = debounce(updateCmdPreview, 300);
+    const debouncedSave = debounce(saveRunOptions, 300);
+
     // Restore saved values on page load, then attach listeners
     document.addEventListener('DOMContentLoaded', () => {
       restoreRunOptions();
       PANEL_FIELDS.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-          el.addEventListener('input', () => { saveRunOptions(); updateCmdPreview(); });
-          el.addEventListener('change', () => { saveRunOptions(); updateCmdPreview(); });
+          el.addEventListener('input', () => { debouncedSave(); debouncedPreview(); });
+          el.addEventListener('change', () => { debouncedSave(); debouncedPreview(); });
         }
       });
     });

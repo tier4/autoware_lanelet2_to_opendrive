@@ -57,11 +57,9 @@ def _read_result_json(path: Path) -> dict[str, Any] | None:
 
 def _read_overrides(job_dir: Path) -> list[str]:
     """Read ``.hydra/overrides.yaml`` from a job directory."""
-    overrides_path = job_dir / ".hydra" / "overrides.yaml"
-    if not overrides_path.is_file():
-        return []
     try:
-        data = yaml.safe_load(overrides_path.read_text(encoding="utf-8"))
+        raw = (job_dir / ".hydra" / "overrides.yaml").read_text(encoding="utf-8")
+        data = yaml.safe_load(raw)
         return data if isinstance(data, list) else []
     except (yaml.YAMLError, OSError):
         return []

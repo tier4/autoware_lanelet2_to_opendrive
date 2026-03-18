@@ -8,16 +8,14 @@ This is lightweight (no CARLA import) and runs in the viewer process.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
-logger = logging.getLogger(__name__)
+from autoware_carla_scenario.examples.run import _CONF_DIR
 
-# Path to Hydra config directory.
-_CONF_DIR = Path(__file__).resolve().parent.parent / "examples" / "conf"
+logger = logging.getLogger(__name__)
 
 
 def resolve_sweep(

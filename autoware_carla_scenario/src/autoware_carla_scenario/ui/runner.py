@@ -15,8 +15,11 @@ import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from .models import RunProgress
+
+_Status = Literal["running", "passed", "failed", "done", "idle"]
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +58,6 @@ def start_run(
     base_path: Path | None = None,
     extra_overrides: list[str] | None = None,
     timeout: int = 300,
-    sweeper: str = "",
     group_as_multirun: bool = False,
 ) -> None:
     """Start scenario execution in a background thread.
@@ -66,8 +68,6 @@ def start_run(
         base_path: Working directory for the subprocess.
         extra_overrides: Additional Hydra overrides appended to every run.
         timeout: Per-scenario subprocess timeout in seconds.
-        sweeper: Kept for API compatibility but no longer used by the
-            runner itself (sweep resolution is done upstream).
         group_as_multirun: When ``True``, all jobs share a single
             ``multirun/{date}/{time}/`` directory with numbered
             subdirectories (0, 1, 2, …) instead of each writing to
@@ -136,7 +136,7 @@ def _run_worker(
                     text=True,
                     timeout=timeout,
                 )
-                status = "passed" if result.returncode == 0 else "failed"
+                status: _Status = "passed" if result.returncode == 0 else "failed"
                 if result.returncode != 0:
                     logger.warning(
                         "Scenario %s failed (exit code %d): %s",
@@ -185,16 +185,16 @@ def build_command(
     scenario: str,
     extra_overrides: list[str] | None = None,
     sweeper: str = "",
-) -> list[str]:
+) -> tuple[list[str], str]:
     """Build the ``uv run scenario`` command for preview purposes.
 
-    When a sweeper is specified the preview shows the sweep-resolve
-    command pattern; actual execution expands each job individually.
+    Returns:
+        A 2-tuple of ``(command_tokens, note)``.  *note* is a
+        human-readable string (e.g. sweep info) or empty.
     """
     cmd = ["uv", "run", "scenario"]
     cmd.append(f"scenario={scenario}")
-    if sweeper:
-        cmd.append(f"  # sweep: {sweeper} (resolved to N individual jobs)")
     if extra_overrides:
         cmd.extend(extra_overrides)
-    return cmd
+    note = f"sweep: {sweeper} (resolved to N individual jobs)" if sweeper else ""
+    return cmd, note

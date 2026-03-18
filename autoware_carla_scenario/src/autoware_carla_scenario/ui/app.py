@@ -13,6 +13,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from autoware_carla_scenario.examples.run import _is_glob_pattern
+
 from . import runner, scanner
 from .models import RunProgress
 
@@ -34,11 +36,6 @@ BASE_PATH = Path.cwd()
 def _base_path() -> Path:
     """Return the base path for log directories."""
     return BASE_PATH
-
-
-def _is_glob(value: str) -> bool:
-    """Return ``True`` if *value* contains glob metacharacters."""
-    return any(ch in value for ch in ("*", "?", "["))
 
 
 # ── Page routes ──────────────────────────────────────────────────────────
@@ -126,30 +123,6 @@ async def refresh(request: Request) -> HTMLResponse:
     )
 
 
-@app.post("/api/refresh/session/{session_type}/{date}/{time}")
-async def refresh_session(
-    request: Request, session_type: str, date: str, time: str
-) -> HTMLResponse:
-    """Clear cache and return updated session detail."""
-    scanner.clear_cache()
-    items = scanner.load_session(_base_path(), session_type, date, time)
-    passed_count = sum(1 for it in items if it.passed is True)
-    total_count = len(items)
-    return templates.TemplateResponse(
-        "partials/session_table.html",
-        {
-            "request": request,
-            "items": items,
-            "session_type": session_type,
-            "date": date,
-            "time": time,
-            "passed_count": passed_count,
-            "total_count": total_count,
-            "page": "session",
-        },
-    )
-
-
 @app.get("/api/scenarios")
 async def list_scenarios() -> list[str]:
     """Return available scenario config names from the conf directory."""
@@ -169,8 +142,11 @@ async def run_preview(request: Request) -> dict[str, str]:
     extra_overrides: list[str] = body.get("extra_overrides", [])
     sweeper: str = body.get("sweeper", "")
 
-    cmd = runner.build_command(scenario, extra_overrides, sweeper)
-    return {"command": " ".join(cmd)}
+    cmd, note = runner.build_command(scenario, extra_overrides, sweeper)
+    preview = " ".join(cmd)
+    if note:
+        preview += f"  # {note}"
+    return {"command": preview}
 
 
 @app.post("/api/run")
@@ -198,7 +174,7 @@ async def run_scenarios(request: Request) -> dict[str, str]:
         from .sweep_resolver import resolve_sweep  # noqa: PLC0415
 
         # Resolve glob to concrete scenario names first.
-        if _is_glob(scenario):
+        if _is_glob_pattern(scenario):
             import fnmatch  # noqa: PLC0415
 
             all_names = scanner.list_scenario_configs()
@@ -231,7 +207,6 @@ async def run_scenarios(request: Request) -> dict[str, str]:
             base_path=_base_path(),
             extra_overrides=[],
             timeout=timeout,
-            sweeper="",
             group_as_multirun=True,
         )
     else:
@@ -242,7 +217,6 @@ async def run_scenarios(request: Request) -> dict[str, str]:
             base_path=_base_path(),
             extra_overrides=extra_overrides,
             timeout=timeout,
-            sweeper="",
         )
 
     return {"status": "started"}

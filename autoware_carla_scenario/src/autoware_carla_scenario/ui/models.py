@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -57,4 +57,4 @@ class RunProgress(BaseModel):
     current: int
     total: int
     scenario_name: str
-    status: str  # "running", "passed", "failed", "done"
+    status: Literal["running", "passed", "failed", "done", "idle"]
