@@ -36,6 +36,26 @@ stopline:
   # Enable CARLA Stencil_STOP format (<object type="-1" name="Stencil_STOP">)
   carla_stop_line: true
 
+# Traffic light actor spawn offset configuration
+# These offsets are applied to positionInertial coordinates:
+# (offset_x, offset_y) are rotated by the signal's hdg and subtracted
+# from the centroid position to adjust signal placement in CARLA.
+traffic_light:
+  # Offset along the signal's facing direction (hdg) in meters
+  # Positive = shift forward (away from approaching traffic)
+  offset_x: 0.0
+
+  # Offset perpendicular to hdg in meters
+  # Positive = shift left (when facing in hdg direction)
+  offset_y: -5.5
+
+  # Vertical offset in meters (subtracted from z)
+  offset_z: 5.5
+
+  # Rotation offset in radians added to the LineString direction to obtain
+  # the signal's facing direction. Default +π/2 (left-to-right → facing).
+  hdg_offset: 1.5707963267948966
+
 # Width spline sampling configuration
 # Adaptive sampling reduces memory usage for large maps
 width_estimation:

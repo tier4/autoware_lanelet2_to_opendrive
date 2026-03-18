@@ -270,3 +270,96 @@ def test_get_signal_lane_ids_rht_fallback_missing_lanelet():
         matching_road=road,
     )
     assert result == [-1]
+
+
+# ---------------------------------------------------------------------------
+# Integration test: multiple LineStrings × multiple roads
+# ---------------------------------------------------------------------------
+
+
+def test_multiple_linestrings_multiple_roads_signal_count():
+    """Test that 2 LineStrings × 2 roads = 4 Signals, 1 Controller with 4 entries."""
+    from unittest.mock import Mock, patch, MagicMock
+    from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
+
+    # --- Mock linestrings ---
+    def _make_linestring(ls_id, points):
+        ls = MagicMock()
+        ls.id = ls_id
+        ls.__len__ = Mock(return_value=len(points))
+        ls.__getitem__ = Mock(side_effect=lambda i: points[i])
+        ls.__iter__ = Mock(side_effect=lambda: iter(points))
+        return ls
+
+    pt_a = MagicMock(x=10.0, y=5.0, z=8.0)
+    pt_b = MagicMock(x=12.0, y=6.0, z=9.0)
+    ls1 = _make_linestring(1001, [pt_a])
+    ls2 = _make_linestring(1002, [pt_b])
+
+    # --- Mock traffic light regulatory element ---
+    traffic_light = MagicMock()
+    traffic_light.id = 5000
+    traffic_light.trafficLights = [ls1, ls2]
+    traffic_light.stopLine = None
+    traffic_light.attributes = {}
+
+    # --- Mock lanelet map ---
+    mock_lanelet_map = MagicMock()
+    mock_lanelet_map.laneletLayer.get.return_value = MagicMock()
+
+    # Lanelet IDs 100,101 → road 0; 200,201 → road 1
+    # Both lanelets in each road carry the traffic light
+    road_to_lanelets = {0: [100, 101], 1: [200, 201]}
+    lanelet_to_road = {100: 0, 101: 0, 200: 1, 201: 1}
+    mapping = RoadLaneletMapping(
+        road_to_lanelets=road_to_lanelets, lanelet_to_road=lanelet_to_road
+    )
+
+    # Traffic light is attached to lanelets 100 and 200
+    traffic_light_map = {
+        5000: (traffic_light, [100, 200]),
+    }
+
+    # --- Mock roads ---
+    road0 = MagicMock()
+    road0.id = 0
+    road0.rule = TrafficRule.RHT
+    road0.get_lanelet_to_lane_mapping.return_value = {100: -1, 101: -2}
+    road0.get_half_width_at_s.return_value = -4.0
+    road0.get_elevation_at_s.return_value = 0.0
+
+    road1 = MagicMock()
+    road1.id = 1
+    road1.rule = TrafficRule.RHT
+    road1.get_lanelet_to_lane_mapping.return_value = {200: -1, 201: -2}
+    road1.get_half_width_at_s.return_value = -4.0
+    road1.get_elevation_at_s.return_value = 0.0
+
+    roads = [road0, road1]
+
+    with (
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+            return_value=traffic_light_map,
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
+            return_value=(10.0, -4.0),
+        ),
+    ):
+        result = SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=mock_lanelet_map,
+            road_lanelet_mapping=mapping,
+            roads=roads,
+        )
+
+    # 2 LineStrings × 2 roads = 4 signals
+    assert len(result.signals) == 4, f"Expected 4 signals, got {len(result.signals)}"
+
+    # 1 controller covering all 4 signals
+    assert len(result.controllers) == 1
+    assert len(result.controllers[0].controls) == 4
+
+    # All signals should have position_inertial set
+    for sig in result.signals:
+        assert sig.position_inertial is not None

@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 # Use --no-default-ignores to disable these defaults.
 DEFAULT_IGNORE_PATTERNS: list[str] = [
     r"attribute 'rule'",  # <road rule="RHT/LHT"> valid in 1.7, false positive on 1.4
+    r"Element 'positionInertial'",  # <positionInertial> deprecated in 1.8, false positive on 1.4
 ]
 
 SEVERITY_LABEL = {
