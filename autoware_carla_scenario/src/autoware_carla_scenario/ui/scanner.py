@@ -458,6 +458,13 @@ def load_scenario(
 
     raw_log = _read_raw_log(job_dir) if job_dir else ""
 
+    # Detect recorded video file in the job directory.
+    video_filename: str | None = None
+    if job_dir:
+        mp4_files = sorted(job_dir.glob("*.mp4"))
+        if mp4_files:
+            video_filename = mp4_files[0].name
+
     result = ScenarioResultView(
         passed=data.get("passed"),
         message=data.get("message", ""),
@@ -465,6 +472,7 @@ def load_scenario(
         condition_statuses=condition_statuses,
         overrides=overrides,
         raw_log=raw_log,
+        video_filename=video_filename,
     )
     _cache[cache_key] = result
     return result

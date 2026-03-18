@@ -52,6 +52,7 @@ class ScenarioResultView(BaseModel):
     condition_statuses: list[ConditionNode]
     overrides: list[str]
     raw_log: str = ""
+    video_filename: str | None = None
 
 
 class RunProgress(BaseModel):
