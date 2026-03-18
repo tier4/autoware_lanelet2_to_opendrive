@@ -11,6 +11,7 @@ from .conditions import BaseCondition
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
 from .entity._spawn import SpawnLocation
 from .entity.vehicle_entity import VehicleEntity, VehicleEntityConfig
+from .tick_snapshot import TickSnapshot
 
 if TYPE_CHECKING:
     import carla
@@ -214,6 +215,58 @@ class BaseScenario(ABC):
             condition: Condition to add to the fail-condition list.
         """
         self._fail_conditions.append(condition)
+
+    # ------------------------------------------------------------------
+    # Tick-phase execution
+    # ------------------------------------------------------------------
+
+    def _run_tick_phase(
+        self,
+        snapshot: TickSnapshot,
+        actions: List[BaseAction],
+        callbacks: List[Callable[["carla.World"], None]],
+    ) -> None:
+        """Execute one tick phase: run actions, then callbacks, then prune.
+
+        Completed one-shot actions (``once=True`` and ``done``) are removed
+        from the *actions* list after execution to avoid unnecessary
+        iteration on subsequent ticks.
+
+        Args:
+            snapshot: Immutable snapshot of the current tick state.
+            actions: The mutable list of :class:`BaseAction` for this phase.
+            callbacks: The list of plain callbacks for this phase.
+        """
+        for action in actions:
+            action.tick(snapshot)
+
+        for cb in callbacks:
+            cb(snapshot.world)
+
+        # Prune completed one-shot actions so they are not iterated again.
+        actions[:] = [a for a in actions if not (a._once and a._done)]
+
+    def run_pre_tick(self, snapshot: TickSnapshot) -> None:
+        """Execute all pre-tick actions and callbacks.
+
+        Called by :class:`ScenarioRunner` before ``world.tick()``.
+
+        Args:
+            snapshot: Immutable snapshot of the current tick state.
+        """
+        self._run_tick_phase(snapshot, self._pre_tick_actions, self._pre_tick_callbacks)
+
+    def run_post_tick(self, snapshot: TickSnapshot) -> None:
+        """Execute all post-tick actions and callbacks.
+
+        Called by :class:`ScenarioRunner` after ``world.tick()``.
+
+        Args:
+            snapshot: Immutable snapshot of the current tick state.
+        """
+        self._run_tick_phase(
+            snapshot, self._post_tick_actions, self._post_tick_callbacks
+        )
 
     # ------------------------------------------------------------------
     # Convenience helpers for common post-tick patterns

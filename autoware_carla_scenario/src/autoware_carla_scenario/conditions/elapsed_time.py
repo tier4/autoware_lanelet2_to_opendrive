@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
 from .comparison import ComparisonRule, ScalarComparisonRule
-
-if TYPE_CHECKING:
-    import carla
 
 
 class ElapsedTimeCondition(BaseCondition):
@@ -59,24 +57,23 @@ class ElapsedTimeCondition(BaseCondition):
         """The time threshold in seconds."""
         return self._comparison.value
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a success result if the elapsed time satisfies the rule.
 
         Args:
-            world: The CARLA world instance (unused).
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             ScenarioResult with passed=True if the condition is met, None otherwise.
         """
-        if self._comparison.satisfied(elapsed):
+        if self._comparison.satisfied(snapshot.elapsed):
             rule_text = self._comparison.rule.name.lower().replace("_", " ")
             return ScenarioResult(
                 passed=True,
                 message=(
-                    f"Elapsed time {elapsed:.2f}s {rule_text}"
+                    f"Elapsed time {snapshot.elapsed:.2f}s {rule_text}"
                     f" target duration {self.duration_seconds:.2f}s"
                 ),
-                elapsed_seconds=elapsed,
+                elapsed_seconds=snapshot.elapsed,
             )
         return None

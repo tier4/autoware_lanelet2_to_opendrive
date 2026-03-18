@@ -22,6 +22,7 @@ from .entity import EgoVehicle
 from .entity import vehicle_entity as _vehicle_entity_module
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
+from .tick_snapshot import TickSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -54,19 +55,17 @@ _CONDITION_LOG_INTERVAL: int = 20
 
 
 def _log_ego_opendrive_position(
-    world: "carla.World",
+    snapshot: TickSnapshot,
     scenario_name: str,
-    elapsed: float,
-    tick_count: int,
 ) -> None:
     """Log the ego vehicle's current OpenDRIVE road/lane position."""
-    ego = find_actor_by_role_name(world, EGO_ROLE_NAME)
+    ego = find_actor_by_role_name(snapshot.world, EGO_ROLE_NAME)
     if ego is None:
         logger.warning(
             "[%s] tick=%d t=%.2fs ego actor NOT FOUND (destroyed?)",
             scenario_name,
-            tick_count,
-            elapsed,
+            snapshot.tick_count,
+            snapshot.elapsed,
         )
         return
 
@@ -77,8 +76,8 @@ def _log_ego_opendrive_position(
             "[%s] tick=%d t=%.2fs ego CARLA(%.1f, %.1f, %.1f) -> "
             "OpenDRIVE road='%s' lane=%d s=%.1f",
             scenario_name,
-            tick_count,
-            elapsed,
+            snapshot.tick_count,
+            snapshot.elapsed,
             loc.x,
             loc.y,
             loc.z,
@@ -91,8 +90,8 @@ def _log_ego_opendrive_position(
             "[%s] tick=%d t=%.2fs ego at (%.1f, %.1f, %.1f) — "
             "failed to convert to OpenDRIVE: %s",
             scenario_name,
-            tick_count,
-            elapsed,
+            snapshot.tick_count,
+            snapshot.elapsed,
             loc.x,
             loc.y,
             loc.z,
@@ -104,8 +103,7 @@ def _build_condition_status(
     cond: "BaseCondition",
     index: int,
     role: str,
-    world: "carla.World",
-    elapsed: float,
+    snapshot: TickSnapshot,
 ) -> ConditionStatus:
     """Build a :class:`ConditionStatus` for a single condition.
 
@@ -113,10 +111,9 @@ def _build_condition_status(
         cond: The condition instance.
         index: Positional index within its role group (pass or fail).
         role: ``"pass"`` or ``"fail"``.
-        world: CARLA world.
-        elapsed: Elapsed time in seconds.
+        snapshot: Immutable snapshot of the current tick state.
     """
-    check = cond.check(world, elapsed)
+    check = cond.check(snapshot)
     cond_type = type(cond).__name__
     details = cond.get_details()
 
@@ -139,8 +136,7 @@ def _build_condition_status(
 
 def _collect_condition_statuses(
     scenario: "BaseScenario",
-    world: "carla.World",
-    elapsed: float,
+    snapshot: TickSnapshot,
     scenario_name: str,
 ) -> list[ConditionStatus]:
     """Snapshot current status of all pass and fail conditions.
@@ -152,7 +148,7 @@ def _collect_condition_statuses(
     statuses: list[ConditionStatus] = []
 
     for i, cond in enumerate(scenario._pass_conditions):
-        status = _build_condition_status(cond, i, "pass", world, elapsed)
+        status = _build_condition_status(cond, i, "pass", snapshot)
         if status.satisfied:
             logger.info(
                 "[%s]   %s: OK — %s", scenario_name, status.label, status.message
@@ -162,7 +158,7 @@ def _collect_condition_statuses(
         statuses.append(status)
 
     for i, cond in enumerate(scenario._fail_conditions):
-        status = _build_condition_status(cond, i, "fail", world, elapsed)
+        status = _build_condition_status(cond, i, "fail", snapshot)
         if status.satisfied:
             logger.info(
                 "[%s]   %s: TRIGGERED — %s",
@@ -396,39 +392,38 @@ class ScenarioRunner:
             logger.info("[%s] === Tick loop start ===", scenario_name)
             start_time = time.monotonic()
             tick_count = 0
+            prev_time = start_time
 
             # Tick loop
             while not scenario.is_done():
-                elapsed = time.monotonic() - start_time
+                now = time.monotonic()
+                elapsed = now - start_time
                 tick_count += 1
+                delta_time = now - prev_time
+                prev_time = now
 
-                # Pre-tick actions (receive elapsed)
-                for action in scenario._pre_tick_actions:
-                    action.tick(world, elapsed)
+                snapshot = TickSnapshot(
+                    world=world,
+                    elapsed=elapsed,
+                    tick_count=tick_count,
+                    delta_time=delta_time,
+                )
 
-                # Pre-tick callbacks
-                for cb in scenario._pre_tick_callbacks:
-                    cb(world)
+                # Pre-tick phase (actions + callbacks, with one-shot pruning)
+                scenario.run_pre_tick(snapshot)
 
                 world.tick()
 
-                # Post-tick actions (receive elapsed)
-                for action in scenario._post_tick_actions:
-                    action.tick(world, elapsed)
-
-                # Post-tick callbacks
-                for cb in scenario._post_tick_callbacks:
-                    cb(world)
+                # Post-tick phase (actions + callbacks, with one-shot pruning)
+                scenario.run_post_tick(snapshot)
 
                 # Periodic ego OpenDRIVE position log
                 if tick_count % _CONDITION_LOG_INTERVAL == 0:
-                    _log_ego_opendrive_position(
-                        world, scenario_name, elapsed, tick_count
-                    )
+                    _log_ego_opendrive_position(snapshot, scenario_name)
 
                 # Check pass conditions
                 for i, condition in enumerate(scenario._pass_conditions):
-                    check = condition.check(world, elapsed)
+                    check = condition.check(snapshot)
                     if check is not None:
                         logger.info(
                             "[%s] Pass condition [%d](%s) SATISFIED: %s",
@@ -442,7 +437,7 @@ class ScenarioRunner:
                             message=check.message,
                             elapsed_seconds=check.elapsed_seconds,
                             condition_statuses=_collect_condition_statuses(
-                                scenario, world, elapsed, scenario_name
+                                scenario, snapshot, scenario_name
                             ),
                         )
                         break
@@ -461,7 +456,7 @@ class ScenarioRunner:
 
                 # Check fail conditions
                 for i, condition in enumerate(scenario._fail_conditions):
-                    check = condition.check(world, elapsed)
+                    check = condition.check(snapshot)
                     if check is not None:
                         logger.info(
                             "[%s] Fail condition [%d](%s) TRIGGERED: %s",
@@ -475,7 +470,7 @@ class ScenarioRunner:
                             message=check.message,
                             elapsed_seconds=check.elapsed_seconds,
                             condition_statuses=_collect_condition_statuses(
-                                scenario, world, elapsed, scenario_name
+                                scenario, snapshot, scenario_name
                             ),
                         )
                         break

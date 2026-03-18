@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ...entity_role import EntityRole
 from ...kinematics import Vector3
+from ...tick_snapshot import TickSnapshot
 from ..base import ScenarioResult, find_actor_in_list
 from ..comparison import ComparisonRule, ScalarComparisonRule
 from .base import CompositionCondition
@@ -168,19 +169,18 @@ class SpeedCondition(CompositionCondition):
         left_unit = Vector3(fwd_unit.y, -fwd_unit.x, 0.0)
         return vel.dot(left_unit)
 
-    def _check(self, world: carla.World, elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a pass result if the entity's speed satisfies the rule.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=True`` if the speed
             condition is met, ``None`` otherwise.
         """
         assert self._entity_name is not None
-        actors: list[carla.Actor] = world.get_actors()
+        actors: list[carla.Actor] = snapshot.world.get_actors()
         entity = find_actor_in_list(actors, self._entity_name)
         if entity is None:
             return None
@@ -199,7 +199,7 @@ class SpeedCondition(CompositionCondition):
                     f" ({speed_component:.2f} m/s)"
                     f" {rule_text} {self._comparison.value:.2f} m/s"
                 ),
-                elapsed_seconds=elapsed,
+                elapsed_seconds=snapshot.elapsed,
             )
 
         return None

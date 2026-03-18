@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 from ...coordinate.poses import CarlaWorldPose
 from ...coordinate.transform import project_onto_road, to_opendrive
 from ...entity_role import EntityRole
+from ...tick_snapshot import TickSnapshot
 from ..base import ScenarioResult, find_actor_by_role_name
 from ..comparison import ScalarComparisonRule
 from .base import CompositionCondition
 
 if TYPE_CHECKING:
-    import carla
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -85,22 +86,21 @@ class EntityLanePositionCondition(CompositionCondition):
         )
         return details
 
-    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a pass result if the named entity is on the specified road and lane.
 
         The entity is guaranteed to exist by the
         :class:`EntityExistenceCondition` guard.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=True`` if the entity is on the
             specified road and lane and all rules are satisfied, ``None`` otherwise.
         """
         assert self._entity_name is not None
-        entity = find_actor_by_role_name(world, self._entity_name)
+        entity = find_actor_by_role_name(snapshot.world, self._entity_name)
         if entity is None:
             return None
 
@@ -122,7 +122,7 @@ class EntityLanePositionCondition(CompositionCondition):
                 loc.x,
                 loc.y,
                 loc.z,
-                elapsed,
+                snapshot.elapsed,
             )
             return None
 
@@ -134,7 +134,7 @@ class EntityLanePositionCondition(CompositionCondition):
                 od_pose.road_id,
                 od_pose.lane_id,
                 self._lane_id,
-                elapsed,
+                snapshot.elapsed,
             )
             return None
 
@@ -157,14 +157,15 @@ class EntityLanePositionCondition(CompositionCondition):
                     rule.rule.name,
                     rule.value,
                     actual,
-                    elapsed,
+                    snapshot.elapsed,
                 )
                 return None
 
         lane_desc = "(any lane)" if self._lane_id is None else f"lane {self._lane_id}"
         msg = (
             f"Entity '{self._entity_name}' is on road '{self._road_id}'"
-            f" {lane_desc} (s={od_pose.s:.2f}, t={od_pose.t:.2f}) at {elapsed:.2f}s"
+            f" {lane_desc} (s={od_pose.s:.2f}, t={od_pose.t:.2f})"
+            f" at {snapshot.elapsed:.2f}s"
         )
         logger.info(
             "EntityLanePositionCondition: MATCHED — '%s' on road='%s' %s"
@@ -179,5 +180,5 @@ class EntityLanePositionCondition(CompositionCondition):
         return ScenarioResult(
             passed=True,
             message=msg,
-            elapsed_seconds=elapsed,
+            elapsed_seconds=snapshot.elapsed,
         )

@@ -16,10 +16,11 @@ import numpy as np
 from ...coordinate.map_manager import MapManager
 from ...coordinate.poses import AnyPose, OpenDrivePose
 from ...coordinate.transform import to_opendrive
+from ...entity_role import EntityRole
+from ...tick_snapshot import TickSnapshot
 from ..and_condition import AndCondition
 from ..base import BaseCondition, ScenarioResult
 from ..comparison import ComparisonRule, ScalarComparisonRule
-from ...entity_role import EntityRole
 from ..or_condition import OrCondition
 from ..persistent import PersistentCondition
 from .base import CompositionCondition
@@ -27,7 +28,7 @@ from .entity_lane_position import EntityLanePositionCondition
 from .speed import SpeedCondition
 
 if TYPE_CHECKING:
-    import carla
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +295,7 @@ class TemporaryStopCondition(CompositionCondition):
             return pose
         return to_opendrive(pose)
 
-    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a pass result once the child condition fires.
 
         The entity is guaranteed to exist by the
@@ -303,8 +304,7 @@ class TemporaryStopCondition(CompositionCondition):
         when this method is called.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=True``.
@@ -313,7 +313,7 @@ class TemporaryStopCondition(CompositionCondition):
             passed=True,
             message=(
                 f"Entity '{self._entity_name}' has temporarily stopped"
-                f" at a target position at {elapsed:.2f}s"
+                f" at a target position at {snapshot.elapsed:.2f}s"
             ),
-            elapsed_seconds=elapsed,
+            elapsed_seconds=snapshot.elapsed,
         )

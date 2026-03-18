@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 
 from ..conditions import BaseCondition
 from ..conditions.always_true import AlwaysTrueCondition
+from ..tick_snapshot import TickSnapshot
 
 if TYPE_CHECKING:
     import carla
@@ -82,25 +83,26 @@ class BaseAction(ABC):
         """
         ...
 
-    def tick(self, world: "carla.World", elapsed: float) -> None:
+    def tick(self, snapshot: TickSnapshot) -> None:
         """Evaluate the condition and, if met, run :meth:`execute`.
 
-        Called by the scenario runner's tick loop with the current elapsed
-        time so that time-based conditions work correctly.
+        Called by the scenario runner's tick loop with an immutable
+        snapshot so that time-based conditions work correctly.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Seconds elapsed since the tick loop started.
+            snapshot: Immutable snapshot of the current tick state,
+                containing the CARLA world, elapsed time, tick count, and
+                delta time.
         """
         if self._once and self._done:
             return
 
-        result = self._condition.check(world, elapsed)
+        result = self._condition.check(snapshot)
         if result is not None:
             logger.info(
                 "%s triggered: %s",
                 type(self).__name__,
                 result.message,
             )
-            self.execute(world)
+            self.execute(snapshot.world)
             self._done = True

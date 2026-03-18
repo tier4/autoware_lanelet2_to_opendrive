@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 
 class PersistentCondition(BaseCondition):
@@ -45,32 +43,31 @@ class PersistentCondition(BaseCondition):
             "child": self._condition.to_summary_dict(),
         }
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a pass result when the child has been passing for *duration* seconds.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=True`` if the child has been
             continuously passing for at least *duration* seconds, ``None``
             otherwise.
         """
-        result = self._condition.check(world, elapsed)
+        result = self._condition.check(snapshot)
 
         if result is not None and result.passed:
             if self._true_start is None:
-                self._true_start = elapsed
-            if elapsed - self._true_start >= self._duration:
+                self._true_start = snapshot.elapsed
+            if snapshot.elapsed - self._true_start >= self._duration:
                 return ScenarioResult(
                     passed=True,
                     message=(
                         f"Child condition passed continuously for"
-                        f" {elapsed - self._true_start:.2f}s"
+                        f" {snapshot.elapsed - self._true_start:.2f}s"
                         f" (threshold: {self._duration}s)"
                     ),
-                    elapsed_seconds=elapsed,
+                    elapsed_seconds=snapshot.elapsed,
                 )
             return None
 

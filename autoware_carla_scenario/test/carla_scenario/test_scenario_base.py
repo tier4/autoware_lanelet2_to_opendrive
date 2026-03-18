@@ -14,7 +14,28 @@ from autoware_carla_scenario import (
     EgoConfig,
     ScenarioResult,
     SpawnTransform,
+    TickSnapshot,
 )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _snap(
+    world: object,
+    elapsed: float = 0.0,
+    tick_count: int = 1,
+    delta_time: float = 0.05,
+) -> TickSnapshot:
+    """Create a TickSnapshot for testing."""
+    return TickSnapshot(
+        world=world,
+        elapsed=elapsed,
+        tick_count=tick_count,
+        delta_time=delta_time,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -45,20 +66,15 @@ class _CountingCondition(BaseCondition):
         self.passed = passed
         self.call_count = 0
 
-    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         self.call_count += 1
         if self.call_count >= self.trigger_after:
             return ScenarioResult(
                 passed=self.passed,
                 message="triggered",
-                elapsed_seconds=elapsed,
+                elapsed_seconds=snapshot.elapsed,
             )
         return None
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_ego_config() -> EgoConfig:
@@ -128,9 +144,9 @@ class TestBaseScenario:
     def test_counting_condition_triggers_after_n_calls(self) -> None:
         cond = _CountingCondition(trigger_after=3, passed=True)
         world = MagicMock()
-        assert cond.check(world, 0.0) is None
-        assert cond.check(world, 0.5) is None
-        result = cond.check(world, 1.0)
+        assert cond.check(_snap(world, 0.0)) is None
+        assert cond.check(_snap(world, 0.5)) is None
+        result = cond.check(_snap(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -166,7 +182,7 @@ class TestBaseScenario:
         condition = _ElapsedRecordingCondition()
         action = _NoOpAction(condition=condition)
         world = MagicMock()
-        action.tick(world, 5.0)
+        action.tick(_snap(world, 5.0))
         assert condition.last_elapsed == 5.0
 
 
@@ -193,6 +209,6 @@ class _ElapsedRecordingCondition(BaseCondition):
         super().__init__(label="elapsed_recorder")
         self.last_elapsed: Optional[float] = None
 
-    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
-        self.last_elapsed = elapsed
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
+        self.last_elapsed = snapshot.elapsed
         return None

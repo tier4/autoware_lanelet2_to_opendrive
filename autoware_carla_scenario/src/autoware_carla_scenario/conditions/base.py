@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ..entity_role import EntityRole
+from ..tick_snapshot import TickSnapshot
 
 if TYPE_CHECKING:
     import carla
@@ -122,12 +123,13 @@ class BaseCondition(ABC):
         self.label = label
 
     @abstractmethod
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Check the condition.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state,
+                containing the CARLA world, elapsed time, tick count, and
+                delta time.
 
         Returns:
             A ScenarioResult if the condition is met, None otherwise.

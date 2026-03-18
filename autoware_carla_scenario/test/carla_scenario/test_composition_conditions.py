@@ -22,6 +22,24 @@ from autoware_carla_scenario.coordinate.poses import (
     Lanelet2Pose,
     OpenDrivePose,
 )
+from autoware_carla_scenario.tick_snapshot import TickSnapshot
+
+
+# ---------------------------------------------------------------------------
+# Test helper utilities
+# ---------------------------------------------------------------------------
+
+
+def _snap(
+    world: object,
+    elapsed: float = 0.0,
+    tick_count: int = 1,
+    delta_time: float = 0.05,
+) -> TickSnapshot:
+    """Create a TickSnapshot for tests."""
+    return TickSnapshot(
+        world=world, elapsed=elapsed, tick_count=tick_count, delta_time=delta_time
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -35,9 +53,9 @@ class AlwaysPassCondition(BaseCondition):
     def __init__(self) -> None:
         super().__init__(label="always_pass")
 
-    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         return ScenarioResult(
-            passed=True, message="Always passes", elapsed_seconds=elapsed
+            passed=True, message="Always passes", elapsed_seconds=snapshot.elapsed
         )
 
 
@@ -47,7 +65,7 @@ class AlwaysNoneCondition(BaseCondition):
     def __init__(self) -> None:
         super().__init__(label="always_none")
 
-    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         return None
 
 
@@ -57,9 +75,9 @@ class AlwaysFailCondition(BaseCondition):
     def __init__(self) -> None:
         super().__init__(label="always_fail")
 
-    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         return ScenarioResult(
-            passed=False, message="Always fails", elapsed_seconds=elapsed
+            passed=False, message="Always fails", elapsed_seconds=snapshot.elapsed
         )
 
 
@@ -71,7 +89,7 @@ class ToggleCondition(BaseCondition):
         self._results = results
         self._index = 0
 
-    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         if self._index >= len(self._results):
             return None
         val = self._results[self._index]
@@ -79,7 +97,7 @@ class ToggleCondition(BaseCondition):
         if val is None:
             return None
         return ScenarioResult(
-            passed=val, message=f"Toggle: {val}", elapsed_seconds=elapsed
+            passed=val, message=f"Toggle: {val}", elapsed_seconds=snapshot.elapsed
         )
 
 
@@ -124,14 +142,14 @@ class TestPersistentCondition:
     def test_returns_none_before_duration(self) -> None:
         cond = PersistentCondition(AlwaysPassCondition(), duration=3.0)
         world = MagicMock()
-        assert cond.check(world, elapsed=0.0) is None
-        assert cond.check(world, elapsed=2.9) is None
+        assert cond.check(_snap(world, 0.0)) is None
+        assert cond.check(_snap(world, 2.9)) is None
 
     def test_returns_pass_at_duration(self) -> None:
         cond = PersistentCondition(AlwaysPassCondition(), duration=3.0)
         world = MagicMock()
-        cond.check(world, elapsed=0.0)
-        result = cond.check(world, elapsed=3.0)
+        cond.check(_snap(world, 0.0))
+        result = cond.check(_snap(world, 3.0))
         assert result is not None
         assert result.passed is True
         assert result.elapsed_seconds == pytest.approx(3.0)
@@ -139,8 +157,8 @@ class TestPersistentCondition:
     def test_returns_pass_beyond_duration(self) -> None:
         cond = PersistentCondition(AlwaysPassCondition(), duration=2.0)
         world = MagicMock()
-        cond.check(world, elapsed=0.0)
-        result = cond.check(world, elapsed=5.0)
+        cond.check(_snap(world, 0.0))
+        result = cond.check(_snap(world, 5.0))
         assert result is not None
         assert result.passed is True
 
@@ -151,11 +169,11 @@ class TestPersistentCondition:
         cond = PersistentCondition(toggle, duration=1.5)
         world = MagicMock()
 
-        cond.check(world, elapsed=0.0)  # True → start timer
-        assert cond.check(world, elapsed=1.0) is None  # True, 1.0s < 1.5s
-        cond.check(world, elapsed=1.2)  # None → reset
-        cond.check(world, elapsed=2.0)  # True → restart timer
-        assert cond.check(world, elapsed=3.0) is None  # True, but only 1.0s
+        cond.check(_snap(world, 0.0))  # True → start timer
+        assert cond.check(_snap(world, 1.0)) is None  # True, 1.0s < 1.5s
+        cond.check(_snap(world, 1.2))  # None → reset
+        cond.check(_snap(world, 2.0))  # True → restart timer
+        assert cond.check(_snap(world, 3.0)) is None  # True, but only 1.0s
 
     def test_timer_resets_on_fail(self) -> None:
         """Timer resets when child returns passed=False."""
@@ -163,10 +181,10 @@ class TestPersistentCondition:
         cond = PersistentCondition(toggle, duration=1.0)
         world = MagicMock()
 
-        cond.check(world, elapsed=0.0)  # True → start
-        cond.check(world, elapsed=0.5)  # False → reset
-        cond.check(world, elapsed=1.0)  # True → restart
-        assert cond.check(world, elapsed=1.5) is None  # True, only 0.5s since restart
+        cond.check(_snap(world, 0.0))  # True → start
+        cond.check(_snap(world, 0.5))  # False → reset
+        cond.check(_snap(world, 1.0))  # True → restart
+        assert cond.check(_snap(world, 1.5)) is None  # True, only 0.5s since restart
 
     def test_invalid_duration_raises(self) -> None:
         with pytest.raises(ValueError, match="duration must be positive"):
@@ -178,21 +196,21 @@ class TestPersistentCondition:
         """Always returns None when child never triggers."""
         cond = PersistentCondition(AlwaysNoneCondition(), duration=1.0)
         world = MagicMock()
-        assert cond.check(world, elapsed=0.0) is None
-        assert cond.check(world, elapsed=100.0) is None
+        assert cond.check(_snap(world, 0.0)) is None
+        assert cond.check(_snap(world, 100.0)) is None
 
     def test_child_always_fails(self) -> None:
         """Always returns None when child always fails."""
         cond = PersistentCondition(AlwaysFailCondition(), duration=1.0)
         world = MagicMock()
-        assert cond.check(world, elapsed=0.0) is None
-        assert cond.check(world, elapsed=100.0) is None
+        assert cond.check(_snap(world, 0.0)) is None
+        assert cond.check(_snap(world, 100.0)) is None
 
     def test_message_contains_duration_info(self) -> None:
         cond = PersistentCondition(AlwaysPassCondition(), duration=2.0)
         world = MagicMock()
-        cond.check(world, elapsed=0.0)
-        result = cond.check(world, elapsed=2.0)
+        cond.check(_snap(world, 0.0))
+        result = cond.check(_snap(world, 2.0))
         assert result is not None
         assert "2.00s" in result.message
 
@@ -201,8 +219,8 @@ class TestPersistentCondition:
         inner = AndCondition([AlwaysPassCondition(), AlwaysPassCondition()])
         cond = PersistentCondition(inner, duration=1.0)
         world = MagicMock()
-        cond.check(world, elapsed=0.0)
-        result = cond.check(world, elapsed=1.0)
+        cond.check(_snap(world, 0.0))
+        result = cond.check(_snap(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -222,14 +240,14 @@ class TestStandstillConditionComposition:
     def test_returns_none_before_duration(self) -> None:
         condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
-        assert condition.check(world, elapsed=0.0) is None
-        assert condition.check(world, elapsed=2.9) is None
+        assert condition.check(_snap(world, 0.0)) is None
+        assert condition.check(_snap(world, 2.9)) is None
 
     def test_returns_pass_after_duration(self) -> None:
         condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
-        condition.check(world, elapsed=0.0)
-        result = condition.check(world, elapsed=3.0)
+        condition.check(_snap(world, 0.0))
+        result = condition.check(_snap(world, 3.0))
         assert result is not None
         assert result.passed is True
 
@@ -239,16 +257,16 @@ class TestStandstillConditionComposition:
         world_move = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
 
         # Stand still from t=0 to t=1
-        condition.check(world_stop, elapsed=0.0)
-        assert condition.check(world_stop, elapsed=1.0) is None
+        condition.check(_snap(world_stop, 0.0))
+        assert condition.check(_snap(world_stop, 1.0)) is None
 
         # Start moving at t=1.5 → timer resets
-        assert condition.check(world_move, elapsed=1.5) is None
+        assert condition.check(_snap(world_move, 1.5)) is None
 
         # Stand still again from t=2
-        condition.check(world_stop, elapsed=2.0)
-        assert condition.check(world_stop, elapsed=3.0) is None  # only 1s
-        result = condition.check(world_stop, elapsed=4.0)  # 2s standstill
+        condition.check(_snap(world_stop, 2.0))
+        assert condition.check(_snap(world_stop, 3.0)) is None  # only 1s
+        result = condition.check(_snap(world_stop, 4.0))  # 2s standstill
         assert result is not None
         assert result.passed is True
 
@@ -258,8 +276,8 @@ class TestStandstillConditionComposition:
         )
         # Speed = sqrt(0.3^2 + 0.3^2) ~ 0.42 < 0.5
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.3, vy=0.3)
-        condition.check(world, elapsed=0.0)
-        result = condition.check(world, elapsed=1.0)
+        condition.check(_snap(world, 0.0))
+        result = condition.check(_snap(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -268,13 +286,13 @@ class TestStandstillConditionComposition:
             "ego", duration=1.0, speed_threshold=0.1, label="test_standstill"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=0.0)
-        condition.check(world, elapsed=0.0)
-        assert condition.check(world, elapsed=5.0) is None
+        condition.check(_snap(world, 0.0))
+        assert condition.check(_snap(world, 5.0)) is None
 
     def test_entity_not_found_returns_none(self) -> None:
         condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("other", 0.0, 0.0, vx=0.0, vy=0.0)
-        assert condition.check(world, elapsed=0.0) is None
+        assert condition.check(_snap(world, 0.0)) is None
 
     def test_invalid_duration_raises(self) -> None:
         with pytest.raises(ValueError, match="duration must be positive"):
@@ -291,8 +309,8 @@ class TestStandstillConditionComposition:
     def test_elapsed_seconds_in_result(self) -> None:
         condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
-        condition.check(world, elapsed=10.0)
-        result = condition.check(world, elapsed=11.0)
+        condition.check(_snap(world, 10.0))
+        result = condition.check(_snap(world, 11.0))
         assert result is not None
         assert result.elapsed_seconds == pytest.approx(11.0)
 

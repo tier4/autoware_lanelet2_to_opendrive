@@ -9,7 +9,7 @@ scenario:
 ego:
   initial_speed_kmh: 0.0
   spawn_lanelet_id: 242
-  spawn_s: 15.0
+  spawn_s: 20.1
 
 sweep:
   constraints:
@@ -28,10 +28,6 @@ sweep:
             constraints:
               - type: equals
                 value: 3002161
-              - type: equals
-                value: 9
-              - type: equals
-                value: 6
   bindings:
     ego.spawn_s:
       type: stop_line_offset

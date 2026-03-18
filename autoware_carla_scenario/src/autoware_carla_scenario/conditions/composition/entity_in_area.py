@@ -10,11 +10,12 @@ import numpy as np
 from ...coordinate.poses import AnyPose, CarlaWorldPose
 from ...coordinate.transform import to_carla_world
 from ...entity_role import EntityRole
+from ...tick_snapshot import TickSnapshot
 from ..base import ScenarioResult, find_actor_by_role_name
 from .base import CompositionCondition
 
 if TYPE_CHECKING:
-    import carla
+    pass
 
 
 def _point_in_polygon_2d(
@@ -102,15 +103,14 @@ class EntityInAreaCondition(CompositionCondition):
                 result.append(to_carla_world(pose))
         return result
 
-    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a pass result if the named entity is inside the polygon area.
 
         The entity is guaranteed to exist by the
         :class:`EntityExistenceCondition` guard.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=True`` if the entity is inside
@@ -119,7 +119,7 @@ class EntityInAreaCondition(CompositionCondition):
         carla_polygon = self._resolve_polygon()
 
         assert self._entity_name is not None
-        entity = find_actor_by_role_name(world, self._entity_name)
+        entity = find_actor_by_role_name(snapshot.world, self._entity_name)
         if entity is None:
             return None
 
@@ -129,8 +129,8 @@ class EntityInAreaCondition(CompositionCondition):
                 passed=True,
                 message=(
                     f"Entity '{self._entity_name}' is inside the designated area"
-                    f" at {elapsed:.2f}s"
+                    f" at {snapshot.elapsed:.2f}s"
                 ),
-                elapsed_seconds=elapsed,
+                elapsed_seconds=snapshot.elapsed,
             )
         return None

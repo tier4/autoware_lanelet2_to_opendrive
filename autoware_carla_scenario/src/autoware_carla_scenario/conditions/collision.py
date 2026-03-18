@@ -7,6 +7,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..constants import EGO_ROLE_NAME
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
 
 if TYPE_CHECKING:
@@ -67,6 +68,10 @@ class CollisionCondition(BaseCondition):
         Rate-limited by ``_ATTACH_RETRY_INTERVAL`` to avoid calling the
         expensive ``world.get_actors()`` API on every tick during startup.
         Returns without doing anything if the ego is not yet available.
+
+        Args:
+            world: The CARLA world instance.
+            elapsed: Elapsed time in seconds (used for rate-limiting).
         """
         if elapsed - self._last_attach_attempt < self._ATTACH_RETRY_INTERVAL:
             return
@@ -87,12 +92,11 @@ class CollisionCondition(BaseCondition):
         self._sensor = world.spawn_actor(sensor_bp, _carla.Transform(), attach_to=ego)
         self._sensor.listen(self._on_collision)
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a failure result if the ego vehicle has collided.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             ScenarioResult with passed=False if a collision occurred, None otherwise.
@@ -102,15 +106,15 @@ class CollisionCondition(BaseCondition):
             return self._cached_result
 
         if self._sensor is None:
-            self._try_attach_sensor(world, elapsed)
+            self._try_attach_sensor(snapshot.world, snapshot.elapsed)
 
         with self._lock:
             if self._collided:
                 other = self._other_type_id or "unknown"
                 self._cached_result = ScenarioResult(
                     passed=False,
-                    message=f"Ego vehicle collided with '{other}' at {elapsed:.2f}s",
-                    elapsed_seconds=elapsed,
+                    message=f"Ego vehicle collided with '{other}' at {snapshot.elapsed:.2f}s",
+                    elapsed_seconds=snapshot.elapsed,
                 )
                 # Stop the listener — no further callbacks are needed.
                 if self._sensor is not None:

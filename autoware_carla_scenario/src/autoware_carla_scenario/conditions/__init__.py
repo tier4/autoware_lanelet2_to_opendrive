@@ -1,5 +1,6 @@
 """Scenario pass/fail conditions for CARLA scenario testing."""
 
+from ..tick_snapshot import TickSnapshot
 from .always_true import AlwaysTrueCondition
 from .and_condition import AndCondition
 from .base import (
@@ -50,6 +51,7 @@ __all__ = [
     "StandstillCondition",
     "StickyCondition",
     "TemporaryStopCondition",
+    "TickSnapshot",
     "TimeoutCondition",
     "find_actor_by_role_name",
     "find_actor_in_list",

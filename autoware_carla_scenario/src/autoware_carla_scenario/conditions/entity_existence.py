@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import Any, Optional, Union
 
 from ..entity_role import EntityRole
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult, find_actor_by_role_name
-
-if TYPE_CHECKING:
-    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -38,32 +36,32 @@ class EntityExistenceCondition(BaseCondition):
     def get_details(self) -> dict[str, Any]:
         return {"entity_name": str(self._entity_name)}
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a fail result if the actor does not exist.
 
         The condition triggers immediately whenever the actor cannot be found,
         including before it has ever been spawned.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=False`` if the actor
             is not found, ``None`` otherwise.
         """
-        actor = find_actor_by_role_name(world, self._entity_name)
+        actor = find_actor_by_role_name(snapshot.world, self._entity_name)
 
         if actor is not None:
             return None
 
         msg = (
-            f"Actor '{self._entity_name}' not found in the world " f"at {elapsed:.2f}s"
+            f"Actor '{self._entity_name}' not found in the world "
+            f"at {snapshot.elapsed:.2f}s"
         )
         logger.error(msg)
 
         return ScenarioResult(
             passed=False,
             message=msg,
-            elapsed_seconds=elapsed,
+            elapsed_seconds=snapshot.elapsed,
         )

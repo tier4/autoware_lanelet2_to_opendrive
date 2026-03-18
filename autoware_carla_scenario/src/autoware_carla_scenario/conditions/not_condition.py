@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 
 class NotCondition(BaseCondition):
@@ -31,18 +29,17 @@ class NotCondition(BaseCondition):
             "child": self._condition.to_summary_dict(),
         }
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Check the child condition and invert the result.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with inverted ``passed`` flag, or
             ``None`` if the child is still pending.
         """
-        result = self._condition.check(world, elapsed)
+        result = self._condition.check(snapshot)
         if result is None:
             return None
         return ScenarioResult(

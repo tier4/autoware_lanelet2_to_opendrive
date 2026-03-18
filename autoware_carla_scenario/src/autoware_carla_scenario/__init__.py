@@ -31,6 +31,7 @@ Public API re-exported for convenience::
         OpenDrivePose,
         ScenarioQueue,
         ScenarioResult,
+        TickSnapshot,
         TimeoutCondition,
         to_carla_location,
         to_carla_world,
@@ -91,6 +92,7 @@ from .conditions import (
     StandstillCondition,
     StickyCondition,
     TemporaryStopCondition,
+    TickSnapshot,
     TimeoutCondition,
     find_actor_by_role_name,
 )
@@ -169,6 +171,7 @@ __all__ = [
     "StandstillCondition",
     "StickyCondition",
     "TemporaryStopCondition",
+    "TickSnapshot",
     "EgoConfig",
     "EgoVehicle",
     "SpawnLocation",

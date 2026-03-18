@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +45,11 @@ class StickyCondition(BaseCondition):
             "child": self._condition.to_summary_dict(),
         }
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return the latched result if available, otherwise delegate to the child.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             The latched :class:`ScenarioResult` if the child previously passed,
@@ -61,7 +58,7 @@ class StickyCondition(BaseCondition):
         if self._latched_result is not None:
             return self._latched_result
 
-        result = self._condition.check(world, elapsed)
+        result = self._condition.check(snapshot)
         if result is not None and result.passed:
             self._latched_result = result
             logger.info(

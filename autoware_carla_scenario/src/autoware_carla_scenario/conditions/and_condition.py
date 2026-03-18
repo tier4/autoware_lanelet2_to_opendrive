@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 
 class AndCondition(BaseCondition):
@@ -38,12 +36,11 @@ class AndCondition(BaseCondition):
             "children": [c.to_summary_dict() for c in self._conditions],
         }
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Check all child conditions with AND logic.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=False`` if any child fails,
@@ -52,7 +49,7 @@ class AndCondition(BaseCondition):
         """
         messages: List[str] = []
         for condition in self._conditions:
-            result = condition.check(world, elapsed)
+            result = condition.check(snapshot)
             if result is None:
                 return None
             if not result.passed:
@@ -61,5 +58,5 @@ class AndCondition(BaseCondition):
         return ScenarioResult(
             passed=True,
             message=" AND ".join(messages),
-            elapsed_seconds=elapsed,
+            elapsed_seconds=snapshot.elapsed,
         )

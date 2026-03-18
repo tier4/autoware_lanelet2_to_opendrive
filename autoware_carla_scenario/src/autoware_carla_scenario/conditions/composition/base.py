@@ -6,11 +6,12 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from ...entity_role import EntityRole
+from ...tick_snapshot import TickSnapshot
 from ..base import BaseCondition, ScenarioResult
 from ..entity_existence import EntityExistenceCondition
 
 if TYPE_CHECKING:
-    import carla
+    pass
 
 
 class CompositionCondition(BaseCondition):
@@ -66,26 +67,26 @@ class CompositionCondition(BaseCondition):
             details["child"] = self._child.to_summary_dict()
         return details
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Evaluate entity existence, then child, then delegate to :meth:`_check`.
 
         Returns ``None`` immediately when the entity is absent or the
         child exists but has not yet fired.
         """
         if self._entity_existence is not None:
-            existence_result = self._entity_existence.check(world, elapsed)
+            existence_result = self._entity_existence.check(snapshot)
             if existence_result is not None:
                 # Entity is absent — cannot evaluate further.
                 return None
 
         if self._child is not None:
-            result = self._child.check(world, elapsed)
+            result = self._child.check(snapshot)
             if result is None or not result.passed:
                 return None
 
-        return self._check(world, elapsed)
+        return self._check(snapshot)
 
     @abstractmethod
-    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Subclass-specific check logic, called after all guards pass."""
         ...

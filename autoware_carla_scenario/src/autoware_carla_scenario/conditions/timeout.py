@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 
 class TimeoutCondition(BaseCondition):
@@ -26,20 +24,19 @@ class TimeoutCondition(BaseCondition):
     def get_details(self) -> dict[str, Any]:
         return {"timeout_seconds": self.timeout_seconds}
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a failure result if elapsed time exceeds the timeout.
 
         Args:
-            world: The CARLA world instance (unused).
-            elapsed: Elapsed time in seconds.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             ScenarioResult with passed=False if timed out, None otherwise.
         """
-        if elapsed >= self.timeout_seconds:
+        if snapshot.elapsed >= self.timeout_seconds:
             return ScenarioResult(
                 passed=False,
-                message=f"Timeout after {elapsed:.2f}s (limit: {self.timeout_seconds}s)",
-                elapsed_seconds=elapsed,
+                message=f"Timeout after {snapshot.elapsed:.2f}s (limit: {self.timeout_seconds}s)",
+                elapsed_seconds=snapshot.elapsed,
             )
         return None

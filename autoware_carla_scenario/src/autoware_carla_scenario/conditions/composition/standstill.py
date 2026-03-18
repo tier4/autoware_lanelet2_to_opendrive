@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import Any, Optional, Union
 
 from ...entity_role import EntityRole
+from ...tick_snapshot import TickSnapshot
 from ..base import ScenarioResult
 from ..comparison import ComparisonRule
 from ..persistent import PersistentCondition
 from .base import CompositionCondition
 from .speed import SpeedCondition
-
-if TYPE_CHECKING:
-    import carla
 
 
 class StandstillCondition(CompositionCondition):
@@ -70,7 +68,7 @@ class StandstillCondition(CompositionCondition):
         )
         return details
 
-    def _check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def _check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Return a pass result once the child :class:`PersistentCondition` fires.
 
         The entity is guaranteed to exist by the
@@ -79,8 +77,7 @@ class StandstillCondition(CompositionCondition):
         this method is called.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             :class:`ScenarioResult` with ``passed=True``.
@@ -92,5 +89,5 @@ class StandstillCondition(CompositionCondition):
                 f" for {self._duration:.2f}s"
                 f" (speed threshold: {self._speed_threshold} m/s)"
             ),
-            elapsed_seconds=elapsed,
+            elapsed_seconds=snapshot.elapsed,
         )

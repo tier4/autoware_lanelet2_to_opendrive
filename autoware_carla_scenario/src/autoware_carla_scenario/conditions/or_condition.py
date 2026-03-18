@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from typing import Any, Optional, Sequence
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 
 class OrCondition(BaseCondition):
@@ -37,19 +35,18 @@ class OrCondition(BaseCondition):
             "children": [c.to_summary_dict() for c in self._conditions],
         }
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Check child conditions with OR logic.
 
         Args:
-            world: The CARLA world instance.
-            elapsed: Elapsed time in seconds since the scenario started.
+            snapshot: Immutable snapshot of the current tick state.
 
         Returns:
             The first non-``None`` :class:`ScenarioResult` from any child,
             or ``None`` if all children are still pending.
         """
         for condition in self._conditions:
-            result = condition.check(world, elapsed)
+            result = condition.check(snapshot)
             if result is not None:
                 return result
         return None

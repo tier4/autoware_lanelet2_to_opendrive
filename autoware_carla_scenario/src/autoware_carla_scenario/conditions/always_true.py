@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
+from ..tick_snapshot import TickSnapshot
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 
 class AlwaysTrueCondition(BaseCondition):
@@ -20,10 +18,10 @@ class AlwaysTrueCondition(BaseCondition):
     def __init__(self, *, label: str = "always_true") -> None:
         super().__init__(label=label)
 
-    def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
         """Always returns a passing :class:`ScenarioResult`."""
         return ScenarioResult(
             passed=True,
             message="AlwaysTrueCondition",
-            elapsed_seconds=elapsed,
+            elapsed_seconds=snapshot.elapsed,
         )
