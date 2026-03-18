@@ -20,8 +20,12 @@ sweep:
             constraints:
               - type: has_traffic_light_stop_line
               - type: is_junction
+          - type: not
+            constraint:
+              type: in_set
+              values: ${map.no_3d_model_lanelet_ids}
           - type: equals
-            value: 178
+            value: 3002161
   bindings:
     ego.spawn_s:
       type: stop_line_offset

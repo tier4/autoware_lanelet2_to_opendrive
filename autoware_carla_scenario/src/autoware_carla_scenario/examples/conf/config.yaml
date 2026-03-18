@@ -17,6 +17,7 @@ map:
   name: ???
   xodr_path: null
   lanelet2_path: null
+  no_3d_model_lanelet_ids: []
 
 ego:
   vehicle_type: vehicle.mini.cooper

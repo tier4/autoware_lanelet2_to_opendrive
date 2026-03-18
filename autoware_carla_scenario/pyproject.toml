@@ -32,3 +32,4 @@ packages = [
 
 [project.scripts]
 scenario = "autoware_carla_scenario.examples.run:main"
+detect-no-3d-model = "autoware_carla_scenario.tools.detect_no_3d_model_lanelets:main"
