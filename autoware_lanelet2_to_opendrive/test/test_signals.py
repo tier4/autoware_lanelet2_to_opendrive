@@ -4,6 +4,7 @@ import lxml.etree as ET
 import pytest
 from autoware_lanelet2_to_opendrive.opendrive.signal import (
     Dependency,
+    PositionInertial,
     Reference,
     Signal,
     SignalType,
@@ -192,7 +193,8 @@ def test_construct_from_lanelet2_traffic_signal_basic():
             self.z = z
 
     class MockLineString:
-        def __init__(self, points):
+        def __init__(self, ls_id, points):
+            self.id = ls_id
             self.points = points
 
         def __len__(self):
@@ -209,7 +211,7 @@ def test_construct_from_lanelet2_traffic_signal_basic():
 
     # Create mock geometry
     point = MockPoint(100.0, 200.0, 5.0)
-    linestring = MockLineString([point])
+    linestring = MockLineString(1234, [point])
     traffic_light = MockTrafficLight(12345, [linestring])
 
     # Convert to Signal
@@ -219,7 +221,7 @@ def test_construct_from_lanelet2_traffic_signal_basic():
 
     # Verify signal properties
     assert signal.id == 100
-    assert signal.name == "TrafficLight_12345"
+    assert signal.name == "TrafficLight_12345_1234"
     assert signal.s == 50.0
     assert signal.t == -4.5
     assert signal.z_offset == 5.0
@@ -244,7 +246,8 @@ def test_construct_from_lanelet2_traffic_signal_with_attributes():
             self.z = z
 
     class MockLineString:
-        def __init__(self, points):
+        def __init__(self, ls_id, points):
+            self.id = ls_id
             self.points = points
 
         def __len__(self):
@@ -261,7 +264,7 @@ def test_construct_from_lanelet2_traffic_signal_with_attributes():
 
     # Test pedestrian traffic light
     point = MockPoint(100.0, 200.0, 3.0)
-    linestring = MockLineString([point])
+    linestring = MockLineString(5001, [point])
     traffic_light = MockTrafficLight(
         67890, [linestring], {"subtype": "pedestrian_light"}
     )
@@ -284,7 +287,8 @@ def test_construct_from_lanelet2_traffic_signal_arrow():
             self.z = z
 
     class MockLineString:
-        def __init__(self, points):
+        def __init__(self, ls_id, points):
+            self.id = ls_id
             self.points = points
 
         def __len__(self):
@@ -300,7 +304,7 @@ def test_construct_from_lanelet2_traffic_signal_arrow():
             self.attributes = attrs
 
     point = MockPoint(150.0, 250.0, 4.5)
-    linestring = MockLineString([point])
+    linestring = MockLineString(5002, [point])
     traffic_light = MockTrafficLight(11111, [linestring], {"type": "arrow_light"})
 
     signal = Signal.construct_from_lanelet2_traffic_signal(
@@ -320,7 +324,8 @@ def test_construct_from_lanelet2_traffic_signal_multiple_lanes():
             self.z = z
 
     class MockLineString:
-        def __init__(self, points):
+        def __init__(self, ls_id, points):
+            self.id = ls_id
             self.points = points
 
         def __len__(self):
@@ -336,7 +341,7 @@ def test_construct_from_lanelet2_traffic_signal_multiple_lanes():
             self.attributes = {}
 
     point = MockPoint(100.0, 200.0, 5.0)
-    linestring = MockLineString([point])
+    linestring = MockLineString(5003, [point])
     traffic_light = MockTrafficLight(22222, [linestring])
 
     # Test with multiple lanes
@@ -381,7 +386,8 @@ def test_construct_from_lanelet2_traffic_signal_with_road_elevation():
             self.z = z
 
     class MockLineString:
-        def __init__(self, points):
+        def __init__(self, ls_id, points):
+            self.id = ls_id
             self.points = points
 
         def __len__(self):
@@ -400,7 +406,7 @@ def test_construct_from_lanelet2_traffic_signal_with_road_elevation():
     # Signal absolute height is 45.0m, road elevation is 40.0m
     # Expected z_offset should be 45.0 - 40.0 = 5.0m
     point = MockPoint(100.0, 200.0, 45.0)
-    linestring = MockLineString([point])
+    linestring = MockLineString(5004, [point])
     traffic_light = MockTrafficLight(12345, [linestring])
 
     # Convert to Signal with road elevation
@@ -464,7 +470,8 @@ def test_construct_from_lanelet2_traffic_signal_with_coordinate_offset():
                 self.z = z
 
         class MockLineString:
-            def __init__(self, points):
+            def __init__(self, ls_id, points):
+                self.id = ls_id
                 self.points = points
 
             def __len__(self):
@@ -480,7 +487,7 @@ def test_construct_from_lanelet2_traffic_signal_with_coordinate_offset():
                 self.attributes = {}
 
         point = MockPoint(100.0, 200.0, 45.0)
-        linestring = MockLineString([point])
+        linestring = MockLineString(5005, [point])
         traffic_light = MockTrafficLight(12345, [linestring])
 
         # Road elevation: 3.0m in local coordinates
@@ -888,3 +895,177 @@ def test_road_marking_stop_line_with_yield_dependency():
     assert dep_elems[0].get("id") == "600"
     assert dep_elems[0].get("type") == "yieldSign"
     assert 'type="yieldSign"' in xml_string
+
+
+# ---------------------------------------------------------------------------
+# Tests for PositionInertial dataclass
+# ---------------------------------------------------------------------------
+
+
+def test_position_inertial_to_xml():
+    """Test PositionInertial XML conversion."""
+    pos = PositionInertial(x=553.09, y=362.05, z=20.10, hdg=-1.65)
+    xml = pos.to_xml()
+
+    assert xml.tag == "positionInertial"
+    # Verify scientific notation formatting
+    assert "e" in xml.get("x").lower()
+    assert "e" in xml.get("y").lower()
+    assert "e" in xml.get("z").lower()
+    assert "e" in xml.get("hdg").lower()
+    assert xml.get("pitch") is not None
+    assert xml.get("roll") is not None
+
+
+def test_position_inertial_defaults():
+    """Test PositionInertial default values."""
+    pos = PositionInertial(x=1.0, y=2.0, z=3.0)
+    assert pos.hdg == 0.0
+    assert pos.pitch == 0.0
+    assert pos.roll == 0.0
+
+
+def test_signal_with_position_inertial_xml():
+    """Test Signal with positionInertial generates correct XML child element."""
+    pos = PositionInertial(x=100.0, y=200.0, z=10.0, hdg=1.57)
+    signal = Signal(
+        id=58,
+        name="TrafficLight_3002245_1234",
+        s=50.0,
+        t=-4.5,
+        orientation="-",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
+        subtype=-1,
+        validities=[Validity(from_lane=-1, to_lane=-1)],
+        position_inertial=pos,
+    )
+
+    xml = signal.to_xml()
+    xml_string = ET.tostring(xml, encoding="unicode", pretty_print=True)
+
+    # positionInertial must be present
+    pi_elem = xml.find("positionInertial")
+    assert pi_elem is not None
+    assert "e" in pi_elem.get("x").lower()
+
+    # Ordering: validity < positionInertial < userData
+    tags = [child.tag for child in xml]
+    assert "validity" in tags
+    assert "positionInertial" in tags
+    assert tags.index("validity") < tags.index("positionInertial")
+
+    assert "<positionInertial" in xml_string
+
+
+def test_signal_without_position_inertial_xml():
+    """Test Signal without positionInertial has no such element."""
+    signal = Signal(
+        id=10,
+        name="TL_10",
+        s=1.0,
+        t=-3.0,
+        orientation="-",
+        dynamic="yes",
+        country="OpenDRIVE",
+        type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
+        subtype=-1,
+    )
+
+    xml = signal.to_xml()
+    assert xml.find("positionInertial") is None
+
+
+def test_centroid_z_offset_multiple_points():
+    """Test z_offset is computed from centroid of all points, not just first."""
+
+    class MockPoint:
+        def __init__(self, x, y, z):
+            self.x = x
+            self.y = y
+            self.z = z
+
+    class MockLineString:
+        def __init__(self, ls_id, points):
+            self.id = ls_id
+            self.points = points
+
+        def __len__(self):
+            return len(self.points)
+
+        def __getitem__(self, index):
+            return self.points[index]
+
+    class MockTrafficLight:
+        def __init__(self, traffic_light_id, geometry):
+            self.id = traffic_light_id
+            self.trafficLights = geometry
+            self.attributes = {}
+
+    # Three bulbs at z = 4.0, 5.0, 6.0 → centroid z = 5.0
+    points = [
+        MockPoint(0.0, 0.0, 4.0),
+        MockPoint(1.0, 0.0, 5.0),
+        MockPoint(2.0, 0.0, 6.0),
+    ]
+    linestring = MockLineString(7001, points)
+    traffic_light = MockTrafficLight(33333, [linestring])
+
+    signal = Signal.construct_from_lanelet2_traffic_signal(
+        traffic_light=traffic_light, signal_id=700, s=10.0, t=-2.0
+    )
+
+    assert signal.z_offset == 5.0, f"Expected centroid z=5.0, got {signal.z_offset}"
+
+
+def test_multiple_linestrings_different_names():
+    """Test that different linestrings produce different signal names."""
+
+    class MockPoint:
+        def __init__(self, x, y, z):
+            self.x = x
+            self.y = y
+            self.z = z
+
+    class MockLineString:
+        def __init__(self, ls_id, points):
+            self.id = ls_id
+            self.points = points
+
+        def __len__(self):
+            return len(self.points)
+
+        def __getitem__(self, index):
+            return self.points[index]
+
+    class MockTrafficLight:
+        def __init__(self, traffic_light_id, geometry):
+            self.id = traffic_light_id
+            self.trafficLights = geometry
+            self.attributes = {}
+
+    p1 = MockPoint(0.0, 0.0, 5.0)
+    p2 = MockPoint(1.0, 0.0, 6.0)
+    ls1 = MockLineString(1001, [p1])
+    ls2 = MockLineString(1002, [p2])
+    traffic_light = MockTrafficLight(44444, [ls1, ls2])
+
+    sig1 = Signal.construct_from_lanelet2_traffic_signal(
+        traffic_light=traffic_light,
+        light_linestring=ls1,
+        signal_id=800,
+        s=10.0,
+        t=-2.0,
+    )
+    sig2 = Signal.construct_from_lanelet2_traffic_signal(
+        traffic_light=traffic_light,
+        light_linestring=ls2,
+        signal_id=801,
+        s=10.0,
+        t=-2.0,
+    )
+
+    assert sig1.name == "TrafficLight_44444_1001"
+    assert sig2.name == "TrafficLight_44444_1002"
+    assert sig1.name != sig2.name

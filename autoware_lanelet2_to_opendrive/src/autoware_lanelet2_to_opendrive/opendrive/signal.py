@@ -67,6 +67,33 @@ class Validity:
 
 
 @dataclass
+class PositionInertial:
+    """Physical position of a signal in inertial (world) coordinates.
+
+    Per ASAM OpenDRIVE specification, positionInertial provides the absolute
+    position of a signal independent of the road coordinate system.
+    """
+
+    x: float
+    y: float
+    z: float
+    hdg: float = 0.0
+    pitch: float = 0.0
+    roll: float = 0.0
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("positionInertial")
+        elem.set("x", f"{self.x:.16e}")
+        elem.set("y", f"{self.y:.16e}")
+        elem.set("z", f"{self.z:.16e}")
+        elem.set("hdg", f"{self.hdg:.16e}")
+        elem.set("pitch", f"{self.pitch:.16e}")
+        elem.set("roll", f"{self.roll:.16e}")
+        return elem
+
+
+@dataclass
 class SignalUserData:
     """User data for signal (custom extensions)."""
 
@@ -179,6 +206,9 @@ class Signal:
     references: Optional[List[Reference]] = (
         None  # References to related signals (e.g., traffic light -> stop line)
     )
+    position_inertial: Optional[PositionInertial] = (
+        None  # Physical position in inertial coordinates
+    )
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -217,6 +247,10 @@ class Signal:
         if self.references:
             for reference in self.references:
                 elem.append(reference.to_xml())
+
+        # Add positionInertial if present (physical position in world coordinates)
+        if self.position_inertial is not None:
+            elem.append(self.position_inertial.to_xml())
 
         # Add user data if present
         if self.user_data:
@@ -264,6 +298,8 @@ class Signal:
         t: float,
         lane_ids: Optional[List[int]] = None,
         road_elevation_at_s: Optional[float] = None,
+        light_linestring: Any = None,
+        position_inertial: Optional["PositionInertial"] = None,
     ) -> "Signal":
         """Construct a Signal from a lanelet2 TrafficLight regulatory element.
 
@@ -284,6 +320,10 @@ class Signal:
             road_elevation_at_s: Elevation of the road surface at position s (m).
                 If provided, used to calculate relative z_offset from
                 signal's absolute height. If None, uses absolute height.
+            light_linestring: Specific Light Bulb LineString to use for this
+                signal. If None, falls back to trafficLights[0].
+            position_inertial: Physical position of the signal in inertial
+                coordinates. If provided, attached to the Signal object.
 
         Returns:
             Signal object constructed from the traffic light with OpenDRIVE format
@@ -304,39 +344,29 @@ class Signal:
             ...     lane_ids=[-1]  # Applies to lane -1
             ... )
         """
-        # Get traffic light geometry (position)
-        # TrafficLight regulatory element contains trafficLights attribute
-        # which is a list of LineString3d objects
-        traffic_light_geometry = traffic_light.trafficLights
-        if not traffic_light_geometry:
-            raise ValueError(
-                f"Traffic light with ID {traffic_light.id} has no geometry"
-            )
+        # Determine which linestring to use
+        if light_linestring is None:
+            # Fallback: use the first linestring from the regulatory element
+            traffic_light_geometry = traffic_light.trafficLights
+            if not traffic_light_geometry:
+                raise ValueError(
+                    f"Traffic light with ID {traffic_light.id} has no geometry"
+                )
+            light_linestring = traffic_light_geometry[0]
 
-        # Get the first traffic light linestring (most traffic lights have one)
-        light_linestring = traffic_light_geometry[0]
-
-        # Get position from the first point of the linestring
         if len(light_linestring) == 0:
             raise ValueError(
                 f"Traffic light linestring for ID {traffic_light.id} is empty"
             )
 
-        # Extract position (we'll use the first point as the signal position)
-        position = light_linestring[0]
-
-        # Calculate z_offset (height above road surface)
-        # OpenDRIVE zOffset is relative to road surface, not absolute elevation
-        if hasattr(position, "z"):
-            signal_absolute_z = float(position.z) - COORDINATE_OFFSET.z
-            if road_elevation_at_s is not None:
-                # Calculate relative height: signal height - road surface elevation
-                z_offset = signal_absolute_z - road_elevation_at_s
-            else:
-                # Fallback: use absolute height (may be incorrect for elevated roads)
-                z_offset = signal_absolute_z
+        # Calculate z_offset from the centroid z of all points in the linestring
+        n = len(light_linestring)
+        centroid_z = sum(float(light_linestring[i].z) for i in range(n)) / n
+        signal_absolute_z = centroid_z - COORDINATE_OFFSET.z
+        if road_elevation_at_s is not None:
+            z_offset = signal_absolute_z - road_elevation_at_s
         else:
-            z_offset = 0.0
+            z_offset = signal_absolute_z
 
         # Determine signal type from attributes
         # Check if traffic light has a 'subtype' or 'type' attribute
@@ -385,8 +415,12 @@ class Signal:
         # Positive t means signal is on the left side (orientation "+")
         orientation = "-" if t < 0 else "+"
 
-        # Create signal name from traffic light ID
-        signal_name = f"TrafficLight_{traffic_light.id}"
+        # Create signal name from traffic light ID and linestring ID
+        linestring_id = getattr(light_linestring, "id", None)
+        if linestring_id is not None:
+            signal_name = f"TrafficLight_{traffic_light.id}_{linestring_id}"
+        else:
+            signal_name = f"TrafficLight_{traffic_light.id}"
 
         # Create and return the Signal object
         signal = Signal(
@@ -408,6 +442,7 @@ class Signal:
             height=signal_height,
             width=signal_width,
             validities=validities if validities else None,
+            position_inertial=position_inertial,
         )
 
         return signal

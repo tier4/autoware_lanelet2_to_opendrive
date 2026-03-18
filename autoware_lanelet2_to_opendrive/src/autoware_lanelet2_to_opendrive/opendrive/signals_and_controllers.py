@@ -1,11 +1,12 @@
 """OpenDRIVE signals and controllers management."""
 
+import math
 from dataclasses import dataclass, field
 from typing import List, Dict, Set, Optional, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
 
-from .signal import Signal, Controller, ControlEntry
+from .signal import Signal, Controller, ControlEntry, PositionInertial
 from .enums import TrafficRule
 from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
 from ..config import COORDINATE_OFFSET
@@ -155,91 +156,96 @@ class SignalsAndControllers:
                 # No roads found for this traffic light, skip
                 continue
 
-            # Get traffic light position for s,t calculation
-            # We'll use a simplified approach: place at the beginning of the first road
-            # In a real implementation, you'd calculate the actual s,t from geometry
-            # traffic_light_geometry = traffic_light.trafficLights[0]
-            # first_point = traffic_light_geometry[0]
+            # Create signals for each LineString × road combination
+            all_created_signal_ids: List[int] = []
 
-            # Create signals for each affected road
-            created_signal_ids: List[int] = []
-
-            for road_id in sorted(affected_roads):
-                # Get lanelets for this road
-                road_lanelets = road_lanelet_mapping.get_lanelets_for_road(road_id)
-
-                # Find which lanelets in this road have this traffic light
-                road_lanelets_with_signal = [
-                    ll_id for ll_id in road_lanelets if ll_id in lanelet_ids
-                ]
-
-                if not road_lanelets_with_signal:
+            for light_linestring in traffic_light.trafficLights:
+                if len(light_linestring) == 0:
                     continue
 
-                # Find the corresponding Road object (reused for lane IDs, elevation, and width)
-                matching_road: Optional["Road"] = road_id_to_road.get(road_id)
+                for road_id in sorted(affected_roads):
+                    # Get lanelets for this road
+                    road_lanelets = road_lanelet_mapping.get_lanelets_for_road(road_id)
 
-                # Calculate s, t coordinates from traffic light geometry
-                s, t = SignalsAndControllers._calculate_signal_position(
-                    traffic_light=traffic_light,
-                    road_id=road_id,
-                    lanelet_map=lanelet_map,
-                    road_lanelet_mapping=road_lanelet_mapping,
-                    road=matching_road,
-                )
+                    # Find which lanelets in this road have this traffic light
+                    road_lanelets_with_signal = [
+                        ll_id for ll_id in road_lanelets if ll_id in lanelet_ids
+                    ]
 
-                # Determine lane IDs for the validity element.
-                # Use the road's lanelet-to-lane mapping so that the IDs are correct
-                # for both RHT (negative IDs) and LHT (positive IDs).
-                lane_ids: List[int] = SignalsAndControllers._get_signal_lane_ids(
-                    road_lanelets_with_signal=road_lanelets_with_signal,
-                    matching_road=matching_road,
-                )
+                    if not road_lanelets_with_signal:
+                        continue
 
-                # Calculate road elevation at signal position
-                road_elevation_at_s = None
-                if matching_road is not None:
-                    # Use the Road's public method to get elevation at position s.
-                    # Note: elevation_profile already contains absolute inertial
-                    # z-coordinates (elevation_offset was added to 'a' coefficient
-                    # in get_elevation_profile).
-                    road_elevation_at_s = matching_road.get_elevation_at_s(s)
+                    # Find the corresponding Road object
+                    matching_road: Optional["Road"] = road_id_to_road.get(road_id)
 
-                # Create Signal object
-                signal = Signal.construct_from_lanelet2_traffic_signal(
-                    traffic_light=traffic_light,
-                    signal_id=signal_id_counter,
-                    s=s,
-                    t=t,
-                    lane_ids=lane_ids,
-                    road_elevation_at_s=road_elevation_at_s,
-                )
+                    # Calculate logical s, t (stop-line based, fallback to linestring centroid)
+                    s, t = SignalsAndControllers._calculate_signal_position(
+                        traffic_light=traffic_light,
+                        light_linestring=light_linestring,
+                        road_id=road_id,
+                        lanelet_map=lanelet_map,
+                        road_lanelet_mapping=road_lanelet_mapping,
+                        road=matching_road,
+                    )
 
-                result.add_signal(signal)
-                created_signal_ids.append(signal_id_counter)
+                    # Calculate physical position from linestring centroid
+                    position_inertial = (
+                        SignalsAndControllers._calculate_physical_position(
+                            light_linestring=light_linestring,
+                            road=matching_road,
+                            road_s=s,
+                        )
+                    )
 
-                # Track signal to road mapping
-                result.signal_to_road_id[signal_id_counter] = road_id
+                    # Determine lane IDs for the validity element.
+                    lane_ids: List[int] = SignalsAndControllers._get_signal_lane_ids(
+                        road_lanelets_with_signal=road_lanelets_with_signal,
+                        matching_road=matching_road,
+                    )
 
-                # Track lanelet2 traffic light ID to OpenDRIVE signal ID mapping
-                if lanelet2_traffic_light_id not in result.lanelet2_tl_id_to_signal_ids:
-                    result.lanelet2_tl_id_to_signal_ids[lanelet2_traffic_light_id] = []
-                result.lanelet2_tl_id_to_signal_ids[lanelet2_traffic_light_id].append(
-                    signal_id_counter
-                )
+                    # Calculate road elevation at signal position
+                    road_elevation_at_s = None
+                    if matching_road is not None:
+                        road_elevation_at_s = matching_road.get_elevation_at_s(s)
 
-                signal_id_counter += 1
+                    # Create Signal object
+                    signal = Signal.construct_from_lanelet2_traffic_signal(
+                        traffic_light=traffic_light,
+                        light_linestring=light_linestring,
+                        signal_id=signal_id_counter,
+                        s=s,
+                        t=t,
+                        lane_ids=lane_ids,
+                        road_elevation_at_s=road_elevation_at_s,
+                        position_inertial=position_inertial,
+                    )
 
-            # Step 3: Create a controller for all traffic lights with signals
-            # OpenDRIVE requires controllers to be defined for proper signal management,
-            # regardless of whether the signal affects one or multiple roads
-            if created_signal_ids:
-                # Create control entries for all signals
+                    result.add_signal(signal)
+                    all_created_signal_ids.append(signal_id_counter)
+
+                    # Track signal to road mapping
+                    result.signal_to_road_id[signal_id_counter] = road_id
+
+                    # Track lanelet2 traffic light ID to OpenDRIVE signal ID mapping
+                    if (
+                        lanelet2_traffic_light_id
+                        not in result.lanelet2_tl_id_to_signal_ids
+                    ):
+                        result.lanelet2_tl_id_to_signal_ids[
+                            lanelet2_traffic_light_id
+                        ] = []
+                    result.lanelet2_tl_id_to_signal_ids[
+                        lanelet2_traffic_light_id
+                    ].append(signal_id_counter)
+
+                    signal_id_counter += 1
+
+            # Step 3: Create a controller for all signals from this regulatory element
+            if all_created_signal_ids:
                 control_entries = [
-                    ControlEntry(signal_id=sig_id) for sig_id in created_signal_ids
+                    ControlEntry(signal_id=sig_id) for sig_id in all_created_signal_ids
                 ]
 
-                # Create controller
                 controller = Controller(
                     id=controller_id_counter,
                     name=f"Controller_TL_{lanelet2_traffic_light_id}",
@@ -305,21 +311,23 @@ class SignalsAndControllers:
     @staticmethod
     def _calculate_signal_position(
         traffic_light,  # lanelet2 TrafficLight regulatory element
+        light_linestring,  # specific Light Bulb LineString
         road_id: int,
         lanelet_map: lanelet2.core.LaneletMap,
         road_lanelet_mapping: RoadLaneletMapping,
         road: Optional["Road"] = None,
     ) -> tuple[float, float]:
         """
-        Calculate s,t coordinates for a traffic signal on a road.
+        Calculate logical s,t coordinates for a traffic signal on a road.
 
-        The s coordinate is calculated by projecting the signal position onto
-        the road reference line (Frenet s). The t coordinate is set to half
-        the total lane width at that s position, placing the signal at the
-        lateral center of the driving lanes.
+        Prefers the stop line position (if available) for logical placement.
+        Falls back to the Light Bulb LineString centroid when no stop line exists.
+
+        The t coordinate is set to half the total lane width at that s position.
 
         Args:
             traffic_light: Lanelet2 TrafficLight regulatory element
+            light_linestring: Specific Light Bulb LineString for this signal
             road_id: ID of the road the signal is on
             lanelet_map: Lanelet2 map containing the lanelets
             road_lanelet_mapping: Mapping between roads and lanelets
@@ -330,24 +338,32 @@ class SignalsAndControllers:
                 s: arc length along road reference line
                 t: half of total lane width at s (signed by lane side)
         """
-        # Get traffic light geometry (position)
-        traffic_light_geometry = traffic_light.trafficLights
-        if not traffic_light_geometry:
-            # No geometry, return default position
-            return (0.0, -4.0)
-
-        # Get the first traffic light linestring
-        light_linestring = traffic_light_geometry[0]
         if len(light_linestring) == 0:
-            # Empty linestring, return default position
             return (0.0, -4.0)
 
-        # Extract 3D position (use the first point as the signal position)
-        # Apply coordinate offset to convert to local coordinates
-        position = light_linestring[0]
-        x = float(position.x) - COORDINATE_OFFSET.x
-        y = float(position.y) - COORDINATE_OFFSET.y
-        z = float(position.z) - COORDINATE_OFFSET.z
+        # Determine the projection point: prefer stop line centroid, fallback to linestring centroid
+        stop_line = getattr(traffic_light, "stopLine", None)
+        if stop_line is not None and len(stop_line) > 0:
+            # Use stop line centroid
+            n = len(stop_line)
+            x = sum(float(stop_line[i].x) for i in range(n)) / n - COORDINATE_OFFSET.x
+            y = sum(float(stop_line[i].y) for i in range(n)) / n - COORDINATE_OFFSET.y
+            z = sum(float(stop_line[i].z) for i in range(n)) / n - COORDINATE_OFFSET.z
+        else:
+            # Fallback: use linestring centroid (all points, not just [0])
+            n = len(light_linestring)
+            x = (
+                sum(float(light_linestring[i].x) for i in range(n)) / n
+                - COORDINATE_OFFSET.x
+            )
+            y = (
+                sum(float(light_linestring[i].y) for i in range(n)) / n
+                - COORDINATE_OFFSET.y
+            )
+            z = (
+                sum(float(light_linestring[i].z) for i in range(n)) / n
+                - COORDINATE_OFFSET.z
+            )
 
         # Build spline for this road
         from .reference_line import ReferenceLine
@@ -355,7 +371,6 @@ class SignalsAndControllers:
         # Get lanelet IDs for this road
         lanelet_ids = road_lanelet_mapping.get_lanelets_for_road(road_id)
         if not lanelet_ids:
-            # No lanelets found for this road, return default position
             return (0.0, -4.0)
 
         # Get lanelet objects from IDs
@@ -365,21 +380,17 @@ class SignalsAndControllers:
                 lanelet = lanelet_map.laneletLayer.get(lanelet_id)
                 lanelets.append(lanelet)
             except Exception:
-                # Lanelet not found, skip
                 continue
 
         if not lanelets:
-            # No valid lanelets found, return default position
             return (0.0, -4.0)
 
         try:
-            # Construct spline from lanelets using ReferenceLine
             reference_line = ReferenceLine.construct_from_lanelet_groups(
                 lanelet_map, lanelets
             )
             spline = reference_line.centerline_2d
 
-            # Use cartesian_to_frenet to get s coordinate only
             s, _frenet_t = spline.cartesian_to_frenet(x, y, z)
 
             # Use half of total lane width at s for t
@@ -390,8 +401,48 @@ class SignalsAndControllers:
 
             return (s, t)
         except Exception as e:
-            # If conversion fails, log warning and return default position
             print(
                 f"Warning: Failed to calculate signal position for traffic light {traffic_light.id}: {e}"
             )
             return (0.0, -4.0)
+
+    @staticmethod
+    def _calculate_physical_position(
+        light_linestring,
+        road: Optional["Road"] = None,
+        road_s: Optional[float] = None,
+    ) -> PositionInertial:
+        """Calculate physical position of a signal from Light Bulb LineString centroid.
+
+        Args:
+            light_linestring: Light Bulb LineString (list of 3D points)
+            road: Optional Road object (reserved for future use)
+            road_s: Optional s coordinate on road (reserved for future use)
+
+        Returns:
+            PositionInertial with centroid coordinates and heading
+        """
+        n = len(light_linestring)
+        x = (
+            sum(float(light_linestring[i].x) for i in range(n)) / n
+            - COORDINATE_OFFSET.x
+        )
+        y = (
+            sum(float(light_linestring[i].y) for i in range(n)) / n
+            - COORDINATE_OFFSET.y
+        )
+        z = (
+            sum(float(light_linestring[i].z) for i in range(n)) / n
+            - COORDINATE_OFFSET.z
+        )
+
+        # hdg: direction from first point to last point of the linestring
+        hdg = 0.0
+        if n >= 2:
+            first = light_linestring[0]
+            last = light_linestring[n - 1]
+            dx = float(last.x) - float(first.x)
+            dy = float(last.y) - float(first.y)
+            hdg = math.atan2(dy, dx)
+
+        return PositionInertial(x=x, y=y, z=z, hdg=hdg)
