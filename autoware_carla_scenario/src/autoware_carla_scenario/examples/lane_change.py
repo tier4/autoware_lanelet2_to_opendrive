@@ -46,8 +46,9 @@ from autoware_carla_scenario import (
     StickyCondition,
     TickTiming,
     TimeoutCondition,
+    TrafficLightTarget,
+    TrafficSignalAction,
     find_actor_by_role_name,
-    set_all_traffic_lights_state,
     snap_to_carla_road,
     to_opendrive,
 )
@@ -128,8 +129,11 @@ class LaneChangeScenario(BaseScenario):
         self.log_actor_position(ego_actor, label="ego")
 
         # --- Set all traffic lights to green ---
-        n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
-        logger.info("Set %d traffic lights to green", n)
+        TrafficSignalAction(
+            state=carla.TrafficLightState.Green,
+            lanelet2_traffic_light_ids=TrafficLightTarget.ALL,
+            label="set_all_green",
+        ).execute(world)
 
         # --- Lane-change action (fires immediately) ---
         direction = _DIRECTION_MAP[cfg.direction]

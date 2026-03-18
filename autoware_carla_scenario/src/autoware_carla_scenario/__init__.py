@@ -40,8 +40,8 @@ Public API re-exported for convenience::
         frame_of,
         lanelet2_traffic_light_id_to_opendrive_controller_id,
         find_actor_by_role_name,
-        set_all_traffic_lights_state,
-        set_group_traffic_light_state,
+        TrafficLightTarget,
+        TrafficSignalAction,
         # Entity
         SpawnLocation,
         SpawnPointIndex,
@@ -66,6 +66,8 @@ from .actions import (
     LaneChangeAction,
     LaneChangeDirection,
     TickTiming,
+    TrafficLightTarget,
+    TrafficSignalAction,
     TurnAction,
     TurnDirection,
 )
@@ -138,8 +140,6 @@ from .utils import (
     find_nearest_traffic_light,
     get_stop_line_linestrings,
     lanelet2_traffic_light_id_to_opendrive_controller_id,
-    set_all_traffic_lights_state,
-    set_group_traffic_light_state,
 )
 
 __all__ = [
@@ -195,8 +195,6 @@ __all__ = [
     "snap_to_carla_road",
     "lanelet2_traffic_light_id_to_opendrive_controller_id",
     "find_actor_by_role_name",
-    "set_all_traffic_lights_state",
-    "set_group_traffic_light_state",
     # Kinematics
     "CoordinateFrame",
     "FrameMismatchError",
@@ -212,6 +210,8 @@ __all__ = [
     "LaneChangeAction",
     "LaneChangeDirection",
     "TickTiming",
+    "TrafficLightTarget",
+    "TrafficSignalAction",
     "TurnAction",
     "TurnDirection",
 ]
