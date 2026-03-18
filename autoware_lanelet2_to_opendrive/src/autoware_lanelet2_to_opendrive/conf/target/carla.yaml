@@ -47,10 +47,10 @@ traffic_light:
 
   # Offset perpendicular to hdg in meters
   # Positive = shift left (when facing in hdg direction)
-  offset_y: -5.0
+  offset_y: -5.5
 
   # Vertical offset in meters (subtracted from z)
-  offset_z: 4.0
+  offset_z: 5.5
 
   # Rotation offset in radians added to the LineString direction to obtain
   # the signal's facing direction. Default +π/2 (left-to-right → facing).
