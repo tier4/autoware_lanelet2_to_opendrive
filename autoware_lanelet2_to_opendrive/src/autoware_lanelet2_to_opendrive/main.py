@@ -1491,6 +1491,14 @@ def preprocess_and_convert_with_hydra(
 
         xodr_path = Path(conversion_config.output_path)
 
+        # Serialize TrafficLightConfig for the analyze command to read back
+        tl_config_dict = {
+            "offset_x": tl_config.offset_x,
+            "offset_y": tl_config.offset_y,
+            "offset_z": tl_config.offset_z,
+            "hdg_offset": tl_config.hdg_offset,
+        }
+
         validate_and_save_mapping(
             lanelet_to_road_and_lane=lanelet_to_road_and_lane,
             lanelet_map=lanelet_map,
@@ -1501,6 +1509,7 @@ def preprocess_and_convert_with_hydra(
             preprocessing_log=preprocessing_log_dict,
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
+            traffic_light_config=tl_config_dict,
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`

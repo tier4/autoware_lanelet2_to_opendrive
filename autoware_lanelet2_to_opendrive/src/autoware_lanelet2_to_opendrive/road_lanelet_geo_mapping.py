@@ -121,6 +121,7 @@ class GeoRoadLaneletMapping:
     preprocessing_log: dict | None = None
     stop_line_mapping: dict[int, StopLineMappingEntry] | None = None
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None
+    traffic_light_config: dict | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
         init=False,
@@ -160,6 +161,8 @@ class GeoRoadLaneletMapping:
             }
         if self.preprocessing_log is not None:
             result["preprocessing_log"] = self.preprocessing_log
+        if self.traffic_light_config is not None:
+            result["traffic_light_config"] = self.traffic_light_config
         return result
 
     @classmethod
@@ -190,6 +193,7 @@ class GeoRoadLaneletMapping:
             preprocessing_log=data.get("preprocessing_log"),
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
+            traffic_light_config=data.get("traffic_light_config"),
         )
 
 
@@ -1364,6 +1368,7 @@ def validate_and_save_mapping(
     preprocessing_log: dict | None = None,
     stop_line_mapping: dict[int, StopLineMappingEntry] | None = None,
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None,
+    traffic_light_config: dict | None = None,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
@@ -1387,6 +1392,9 @@ def validate_and_save_mapping(
         stop_line_mapping: Optional mapping of linestring ID to stop line
             conversion info (road_id, signal_types).
         skipped_stop_lines: Optional mapping of linestring ID to skip reason.
+        traffic_light_config: Optional dict of TrafficLightConfig fields
+            (offset_x, offset_y, offset_z, hdg_offset) persisted for the
+            ``analyze`` command to reverse the spawn offset.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
@@ -1407,6 +1415,7 @@ def validate_and_save_mapping(
         preprocessing_log=preprocessing_log,
         stop_line_mapping=stop_line_mapping,
         skipped_stop_lines=skipped_stop_lines,
+        traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)
