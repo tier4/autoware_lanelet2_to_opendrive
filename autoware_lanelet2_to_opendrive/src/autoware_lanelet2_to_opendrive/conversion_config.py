@@ -4,6 +4,7 @@ This module provides dataclass-based configuration objects to replace functions
 with many parameters, improving type safety and API clarity.
 """
 
+import math
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -141,11 +142,18 @@ class TrafficLightConfig:
             in the hdg direction. Default 0.0 (no offset).
         offset_z: Vertical offset in meters. Subtracted directly from the
             z coordinate. Default 0.0 (no offset).
+        hdg_offset: Rotation offset in radians added to the LineString
+            direction (first→last) to obtain the signal's facing direction.
+            Autoware map spec: LineString points are ordered left-to-right
+            from the signal's viewpoint. The facing direction (toward
+            approaching traffic) is perpendicular to this arrangement.
+            Default +π/2 (90° counter-clockwise).
     """
 
     offset_x: float = 0.0
     offset_y: float = 0.0
     offset_z: float = 0.0
+    hdg_offset: float = math.pi / 2
 
 
 @dataclass

@@ -47,10 +47,14 @@ traffic_light:
 
   # Offset perpendicular to hdg in meters
   # Positive = shift left (when facing in hdg direction)
-  offset_y: 0.0
+  offset_y: -5.0
 
   # Vertical offset in meters (subtracted from z)
-  offset_z: 0.0
+  offset_z: 4.0
+
+  # Rotation offset in radians added to the LineString direction to obtain
+  # the signal's facing direction. Default +π/2 (left-to-right → facing).
+  hdg_offset: 1.5707963267948966
 
 # Width spline sampling configuration
 # Adaptive sampling reduces memory usage for large maps

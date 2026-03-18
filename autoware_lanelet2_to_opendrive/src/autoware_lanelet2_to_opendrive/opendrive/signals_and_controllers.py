@@ -449,14 +449,19 @@ class SignalsAndControllers:
         # hdg: facing direction of the traffic light.
         # The LineString direction (first→last) runs along the bulb arrangement
         # (the face of the traffic light). The facing direction is perpendicular
-        # to this, rotated -90° (clockwise) to point toward approaching traffic.
+        # to this. hdg_offset (default +π/2) rotates the LineString direction
+        # to the facing direction. Configurable via TrafficLightConfig.hdg_offset.
+        hdg_offset = math.pi / 2
+        if traffic_light_config is not None:
+            hdg_offset = traffic_light_config.hdg_offset
+
         hdg = 0.0
         if n >= 2:
             first = light_linestring[0]
             last = light_linestring[n - 1]
             dx = float(last.x) - float(first.x)
             dy = float(last.y) - float(first.y)
-            hdg = math.atan2(dy, dx) - math.pi / 2
+            hdg = math.atan2(dy, dx) + hdg_offset
 
         # Apply traffic light spawn offset (hdg-aware coordinate transformation).
         # The offset is specified in the signal's local frame:
