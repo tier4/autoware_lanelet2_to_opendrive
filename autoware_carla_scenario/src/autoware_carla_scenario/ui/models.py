@@ -51,6 +51,7 @@ class ScenarioResultView(BaseModel):
     elapsed_seconds: float | None
     condition_statuses: list[ConditionNode]
     overrides: list[str]
+    raw_log: str = ""
 
 
 class RunProgress(BaseModel):
