@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+Status = Literal["running", "passed", "failed", "done", "idle"]
+
 
 class SessionSummary(BaseModel):
     """Summary of a single test session (multirun, batch, or single)."""
@@ -57,4 +59,4 @@ class RunProgress(BaseModel):
     current: int
     total: int
     scenario_name: str
-    status: Literal["running", "passed", "failed", "done", "idle"]
+    status: Status

@@ -257,9 +257,11 @@
       });
     }
 
-    // Debounced helpers (300ms delay to avoid flooding the server / localStorage)
-    const debouncedPreview = debounce(updateCmdPreview, 300);
-    const debouncedSave = debounce(saveRunOptions, 300);
+    // Single debounced handler for save + preview (300ms)
+    const debouncedSync = debounce(() => {
+      saveRunOptions();
+      updateCmdPreview();
+    }, 300);
 
     // Restore saved values on page load, then attach listeners
     document.addEventListener('DOMContentLoaded', () => {
@@ -267,8 +269,8 @@
       PANEL_FIELDS.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-          el.addEventListener('input', () => { debouncedSave(); debouncedPreview(); });
-          el.addEventListener('change', () => { debouncedSave(); debouncedPreview(); });
+          el.addEventListener('input', debouncedSync);
+          el.addEventListener('change', debouncedSync);
         }
       });
     });

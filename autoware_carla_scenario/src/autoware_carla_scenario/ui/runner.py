@@ -15,11 +15,7 @@ import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
-
-from .models import RunProgress
-
-_Status = Literal["running", "passed", "failed", "done", "idle"]
+from .models import RunProgress, Status
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +132,7 @@ def _run_worker(
                     text=True,
                     timeout=timeout,
                 )
-                status: _Status = "passed" if result.returncode == 0 else "failed"
+                status: Status = "passed" if result.returncode == 0 else "failed"
                 if result.returncode != 0:
                     logger.warning(
                         "Scenario %s failed (exit code %d): %s",
