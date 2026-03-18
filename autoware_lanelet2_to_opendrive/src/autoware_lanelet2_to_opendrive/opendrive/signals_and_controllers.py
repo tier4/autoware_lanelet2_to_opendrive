@@ -164,25 +164,31 @@ class SignalsAndControllers:
             # Create signals for each LineString × road combination
             all_created_signal_ids: List[int] = []
 
+            # Pre-sort affected roads and cache per-road data that is
+            # invariant across linestrings.
+            sorted_affected_roads = sorted(affected_roads)
+            road_context: Dict[int, tuple] = {}
+            for road_id in sorted_affected_roads:
+                road_lanelets = road_lanelet_mapping.get_lanelets_for_road(road_id)
+                road_lanelets_with_signal = [
+                    ll_id for ll_id in road_lanelets if ll_id in lanelet_ids
+                ]
+                if not road_lanelets_with_signal:
+                    continue
+                matching_road: Optional["Road"] = road_id_to_road.get(road_id)
+                road_context[road_id] = (
+                    road_lanelets_with_signal,
+                    matching_road,
+                )
+
             for light_linestring in traffic_light.trafficLights:
                 if len(light_linestring) == 0:
                     continue
 
-                for road_id in sorted(affected_roads):
-                    # Get lanelets for this road
-                    road_lanelets = road_lanelet_mapping.get_lanelets_for_road(road_id)
-
-                    # Find which lanelets in this road have this traffic light
-                    road_lanelets_with_signal = [
-                        ll_id for ll_id in road_lanelets if ll_id in lanelet_ids
-                    ]
-
-                    if not road_lanelets_with_signal:
-                        continue
-
-                    # Find the corresponding Road object
-                    matching_road: Optional["Road"] = road_id_to_road.get(road_id)
-
+                for road_id, (
+                    road_lanelets_with_signal,
+                    matching_road,
+                ) in road_context.items():
                     # Calculate logical s, t (stop-line based, fallback to linestring centroid)
                     s, t = SignalsAndControllers._calculate_signal_position(
                         traffic_light=traffic_light,

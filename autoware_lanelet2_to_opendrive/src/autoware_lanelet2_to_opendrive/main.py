@@ -1438,10 +1438,16 @@ def preprocess_and_convert_with_hydra(
         offset_x=tl_dict.get("offset_x", 0.0) if tl_dict else 0.0,
         offset_y=tl_dict.get("offset_y", 0.0) if tl_dict else 0.0,
         offset_z=tl_dict.get("offset_z", 0.0) if tl_dict else 0.0,
+        hdg_offset=(
+            tl_dict.get("hdg_offset", TrafficLightConfig.hdg_offset)
+            if tl_dict
+            else TrafficLightConfig.hdg_offset
+        ),
     )
     logger.info(
         f"Traffic light config: offset=({tl_config.offset_x}, "
-        f"{tl_config.offset_y}, {tl_config.offset_z})"
+        f"{tl_config.offset_y}, {tl_config.offset_z}), "
+        f"hdg_offset={tl_config.hdg_offset}"
     )
 
     # Build ConversionConfig from parameters
