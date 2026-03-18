@@ -11,6 +11,7 @@ extract per-job progress (``[1/3] Launching …``).
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -190,6 +191,8 @@ def _run_with_progress(
     The sweeper logs lines like ``[1/3] Launching (attempt 1/1): ...``
     which are parsed in real-time to update the progress bar.
     """
+    # Force unbuffered output so sweeper log lines arrive in real-time.
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     try:
         proc = subprocess.Popen(  # noqa: S603
             cmd,
@@ -197,6 +200,7 @@ def _run_with_progress(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=env,
         )
     except OSError as exc:
         logger.error("Failed to start scenario %s: %s", scenario_name, exc)
