@@ -357,6 +357,18 @@ def _build_condition_tree(details: dict[str, Any]) -> list[ConditionNode]:
     return children
 
 
+_STRUCTURAL_KEYS = {
+    "label",
+    "condition_type",
+    "satisfied",
+    "message",
+    "children",
+    "child",
+    "operator",
+    "wrapper",
+}
+
+
 def _detail_to_condition_node(detail: dict[str, Any]) -> ConditionNode | None:
     """Convert a detail dict (from nested condition tree) to a ConditionNode."""
     if not isinstance(detail, dict):
@@ -364,21 +376,19 @@ def _detail_to_condition_node(detail: dict[str, Any]) -> ConditionNode | None:
 
     label = detail.get("label", "")
     condition_type = detail.get("condition_type", "")
+    satisfied = detail.get("satisfied", False)
+    message = detail.get("message", "")
 
     # Build children recursively
     children = _build_condition_tree(detail)
 
     return ConditionNode(
         label=label,
-        satisfied=True,  # Inner nodes don't have explicit satisfied field
-        message="",
+        satisfied=satisfied,
+        message=message,
         condition_type=condition_type,
         role="",
-        details={
-            k: v
-            for k, v in detail.items()
-            if k not in ("label", "condition_type", "children", "child")
-        },
+        details={k: v for k, v in detail.items() if k not in _STRUCTURAL_KEYS},
         children=children,
     )
 
@@ -440,7 +450,7 @@ def load_scenario(
                 details={
                     k: v
                     for k, v in cs.get("details", {}).items()
-                    if k not in ("children", "child")
+                    if k not in _STRUCTURAL_KEYS
                 },
                 children=children,
             )
