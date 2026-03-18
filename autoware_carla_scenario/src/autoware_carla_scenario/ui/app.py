@@ -191,28 +191,58 @@ async def run_scenarios(request: Request) -> dict[str, str]:
     timeout: int = body.get("timeout", 300)
     sweeper: str = body.get("sweeper", "")
 
-    # When a sweeper is selected and the scenario is a glob pattern,
-    # resolve the glob here so that each subprocess receives a concrete
-    # (non-glob) scenario name.  This prevents run.py's main() from
-    # routing to run_batch() which cannot handle --multirun.
-    if sweeper and _is_glob(scenario):
-        import fnmatch  # noqa: PLC0415
+    if sweeper:
+        # Resolve sweep constraints in-process (lightweight, no CARLA).
+        # This expands the scenario + constraints into concrete per-job
+        # override lists, which are then run as individual subprocesses.
+        from .sweep_resolver import resolve_sweep  # noqa: PLC0415
 
-        all_names = scanner.list_scenario_configs()
-        matched = [n for n in all_names if fnmatch.fnmatch(n, scenario)]
-        if not matched:
+        # Resolve glob to concrete scenario names first.
+        if _is_glob(scenario):
+            import fnmatch  # noqa: PLC0415
+
+            all_names = scanner.list_scenario_configs()
+            scenario_names = [n for n in all_names if fnmatch.fnmatch(n, scenario)]
+        else:
+            scenario_names = [scenario]
+
+        if not scenario_names:
             return {"status": "error", "message": f"No scenarios match '{scenario}'"}
-        overrides_list = [[f"scenario={name}"] for name in matched]
-    else:
-        overrides_list = [[f"scenario={scenario}"]]
 
-    runner.start_run(
-        overrides_list,
-        base_path=_base_path(),
-        extra_overrides=extra_overrides,
-        timeout=timeout,
-        sweeper=sweeper,
-    )
+        overrides_list: list[list[str]] = []
+        for name in scenario_names:
+            try:
+                batches = resolve_sweep(name, extra_overrides)
+                overrides_list.extend(batches)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Sweep resolution failed for %s: %s", name, exc)
+
+        if not overrides_list:
+            return {
+                "status": "error",
+                "message": "No jobs generated (no lanelets matched constraints)",
+            }
+
+        # Jobs already contain scenario= and sweep overrides;
+        # run without sweeper flag (each is a plain single-scenario run).
+        runner.start_run(
+            overrides_list,
+            base_path=_base_path(),
+            extra_overrides=[],
+            timeout=timeout,
+            sweeper="",
+        )
+    else:
+        # No sweeper: pass scenario pattern as-is.
+        overrides_list = [[f"scenario={scenario}"]]
+        runner.start_run(
+            overrides_list,
+            base_path=_base_path(),
+            extra_overrides=extra_overrides,
+            timeout=timeout,
+            sweeper="",
+        )
+
     return {"status": "started"}
 
 
