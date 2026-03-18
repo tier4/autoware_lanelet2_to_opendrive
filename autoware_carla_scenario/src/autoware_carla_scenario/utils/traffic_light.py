@@ -74,7 +74,7 @@ def lanelet2_traffic_light_id_to_opendrive_controller_id(
     return None
 
 
-def _get_signal_ids_for_controller(controller_id: int) -> list[str]:
+def get_signal_ids_for_controller(controller_id: int) -> list[str]:
     """Return the signal IDs controlled by an OpenDRIVE controller.
 
     Parses ``<control signalId="...">`` children of the ``<controller>``
@@ -90,62 +90,3 @@ def _get_signal_ids_for_controller(controller_id: int) -> list[str]:
                 if c.get("signalId") is not None
             ]
     return []
-
-
-def set_all_traffic_lights_state(
-    world: "carla.World",
-    state: "carla.TrafficLightState",
-    *,
-    freeze: bool = True,
-) -> int:
-    """Set every traffic light in the world to *state*.
-
-    Args:
-        world: The CARLA world instance.
-        state: The desired :class:`carla.TrafficLightState`
-            (e.g. ``carla.TrafficLightState.Green``).
-        freeze: If ``True`` (default), freeze every light so that the
-            CARLA traffic manager does not override the state.
-
-    Returns:
-        The number of traffic lights that were updated.
-    """
-    traffic_lights = world.get_actors().filter("traffic.traffic_light*")
-    for tl in traffic_lights:
-        tl.set_state(state)
-        tl.freeze(freeze)
-    return len(traffic_lights)
-
-
-def set_group_traffic_light_state(
-    world: "carla.World",
-    controller_id: int,
-    state: "carla.TrafficLightState",
-    *,
-    freeze: bool = True,
-) -> None:
-    """Set all traffic lights belonging to an OpenDRIVE controller to *state*.
-
-    The function looks up which OpenDRIVE signal IDs belong to the given
-    *controller_id*, then matches them against CARLA traffic light actors
-    using :meth:`carla.TrafficLight.get_opendrive_id`.
-
-    Args:
-        world: The CARLA world instance used to enumerate traffic lights.
-        controller_id: OpenDRIVE controller ID whose signals should be
-            updated.
-        state: The desired :class:`carla.TrafficLightState`
-            (e.g. ``carla.TrafficLightState.Green``).
-        freeze: If ``True`` (default), freeze every light so that the
-            CARLA traffic manager does not override the state.
-    """
-    signal_ids = set(_get_signal_ids_for_controller(controller_id))
-    if not signal_ids:
-        return
-
-    for actor in world.get_actors():
-        if not actor.type_id.startswith("traffic.traffic_light"):
-            continue
-        if actor.get_opendrive_id() in signal_ids:
-            actor.set_state(state)
-            actor.freeze(freeze)
