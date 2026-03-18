@@ -19,6 +19,9 @@ from .models import RunProgress, Status
 
 logger = logging.getLogger(__name__)
 
+RAW_OUTPUT_LOG = "raw_output.log"
+"""Filename used to persist subprocess stdout/stderr alongside result JSON."""
+
 # Global state for the current run.
 _lock = threading.Lock()
 _progress: RunProgress | None = None
@@ -140,6 +143,10 @@ def _run_worker(
                         result.returncode,
                         result.stderr[-500:] if result.stderr else "",
                     )
+                # Save raw terminal output to the job directory.
+                if multirun_dir:
+                    base = Path(cwd) if cwd else Path.cwd()
+                    _save_raw_output(result, base / multirun_dir / str(i))
             except subprocess.TimeoutExpired:
                 status = "failed"
                 logger.error("Scenario %s timed out", scenario_name)
@@ -167,6 +174,21 @@ def _run_worker(
         )
     finally:
         _set_running(False)
+
+
+def _save_raw_output(
+    result: subprocess.CompletedProcess[str],
+    job_dir: Path,
+) -> None:
+    """Save subprocess stdout/stderr to ``raw_output.log`` in *job_dir*."""
+    parts = [s for s in (result.stdout, result.stderr) if s]
+    if not parts:
+        return
+    try:
+        job_dir.mkdir(parents=True, exist_ok=True)
+        (job_dir / RAW_OUTPUT_LOG).write_text("\n\n".join(parts), encoding="utf-8")
+    except OSError:
+        logger.warning("Failed to save raw output to %s", job_dir)
 
 
 def _extract_scenario_name(overrides: list[str]) -> str:

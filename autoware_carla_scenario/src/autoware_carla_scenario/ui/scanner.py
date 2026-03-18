@@ -10,6 +10,7 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 
 from .models import ConditionNode, ScenarioResultView, SessionItem, SessionSummary
+from .runner import RAW_OUTPUT_LOG
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +310,33 @@ def load_session(
     return items
 
 
+_RAW_LOG_MAX_BYTES = 256 * 1024  # 256 KB cap per log
+
+
+def _read_raw_log(job_dir: Path) -> str:
+    """Read raw terminal log from a job directory.
+
+    Tries ``raw_output.log`` first (subprocess stdout/stderr captured by
+    the runner), then falls back to ``run.log`` (Python logging output).
+    Returns an empty string when neither file exists.  Large files are
+    truncated to the last ``_RAW_LOG_MAX_BYTES`` bytes.
+    """
+    for name in (RAW_OUTPUT_LOG, "run.log"):
+        try:
+            log_path = job_dir / name
+            size = log_path.stat().st_size
+            if size <= _RAW_LOG_MAX_BYTES:
+                return log_path.read_text(encoding="utf-8", errors="replace")
+            with log_path.open(encoding="utf-8", errors="replace") as f:
+                f.seek(size - _RAW_LOG_MAX_BYTES)
+                f.readline()  # discard partial first line
+                tail = f.read()
+            return f"... (truncated, showing last {len(tail)} chars) ...\n{tail}"
+        except OSError:
+            continue
+    return ""
+
+
 def _build_condition_tree(details: dict[str, Any]) -> list[ConditionNode]:
     """Recursively extract child condition nodes from a details dict."""
     children: list[ConditionNode] = []
@@ -365,6 +393,7 @@ def load_scenario(
 
     data: dict[str, Any] | None = None
     overrides: list[str] = []
+    job_dir: Path | None = None
 
     if session_type == "multirun":
         job_dir = base_path / "multirun" / date / time / str(index)
@@ -376,9 +405,9 @@ def load_scenario(
             data = _read_result_json(result_files[0])
 
     elif session_type == "batch":
-        session_dir = base_path / "outputs" / date / time
-        batch_json = session_dir / "batch_results.json"
-        overrides = _read_overrides(session_dir)
+        job_dir = base_path / "outputs" / date / time
+        batch_json = job_dir / "batch_results.json"
+        overrides = _read_overrides(job_dir)
         if batch_json.is_file():
             try:
                 data_list = json.loads(batch_json.read_text(encoding="utf-8"))
@@ -388,9 +417,9 @@ def load_scenario(
                 pass
 
     elif session_type == "single":
-        session_dir = base_path / "outputs" / date / time
-        overrides = _read_overrides(session_dir)
-        result_files = sorted(session_dir.glob("*_result.json"))
+        job_dir = base_path / "outputs" / date / time
+        overrides = _read_overrides(job_dir)
+        result_files = sorted(job_dir.glob("*_result.json"))
         if result_files and index == 0:
             data = _read_result_json(result_files[0])
 
@@ -417,12 +446,15 @@ def load_scenario(
             )
         )
 
+    raw_log = _read_raw_log(job_dir) if job_dir else ""
+
     result = ScenarioResultView(
         passed=data.get("passed"),
         message=data.get("message", ""),
         elapsed_seconds=data.get("elapsed_seconds"),
         condition_statuses=condition_statuses,
         overrides=overrides,
+        raw_log=raw_log,
     )
     _cache[cache_key] = result
     return result

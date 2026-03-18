@@ -136,6 +136,28 @@
 </div>
 {% endif %}
 
+<!-- Raw Terminal Log -->
+{% if result.raw_log %}
+<div class="mb-6">
+  <button
+    id="raw-log-toggle"
+    onclick="toggleRawLog()"
+    class="flex items-center gap-2 text-lg font-semibold text-gray-700 mb-2 hover:text-blue-600 transition-colors"
+  >
+    <svg id="raw-log-arrow" class="h-4 w-4 text-gray-400 transform rotate-0 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+    </svg>
+    Raw Terminal Log
+    <span class="text-xs font-normal text-gray-400">(click to expand)</span>
+  </button>
+  <div id="raw-log-content" class="hidden">
+    <div class="bg-gray-900 text-gray-100 rounded-lg shadow p-4 overflow-x-auto max-h-[600px] overflow-y-auto">
+      <pre class="text-xs font-mono whitespace-pre-wrap break-words leading-relaxed">{{ result.raw_log }}</pre>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Condition Tree -->
 {% if result.condition_statuses %}
 <div class="mb-6">
@@ -158,6 +180,22 @@
 
 {% block extra_scripts %}
 <script>
+  // Toggle raw terminal log visibility
+  function toggleRawLog() {
+    const content = document.getElementById('raw-log-content');
+    const arrow = document.getElementById('raw-log-arrow');
+    const hint = document.querySelector('#raw-log-toggle .text-xs');
+    if (content) {
+      content.classList.toggle('hidden');
+      if (arrow) {
+        arrow.classList.toggle('rotate-90');
+      }
+      if (hint) {
+        hint.textContent = content.classList.contains('hidden') ? '(click to expand)' : '(click to collapse)';
+      }
+    }
+  }
+
   // Toggle condition children visibility
   document.querySelectorAll('.condition-toggle').forEach(el => {
     el.addEventListener('click', () => {
