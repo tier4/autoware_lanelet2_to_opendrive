@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Scenario #{{ index }} - Scenario Result Viewer{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex text-sm text-gray-500" aria-label="Breadcrumb">
+  <ol class="flex items-center space-x-2">
+    <li><a href="/" class="hover:text-blue-600">Sessions</a></li>
+    <li><span class="mx-1">/</span></li>
+    <li><a href="/session/{{ session_type }}/{{ date }}/{{ time }}" class="hover:text-blue-600">{{ date }} {{ time }}</a></li>
+    <li><span class="mx-1">/</span></li>
+    <li class="text-gray-800 font-medium">#{{ index }}</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{# Recursive macro for rendering condition tree nodes #}
+{% macro render_condition(node, depth) %}
+<div class="condition-node" style="margin-left: {{ depth * 1.5 }}rem;">
+  <div class="condition-toggle flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer hover:bg-gray-50 transition-colors">
+    {# Expand arrow (only if has children) #}
+    {% if node.children %}
+      <svg class="toggle-arrow h-4 w-4 text-gray-400 transform rotate-90 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+      </svg>
+    {% else %}
+      <span class="w-4 flex-shrink-0"></span>
+    {% endif %}
+
+    {# Status icon #}
+    {% if node.satisfied %}
+      <span class="flex-shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xs font-bold">&#10003;</span>
+    {% else %}
+      {% if node.role == "fail" %}
+        <span class="flex-shrink-0 w-5 h-5 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center text-xs font-bold">&#10007;</span>
+      {% else %}
+        <span class="flex-shrink-0 w-5 h-5 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-xs font-bold">&#10007;</span>
+      {% endif %}
+    {% endif %}
+
+    {# Label and type #}
+    <div class="flex-1 min-w-0">
+      <span class="text-sm font-medium text-gray-800">{{ node.label }}</span>
+      <span class="text-xs text-gray-400 ml-2">({{ node.condition_type }})</span>
+    </div>
+
+    {# Role badge #}
+    {% if node.role %}
+      {% if node.role == "pass" %}
+        <span class="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">pass</span>
+      {% elif node.role == "fail" %}
+        <span class="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700">fail</span>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  {# Message (for top-level conditions) #}
+  {% if node.message %}
+    <div class="ml-11 text-xs text-gray-500 font-mono mt-0.5 mb-1 break-words">{{ node.message }}</div>
+  {% endif %}
+
+  {# Details (non-structural keys) #}
+  {% if node.details %}
+    {% set display_details = {} %}
+    {% for k, v in node.details.items() %}
+      {% if k not in ['operator', 'wrapper', 'children', 'child'] %}
+        {% if display_details.update({k: v}) %}{% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if display_details %}
+    <div class="ml-11 mb-1">
+      {% for k, v in display_details.items() %}
+        <span class="inline-flex items-center text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded mr-1 mb-0.5 font-mono">{{ k }}={{ v }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endif %}
+
+  {# Children (recursive) #}
+  {% if node.children %}
+    <div class="condition-children border-l-2 border-gray-200 ml-4">
+      {% for child in node.children %}
+        {{ render_condition(child, depth + 1) }}
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+
+{% if result %}
+<!-- Result Summary -->
+<div class="mb-6">
+  <div class="flex items-center gap-4">
+    <h1 class="text-2xl font-bold text-gray-800">{{ scenario_name }}</h1>
+    {% if result.passed is none %}
+      <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600">N/A</span>
+    {% elif result.passed %}
+      <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">PASSED</span>
+    {% else %}
+      <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">FAILED</span>
+    {% endif %}
+    {% if result.elapsed_seconds is not none %}
+      <span class="text-sm text-gray-500 font-mono">{{ "%.2f" | format(result.elapsed_seconds) }}s</span>
+    {% endif %}
+  </div>
+  {% if result.message %}
+  <p class="mt-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg font-mono whitespace-pre-wrap">{{ result.message }}</p>
+  {% endif %}
+</div>
+
+<!-- Overrides -->
+{% if result.overrides %}
+<div class="mb-6">
+  <h2 class="text-lg font-semibold text-gray-700 mb-2">Overrides</h2>
+  <div class="bg-white rounded-lg shadow p-4">
+    <ul class="space-y-1">
+      {% for override in result.overrides %}
+      <li class="text-sm font-mono text-gray-600 flex items-center gap-2">
+        <span class="text-blue-500">-</span>
+        {{ override }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+
+<!-- Condition Tree -->
+{% if result.condition_statuses %}
+<div class="mb-6">
+  <h2 class="text-lg font-semibold text-gray-700 mb-2">Condition Tree</h2>
+  <div class="bg-white rounded-lg shadow p-4 space-y-1">
+    {% for cs in result.condition_statuses %}
+      {{ render_condition(cs, 0) }}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="text-center py-12 text-gray-500">
+  <p>No result data found for this scenario.</p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  // Toggle condition children visibility
+  document.querySelectorAll('.condition-toggle').forEach(el => {
+    el.addEventListener('click', () => {
+      const parent = el.closest('.condition-node');
+      const children = parent.querySelector(':scope > .condition-children');
+      if (children) {
+        children.classList.toggle('hidden');
+        const arrow = el.querySelector('.toggle-arrow');
+        if (arrow) {
+          arrow.classList.toggle('rotate-90');
+          arrow.classList.toggle('rotate-0');
+        }
+      }
+    });
+  });
+</script>
+{% endblock %}
