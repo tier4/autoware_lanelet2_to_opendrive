@@ -1,0 +1,36 @@
+<!-- Progress bar partial (htmx SSE updates) -->
+{% if progress %}
+<div class="flex items-center gap-3">
+  <div class="flex-1">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-sm font-medium text-gray-700">
+        {% if progress.status == "done" %}
+          Completed!
+        {% elif progress.status == "running" %}
+          {{ progress.scenario_name }} - running...
+        {% elif progress.status == "passed" %}
+          {{ progress.scenario_name }} - passed
+        {% elif progress.status == "failed" %}
+          {{ progress.scenario_name }} - failed
+        {% else %}
+          Idle
+        {% endif %}
+      </span>
+      {% if progress.total > 0 %}
+      <span class="text-sm text-gray-500">[{{ progress.current }}/{{ progress.total }}]</span>
+      {% endif %}
+    </div>
+    {% if progress.total > 0 %}
+    <div class="w-full bg-gray-200 rounded-full h-2">
+      {% set pct = (progress.current / progress.total * 100) %}
+      <div class="h-2 rounded-full transition-all duration-300
+        {% if progress.status == 'done' %}bg-green-600
+        {% elif progress.status == 'failed' %}bg-red-500
+        {% else %}bg-blue-600{% endif %}"
+        style="width: {{ pct | round(1) }}%">
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

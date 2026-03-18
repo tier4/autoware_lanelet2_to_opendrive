@@ -24,8 +24,14 @@ sweep:
             constraint:
               type: in_set
               values: ${map.no_3d_model_lanelet_ids}
-          - type: equals
-            value: 3002161
+          - type: or
+            constraints:
+              - type: equals
+                value: 3002161
+              - type: equals
+                value: 9
+              - type: equals
+                value: 6
   bindings:
     ego.spawn_s:
       type: stop_line_offset

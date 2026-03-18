@@ -1,0 +1,25 @@
+/* Minimal custom styles for the Scenario Result Viewer */
+
+/* htmx indicator: hide by default, show when active */
+.htmx-indicator {
+  display: none;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  display: inline-block;
+}
+
+/* Condition tree toggle arrow transition */
+.toggle-arrow {
+  transition: transform 0.15s ease-in-out;
+}
+
+/* Condition node hover highlight */
+.condition-node > .condition-toggle:hover {
+  background-color: rgb(249, 250, 251);
+}
+
+/* Smooth transitions for progress bar */
+#progress-fill {
+  transition: width 0.3s ease-in-out;
+}

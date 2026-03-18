@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Scenario Result Viewer{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-gray-50 min-h-screen" {% block body_attrs %}{% endblock %}>
+  <!-- Navbar -->
+  <nav class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="text-xl font-bold text-gray-800 hover:text-blue-600 transition-colors">
+        Scenario Viewer
+      </a>
+      <div class="flex items-center gap-3">
+        <!-- Update Button -->
+        <button
+          id="update-btn"
+          hx-post="/api/refresh"
+          hx-target="#main-content"
+          hx-swap="innerHTML"
+          hx-indicator="#update-spinner"
+          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2"
+        >
+          <svg id="update-spinner" class="htmx-indicator animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          Update
+        </button>
+        <!-- Run Scenarios Button (toggles options panel) -->
+        <button
+          id="run-btn"
+          onclick="toggleRunPanel()"
+          class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          Run Scenarios
+          <svg id="run-btn-chevron" class="h-3 w-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Run Options Panel (hidden by default, sticky below navbar) -->
+  <div id="run-panel" class="hidden sticky top-[52px] z-40 bg-white border-b border-gray-200 shadow-md">
+    <div class="max-w-7xl mx-auto px-4 py-4">
+      <!-- Row 1: Scenario selection -->
+      <div class="mb-3">
+        <label for="run-scenario" class="block text-sm font-medium text-gray-700 mb-1">
+          Scenario
+        </label>
+        <div class="flex items-center gap-2">
+          <input
+            id="run-scenario"
+            type="text"
+            list="scenario-list"
+            value="*/*"
+            placeholder="e.g. traffic_light_compliance/* or intersection_passing/straight"
+            class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-700 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+          <datalist id="scenario-list"></datalist>
+          <p class="text-xs text-gray-400 flex-shrink-0">Glob patterns supported (<code>*</code>, <code>?</code>)</p>
+        </div>
+      </div>
+
+      <!-- Row 2: Options + Actions -->
+      <div class="flex items-start gap-6">
+        <!-- Extra Overrides -->
+        <div class="flex-1">
+          <label for="extra-overrides" class="block text-sm font-medium text-gray-700 mb-1">
+            Extra Overrides
+          </label>
+          <textarea
+            id="extra-overrides"
+            rows="3"
+            placeholder="server.host=192.168.1.100&#10;scenario.timeout_seconds=15.0&#10;ego.initial_speed_kmh=10.0"
+            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-700 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-y"
+          ></textarea>
+          <p class="mt-1 text-xs text-gray-400">One Hydra override per line (<code>key=value</code>). Applied to every scenario in this run.</p>
+        </div>
+
+        <!-- Common Options -->
+        <div class="flex-shrink-0 w-64 space-y-3">
+          <div>
+            <label for="run-timeout" class="block text-sm font-medium text-gray-700 mb-1">
+              Timeout (sec)
+            </label>
+            <input
+              id="run-timeout"
+              type="number"
+              min="1"
+              value="300"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+          </div>
+          <div>
+            <label for="run-sweeper" class="block text-sm font-medium text-gray-700 mb-1">
+              Sweeper (--multirun)
+            </label>
+            <select
+              id="run-sweeper"
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">None (batch / single run)</option>
+              <option value="lanelet_constraint" selected>lanelet_constraint</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex-shrink-0 flex flex-col gap-2 pt-6">
+          <button
+            onclick="startRun()"
+            class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+            </svg>
+            Start
+          </button>
+          <button
+            onclick="toggleRunPanel()"
+            class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <!-- Command Preview -->
+      <div class="mt-3 pt-3 border-t border-gray-200">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium text-gray-500">Command:</span>
+          <code id="cmd-preview" class="flex-1 text-xs font-mono text-gray-600 bg-gray-100 px-3 py-1.5 rounded select-all overflow-x-auto whitespace-nowrap">uv run scenario scenario=*/*</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress Bar (hidden by default, sticky below navbar/panel) -->
+  <div id="progress-bar" class="hidden sticky top-[52px] z-30 bg-white border-b border-gray-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 py-3">
+      <div class="flex items-center gap-3">
+        <div class="flex-1">
+          <div class="flex items-center justify-between mb-1">
+            <span id="progress-text" class="text-sm font-medium text-gray-700">Preparing...</span>
+            <span id="progress-count" class="text-sm text-gray-500"></span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-2">
+            <div id="progress-fill" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Breadcrumb -->
+  <div class="max-w-7xl mx-auto px-4 py-2">
+    {% block breadcrumb %}{% endblock %}
+  </div>
+
+  <!-- Main Content -->
+  <main class="max-w-7xl mx-auto px-4 py-4">
+    <div id="main-content">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <script>
+    // Toggle run options panel and load scenario list on first open
+    let scenarioListLoaded = false;
+    function toggleRunPanel() {
+      const panel = document.getElementById('run-panel');
+      const chevron = document.getElementById('run-btn-chevron');
+      panel.classList.toggle('hidden');
+      if (chevron) {
+        chevron.classList.toggle('rotate-180');
+      }
+      if (!panel.classList.contains('hidden')) {
+        // Load scenario list on first open
+        if (!scenarioListLoaded) {
+          fetch('/api/scenarios').then(r => r.json()).then(names => {
+            const datalist = document.getElementById('scenario-list');
+            ['*/*', 'intersection_passing/*', 'traffic_light_compliance/*', 'lane_change/*'].forEach(p => {
+              const opt = document.createElement('option');
+              opt.value = p;
+              datalist.appendChild(opt);
+            });
+            names.forEach(name => {
+              const opt = document.createElement('option');
+              opt.value = name;
+              datalist.appendChild(opt);
+            });
+            scenarioListLoaded = true;
+          });
+        }
+        updateCmdPreview();
+      }
+    }
+
+    // Debounce helper
+    function debounce(fn, ms) {
+      let timer;
+      return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), ms);
+      };
+    }
+
+    // Update the command preview (debounced calls go through debouncedPreview)
+    function updateCmdPreview() {
+      const opts = collectRunOptions();
+      fetch('/api/run/preview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          scenario: opts.scenario,
+          extra_overrides: opts.extra_overrides,
+          sweeper: opts.sweeper,
+        })
+      }).then(r => r.json()).then(data => {
+        const el = document.getElementById('cmd-preview');
+        if (el) el.textContent = data.command;
+      });
+    }
+
+    // --- localStorage persistence for Run Options panel ---
+    const STORAGE_KEY = 'viewer_run_options';
+    const PANEL_FIELDS = ['run-scenario', 'extra-overrides', 'run-timeout', 'run-sweeper'];
+
+    function saveRunOptions() {
+      const data = {};
+      PANEL_FIELDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) data[id] = el.value;
+      });
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+    }
+
+    function restoreRunOptions() {
+      let data;
+      try { data = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch {}
+      if (!data) return;
+      PANEL_FIELDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && data[id] !== undefined) el.value = data[id];
+      });
+    }
+
+    // Debounced helpers (300ms delay to avoid flooding the server / localStorage)
+    const debouncedPreview = debounce(updateCmdPreview, 300);
+    const debouncedSave = debounce(saveRunOptions, 300);
+
+    // Restore saved values on page load, then attach listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      restoreRunOptions();
+      PANEL_FIELDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('input', () => { debouncedSave(); debouncedPreview(); });
+          el.addEventListener('change', () => { debouncedSave(); debouncedPreview(); });
+        }
+      });
+    });
+
+    // Collect all run options from the panel
+    function collectRunOptions() {
+      const scenario = (document.getElementById('run-scenario')?.value || '*/*').trim();
+      const textarea = document.getElementById('extra-overrides');
+      const raw = (textarea ? textarea.value : '').trim();
+      const extra = raw ? raw.split('\n').map(l => l.trim()).filter(l => l && l.includes('=')) : [];
+      const timeout = parseInt(document.getElementById('run-timeout')?.value || '300', 10);
+      const sweeper = document.getElementById('run-sweeper')?.value || '';
+      return { scenario: scenario, extra_overrides: extra, timeout: timeout, sweeper: sweeper };
+    }
+
+    // Run scenarios using options from the panel
+    function startRun() {
+      const opts = collectRunOptions();
+      const body = {
+        scenario: opts.scenario,
+        extra_overrides: opts.extra_overrides,
+        timeout: opts.timeout,
+        sweeper: opts.sweeper,
+      };
+
+      // Hide panel, show progress bar
+      document.getElementById('run-panel').classList.add('hidden');
+      const chevron = document.getElementById('run-btn-chevron');
+      if (chevron) chevron.classList.remove('rotate-180');
+
+      // Start the run
+      fetch('/api/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      }).then(() => {
+        document.getElementById('progress-bar').classList.remove('hidden');
+        const evtSource = new EventSource('/api/run/progress');
+        evtSource.onmessage = function(event) {
+          const data = JSON.parse(event.data);
+          updateProgress(data);
+          if (data.status === 'done' || data.status === 'idle') {
+            evtSource.close();
+            setTimeout(() => {
+              document.getElementById('progress-bar').classList.add('hidden');
+              htmx.trigger('#update-btn', 'click');
+            }, 1000);
+          }
+        };
+        evtSource.onerror = function() {
+          evtSource.close();
+          document.getElementById('progress-bar').classList.add('hidden');
+        };
+      });
+    }
+
+    function updateProgress(data) {
+      const text = document.getElementById('progress-text');
+      const count = document.getElementById('progress-count');
+      const fill = document.getElementById('progress-fill');
+
+      if (data.status === 'done') {
+        text.textContent = 'Completed!';
+        count.textContent = `${data.current}/${data.total}`;
+        fill.style.width = '100%';
+        fill.className = 'bg-green-600 h-2 rounded-full transition-all duration-300';
+      } else if (data.total > 0) {
+        text.textContent = `${data.scenario_name} - ${data.status}...`;
+        count.textContent = `[${data.current}/${data.total}]`;
+        const pct = (data.current / data.total) * 100;
+        fill.style.width = pct + '%';
+        if (data.status === 'failed') {
+          fill.className = 'bg-red-500 h-2 rounded-full transition-all duration-300';
+        } else {
+          fill.className = 'bg-blue-600 h-2 rounded-full transition-all duration-300';
+        }
+      }
+    }
+
+    // Close panel on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        document.getElementById('run-panel').classList.add('hidden');
+        const chevron = document.getElementById('run-btn-chevron');
+        if (chevron) chevron.classList.remove('rotate-180');
+      }
+    });
+  </script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>
