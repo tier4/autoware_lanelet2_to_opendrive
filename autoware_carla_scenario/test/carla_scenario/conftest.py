@@ -1,4 +1,4 @@
-"""Session-scoped fixtures for CARLA integration tests.
+"""Session-scoped fixtures and shared test helpers for CARLA scenario tests.
 
 Architecture
 ------------
@@ -18,15 +18,74 @@ CARLA session cannot be established.
 
 from __future__ import annotations
 
+from typing import Optional
+
 import carla as _carla
 
 from autoware_carla_scenario import (
+    BaseCondition,
     BaseScenario,
     CarlaScenarioFixture,
     EgoConfig,
     ScenarioQueue,
+    ScenarioResult,
     SpawnTransform,
+    TickSnapshot,
 )
+
+
+# ---------------------------------------------------------------------------
+# Shared test helpers — imported by unit test modules
+# ---------------------------------------------------------------------------
+
+
+def make_tick_snapshot(
+    world: object,
+    elapsed: float = 0.0,
+    tick_count: int = 1,
+    delta_time: float = 0.05,
+) -> TickSnapshot:
+    """Create a :class:`TickSnapshot` for unit tests."""
+    return TickSnapshot(
+        world=world,
+        elapsed=elapsed,
+        tick_count=tick_count,
+        delta_time=delta_time,
+    )
+
+
+class AlwaysPassCondition(BaseCondition):
+    """Test helper: always returns a passing result."""
+
+    def __init__(self) -> None:
+        super().__init__(label="always_pass")
+
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
+        return ScenarioResult(
+            passed=True, message="Always passes", elapsed_seconds=snapshot.elapsed
+        )
+
+
+class AlwaysNoneCondition(BaseCondition):
+    """Test helper: never triggers."""
+
+    def __init__(self) -> None:
+        super().__init__(label="always_none")
+
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
+        return None
+
+
+class AlwaysFailCondition(BaseCondition):
+    """Test helper: always returns a failing result."""
+
+    def __init__(self) -> None:
+        super().__init__(label="always_fail")
+
+    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
+        return ScenarioResult(
+            passed=False, message="Always fails", elapsed_seconds=snapshot.elapsed
+        )
 
 
 # ---------------------------------------------------------------------------

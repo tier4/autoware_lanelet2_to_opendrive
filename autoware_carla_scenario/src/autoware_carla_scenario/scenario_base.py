@@ -244,7 +244,7 @@ class BaseScenario(ABC):
             cb(snapshot.world)
 
         # Prune completed one-shot actions so they are not iterated again.
-        actions[:] = [a for a in actions if not (a._once and a._done)]
+        actions[:] = [a for a in actions if not a.is_prunable]
 
     def run_pre_tick(self, snapshot: TickSnapshot) -> None:
         """Execute all pre-tick actions and callbacks.

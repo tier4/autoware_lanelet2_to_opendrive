@@ -92,10 +92,10 @@ from .conditions import (
     StandstillCondition,
     StickyCondition,
     TemporaryStopCondition,
-    TickSnapshot,
     TimeoutCondition,
     find_actor_by_role_name,
 )
+from .tick_snapshot import TickSnapshot
 from .constants import EGO_ROLE_NAME
 from .entity_role import EntityRole
 from .coordinate import (

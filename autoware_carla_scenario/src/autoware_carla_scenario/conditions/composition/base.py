@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import Any, Optional, Union
 
 from ...entity_role import EntityRole
 from ...tick_snapshot import TickSnapshot
 from ..base import BaseCondition, ScenarioResult
 from ..entity_existence import EntityExistenceCondition
-
-if TYPE_CHECKING:
-    pass
 
 
 class CompositionCondition(BaseCondition):

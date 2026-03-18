@@ -17,25 +17,7 @@ from autoware_carla_scenario import (
     TickSnapshot,
 )
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _snap(
-    world: object,
-    elapsed: float = 0.0,
-    tick_count: int = 1,
-    delta_time: float = 0.05,
-) -> TickSnapshot:
-    """Create a TickSnapshot for testing."""
-    return TickSnapshot(
-        world=world,
-        elapsed=elapsed,
-        tick_count=tick_count,
-        delta_time=delta_time,
-    )
+from .conftest import make_tick_snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -144,9 +126,9 @@ class TestBaseScenario:
     def test_counting_condition_triggers_after_n_calls(self) -> None:
         cond = _CountingCondition(trigger_after=3, passed=True)
         world = MagicMock()
-        assert cond.check(_snap(world, 0.0)) is None
-        assert cond.check(_snap(world, 0.5)) is None
-        result = cond.check(_snap(world, 1.0))
+        assert cond.check(make_tick_snapshot(world, 0.0)) is None
+        assert cond.check(make_tick_snapshot(world, 0.5)) is None
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -182,7 +164,7 @@ class TestBaseScenario:
         condition = _ElapsedRecordingCondition()
         action = _NoOpAction(condition=condition)
         world = MagicMock()
-        action.tick(_snap(world, 5.0))
+        action.tick(make_tick_snapshot(world, 5.0))
         assert condition.last_elapsed == 5.0
 
 

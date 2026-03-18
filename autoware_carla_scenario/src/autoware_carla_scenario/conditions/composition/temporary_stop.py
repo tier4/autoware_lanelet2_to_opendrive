@@ -9,7 +9,7 @@ created for the predecessor/successor roads and combined via
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Sequence, Union
+from typing import Optional, Sequence, Union
 
 import numpy as np
 
@@ -26,9 +26,6 @@ from ..persistent import PersistentCondition
 from .base import CompositionCondition
 from .entity_lane_position import EntityLanePositionCondition
 from .speed import SpeedCondition
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

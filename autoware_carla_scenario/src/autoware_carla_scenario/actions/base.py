@@ -72,6 +72,16 @@ class BaseAction(ABC):
         """Whether this action has already fired (relevant when *once=True*)."""
         return self._done
 
+    @property
+    def is_prunable(self) -> bool:
+        """Whether this action can be removed from the tick list.
+
+        Returns ``True`` when the action is a one-shot (``once=True``) and
+        has already fired.  Used by :meth:`BaseScenario._run_tick_phase`
+        to prune completed actions.
+        """
+        return self._once and self._done
+
     @abstractmethod
     def execute(self, world: "carla.World") -> None:
         """Perform the action.

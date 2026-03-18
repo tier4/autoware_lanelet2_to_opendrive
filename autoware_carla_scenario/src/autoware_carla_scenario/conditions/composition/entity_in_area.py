@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Union
+from typing import Any, List, Optional, Sequence, Union
 
 import cv2
 import numpy as np
@@ -13,9 +13,6 @@ from ...entity_role import EntityRole
 from ...tick_snapshot import TickSnapshot
 from ..base import ScenarioResult, find_actor_by_role_name
 from .base import CompositionCondition
-
-if TYPE_CHECKING:
-    pass
 
 
 def _point_in_polygon_2d(

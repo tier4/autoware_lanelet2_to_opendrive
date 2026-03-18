@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import Any, Optional, Union
 
 from ...coordinate.poses import CarlaWorldPose
 from ...coordinate.transform import project_onto_road, to_opendrive
@@ -12,9 +12,6 @@ from ...tick_snapshot import TickSnapshot
 from ..base import ScenarioResult, find_actor_by_role_name
 from ..comparison import ScalarComparisonRule
 from .base import CompositionCondition
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

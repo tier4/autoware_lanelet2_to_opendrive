@@ -31,42 +31,12 @@ from autoware_carla_scenario.conditions.composition.entity_in_area import (
 )
 from autoware_carla_scenario.coordinate.poses import CarlaWorldPose, OpenDrivePose
 
-
-def _snap(
-    world: object,
-    elapsed: float = 0.0,
-    tick_count: int = 1,
-    delta_time: float = 0.05,
-) -> TickSnapshot:
-    """Create a TickSnapshot for tests."""
-    return TickSnapshot(
-        world=world,
-        elapsed=elapsed,
-        tick_count=tick_count,
-        delta_time=delta_time,
-    )
-
-
-class AlwaysPassCondition(BaseCondition):
-    """Test helper: always returns a passing result."""
-
-    def __init__(self) -> None:
-        super().__init__(label="always_pass")
-
-    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
-        return ScenarioResult(
-            passed=True, message="Always passes", elapsed_seconds=snapshot.elapsed
-        )
-
-
-class AlwaysNoneCondition(BaseCondition):
-    """Test helper: never triggers."""
-
-    def __init__(self) -> None:
-        super().__init__(label="always_none")
-
-    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
-        return None
+from .conftest import (
+    AlwaysFailCondition,
+    AlwaysNoneCondition,
+    AlwaysPassCondition,
+    make_tick_snapshot,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,13 +48,13 @@ class TestTimeoutCondition:
     def test_returns_none_before_timeout(self) -> None:
         condition = TimeoutCondition(timeout_seconds=10.0, label="test_timeout")
         world = MagicMock()
-        result = condition.check(_snap(world, 5.0))
+        result = condition.check(make_tick_snapshot(world, 5.0))
         assert result is None
 
     def test_returns_failure_at_timeout(self) -> None:
         condition = TimeoutCondition(timeout_seconds=10.0, label="test_timeout")
         world = MagicMock()
-        result = condition.check(_snap(world, 10.0))
+        result = condition.check(make_tick_snapshot(world, 10.0))
         assert result is not None
         assert result.passed is False
         assert result.elapsed_seconds == pytest.approx(10.0)
@@ -92,7 +62,7 @@ class TestTimeoutCondition:
     def test_returns_failure_beyond_timeout(self) -> None:
         condition = TimeoutCondition(timeout_seconds=5.0, label="test_timeout")
         world = MagicMock()
-        result = condition.check(_snap(world, 999.9))
+        result = condition.check(make_tick_snapshot(world, 999.9))
         assert result is not None
         assert result.passed is False
 
@@ -103,7 +73,7 @@ class TestTimeoutCondition:
     def test_message_contains_timeout_info(self) -> None:
         condition = TimeoutCondition(timeout_seconds=30.0, label="test_timeout")
         world = MagicMock()
-        result = condition.check(_snap(world, 30.0))
+        result = condition.check(make_tick_snapshot(world, 30.0))
         assert result is not None
         assert "30" in result.message
 
@@ -117,13 +87,13 @@ class TestElapsedTimeCondition:
     def test_returns_none_before_duration(self) -> None:
         condition = ElapsedTimeCondition(duration_seconds=10.0, label="test_elapsed")
         world = MagicMock()
-        result = condition.check(_snap(world, 5.0))
+        result = condition.check(make_tick_snapshot(world, 5.0))
         assert result is None
 
     def test_returns_pass_at_duration(self) -> None:
         condition = ElapsedTimeCondition(duration_seconds=10.0, label="test_elapsed")
         world = MagicMock()
-        result = condition.check(_snap(world, 10.0))
+        result = condition.check(make_tick_snapshot(world, 10.0))
         assert result is not None
         assert result.passed is True
         assert result.elapsed_seconds == pytest.approx(10.0)
@@ -131,14 +101,14 @@ class TestElapsedTimeCondition:
     def test_returns_pass_beyond_duration(self) -> None:
         condition = ElapsedTimeCondition(duration_seconds=5.0, label="test_elapsed")
         world = MagicMock()
-        result = condition.check(_snap(world, 999.9))
+        result = condition.check(make_tick_snapshot(world, 999.9))
         assert result is not None
         assert result.passed is True
 
     def test_message_contains_duration_info(self) -> None:
         condition = ElapsedTimeCondition(duration_seconds=30.0, label="test_elapsed")
         world = MagicMock()
-        result = condition.check(_snap(world, 30.0))
+        result = condition.check(make_tick_snapshot(world, 30.0))
         assert result is not None
         assert "30.00" in result.message
 
@@ -161,8 +131,10 @@ class TestElapsedTimeConditionWithRule:
             label="test_elapsed",
         )
         world = MagicMock()
-        assert cond.check(_snap(world, 10.0)) is None  # not strictly greater
-        result = cond.check(_snap(world, 10.1))
+        assert (
+            cond.check(make_tick_snapshot(world, 10.0)) is None
+        )  # not strictly greater
+        result = cond.check(make_tick_snapshot(world, 10.1))
         assert result is not None
         assert result.passed is True
 
@@ -171,10 +143,10 @@ class TestElapsedTimeConditionWithRule:
             duration_seconds=10.0, rule=ComparisonRule.LESS_THAN, label="test_elapsed"
         )
         world = MagicMock()
-        result = cond.check(_snap(world, 5.0))
+        result = cond.check(make_tick_snapshot(world, 5.0))
         assert result is not None
         assert result.passed is True
-        assert cond.check(_snap(world, 10.0)) is None
+        assert cond.check(make_tick_snapshot(world, 10.0)) is None
 
     def test_equal_to_within_tolerance(self) -> None:
         cond = ElapsedTimeCondition(
@@ -184,7 +156,7 @@ class TestElapsedTimeConditionWithRule:
             label="test_elapsed",
         )
         world = MagicMock()
-        result = cond.check(_snap(world, 10.005))
+        result = cond.check(make_tick_snapshot(world, 10.005))
         assert result is not None
         assert result.passed is True
 
@@ -196,7 +168,7 @@ class TestElapsedTimeConditionWithRule:
             label="test_elapsed",
         )
         world = MagicMock()
-        assert cond.check(_snap(world, 10.1)) is None
+        assert cond.check(make_tick_snapshot(world, 10.1)) is None
 
     def test_less_than_or_equal(self) -> None:
         cond = ElapsedTimeCondition(
@@ -205,16 +177,16 @@ class TestElapsedTimeConditionWithRule:
             label="test_elapsed",
         )
         world = MagicMock()
-        result = cond.check(_snap(world, 10.0))
+        result = cond.check(make_tick_snapshot(world, 10.0))
         assert result is not None
         assert result.passed is True
-        assert cond.check(_snap(world, 10.1)) is None
+        assert cond.check(make_tick_snapshot(world, 10.1)) is None
 
     def test_default_rule_is_greater_than_or_equal(self) -> None:
         """Backward compatibility: default behaves as >= (original semantics)."""
         cond = ElapsedTimeCondition(duration_seconds=10.0, label="test_elapsed")
         world = MagicMock()
-        result = cond.check(_snap(world, 10.0))
+        result = cond.check(make_tick_snapshot(world, 10.0))
         assert result is not None
         assert result.passed is True
 
@@ -232,7 +204,7 @@ class TestElapsedTimeConditionWithRule:
             duration_seconds=5.0, rule=ComparisonRule.LESS_THAN, label="test_elapsed"
         )
         world = MagicMock()
-        result = cond.check(_snap(world, 3.0))
+        result = cond.check(make_tick_snapshot(world, 3.0))
         assert result is not None
         assert "less than" in result.message
 
@@ -245,13 +217,13 @@ class TestElapsedTimeConditionWithRule:
 class TestBaseCondition:
     def test_concrete_subclass_always_pass(self) -> None:
         cond = AlwaysPassCondition()
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is True
 
     def test_concrete_subclass_always_none(self) -> None:
         cond = AlwaysNoneCondition()
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is None
 
 
@@ -272,7 +244,7 @@ class TestTimeoutConditionIntegration:
         runner = carla_queue._runner
         world = runner._world or runner._client.get_world()
         condition = TimeoutCondition(timeout_seconds=0.0, label="test_timeout")
-        result = condition.check(_snap(world, 1.0))
+        result = condition.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is False
 
@@ -380,7 +352,7 @@ class TestEntityInAreaCondition:
         polygon = self._square_polygon()
         condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=0.0)
-        result = condition.check(_snap(world, 1.0))
+        result = condition.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
         assert "npc1" in result.message
@@ -389,21 +361,21 @@ class TestEntityInAreaCondition:
         polygon = self._square_polygon()
         condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=10.0, y=10.0)
-        result = condition.check(_snap(world, 1.0))
+        result = condition.check(make_tick_snapshot(world, 1.0))
         assert result is None
 
     def test_entity_not_found_returns_none(self) -> None:
         polygon = self._square_polygon()
         condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("other_actor", x=0.0, y=0.0)
-        result = condition.check(_snap(world, 1.0))
+        result = condition.check(make_tick_snapshot(world, 1.0))
         assert result is None
 
     def test_result_elapsed_seconds(self) -> None:
         polygon = self._square_polygon()
         condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=0.0)
-        result = condition.check(_snap(world, 3.5))
+        result = condition.check(make_tick_snapshot(world, 3.5))
         assert result is not None
         assert result.elapsed_seconds == pytest.approx(3.5)
 
@@ -424,7 +396,7 @@ class TestEntityInAreaCondition:
         ]
         condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=0.0)
-        result = condition.check(_snap(world, 2.0))
+        result = condition.check(make_tick_snapshot(world, 2.0))
         assert result is not None
         assert result.passed is True
 
@@ -433,7 +405,7 @@ class TestEntityInAreaCondition:
         polygon = self._square_polygon()
         condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
         world = _make_world_with_actor("npc1", x=0.0, y=-5.0)
-        assert condition.check(_snap(world, 1.0)) is not None
+        assert condition.check(make_tick_snapshot(world, 1.0)) is not None
 
     def test_boundary_excluded_when_flag_false(self) -> None:
         polygon = self._square_polygon()
@@ -441,7 +413,7 @@ class TestEntityInAreaCondition:
             "npc1", polygon, include_boundary=False, label="test_entity_in_area"
         )
         world = _make_world_with_actor("npc1", x=0.0, y=-5.0)
-        assert condition.check(_snap(world, 1.0)) is None
+        assert condition.check(make_tick_snapshot(world, 1.0)) is None
 
     def test_polygon_resolved_on_every_check(self) -> None:
         """_resolve_polygon is called each time check() is invoked."""
@@ -453,10 +425,10 @@ class TestEntityInAreaCondition:
         condition = EntityInAreaCondition("npc1", polygon, label="test_entity_in_area")
 
         world_in = _make_world_with_actor("npc1", x=0.0, y=0.0)
-        assert condition.check(_snap(world_in, 1.0)) is not None
+        assert condition.check(make_tick_snapshot(world_in, 1.0)) is not None
 
         world_out = _make_world_with_actor("npc1", x=5.0, y=5.0)
-        assert condition.check(_snap(world_out, 2.0)) is None
+        assert condition.check(make_tick_snapshot(world_out, 2.0)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -477,7 +449,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is not None
         assert result.passed is True
@@ -498,7 +470,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 1.0))
+            result = condition.check(make_tick_snapshot(world, 1.0))
 
         assert result is None
 
@@ -514,7 +486,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 1.0))
+            result = condition.check(make_tick_snapshot(world, 1.0))
 
         assert result is None
 
@@ -525,7 +497,7 @@ class TestEntityLanePositionCondition:
         )
         world = _make_world_with_actor("other_actor", x=100.0, y=200.0)
 
-        result = condition.check(_snap(world, 1.0))
+        result = condition.check(make_tick_snapshot(world, 1.0))
         assert result is None
 
     def test_result_elapsed_seconds(self) -> None:
@@ -540,7 +512,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 42.5))
+            result = condition.check(make_tick_snapshot(world, 42.5))
 
         assert result is not None
         assert result.elapsed_seconds == pytest.approx(42.5)
@@ -557,7 +529,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 3.0))
+            result = condition.check(make_tick_snapshot(world, 3.0))
 
         assert result is not None
         assert result.passed is True
@@ -578,7 +550,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 1.0))
+            result = condition.check(make_tick_snapshot(world, 1.0))
 
         assert result is None
 
@@ -597,7 +569,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is not None
         assert result.passed is True
@@ -615,7 +587,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is None
 
@@ -632,7 +604,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is not None
         assert result.passed is True
@@ -650,7 +622,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is None
 
@@ -670,7 +642,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is not None
         assert result.passed is True
@@ -691,7 +663,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is None
 
@@ -717,7 +689,7 @@ class TestEntityLanePositionCondition:
         ), unittest.mock.patch(
             "autoware_carla_scenario.conditions.composition.entity_lane_position.project_onto_road",
         ) as mock_project:
-            result = condition.check(_snap(world, 3.0))
+            result = condition.check(make_tick_snapshot(world, 3.0))
 
         mock_project.assert_not_called()
         assert result is not None
@@ -742,7 +714,7 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.project_onto_road",
             return_value=projected_pose,
         ) as mock_project:
-            result = condition.check(_snap(world, 3.0))
+            result = condition.check(make_tick_snapshot(world, 3.0))
 
         mock_project.assert_called_once()
         assert result is not None
@@ -760,29 +732,12 @@ class TestEntityLanePositionCondition:
             "autoware_carla_scenario.conditions.composition.entity_lane_position.to_opendrive",
             return_value=fake_od_pose,
         ):
-            result = condition.check(_snap(world, 5.0))
+            result = condition.check(make_tick_snapshot(world, 5.0))
 
         assert result is not None
         assert result.passed is True
         assert "npc1" in result.message
         assert "'1'" in result.message
-
-
-# ---------------------------------------------------------------------------
-# Composite helpers
-# ---------------------------------------------------------------------------
-
-
-class AlwaysFailCondition(BaseCondition):
-    """Test helper: always returns a failing result."""
-
-    def __init__(self) -> None:
-        super().__init__(label="always_fail")
-
-    def check(self, snapshot: TickSnapshot) -> Optional[ScenarioResult]:
-        return ScenarioResult(
-            passed=False, message="Always fails", elapsed_seconds=snapshot.elapsed
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -793,22 +748,22 @@ class AlwaysFailCondition(BaseCondition):
 class TestAndCondition:
     def test_all_pass_returns_pass(self) -> None:
         cond = AndCondition([AlwaysPassCondition(), AlwaysPassCondition()])
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is True
         assert "AND" in result.message
 
     def test_one_none_returns_none(self) -> None:
         cond = AndCondition([AlwaysPassCondition(), AlwaysNoneCondition()])
-        assert cond.check(_snap(MagicMock(), 1.0)) is None
+        assert cond.check(make_tick_snapshot(MagicMock(), 1.0)) is None
 
     def test_all_none_returns_none(self) -> None:
         cond = AndCondition([AlwaysNoneCondition(), AlwaysNoneCondition()])
-        assert cond.check(_snap(MagicMock(), 1.0)) is None
+        assert cond.check(make_tick_snapshot(MagicMock(), 1.0)) is None
 
     def test_one_fail_returns_fail_immediately(self) -> None:
         cond = AndCondition([AlwaysFailCondition(), AlwaysPassCondition()])
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is False
 
@@ -817,7 +772,7 @@ class TestAndCondition:
         spy = MagicMock(spec=BaseCondition)
         spy.label = "spy"
         cond = AndCondition([AlwaysFailCondition(), spy])
-        cond.check(_snap(MagicMock(), 1.0))
+        cond.check(make_tick_snapshot(MagicMock(), 1.0))
         spy.check.assert_not_called()
 
     def test_none_short_circuits(self) -> None:
@@ -825,21 +780,21 @@ class TestAndCondition:
         spy = MagicMock(spec=BaseCondition)
         spy.label = "spy"
         cond = AndCondition([AlwaysNoneCondition(), spy])
-        cond.check(_snap(MagicMock(), 1.0))
+        cond.check(make_tick_snapshot(MagicMock(), 1.0))
         spy.check.assert_not_called()
 
     def test_three_conditions_all_pass(self) -> None:
         cond = AndCondition(
             [AlwaysPassCondition(), AlwaysPassCondition(), AlwaysPassCondition()]
         )
-        result = cond.check(_snap(MagicMock(), 2.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 2.0))
         assert result is not None
         assert result.passed is True
         assert result.elapsed_seconds == pytest.approx(2.0)
 
     def test_message_combines_children(self) -> None:
         cond = AndCondition([AlwaysPassCondition(), AlwaysPassCondition()])
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.message.count("Always passes") == 2
 
@@ -858,23 +813,23 @@ class TestAndCondition:
 class TestOrCondition:
     def test_first_pass_returns_pass(self) -> None:
         cond = OrCondition([AlwaysPassCondition(), AlwaysNoneCondition()])
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is True
 
     def test_second_pass_returns_pass(self) -> None:
         cond = OrCondition([AlwaysNoneCondition(), AlwaysPassCondition()])
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is True
 
     def test_all_none_returns_none(self) -> None:
         cond = OrCondition([AlwaysNoneCondition(), AlwaysNoneCondition()])
-        assert cond.check(_snap(MagicMock(), 1.0)) is None
+        assert cond.check(make_tick_snapshot(MagicMock(), 1.0)) is None
 
     def test_fail_result_is_returned(self) -> None:
         cond = OrCondition([AlwaysFailCondition(), AlwaysNoneCondition()])
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is False
 
@@ -883,14 +838,14 @@ class TestOrCondition:
         spy = MagicMock(spec=BaseCondition)
         spy.label = "spy"
         cond = OrCondition([AlwaysPassCondition(), spy])
-        cond.check(_snap(MagicMock(), 1.0))
+        cond.check(make_tick_snapshot(MagicMock(), 1.0))
         spy.check.assert_not_called()
 
     def test_three_conditions(self) -> None:
         cond = OrCondition(
             [AlwaysNoneCondition(), AlwaysNoneCondition(), AlwaysPassCondition()]
         )
-        result = cond.check(_snap(MagicMock(), 3.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 3.0))
         assert result is not None
         assert result.passed is True
 
@@ -904,7 +859,7 @@ class TestOrCondition:
         """OrCondition can contain AndCondition for complex logic."""
         inner_and = AndCondition([AlwaysPassCondition(), AlwaysPassCondition()])
         cond = OrCondition([AlwaysNoneCondition(), inner_and])
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -918,14 +873,14 @@ class TestStandstillCondition:
     def test_returns_none_before_duration(self) -> None:
         condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
-        assert condition.check(_snap(world, 0.0)) is None
-        assert condition.check(_snap(world, 2.9)) is None
+        assert condition.check(make_tick_snapshot(world, 0.0)) is None
+        assert condition.check(make_tick_snapshot(world, 2.9)) is None
 
     def test_returns_pass_after_duration(self) -> None:
         condition = StandstillCondition("ego", duration=3.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
-        condition.check(_snap(world, 0.0))
-        result = condition.check(_snap(world, 3.0))
+        condition.check(make_tick_snapshot(world, 0.0))
+        result = condition.check(make_tick_snapshot(world, 3.0))
         assert result is not None
         assert result.passed is True
         assert "ego" in result.message
@@ -936,16 +891,16 @@ class TestStandstillCondition:
         world_move = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
 
         # Stand still from t=0 to t=1
-        condition.check(_snap(world_stop, 0.0))
-        assert condition.check(_snap(world_stop, 1.0)) is None
+        condition.check(make_tick_snapshot(world_stop, 0.0))
+        assert condition.check(make_tick_snapshot(world_stop, 1.0)) is None
 
         # Start moving at t=1.5 → timer resets
-        assert condition.check(_snap(world_move, 1.5)) is None
+        assert condition.check(make_tick_snapshot(world_move, 1.5)) is None
 
         # Stand still again from t=2
-        condition.check(_snap(world_stop, 2.0))
-        assert condition.check(_snap(world_stop, 3.0)) is None  # only 1s
-        result = condition.check(_snap(world_stop, 4.0))  # 2s standstill
+        condition.check(make_tick_snapshot(world_stop, 2.0))
+        assert condition.check(make_tick_snapshot(world_stop, 3.0)) is None  # only 1s
+        result = condition.check(make_tick_snapshot(world_stop, 4.0))  # 2s standstill
         assert result is not None
         assert result.passed is True
 
@@ -955,8 +910,8 @@ class TestStandstillCondition:
         )
         # Speed = sqrt(0.3^2 + 0.3^2) ≈ 0.42 < 0.5
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.3, vy=0.3)
-        condition.check(_snap(world, 0.0))
-        result = condition.check(_snap(world, 1.0))
+        condition.check(make_tick_snapshot(world, 0.0))
+        result = condition.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -965,13 +920,13 @@ class TestStandstillCondition:
             "ego", duration=1.0, speed_threshold=0.1, label="test_standstill"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=0.0)
-        condition.check(_snap(world, 0.0))
-        assert condition.check(_snap(world, 5.0)) is None
+        condition.check(make_tick_snapshot(world, 0.0))
+        assert condition.check(make_tick_snapshot(world, 5.0)) is None
 
     def test_entity_not_found_returns_none(self) -> None:
         condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("other", 0.0, 0.0, vx=0.0, vy=0.0)
-        assert condition.check(_snap(world, 0.0)) is None
+        assert condition.check(make_tick_snapshot(world, 0.0)) is None
 
     def test_invalid_duration_raises(self) -> None:
         with pytest.raises(ValueError, match="duration must be positive"):
@@ -988,8 +943,8 @@ class TestStandstillCondition:
     def test_elapsed_seconds_in_result(self) -> None:
         condition = StandstillCondition("ego", duration=1.0, label="test_standstill")
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=0.0, vy=0.0)
-        condition.check(_snap(world, 10.0))
-        result = condition.check(_snap(world, 11.0))
+        condition.check(make_tick_snapshot(world, 10.0))
+        result = condition.check(make_tick_snapshot(world, 11.0))
         assert result is not None
         assert result.elapsed_seconds == pytest.approx(11.0)
 
@@ -1003,12 +958,12 @@ class TestStickyCondition:
     def test_passes_through_none(self) -> None:
         """When inner returns None, StickyCondition also returns None."""
         cond = StickyCondition(AlwaysNoneCondition())
-        assert cond.check(_snap(MagicMock(), 1.0)) is None
+        assert cond.check(make_tick_snapshot(MagicMock(), 1.0)) is None
 
     def test_passes_through_fail(self) -> None:
         """When inner returns a failure, StickyCondition forwards it without latching."""
         cond = StickyCondition(AlwaysFailCondition())
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is False
 
@@ -1029,10 +984,10 @@ class TestStickyCondition:
                 return None
 
         cond = StickyCondition(FailThenNone())
-        r1 = cond.check(_snap(MagicMock(), 1.0))
+        r1 = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert r1 is not None and r1.passed is False
         # Second call should return None (not the latched failure)
-        assert cond.check(_snap(MagicMock(), 2.0)) is None
+        assert cond.check(make_tick_snapshot(MagicMock(), 2.0)) is None
 
     def test_latches_pass_result(self) -> None:
         """Once inner passes, StickyCondition returns the same result forever."""
@@ -1053,12 +1008,12 @@ class TestStickyCondition:
                 return None  # Would return None after first call
 
         cond = StickyCondition(PassOnce())
-        r1 = cond.check(_snap(MagicMock(), 1.0))
+        r1 = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert r1 is not None and r1.passed is True
         assert r1.message == "first pass"
 
         # Inner would return None now, but sticky keeps the latched result
-        r2 = cond.check(_snap(MagicMock(), 5.0))
+        r2 = cond.check(make_tick_snapshot(MagicMock(), 5.0))
         assert r2 is not None and r2.passed is True
         assert r2.message == "first pass"
         assert r2.elapsed_seconds == pytest.approx(1.0)
@@ -1071,10 +1026,10 @@ class TestStickyCondition:
             passed=True, message="ok", elapsed_seconds=0.0
         )
         cond = StickyCondition(spy)
-        cond.check(_snap(MagicMock(), 0.0))  # triggers latch
+        cond.check(make_tick_snapshot(MagicMock(), 0.0))  # triggers latch
         spy.check.reset_mock()
 
-        cond.check(_snap(MagicMock(), 1.0))  # should not call inner
+        cond.check(make_tick_snapshot(MagicMock(), 1.0))  # should not call inner
         spy.check.assert_not_called()
 
     def test_with_and_condition(self) -> None:
@@ -1085,7 +1040,7 @@ class TestStickyCondition:
                 StickyCondition(AlwaysPassCondition()),
             ]
         )
-        result = cond.check(_snap(MagicMock(), 1.0))
+        result = cond.check(make_tick_snapshot(MagicMock(), 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1119,9 +1074,9 @@ class TestStickyCondition:
         )
         world = MagicMock()
 
-        assert cond.check(_snap(world, 1.0)) is None  # 2nd not ready
-        assert cond.check(_snap(world, 2.0)) is None  # 2nd not ready
-        result = cond.check(_snap(world, 3.0))  # both now triggered
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None  # 2nd not ready
+        assert cond.check(make_tick_snapshot(world, 2.0)) is None  # 2nd not ready
+        result = cond.check(make_tick_snapshot(world, 3.0))  # both now triggered
         assert result is not None
         assert result.passed is True
 
@@ -1168,7 +1123,7 @@ class TestSpeedConditionMagnitude:
         )
         # speed = sqrt(10^2 + 0^2) = 10.0
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1177,21 +1132,21 @@ class TestSpeedConditionMagnitude:
             "ego", value=15.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
     def test_speed_equal_threshold_greater_than(self) -> None:
         cond = SpeedCondition(
             "ego", value=10.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
     def test_less_than(self) -> None:
         cond = SpeedCondition(
             "ego", value=15.0, rule=ComparisonRule.LESS_THAN, label="test_speed"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        result = cond.check(_snap(world, 2.0))
+        result = cond.check(make_tick_snapshot(world, 2.0))
         assert result is not None
         assert result.passed is True
 
@@ -1200,7 +1155,7 @@ class TestSpeedConditionMagnitude:
             "ego", value=5.0, rule=ComparisonRule.LESS_THAN, label="test_speed"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
     def test_equal_to_within_tolerance(self) -> None:
         cond = SpeedCondition(
@@ -1211,7 +1166,7 @@ class TestSpeedConditionMagnitude:
             label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.005, vy=0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1224,7 +1179,7 @@ class TestSpeedConditionMagnitude:
             label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.1, vy=0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
     def test_greater_than_or_equal_at_boundary(self) -> None:
         cond = SpeedCondition(
@@ -1234,7 +1189,7 @@ class TestSpeedConditionMagnitude:
             label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1246,7 +1201,7 @@ class TestSpeedConditionMagnitude:
             label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1255,14 +1210,14 @@ class TestSpeedConditionMagnitude:
             "missing", value=0.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
     def test_message_contains_entity_name(self) -> None:
         cond = SpeedCondition(
             "npc1", value=5.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
         )
         world = _make_world_with_actor("npc1", 0.0, 0.0, vx=10.0, vy=0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert "npc1" in result.message
         assert "magnitude" in result.message
@@ -1272,7 +1227,7 @@ class TestSpeedConditionMagnitude:
             "ego", value=0.0, rule=ComparisonRule.GREATER_THAN, label="test_speed"
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=5.0, vy=0.0)
-        result = cond.check(_snap(world, 42.5))
+        result = cond.check(make_tick_snapshot(world, 42.5))
         assert result is not None
         assert result.elapsed_seconds == pytest.approx(42.5)
 
@@ -1283,7 +1238,7 @@ class TestSpeedConditionMagnitude:
         )
         # speed = sqrt(3^2 + 4^2 + 0^2) = 5.0 — not greater than 5.0
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=3.0, vy=4.0, vz=0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
 
 class TestSpeedConditionWorld:
@@ -1299,7 +1254,7 @@ class TestSpeedConditionWorld:
             label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=10.0, vy=3.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
         assert "longitudinal" in result.message
@@ -1315,7 +1270,7 @@ class TestSpeedConditionWorld:
         )
         # vy = 8.0 > 5.0
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=1.0, vy=8.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
         assert "lateral" in result.message
@@ -1331,7 +1286,7 @@ class TestSpeedConditionWorld:
             label="test_speed",
         )
         world = _make_world_with_actor("ego", 0.0, 0.0, vx=-3.0, vy=0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1362,7 +1317,7 @@ class TestSpeedConditionEntity:
         )
         # World only has "npc", no "missing_ref"
         world = _make_world_with_actor("npc", 0.0, 0.0, vx=10.0, vy=0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
     def test_longitudinal_entity_facing_east_moving_east(self) -> None:
         """Entity facing East, target moving East → longitudinal = vx."""
@@ -1377,7 +1332,7 @@ class TestSpeedConditionEntity:
         )
         # ref faces East (fwd=(1,0)), npc moves East at 10 m/s
         world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 1.0, 0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1398,7 +1353,7 @@ class TestSpeedConditionEntity:
         )
         # ref faces East (fwd=(1,0)), npc moves North (vy=-5 in CARLA)
         world = _make_world_with_entity_frame("npc", 0.0, -5.0, "ref", 1.0, 0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1418,7 +1373,7 @@ class TestSpeedConditionEntity:
             label="test_speed",
         )
         world = _make_world_with_entity_frame("npc", 0.0, 5.0, "ref", 1.0, 0.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1438,7 +1393,7 @@ class TestSpeedConditionEntity:
             label="test_speed",
         )
         world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 0.0, -1.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1459,7 +1414,7 @@ class TestSpeedConditionEntity:
             label="test_speed",
         )
         world = _make_world_with_entity_frame("npc", 10.0, 0.0, "ref", 0.0, -1.0)
-        result = cond.check(_snap(world, 1.0))
+        result = cond.check(make_tick_snapshot(world, 1.0))
         assert result is not None
         assert result.passed is True
 
@@ -1476,7 +1431,7 @@ class TestSpeedConditionEntity:
         )
         # speed = sqrt(3^2 + 4^2) = 5.0 — not > 5.0
         world = _make_world_with_entity_frame("npc", 3.0, 4.0, "ref", 1.0, 0.0)
-        assert cond.check(_snap(world, 1.0)) is None
+        assert cond.check(make_tick_snapshot(world, 1.0)) is None
 
 
 class TestSpeedConditionValidation:
