@@ -225,13 +225,37 @@
       });
     }
 
-    // Attach preview update to all panel inputs
+    // --- localStorage persistence for Run Options panel ---
+    const STORAGE_KEY = 'viewer_run_options';
+    const PANEL_FIELDS = ['run-scenario', 'extra-overrides', 'run-timeout', 'run-sweeper'];
+
+    function saveRunOptions() {
+      const data = {};
+      PANEL_FIELDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) data[id] = el.value;
+      });
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+    }
+
+    function restoreRunOptions() {
+      let data;
+      try { data = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch {}
+      if (!data) return;
+      PANEL_FIELDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && data[id] !== undefined) el.value = data[id];
+      });
+    }
+
+    // Restore saved values on page load, then attach listeners
     document.addEventListener('DOMContentLoaded', () => {
-      ['run-scenario', 'extra-overrides', 'run-sweeper'].forEach(id => {
+      restoreRunOptions();
+      PANEL_FIELDS.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-          el.addEventListener('input', updateCmdPreview);
-          el.addEventListener('change', updateCmdPreview);
+          el.addEventListener('input', () => { saveRunOptions(); updateCmdPreview(); });
+          el.addEventListener('change', () => { saveRunOptions(); updateCmdPreview(); });
         }
       });
     });
