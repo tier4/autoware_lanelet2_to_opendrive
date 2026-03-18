@@ -402,11 +402,19 @@ class ScenarioRunner:
                 elapsed = time.monotonic() - start_time
                 tick_count += 1
 
+                # Pre-tick actions (receive elapsed)
+                for action in scenario._pre_tick_actions:
+                    action.tick(world, elapsed)
+
                 # Pre-tick callbacks
                 for cb in scenario._pre_tick_callbacks:
                     cb(world)
 
                 world.tick()
+
+                # Post-tick actions (receive elapsed)
+                for action in scenario._post_tick_actions:
+                    action.tick(world, elapsed)
 
                 # Post-tick callbacks
                 for cb in scenario._post_tick_callbacks:
