@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from .models import RunProgress
@@ -55,6 +56,7 @@ def start_run(
     extra_overrides: list[str] | None = None,
     timeout: int = 300,
     sweeper: str = "",
+    group_as_multirun: bool = False,
 ) -> None:
     """Start scenario execution in a background thread.
 
@@ -66,6 +68,10 @@ def start_run(
         timeout: Per-scenario subprocess timeout in seconds.
         sweeper: Kept for API compatibility but no longer used by the
             runner itself (sweep resolution is done upstream).
+        group_as_multirun: When ``True``, all jobs share a single
+            ``multirun/{date}/{time}/`` directory with numbered
+            subdirectories (0, 1, 2, …) instead of each writing to
+            its own ``outputs/`` directory.
     """
     if is_running():
         logger.warning("A scenario run is already in progress")
@@ -73,7 +79,13 @@ def start_run(
 
     thread = threading.Thread(
         target=_run_worker,
-        args=(overrides_list, base_path, extra_overrides or [], timeout),
+        args=(
+            overrides_list,
+            base_path,
+            extra_overrides or [],
+            timeout,
+            group_as_multirun,
+        ),
         daemon=True,
     )
     thread.start()
@@ -84,11 +96,19 @@ def _run_worker(
     base_path: Path | None,
     extra_overrides: list[str],
     timeout: int,
+    group_as_multirun: bool,
 ) -> None:
     """Background worker that executes scenarios sequentially."""
     _set_running(True)
     total = len(overrides_list)
     cwd = str(base_path) if base_path else None
+
+    # When grouping as multirun, create a shared timestamped directory.
+    multirun_dir: str | None = None
+    if group_as_multirun and total > 0:
+        now = datetime.now()  # noqa: DTZ005
+        multirun_dir = f"multirun/{now:%Y-%m-%d}/{now:%H-%M-%S}"
+        logger.info("Grouping %d jobs under %s", total, multirun_dir)
 
     try:
         for i, overrides in enumerate(overrides_list):
@@ -103,6 +123,9 @@ def _run_worker(
             )
 
             cmd = ["uv", "run", "scenario", *overrides, *extra_overrides]
+            # Direct each job's output to multirun/{date}/{time}/{index}/
+            if multirun_dir:
+                cmd.append(f"hydra.run.dir={multirun_dir}/{i}")
             logger.info("Running [%d/%d]: %s", i + 1, total, " ".join(cmd))
 
             try:

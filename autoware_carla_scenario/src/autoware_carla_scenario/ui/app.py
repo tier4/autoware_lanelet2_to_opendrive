@@ -225,12 +225,14 @@ async def run_scenarios(request: Request) -> dict[str, str]:
 
         # Jobs already contain scenario= and sweep overrides;
         # run without sweeper flag (each is a plain single-scenario run).
+        # Group results under a shared multirun/ directory.
         runner.start_run(
             overrides_list,
             base_path=_base_path(),
             extra_overrides=[],
             timeout=timeout,
             sweeper="",
+            group_as_multirun=True,
         )
     else:
         # No sweeper: pass scenario pattern as-is.
