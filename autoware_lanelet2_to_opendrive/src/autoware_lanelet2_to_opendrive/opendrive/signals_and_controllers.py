@@ -436,13 +436,16 @@ class SignalsAndControllers:
             - COORDINATE_OFFSET.z
         )
 
-        # hdg: direction from first point to last point of the linestring
+        # hdg: facing direction of the traffic light.
+        # The LineString direction (first→last) runs along the bulb arrangement
+        # (the face of the traffic light). The facing direction is perpendicular
+        # to this, rotated -90° (clockwise) to point toward approaching traffic.
         hdg = 0.0
         if n >= 2:
             first = light_linestring[0]
             last = light_linestring[n - 1]
             dx = float(last.x) - float(first.x)
             dy = float(last.y) - float(first.y)
-            hdg = math.atan2(dy, dx)
+            hdg = math.atan2(dy, dx) - math.pi / 2
 
         return PositionInertial(x=x, y=y, z=z, hdg=hdg)

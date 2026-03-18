@@ -363,8 +363,9 @@ def test_calculate_physical_position_centroid():
         assert abs(pos.x - 12.0) < 1e-6
         assert abs(pos.y - 22.0) < 1e-6
         assert abs(pos.z - 6.0) < 1e-6
-        # hdg: from pt1(10,20) to pt3(12,22) → atan2(2,2) = π/4
-        expected_hdg = math.atan2(22.0 - 20.0, 12.0 - 10.0)
+        # hdg: LineString direction atan2(2,2) = π/4, then -π/2 for facing direction
+        linestring_hdg = math.atan2(22.0 - 20.0, 12.0 - 10.0)
+        expected_hdg = linestring_hdg - math.pi / 2
         assert abs(pos.hdg - expected_hdg) < 1e-6
     finally:
         COORDINATE_OFFSET.x = original_x
