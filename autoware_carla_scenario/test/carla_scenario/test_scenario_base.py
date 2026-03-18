@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from autoware_carla_scenario import (
+    BaseAction,
     BaseCondition,
     BaseScenario,
     EgoConfig,
@@ -132,3 +133,66 @@ class TestBaseScenario:
         result = cond.check(world, 1.0)
         assert result is not None
         assert result.passed is True
+
+    def test_register_pre_tick_with_base_action_tracks_action(self) -> None:
+        scenario = _SimpleScenario(_make_ego_config())
+        action = _NoOpAction()
+        scenario.register_pre_tick(action)
+        assert action in scenario._pre_tick_actions
+        assert action not in scenario._pre_tick_callbacks
+
+    def test_register_post_tick_with_base_action_tracks_action(self) -> None:
+        scenario = _SimpleScenario(_make_ego_config())
+        action = _NoOpAction()
+        scenario.register_post_tick(action)
+        assert action in scenario._post_tick_actions
+        assert action not in scenario._post_tick_callbacks
+
+    def test_register_pre_tick_plain_callable_does_not_track_action(self) -> None:
+        scenario = _SimpleScenario(_make_ego_config())
+        cb = MagicMock()
+        scenario.register_pre_tick(cb)
+        assert len(scenario._pre_tick_actions) == 0
+        assert cb in scenario._pre_tick_callbacks
+
+    def test_register_post_tick_plain_callable_does_not_track_action(self) -> None:
+        scenario = _SimpleScenario(_make_ego_config())
+        cb = MagicMock()
+        scenario.register_post_tick(cb)
+        assert len(scenario._post_tick_actions) == 0
+        assert cb in scenario._post_tick_callbacks
+
+    def test_base_action_tick_receives_elapsed(self) -> None:
+        condition = _ElapsedRecordingCondition()
+        action = _NoOpAction(condition=condition)
+        world = MagicMock()
+        action.tick(world, 5.0)
+        assert condition.last_elapsed == 5.0
+
+
+# ---------------------------------------------------------------------------
+# Test helpers for BaseAction tests
+# ---------------------------------------------------------------------------
+
+
+class _NoOpAction(BaseAction):
+    """Minimal concrete action for testing."""
+
+    def __init__(self, condition: Optional[BaseCondition] = None) -> None:
+        super().__init__(label="noop", condition=condition)
+        self.executed = False
+
+    def execute(self, world: object) -> None:  # type: ignore[override]
+        self.executed = True
+
+
+class _ElapsedRecordingCondition(BaseCondition):
+    """Condition that records the elapsed value it receives."""
+
+    def __init__(self) -> None:
+        super().__init__(label="elapsed_recorder")
+        self.last_elapsed: Optional[float] = None
+
+    def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
+        self.last_elapsed = elapsed
+        return None

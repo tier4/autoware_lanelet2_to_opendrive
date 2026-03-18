@@ -60,7 +60,6 @@ class BaseAction(ABC):
         self._timing = timing
         self._once = once
         self._done = False
-        self._elapsed: float = 0.0
 
     @property
     def timing(self) -> TickTiming:
@@ -83,20 +82,20 @@ class BaseAction(ABC):
         """
         ...
 
-    def tick(self, world: "carla.World") -> None:
+    def tick(self, world: "carla.World", elapsed: float) -> None:
         """Evaluate the condition and, if met, run :meth:`execute`.
 
-        This method is designed to be registered directly as a tick callback
-        via :meth:`BaseScenario.register_pre_tick` or
-        :meth:`BaseScenario.register_post_tick`.
+        Called by the scenario runner's tick loop with the current elapsed
+        time so that time-based conditions work correctly.
 
         Args:
             world: The CARLA world instance.
+            elapsed: Seconds elapsed since the tick loop started.
         """
         if self._once and self._done:
             return
 
-        result = self._condition.check(world, self._elapsed)
+        result = self._condition.check(world, elapsed)
         if result is not None:
             logger.info(
                 "%s triggered: %s",
@@ -105,11 +104,3 @@ class BaseAction(ABC):
             )
             self.execute(world)
             self._done = True
-
-    def set_elapsed(self, elapsed: float) -> None:
-        """Update the elapsed time used for condition checks.
-
-        The scenario runner or the caller is responsible for calling this
-        before each tick so that time-based conditions work correctly.
-        """
-        self._elapsed = elapsed

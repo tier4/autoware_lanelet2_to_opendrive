@@ -73,6 +73,8 @@ class BaseScenario(ABC):
         self._entities: List[VehicleEntity] = []
         self._pre_tick_callbacks: List[Callable[["carla.World"], None]] = []
         self._post_tick_callbacks: List[Callable[["carla.World"], None]] = []
+        self._pre_tick_actions: List[BaseAction] = []
+        self._post_tick_actions: List[BaseAction] = []
         self._pass_conditions: List[BaseCondition] = []
         self._fail_conditions: List[BaseCondition] = []
 
@@ -149,16 +151,31 @@ class BaseScenario(ABC):
     # Callback registration helpers
     # ------------------------------------------------------------------
 
+    def _register_tick(
+        self,
+        cb: Union[BaseAction, Callable[["carla.World"], None]],
+        actions: List[BaseAction],
+        callbacks: List[Callable[["carla.World"], None]],
+    ) -> None:
+        """Dispatch *cb* into the appropriate list.
+
+        :class:`BaseAction` instances go into *actions* so the tick loop can
+        pass *elapsed*.  Plain callables go into *callbacks*.
+        """
+        if isinstance(cb, BaseAction):
+            actions.append(cb)
+        else:
+            callbacks.append(cb)
+
     def register_pre_tick(
         self, cb: Union[BaseAction, Callable[["carla.World"], None]]
     ) -> None:
         """Register a callback or action to run *before* each world tick.
 
         Args:
-            cb: A :class:`BaseAction` (whose :meth:`~BaseAction.tick` is
-                registered) or a plain callable that receives the CARLA world.
+            cb: A :class:`BaseAction` or a plain callable receiving the world.
         """
-        self._pre_tick_callbacks.append(cb.tick if isinstance(cb, BaseAction) else cb)
+        self._register_tick(cb, self._pre_tick_actions, self._pre_tick_callbacks)
 
     def register_post_tick(
         self, cb: Union[BaseAction, Callable[["carla.World"], None]]
@@ -166,10 +183,9 @@ class BaseScenario(ABC):
         """Register a callback or action to run *after* each world tick.
 
         Args:
-            cb: A :class:`BaseAction` (whose :meth:`~BaseAction.tick` is
-                registered) or a plain callable that receives the CARLA world.
+            cb: A :class:`BaseAction` or a plain callable receiving the world.
         """
-        self._post_tick_callbacks.append(cb.tick if isinstance(cb, BaseAction) else cb)
+        self._register_tick(cb, self._post_tick_actions, self._post_tick_callbacks)
 
     def register_entity(self, entity: VehicleEntity) -> None:
         """Register a spawned NPC vehicle entity.
