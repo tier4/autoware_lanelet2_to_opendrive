@@ -103,6 +103,16 @@
     {% if result.elapsed_seconds is not none %}
       <span class="text-sm text-gray-500 font-mono">{{ "%.2f" | format(result.elapsed_seconds) }}s</span>
     {% endif %}
+    <!-- Re-run button -->
+    <button
+      onclick="rerunScenario()"
+      class="ml-auto px-4 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-1.5"
+    >
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+      </svg>
+      Re-run
+    </button>
   </div>
   {% if result.message %}
   <p class="mt-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg font-mono whitespace-pre-wrap">{{ result.message }}</p>
@@ -163,5 +173,51 @@
       }
     });
   });
+
+  // Re-run this scenario with its original overrides
+  function rerunScenario() {
+    const overrides = {{ result.overrides | tojson }};
+    let scenario = '';
+    const extra = [];
+    overrides.forEach(ov => {
+      if (ov.startsWith('scenario=')) {
+        scenario = ov.substring('scenario='.length);
+      } else {
+        extra.push(ov);
+      }
+    });
+    if (!scenario) return;
+
+    const body = {
+      scenario: scenario,
+      extra_overrides: extra,
+      timeout: 300,
+      sweeper: '',
+    };
+
+    fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(() => {
+      document.getElementById('progress-bar').classList.remove('hidden');
+      const evtSource = new EventSource('/api/run/progress');
+      evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        updateProgress(data);
+        if (data.status === 'done' || data.status === 'idle') {
+          evtSource.close();
+          setTimeout(() => {
+            document.getElementById('progress-bar').classList.add('hidden');
+            window.location.reload();
+          }, 1000);
+        }
+      };
+      evtSource.onerror = function() {
+        evtSource.close();
+        document.getElementById('progress-bar').classList.add('hidden');
+      };
+    });
+  }
 </script>
 {% endblock %}
