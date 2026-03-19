@@ -45,6 +45,28 @@
     <div class="h-3 rounded-full {% if passed_count == total_count %}bg-green-500{% else %}bg-green-500{% endif %}"
          style="width: {{ pct | round(1) }}%"></div>
   </div>
+
+  <!-- Result filter -->
+  <div class="mt-4 flex items-center gap-2">
+    <span class="text-sm text-gray-500 mr-1">Filter:</span>
+    <button type="button" data-filter="all"
+            class="filter-btn inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors bg-gray-800 text-white border-gray-800">
+      All
+    </button>
+    <button type="button" data-filter="pass"
+            class="filter-btn inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors bg-white text-green-700 border-green-300 hover:bg-green-50">
+      PASS
+    </button>
+    <button type="button" data-filter="fail"
+            class="filter-btn inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors bg-white text-red-700 border-red-300 hover:bg-red-50">
+      FAIL
+    </button>
+    <button type="button" data-filter="na"
+            class="filter-btn inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors bg-white text-gray-600 border-gray-300 hover:bg-gray-50">
+      N/A
+    </button>
+    <span id="filter-count" class="ml-2 text-xs text-gray-400"></span>
+  </div>
 </div>
 
 <!-- Scenario list -->
@@ -63,6 +85,7 @@
     <tbody class="bg-white divide-y divide-gray-200">
       {% for item in items %}
       <tr class="hover:bg-gray-50 cursor-pointer transition-colors {% if item.passed == false %}bg-red-50{% endif %}"
+          data-result="{% if item.passed is none %}na{% elif item.passed %}pass{% else %}fail{% endif %}"
           onclick="window.location='/session/{{ session_type }}/{{ date }}/{{ time }}/{{ item.index }}'">
         <td class="px-6 py-4 whitespace-nowrap">
           <a href="/session/{{ session_type }}/{{ date }}/{{ time }}/{{ item.index }}"
@@ -103,4 +126,43 @@
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  var buttons = document.querySelectorAll('.filter-btn');
+  var countEl = document.getElementById('filter-count');
+
+  var styles = {
+    all:  { active: 'bg-gray-800 text-white border-gray-800', inactive: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' },
+    pass: { active: 'bg-green-600 text-white border-green-600', inactive: 'bg-white text-green-700 border-green-300 hover:bg-green-50' },
+    fail: { active: 'bg-red-600 text-white border-red-600', inactive: 'bg-white text-red-700 border-red-300 hover:bg-red-50' },
+    na:   { active: 'bg-gray-600 text-white border-gray-600', inactive: 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50' },
+  };
+
+  function applyFilter(filter) {
+    var rows = document.querySelectorAll('tbody tr[data-result]');
+    var visible = 0;
+    rows.forEach(function(row) {
+      var match = filter === 'all' || row.getAttribute('data-result') === filter;
+      row.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    countEl.textContent = filter === 'all' ? '' : visible + ' / ' + rows.length;
+    buttons.forEach(function(btn) {
+      var f = btn.getAttribute('data-filter');
+      var s = styles[f];
+      (s.active + ' ' + s.inactive).split(' ').forEach(function(c) { btn.classList.remove(c); });
+      (f === filter ? s.active : s.inactive).split(' ').forEach(function(c) { btn.classList.add(c); });
+    });
+  }
+
+  buttons.forEach(function(btn) {
+    btn.addEventListener('click', function() { applyFilter(btn.getAttribute('data-filter')); });
+  });
+
+  applyFilter('all');
+})();
+</script>
 {% endblock %}
