@@ -62,7 +62,6 @@ def start_run(
     overrides_list: list[list[str]],
     base_path: Path | None = None,
     extra_overrides: list[str] | None = None,
-    timeout: int = 300,
     group_as_multirun: bool = False,
 ) -> None:
     """Start scenario execution in a background thread.
@@ -72,7 +71,6 @@ def start_run(
             as overrides to a single ``uv run scenario`` invocation.
         base_path: Working directory for the subprocess.
         extra_overrides: Additional Hydra overrides appended to every run.
-        timeout: Per-scenario subprocess timeout in seconds.
         group_as_multirun: When ``True``, all jobs share a single
             ``multirun/{date}/{time}/`` directory with numbered
             subdirectories (0, 1, 2, …) instead of each writing to
@@ -88,7 +86,6 @@ def start_run(
             overrides_list,
             base_path,
             extra_overrides or [],
-            timeout,
             group_as_multirun,
         ),
         daemon=True,
@@ -100,7 +97,6 @@ def _run_worker(
     overrides_list: list[list[str]],
     base_path: Path | None,
     extra_overrides: list[str],
-    timeout: int,
     group_as_multirun: bool,
 ) -> None:
     """Background worker that executes scenarios sequentially."""
@@ -139,7 +135,6 @@ def _run_worker(
                     cwd=cwd,
                     capture_output=True,
                     text=True,
-                    timeout=timeout,
                 )
                 status: Status = "passed" if result.returncode == 0 else "failed"
                 if result.returncode != 0:
@@ -153,9 +148,6 @@ def _run_worker(
                 if multirun_dir:
                     base = Path(cwd) if cwd else Path.cwd()
                     _save_raw_output(result, base / multirun_dir / str(i))
-            except subprocess.TimeoutExpired:
-                status = "failed"
-                logger.error("Scenario %s timed out", scenario_name)
             except OSError as exc:
                 status = "failed"
                 logger.error("Failed to run scenario %s: %s", scenario_name, exc)

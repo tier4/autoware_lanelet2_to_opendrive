@@ -388,16 +388,14 @@ class ScenarioRunner:
                 pitch=spectator_config.pitch,
             )
 
-            from tqdm import tqdm  # noqa: PLC0415
-
             # Tick through the remaining replay frames.  We already consumed
             # one tick above for actor spawn, so replay (tick_count - 1) more.
-            for _ in tqdm(
-                range(max(tick_count - 1, 0)),
-                desc="Rendering video",
-                unit="tick",
-            ):
+            # Each tick is followed by a synchronous frame write so no
+            # frames are lost to async delivery delays.
+            remaining = max(tick_count - 1, 0)
+            for _ in range(remaining):
                 world.tick()
+                camera_recorder.write_frame()
 
             logger.info("[%s] Video rendered to %s", scenario_name, mp4_path)
 
@@ -481,13 +479,7 @@ class ScenarioRunner:
 
             # Warm-up ticks: let physics and TrafficManager stabilise
             # before the main loop begins.
-            from tqdm import tqdm  # noqa: PLC0415
-
-            for _ in tqdm(
-                range(scenario.STABILIZE_TICKS),
-                desc="Warm-up",
-                unit="tick",
-            ):
+            for _ in range(scenario.STABILIZE_TICKS):
                 world.tick()
 
             # Enable autopilot on every vehicle (all NPCs use TrafficManager)

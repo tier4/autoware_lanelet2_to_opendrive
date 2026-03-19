@@ -262,7 +262,7 @@
     if (!scenario) return;
 
     executeRunWithProgress(
-      { scenario: scenario, extra_overrides: extra, timeout: 300, sweeper: '' },
+      { scenario: scenario, extra_overrides: extra, sweeper: '' },
       () => window.location.reload()
     );
   }

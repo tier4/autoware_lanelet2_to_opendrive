@@ -198,7 +198,6 @@ async def run_scenarios(request: Request) -> dict[str, str]:
 
     scenario: str = body.get("scenario", "*/*")
     extra_overrides: list[str] = body.get("extra_overrides", [])
-    timeout: int = body.get("timeout", 300)
     sweeper: str = body.get("sweeper", "")
 
     if sweeper:
@@ -232,7 +231,6 @@ async def run_scenarios(request: Request) -> dict[str, str]:
             overrides_list,
             base_path=_base_path(),
             extra_overrides=[],
-            timeout=timeout,
             group_as_multirun=True,
         )
     else:
@@ -246,7 +244,6 @@ async def run_scenarios(request: Request) -> dict[str, str]:
             overrides_list,
             base_path=_base_path(),
             extra_overrides=extra_overrides,
-            timeout=timeout,
             group_as_multirun=len(scenario_names) > 1,
         )
 

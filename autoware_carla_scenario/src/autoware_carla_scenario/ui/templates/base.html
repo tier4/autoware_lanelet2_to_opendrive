@@ -92,18 +92,6 @@
         <!-- Common Options -->
         <div class="flex-shrink-0 w-64 space-y-3">
           <div>
-            <label for="run-timeout" class="block text-sm font-medium text-gray-700 mb-1">
-              Timeout (sec)
-            </label>
-            <input
-              id="run-timeout"
-              type="number"
-              min="1"
-              value="300"
-              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            >
-          </div>
-          <div>
             <label for="run-sweeper" class="block text-sm font-medium text-gray-700 mb-1">
               Sweeper (--multirun)
             </label>
@@ -246,7 +234,7 @@
 
     // --- localStorage persistence for Run Options panel ---
     const STORAGE_KEY = 'viewer_run_options';
-    const PANEL_FIELDS = ['run-scenario', 'extra-overrides', 'run-timeout', 'run-sweeper'];
+    const PANEL_FIELDS = ['run-scenario', 'extra-overrides', 'run-sweeper'];
 
     function saveRunOptions() {
       const data = {};
@@ -302,9 +290,8 @@
       const textarea = document.getElementById('extra-overrides');
       const raw = (textarea ? textarea.value : '').trim();
       const extra = raw ? raw.split('\n').map(l => l.trim()).filter(l => l && l.includes('=')) : [];
-      const timeout = parseInt(document.getElementById('run-timeout')?.value || '300', 10);
       const sweeper = document.getElementById('run-sweeper')?.value || '';
-      return { scenario: scenario, extra_overrides: extra, timeout: timeout, sweeper: sweeper };
+      return { scenario: scenario, extra_overrides: extra, sweeper: sweeper };
     }
 
     // Connect to SSE progress stream, show progress bar, and call onComplete when done.
@@ -352,7 +339,6 @@
       const body = {
         scenario: opts.scenario,
         extra_overrides: opts.extra_overrides,
-        timeout: opts.timeout,
         sweeper: opts.sweeper,
       };
 
