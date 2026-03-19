@@ -105,6 +105,7 @@
     {% if result.elapsed_seconds is not none %}
       <span class="text-sm text-gray-500 font-mono">{{ "%.2f" | format(result.elapsed_seconds) }}s</span>
     {% endif %}
+    {% if result.overrides %}
     <!-- Re-run button -->
     <button
       onclick="rerunScenario()"
@@ -115,6 +116,7 @@
       </svg>
       Re-run
     </button>
+    {% endif %}
   </div>
   {% if result.message %}
   <p class="mt-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg font-mono whitespace-pre-wrap">{{ result.message }}</p>
@@ -231,6 +233,7 @@
     });
   });
 
+  {% if result and result.overrides %}
   // Re-run this scenario with its original overrides
   function rerunScenario() {
     const overrides = {{ result.overrides | tojson }};
@@ -245,36 +248,11 @@
     });
     if (!scenario) return;
 
-    const body = {
-      scenario: scenario,
-      extra_overrides: extra,
-      timeout: 300,
-      sweeper: '',
-    };
-
-    fetch('/api/run', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-    }).then(() => {
-      document.getElementById('progress-bar').classList.remove('hidden');
-      const evtSource = new EventSource('/api/run/progress');
-      evtSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        updateProgress(data);
-        if (data.status === 'done' || data.status === 'idle') {
-          evtSource.close();
-          setTimeout(() => {
-            document.getElementById('progress-bar').classList.add('hidden');
-            window.location.reload();
-          }, 1000);
-        }
-      };
-      evtSource.onerror = function() {
-        evtSource.close();
-        document.getElementById('progress-bar').classList.add('hidden');
-      };
-    });
+    executeRunWithProgress(
+      { scenario: scenario, extra_overrides: extra, timeout: 300, sweeper: '' },
+      () => window.location.reload()
+    );
   }
+  {% endif %}
 </script>
 {% endblock %}

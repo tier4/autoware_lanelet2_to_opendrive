@@ -286,6 +286,34 @@
       return { scenario: scenario, extra_overrides: extra, timeout: timeout, sweeper: sweeper };
     }
 
+    // Shared helper: POST to /api/run, show progress bar, stream SSE updates,
+    // then call onComplete when done.
+    function executeRunWithProgress(body, onComplete) {
+      fetch('/api/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      }).then(() => {
+        document.getElementById('progress-bar').classList.remove('hidden');
+        const evtSource = new EventSource('/api/run/progress');
+        evtSource.onmessage = function(event) {
+          const data = JSON.parse(event.data);
+          updateProgress(data);
+          if (data.status === 'done' || data.status === 'idle') {
+            evtSource.close();
+            setTimeout(() => {
+              document.getElementById('progress-bar').classList.add('hidden');
+              if (onComplete) onComplete();
+            }, 1000);
+          }
+        };
+        evtSource.onerror = function() {
+          evtSource.close();
+          document.getElementById('progress-bar').classList.add('hidden');
+        };
+      });
+    }
+
     // Run scenarios using options from the panel
     function startRun() {
       const opts = collectRunOptions();
@@ -301,30 +329,7 @@
       const chevron = document.getElementById('run-btn-chevron');
       if (chevron) chevron.classList.remove('rotate-180');
 
-      // Start the run
-      fetch('/api/run', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body)
-      }).then(() => {
-        document.getElementById('progress-bar').classList.remove('hidden');
-        const evtSource = new EventSource('/api/run/progress');
-        evtSource.onmessage = function(event) {
-          const data = JSON.parse(event.data);
-          updateProgress(data);
-          if (data.status === 'done' || data.status === 'idle') {
-            evtSource.close();
-            setTimeout(() => {
-              document.getElementById('progress-bar').classList.add('hidden');
-              htmx.trigger('#update-btn', 'click');
-            }, 1000);
-          }
-        };
-        evtSource.onerror = function() {
-          evtSource.close();
-          document.getElementById('progress-bar').classList.add('hidden');
-        };
-      });
+      executeRunWithProgress(body, () => htmx.trigger('#update-btn', 'click'));
     }
 
     function updateProgress(data) {
