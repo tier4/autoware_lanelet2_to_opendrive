@@ -34,6 +34,12 @@ def get_progress() -> RunProgress | None:
         return _progress
 
 
+def get_status() -> tuple[bool, RunProgress | None]:
+    """Return ``(is_running, progress)`` under a single lock acquisition."""
+    with _lock:
+        return _running, _progress
+
+
 def _set_progress(p: RunProgress) -> None:
     with _lock:
         global _progress  # noqa: PLW0603
