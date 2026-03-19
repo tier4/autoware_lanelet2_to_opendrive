@@ -434,7 +434,24 @@ def load_scenario(
             data = _read_result_json(result_files[0])
 
     if data is None:
-        return None
+        # No result JSON (e.g. spawn failed), but the job directory exists.
+        # Return a partial view with only the log and overrides so the viewer
+        # can still display useful information instead of returning a 500 error.
+        if job_dir is None:
+            return None
+        raw_log = _read_raw_log(job_dir)
+        if not raw_log and not overrides:
+            return None
+        result = ScenarioResultView(
+            passed=None,
+            message="No result data available (scenario may have failed to start)",
+            elapsed_seconds=None,
+            condition_statuses=[],
+            overrides=overrides,
+            raw_log=raw_log,
+        )
+        _cache[cache_key] = result
+        return result
 
     # Build condition tree
     condition_statuses: list[ConditionNode] = []
