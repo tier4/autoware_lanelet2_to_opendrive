@@ -1,15 +1,15 @@
 """RGB camera recorder that attaches to a CARLA actor and writes MP4 video.
 
-Frames are piped directly to *ffmpeg* as raw BGR data and encoded to
-H.264 (``libx264``) in real time, producing a browser-compatible MP4
-file without any post-processing step.
+Frames are captured synchronously (one per ``world.tick()``) via a
+:class:`queue.Queue` and piped to *ffmpeg* as raw BGR data, producing a
+browser-compatible H.264 MP4 file.
 """
 
 from __future__ import annotations
 
 import logging
+import queue
 import subprocess
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,6 +29,9 @@ DEFAULT_FOV: float = 90.0
 #: Default recording frame rate (matches CARLA synchronous mode at 20 Hz).
 DEFAULT_FPS: float = 20.0
 
+#: Timeout (seconds) for waiting on a single frame from the sensor queue.
+_FRAME_TIMEOUT: float = 5.0
+
 
 class CameraRecorder:
     """Attach an RGB camera sensor to a CARLA actor and record video to MP4.
@@ -37,9 +40,9 @@ class CameraRecorder:
     frame, producing the same viewpoint as the spectator camera when
     configured with matching *offset_back*, *offset_up*, and *pitch*.
 
-    Internally, raw BGR frames are streamed to an *ffmpeg* subprocess via
-    stdin and encoded to H.264 (``yuv420p``) so the resulting ``.mp4``
-    file is playable in all modern web browsers.
+    Frames are retrieved **synchronously** — call :meth:`write_frame` after
+    each ``world.tick()`` to pull the latest frame from the sensor queue and
+    write it to ffmpeg.
 
     Args:
         world: The CARLA world instance.
@@ -70,9 +73,9 @@ class CameraRecorder:
     ) -> None:
         import carla as _carla  # noqa: PLC0415
 
-        self._lock = threading.Lock()
         self._output_path = output_path
         self._frame_count = 0
+        self._frame_queue: queue.Queue["carla.Image"] = queue.Queue()
 
         # Set up the RGB camera blueprint
         bp_lib = world.get_blueprint_library()
@@ -123,8 +126,8 @@ class CameraRecorder:
             stderr=subprocess.PIPE,
         )
 
-        # Start listening for frames
-        self._sensor.listen(self._on_image)
+        # Enqueue frames instead of processing them in the callback thread.
+        self._sensor.listen(self._frame_queue.put)
         logger.info(
             "CameraRecorder started: %dx%d @ %.0f fps -> %s",
             image_width,
@@ -133,20 +136,33 @@ class CameraRecorder:
             output_path,
         )
 
-    def _on_image(self, image: "carla.Image") -> None:
-        """Callback invoked by CARLA for each captured frame."""
+    def write_frame(self) -> bool:
+        """Pull one frame from the sensor queue and write it to ffmpeg.
+
+        Call this once after each ``world.tick()``.
+
+        Returns:
+            ``True`` if a frame was written, ``False`` on timeout or if
+            ffmpeg is no longer accepting input.
+        """
+        try:
+            image: "carla.Image" = self._frame_queue.get(timeout=_FRAME_TIMEOUT)
+        except queue.Empty:
+            logger.debug("CameraRecorder: frame queue timeout")
+            return False
+
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
         array = array.reshape((image.height, image.width, 4))  # BGRA
-        # Drop the alpha channel to get BGR and ensure contiguous memory.
         bgr = np.ascontiguousarray(array[:, :, :3])
 
-        with self._lock:
-            if self._ffmpeg is not None and self._ffmpeg.stdin is not None:
-                try:
-                    self._ffmpeg.stdin.write(bgr.tobytes())
-                    self._frame_count += 1
-                except BrokenPipeError:
-                    pass
+        if self._ffmpeg is not None and self._ffmpeg.stdin is not None:
+            try:
+                self._ffmpeg.stdin.write(bgr.tobytes())
+                self._frame_count += 1
+                return True
+            except BrokenPipeError:
+                return False
+        return False
 
     def stop(self) -> None:
         """Stop the sensor, finalise the ffmpeg process, and destroy the sensor actor."""
@@ -155,9 +171,8 @@ class CameraRecorder:
             self._sensor.destroy()
             self._sensor = None
 
-        with self._lock:
-            if self._ffmpeg is not None and self._ffmpeg.stdin is not None:
-                self._ffmpeg.stdin.close()
+        if self._ffmpeg is not None and self._ffmpeg.stdin is not None:
+            self._ffmpeg.stdin.close()
 
         if self._ffmpeg is not None:
             self._ffmpeg.wait()
