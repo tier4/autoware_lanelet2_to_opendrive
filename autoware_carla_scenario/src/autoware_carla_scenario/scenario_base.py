@@ -333,6 +333,7 @@ class BaseScenario(ABC):
         Args:
             ego_actor: The ego vehicle CARLA actor.
         """
+
         def _apply(actor: "carla.Actor", speed_kmh: float) -> None:
             if speed_kmh <= 0.0:
                 return
