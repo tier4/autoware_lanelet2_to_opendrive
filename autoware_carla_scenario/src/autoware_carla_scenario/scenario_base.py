@@ -5,16 +5,15 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, List, Optional, Union
+from typing import Callable, List, Optional, Union
+
+import carla
 
 from .actions import BaseAction
 from .conditions import BaseCondition
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
 from .entity._spawn import SpawnLocation
 from .entity.vehicle_entity import VehicleEntity, VehicleEntityConfig
-
-if TYPE_CHECKING:
-    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -258,8 +257,6 @@ class BaseScenario(ABC):
             offset_back=offset_back, offset_up=offset_up, pitch=pitch
         )
 
-        import carla as _carla  # noqa: PLC0415
-
         def _follow(world: "carla.World") -> None:
             actor = actor_getter()
             if actor is None:
@@ -269,13 +266,13 @@ class BaseScenario(ABC):
             except RuntimeError:
                 return
             fwd = tf.get_forward_vector()
-            loc = _carla.Location(
+            loc = carla.Location(
                 x=tf.location.x - offset_back * fwd.x,
                 y=tf.location.y - offset_back * fwd.y,
                 z=tf.location.z + offset_up,
             )
-            rot = _carla.Rotation(yaw=tf.rotation.yaw, pitch=pitch)
-            world.get_spectator().set_transform(_carla.Transform(loc, rot))
+            rot = carla.Rotation(yaw=tf.rotation.yaw, pitch=pitch)
+            world.get_spectator().set_transform(carla.Transform(loc, rot))
 
         self.register_post_tick(_follow)
 
@@ -336,15 +333,13 @@ class BaseScenario(ABC):
         Args:
             ego_actor: The ego vehicle CARLA actor.
         """
-        import carla as _carla  # noqa: PLC0415
-
         def _apply(actor: "carla.Actor", speed_kmh: float) -> None:
             if speed_kmh <= 0.0:
                 return
             speed_ms = speed_kmh / 3.6
             fwd = actor.get_transform().get_forward_vector()
             actor.set_target_velocity(
-                _carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
+                carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
             )
 
         for entity in self._entities:

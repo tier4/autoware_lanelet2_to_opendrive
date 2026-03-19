@@ -11,9 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Union
 
-if TYPE_CHECKING:
-    import carla  # noqa: F401  (type stubs only)
+import carla  # noqa: F401
 
+if TYPE_CHECKING:
     from .frames import CoordinateFrame
 
 
@@ -80,8 +80,6 @@ class CarlaWorldPose:
 
     def to_carla_transform(self) -> "carla.Transform":
         """Convert to a carla.Transform object."""
-        import carla  # noqa: PLC0415
-
         return carla.Transform(
             carla.Location(x=self.x, y=self.y, z=self.z),
             carla.Rotation(roll=self.roll, pitch=self.pitch, yaw=self.yaw),

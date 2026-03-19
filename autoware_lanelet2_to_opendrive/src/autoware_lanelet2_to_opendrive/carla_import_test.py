@@ -23,6 +23,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import carla  # type: ignore[import]
+
 logger = logging.getLogger(__name__)
 
 # Silence verbose library logging (overridden by --verbose)
@@ -121,8 +123,6 @@ def run_opendrive_parser_test(xodr_content: str, map_name: str) -> TestResult:
     """
     test_name = "OpenDRIVE Parser Test"
     try:
-        import carla  # type: ignore[import]
-
         carla_map = carla.Map(map_name, xodr_content)
         waypoints = carla_map.generate_waypoints(CONSTANTS.waypoint_generation_distance)
         topology = carla_map.get_topology()
@@ -167,8 +167,6 @@ def run_traffic_manager_test(xodr_content: str, map_name: str) -> TestResult:
     """
     test_name = "Traffic Manager Test"
     try:
-        import carla  # type: ignore[import]
-
         carla_map = carla.Map(map_name, xodr_content)
         with tempfile.TemporaryDirectory() as tmp_dir:
             bin_path = str(Path(tmp_dir) / f"{map_name}.bin")
