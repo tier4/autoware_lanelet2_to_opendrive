@@ -10,9 +10,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-if TYPE_CHECKING:
-    import carla
+import carla
 
+if TYPE_CHECKING:
     from .scenario_base import SpectatorCameraConfig
 
 from .camera_recorder import CameraRecorder
@@ -241,8 +241,6 @@ class ScenarioRunner:
             timeout_seconds: Default timeout applied to every scenario.
             output_dir: Directory where CARLA recording logs are saved.
         """
-        import carla
-
         self.timeout_seconds = timeout_seconds
         self.output_dir = output_dir
         self._tm_port = tm_port

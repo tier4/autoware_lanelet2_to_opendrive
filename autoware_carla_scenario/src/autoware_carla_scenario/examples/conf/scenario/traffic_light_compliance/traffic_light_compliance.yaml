@@ -27,11 +27,7 @@ sweep:
           - type: or
             constraints:
               - type: equals
-                value: 3002161
-              - type: equals
-                value: 9
-              - type: equals
-                value: 6
+                value: 67
   bindings:
     ego.spawn_s:
       type: stop_line_offset

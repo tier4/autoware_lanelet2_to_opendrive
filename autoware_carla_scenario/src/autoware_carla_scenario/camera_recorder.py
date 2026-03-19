@@ -1,8 +1,8 @@
 """RGB camera recorder that attaches to a CARLA actor and writes MP4 video.
 
 Frames are captured synchronously (one per ``world.tick()``) via a
-:class:`queue.Queue` and piped to *ffmpeg* as raw BGR data, producing a
-browser-compatible H.264 MP4 file.
+:class:`queue.Queue` and streamed to an *ffmpeg* process through
+*ffmpeg-python*, producing a browser-compatible H.264 MP4 file.
 """
 
 from __future__ import annotations
@@ -11,12 +11,10 @@ import logging
 import queue
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import carla
+import ffmpeg
 import numpy as np
-
-if TYPE_CHECKING:
-    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +28,9 @@ DEFAULT_FOV: float = 90.0
 DEFAULT_FPS: float = 20.0
 
 #: Timeout (seconds) for waiting on a single frame from the sensor queue.
-_FRAME_TIMEOUT: float = 5.0
+#: Set slightly above the expected frame interval (50 ms at 20 Hz) to
+#: avoid hanging on a dead sensor.
+_FRAME_TIMEOUT: float = 1.0
 
 
 class CameraRecorder:
@@ -42,7 +42,7 @@ class CameraRecorder:
 
     Frames are retrieved **synchronously** — call :meth:`write_frame` after
     each ``world.tick()`` to pull the latest frame from the sensor queue and
-    write it to ffmpeg.
+    stream it to ffmpeg for H.264 encoding.
 
     Args:
         world: The CARLA world instance.
@@ -71,11 +71,10 @@ class CameraRecorder:
         fov: float = DEFAULT_FOV,
         fps: float = DEFAULT_FPS,
     ) -> None:
-        import carla as _carla  # noqa: PLC0415
-
         self._output_path = output_path
         self._frame_count = 0
-        self._frame_queue: queue.Queue["carla.Image"] = queue.Queue()
+        # maxsize=2 bounds memory if write_frame() falls behind.
+        self._frame_queue: queue.Queue["carla.Image"] = queue.Queue(maxsize=2)
 
         # Set up the RGB camera blueprint
         bp_lib = world.get_blueprint_library()
@@ -86,44 +85,33 @@ class CameraRecorder:
 
         # Place the camera at the same relative position as the spectator.
         # In the actor's local frame: -x = behind, +z = above.
-        transform = _carla.Transform(
-            _carla.Location(x=-offset_back, y=0.0, z=offset_up),
-            _carla.Rotation(pitch=pitch),
+        transform = carla.Transform(
+            carla.Location(x=-offset_back, y=0.0, z=offset_up),
+            carla.Rotation(pitch=pitch),
         )
         self._sensor: "carla.Actor | None" = world.spawn_actor(
             camera_bp, transform, attach_to=actor
         )
 
-        # Launch ffmpeg to encode raw BGR frames to H.264 MP4 in real time.
-        self._ffmpeg: subprocess.Popen[bytes] | None = subprocess.Popen(
-            [
-                "ffmpeg",
-                "-y",
-                "-f",
-                "rawvideo",
-                "-vcodec",
-                "rawvideo",
-                "-s",
-                f"{image_width}x{image_height}",
-                "-pix_fmt",
-                "bgr24",
-                "-r",
-                str(fps),
-                "-i",
-                "-",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-                "-pix_fmt",
-                "yuv420p",
+        # Start ffmpeg process via ffmpeg-python for H.264 streaming encoding.
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._process: subprocess.Popen[bytes] | None = (
+            ffmpeg.input(
+                "pipe:",
+                format="rawvideo",
+                pix_fmt="bgr24",
+                s=f"{image_width}x{image_height}",
+                r=fps,
+            )
+            .output(
                 str(output_path),
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+                vcodec="libx264",
+                pix_fmt="yuv420p",
+                preset="fast",
+                crf=23,
+            )
+            .overwrite_output()
+            .run_async(pipe_stdin=True, pipe_stderr=True)
         )
 
         # Enqueue frames instead of processing them in the callback thread.
@@ -143,7 +131,7 @@ class CameraRecorder:
 
         Returns:
             ``True`` if a frame was written, ``False`` on timeout or if
-            ffmpeg is no longer accepting input.
+            the ffmpeg process is no longer accepting input.
         """
         try:
             image: "carla.Image" = self._frame_queue.get(timeout=_FRAME_TIMEOUT)
@@ -155,12 +143,14 @@ class CameraRecorder:
         array = array.reshape((image.height, image.width, 4))  # BGRA
         bgr = np.ascontiguousarray(array[:, :, :3])
 
-        if self._ffmpeg is not None and self._ffmpeg.stdin is not None:
+        if self._process is not None and self._process.stdin is not None:
             try:
-                self._ffmpeg.stdin.write(bgr.tobytes())
+                self._process.stdin.write(bgr.data)
                 self._frame_count += 1
                 return True
             except BrokenPipeError:
+                logger.warning("CameraRecorder: ffmpeg pipe broken")
+                self._process = None
                 return False
         return False
 
@@ -171,20 +161,23 @@ class CameraRecorder:
             self._sensor.destroy()
             self._sensor = None
 
-        if self._ffmpeg is not None and self._ffmpeg.stdin is not None:
-            self._ffmpeg.stdin.close()
-
-        if self._ffmpeg is not None:
-            self._ffmpeg.wait()
-            if self._ffmpeg.returncode != 0:
-                stderr_io = self._ffmpeg.stderr
-                stderr = stderr_io.read() if stderr_io is not None else b""
+        if self._process is not None:
+            try:
+                if self._process.stdin is not None:
+                    self._process.stdin.close()
+            except BrokenPipeError:
+                pass
+            self._process.wait()
+            if self._process.returncode != 0:
+                stderr = b""
+                if self._process.stderr is not None:
+                    stderr = self._process.stderr.read()
                 logger.warning(
                     "ffmpeg exited with code %d: %s",
-                    self._ffmpeg.returncode,
+                    self._process.returncode,
                     stderr.decode(errors="replace")[-500:],
                 )
-            self._ffmpeg = None
+            self._process = None
 
         logger.info(
             "CameraRecorder stopped: %d frames written to %s",

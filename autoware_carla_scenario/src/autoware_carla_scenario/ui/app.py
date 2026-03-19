@@ -250,6 +250,16 @@ async def run_scenarios(request: Request) -> dict[str, str]:
     return {"status": "started"}
 
 
+@app.get("/api/run/status")
+async def run_status() -> dict[str, Any]:
+    """Return current run status without SSE streaming."""
+    running, progress = runner.get_status()
+    return {
+        "running": running,
+        "progress": progress.model_dump() if progress else None,
+    }
+
+
 @app.get("/api/run/progress")
 async def run_progress() -> StreamingResponse:
     """SSE endpoint for run progress updates."""

@@ -51,6 +51,27 @@ class MapConfig:
 
 
 @dataclass
+class EntityConfig:
+    """Shared entity parameters for ground projection and spawn retry.
+
+    These settings apply to all vehicle entities (ego and NPC).
+    """
+
+    #: Search range (m) above the estimated z for the ground projection ray.
+    ground_projection_ray_distance_upper: float = 5.0
+
+    #: Search range (m) below the estimated z for the ground projection ray.
+    ground_projection_ray_distance_lower: float = 5.0
+
+    #: Maximum number of upward-shift retries when the initial spawn fails.
+    #: 0 disables retries.
+    spawn_retry_max_count: int = 10
+
+    #: Upward shift (metres) per retry attempt when the initial spawn fails.
+    spawn_retry_t_step: float = 0.1
+
+
+@dataclass
 class EgoVehicleConfig:
     """Ego vehicle parameters."""
 
@@ -62,12 +83,6 @@ class EgoVehicleConfig:
 
     #: Longitudinal offset along the lanelet centerline.
     spawn_s: float = 25.0
-
-    #: Search range (m) above the estimated z for the ground projection ray.
-    ground_projection_ray_distance_upper: float = 5.0
-
-    #: Search range (m) below the estimated z for the ground projection ray.
-    ground_projection_ray_distance_lower: float = 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +250,7 @@ class ScenarioRunConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     map: MapConfig = field(default_factory=MapConfig)
     ego: EgoVehicleConfig = field(default_factory=EgoVehicleConfig)
+    entity: EntityConfig = field(default_factory=EntityConfig)
     scenario: (
         IntersectionPassingConfig
         | LaneChangeConfig

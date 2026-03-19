@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, Optional, Union, overload
+from typing import Any, Optional, Union, overload
 
+import carla
 import numpy as np
 
 # autoware_lanelet2_extension_python must be imported before lanelet2
@@ -38,9 +39,6 @@ import lanelet2.geometry
 
 from .map_manager import MapManager
 from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
-
-if TYPE_CHECKING:
-    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +103,7 @@ def to_carla_location(pose: Union[AnyPose, "carla.Location"]) -> "carla.Location
     if isinstance(pose, (Lanelet2Pose, OpenDrivePose)):
         pose = to_carla_world(pose)
     if isinstance(pose, CarlaWorldPose):
-        import carla as _carla  # noqa: PLC0415
-
-        return _carla.Location(x=pose.x, y=pose.y, z=pose.z)
+        return carla.Location(x=pose.x, y=pose.y, z=pose.z)
     # Assume carla.Location
     return pose
 
@@ -406,8 +402,6 @@ def _carla_to_opendrive_via_waypoint(
     Returns ``None`` when the waypoint cannot be obtained or the road is not
     present in the pyxodr ``RoadNetwork``.
     """
-    import carla  # noqa: PLC0415
-
     try:
         wp = carla_map.get_waypoint(
             carla.Location(x=pose.x, y=pose.y, z=pose.z),

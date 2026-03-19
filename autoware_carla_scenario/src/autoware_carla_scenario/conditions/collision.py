@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import math
 import threading
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
+
+import carla
 
 from ..constants import EGO_ROLE_NAME
 from .base import BaseCondition, ScenarioResult
-
-if TYPE_CHECKING:
-    import carla
 
 
 class CollisionCondition(BaseCondition):
@@ -72,8 +71,6 @@ class CollisionCondition(BaseCondition):
             return
         self._last_attach_attempt = elapsed
 
-        import carla as _carla
-
         actors = world.get_actors().filter("vehicle.*")
         ego = next(
             (a for a in actors if a.attributes.get("role_name") == str(EGO_ROLE_NAME)),
@@ -84,7 +81,7 @@ class CollisionCondition(BaseCondition):
 
         blueprint_library = world.get_blueprint_library()
         sensor_bp = blueprint_library.find("sensor.other.collision")
-        self._sensor = world.spawn_actor(sensor_bp, _carla.Transform(), attach_to=ego)
+        self._sensor = world.spawn_actor(sensor_bp, carla.Transform(), attach_to=ego)
         self._sensor.listen(self._on_collision)
 
     def check(self, world: "carla.World", elapsed: float) -> Optional[ScenarioResult]:

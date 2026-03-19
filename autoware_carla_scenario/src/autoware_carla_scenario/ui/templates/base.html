@@ -165,6 +165,16 @@
   </main>
 
   <script>
+    // Status constants (mirrors Python Status = Literal[...] in models.py)
+    const STATUS = Object.freeze({
+      RUNNING: 'running',
+      PASSED:  'passed',
+      FAILED:  'failed',
+      DONE:    'done',
+      IDLE:    'idle',
+    });
+    const TERMINAL_STATUSES = Object.freeze([STATUS.DONE, STATUS.IDLE]);
+
     // Toggle run options panel and load scenario list on first open
     let scenarioListLoaded = false;
     function toggleRunPanel() {
@@ -261,6 +271,17 @@
           el.addEventListener('change', debouncedSync);
         }
       });
+
+      // Reconnect to progress bar if a run is still active
+      fetch('/api/run/status')
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(data => {
+          if (data.running && data.progress) {
+            updateProgress(data.progress);
+            connectProgressStream(() => htmx.trigger('#update-btn', 'click'));
+          }
+        })
+        .catch(e => console.warn('Failed to check run status:', e));
     });
 
     // Collect all run options from the panel
@@ -273,6 +294,33 @@
       return { scenario: scenario, extra_overrides: extra, sweeper: sweeper };
     }
 
+    // Connect to SSE progress stream, show progress bar, and call onComplete when done.
+    let activeEvtSource = null;
+    function connectProgressStream(onComplete) {
+      if (activeEvtSource) { activeEvtSource.close(); }
+      const progressBar = document.getElementById('progress-bar');
+      progressBar.classList.remove('hidden');
+      const evtSource = new EventSource('/api/run/progress');
+      activeEvtSource = evtSource;
+      evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        updateProgress(data);
+        if (TERMINAL_STATUSES.includes(data.status)) {
+          evtSource.close();
+          activeEvtSource = null;
+          setTimeout(() => {
+            progressBar.classList.add('hidden');
+            if (onComplete) onComplete();
+          }, 1000);
+        }
+      };
+      evtSource.onerror = function() {
+        evtSource.close();
+        activeEvtSource = null;
+        progressBar.classList.add('hidden');
+      };
+    }
+
     // Shared helper: POST to /api/run, show progress bar, stream SSE updates,
     // then call onComplete when done.
     function executeRunWithProgress(body, onComplete) {
@@ -281,23 +329,7 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
       }).then(() => {
-        document.getElementById('progress-bar').classList.remove('hidden');
-        const evtSource = new EventSource('/api/run/progress');
-        evtSource.onmessage = function(event) {
-          const data = JSON.parse(event.data);
-          updateProgress(data);
-          if (data.status === 'done' || data.status === 'idle') {
-            evtSource.close();
-            setTimeout(() => {
-              document.getElementById('progress-bar').classList.add('hidden');
-              if (onComplete) onComplete();
-            }, 1000);
-          }
-        };
-        evtSource.onerror = function() {
-          evtSource.close();
-          document.getElementById('progress-bar').classList.add('hidden');
-        };
+        connectProgressStream(onComplete);
       });
     }
 
@@ -323,7 +355,7 @@
       const count = document.getElementById('progress-count');
       const fill = document.getElementById('progress-fill');
 
-      if (data.status === 'done') {
+      if (data.status === STATUS.DONE) {
         text.textContent = 'Completed!';
         count.textContent = `${data.current}/${data.total}`;
         fill.style.width = '100%';
@@ -333,7 +365,7 @@
         count.textContent = `[${data.current}/${data.total}]`;
         const pct = (data.current / data.total) * 100;
         fill.style.width = pct + '%';
-        if (data.status === 'failed') {
+        if (data.status === STATUS.FAILED) {
           fill.className = 'bg-red-500 h-2 rounded-full transition-all duration-300';
         } else {
           fill.className = 'bg-blue-600 h-2 rounded-full transition-all duration-300';

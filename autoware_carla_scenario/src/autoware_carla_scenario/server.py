@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+import carla
+
 from dotenv import load_dotenv
 
 load_dotenv(override=False)
@@ -204,8 +206,6 @@ class CarlaServerManager:
     def _ping(self) -> bool:
         """Try to connect to the CARLA RPC port; return True on success."""
         try:
-            import carla
-
             client = carla.Client(self.host, self.port)
             client.set_timeout(2.0)
             client.get_server_version()
