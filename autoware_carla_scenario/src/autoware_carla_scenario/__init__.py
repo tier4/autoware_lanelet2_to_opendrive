@@ -94,6 +94,7 @@ from .conditions import (
     StickyCondition,
     TemporaryStopCondition,
     TimeoutCondition,
+    TrafficSignalCondition,
     find_actor_by_role_name,
 )
 from .constants import EGO_ROLE_NAME
@@ -212,6 +213,7 @@ __all__ = [
     "TickTiming",
     "TrafficLightTarget",
     "TrafficSignalAction",
+    "TrafficSignalCondition",
     "TurnAction",
     "TurnDirection",
 ]

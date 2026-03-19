@@ -27,6 +27,7 @@ from .or_condition import OrCondition
 from .persistent import PersistentCondition
 from .sticky import StickyCondition
 from .timeout import TimeoutCondition
+from .traffic_signal import TrafficSignalCondition
 
 __all__ = [
     "AlwaysTrueCondition",
@@ -51,6 +52,7 @@ __all__ = [
     "StickyCondition",
     "TemporaryStopCondition",
     "TimeoutCondition",
+    "TrafficSignalCondition",
     "find_actor_by_role_name",
     "find_actor_in_list",
 ]
