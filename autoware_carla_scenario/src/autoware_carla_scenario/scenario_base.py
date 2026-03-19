@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 from .actions import BaseAction
@@ -16,6 +17,19 @@ if TYPE_CHECKING:
     import carla
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SpectatorCameraConfig:
+    """Parameters used by :meth:`BaseScenario.follow_with_spectator`.
+
+    Stored so that :class:`ScenarioRunner` can attach an RGB camera sensor
+    at the same position for video recording.
+    """
+
+    offset_back: float
+    offset_up: float
+    pitch: float
 
 
 class EgoConfig(VehicleEntityConfig):
@@ -81,6 +95,7 @@ class BaseScenario(ABC):
         self._post_tick_actions: List[BaseAction] = []
         self._pass_conditions: List[BaseCondition] = []
         self._fail_conditions: List[BaseCondition] = []
+        self._spectator_camera_config: Optional[SpectatorCameraConfig] = None
 
     # ------------------------------------------------------------------
     # Client injection
@@ -243,6 +258,10 @@ class BaseScenario(ABC):
             offset_up: Height above the actor (metres).
             pitch: Camera pitch angle (degrees, negative = look down).
         """
+        self._spectator_camera_config = SpectatorCameraConfig(
+            offset_back=offset_back, offset_up=offset_up, pitch=pitch
+        )
+
         import carla as _carla  # noqa: PLC0415
 
         def _follow(world: "carla.World") -> None:

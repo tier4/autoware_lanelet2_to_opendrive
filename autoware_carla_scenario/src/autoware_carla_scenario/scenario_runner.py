@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import carla
 
+    from .scenario_base import SpectatorCameraConfig
+
+from .camera_recorder import CameraRecorder
 from .conditions import EntityExistenceCondition, ScenarioResult, TimeoutCondition
 from .conditions.base import BaseCondition, ConditionStatus, find_actor_by_role_name
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
@@ -175,6 +178,35 @@ def _collect_condition_statuses(
     return statuses
 
 
+def _unique_path(path: Path) -> Path:
+    """Return *path* if it does not exist, otherwise append ``_1``, ``_2``, … ."""
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    counter = 1
+    while True:
+        candidate = path.with_name(f"{stem}_{counter}{suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _destroy_all_dynamic_actors(world: "carla.World", scenario_name: str) -> None:
+    """Destroy all vehicles and sensors in the world for a clean state."""
+    destroyed = 0
+    actors = world.get_actors()
+    for actor in [*actors.filter("vehicle.*"), *actors.filter("sensor.*")]:
+        try:
+            actor.destroy()
+            destroyed += 1
+        except RuntimeError:
+            pass
+    if destroyed:
+        world.tick()
+        logger.info("[%s] Destroyed %d leftover actor(s)", scenario_name, destroyed)
+
+
 class ScenarioRunner:
     """Orchestrates scenario execution: map loading, tick loop, and recording.
 
@@ -286,6 +318,101 @@ class ScenarioRunner:
         self._world = self._client.load_world(map_name)
 
     # ------------------------------------------------------------------
+    # Video rendering from recording
+    # ------------------------------------------------------------------
+
+    def _render_video_from_recording(
+        self,
+        log_path: Path,
+        mp4_path: Path,
+        spectator_config: "SpectatorCameraConfig",
+        tick_count: int,
+        scenario_name: str,
+    ) -> None:
+        """Replay a CARLA recording and render video with an attached RGB camera.
+
+        The ``.log`` file produced by the native CARLA recorder is replayed in
+        synchronous mode.  An RGB camera sensor is attached to the ego vehicle
+        at the same offset as the spectator camera, and the captured frames are
+        written to an MP4 file via :class:`CameraRecorder`.
+
+        Args:
+            log_path: Path to the CARLA ``.log`` recording file.
+            mp4_path: Destination path for the rendered ``.mp4`` video.
+            spectator_config: Camera offset / pitch matching the spectator.
+            tick_count: Number of ticks recorded during the scenario.
+            scenario_name: Scenario class name (used for logging).
+        """
+        world = self._client.get_world()
+
+        # Destroy any leftover actors (NPCs, sensors, etc.) so the
+        # replay starts from a completely clean state.
+        _destroy_all_dynamic_actors(world, scenario_name)
+
+        # Enable synchronous mode for controlled replay
+        settings = world.get_settings()
+        settings.synchronous_mode = True
+        settings.fixed_delta_seconds = 0.05  # 20 Hz – same as scenario execution
+        world.apply_settings(settings)
+
+        camera_recorder: Optional[CameraRecorder] = None
+
+        try:
+            logger.info(
+                "[%s] Starting replay of %s for video rendering",
+                scenario_name,
+                log_path,
+            )
+            # replay_file(filename, start, duration, follow_id)
+            # duration=0.0 replays the entire recording.
+            self._client.replay_file(str(log_path), 0.0, 0.0, 0)
+
+            # Tick once so the replayer spawns actors from the first frame.
+            world.tick()
+
+            # Find the ego vehicle among replayed actors
+            ego = find_actor_by_role_name(world, EGO_ROLE_NAME)
+            if ego is None:
+                logger.warning(
+                    "[%s] Could not find ego actor during replay — "
+                    "skipping video render",
+                    scenario_name,
+                )
+                return
+
+            mp4_path.parent.mkdir(parents=True, exist_ok=True)
+            camera_recorder = CameraRecorder(
+                world,
+                ego,
+                mp4_path,
+                offset_back=spectator_config.offset_back,
+                offset_up=spectator_config.offset_up,
+                pitch=spectator_config.pitch,
+            )
+
+            from tqdm import tqdm  # noqa: PLC0415
+
+            # Tick through the remaining replay frames.  We already consumed
+            # one tick above for actor spawn, so replay (tick_count - 1) more.
+            for _ in tqdm(
+                range(max(tick_count - 1, 0)),
+                desc="Rendering video",
+                unit="tick",
+            ):
+                world.tick()
+
+            logger.info("[%s] Video rendered to %s", scenario_name, mp4_path)
+
+        except Exception:
+            logger.warning("[%s] Video rendering failed", scenario_name, exc_info=True)
+        finally:
+            if camera_recorder is not None:
+                camera_recorder.stop()
+            # Stop the replayer and clean up replay actors
+            self._client.stop_replayer(keep_actors=False)
+            _destroy_all_dynamic_actors(world, scenario_name)
+
+    # ------------------------------------------------------------------
     # Scenario execution
     # ------------------------------------------------------------------
 
@@ -331,6 +458,7 @@ class ScenarioRunner:
 
         ego = EgoVehicle()
         recording_started = False
+        tick_count = 0
         result: Optional[ScenarioResult] = None
 
         try:
@@ -395,7 +523,6 @@ class ScenarioRunner:
 
             logger.info("[%s] === Tick loop start ===", scenario_name)
             start_time = time.monotonic()
-            tick_count = 0
 
             # Tick loop
             while not scenario.is_done():
@@ -542,5 +669,21 @@ class ScenarioRunner:
             json_path.parent.mkdir(parents=True, exist_ok=True)
             json_path.write_text(result.to_json(indent=2), encoding="utf-8")
             logger.info("[%s] Result JSON written to: %s", scenario_name, json_path)
+
+        # Render video from the CARLA recording after scenario cleanup
+        if (
+            recording_started
+            and tick_count > 0
+            and scenario._spectator_camera_config is not None
+        ):
+            log_path = self.output_dir / f"{scenario_name}.log"
+            mp4_path = _unique_path(self.output_dir / f"{scenario_name}.mp4")
+            self._render_video_from_recording(
+                log_path=log_path,
+                mp4_path=mp4_path,
+                spectator_config=scenario._spectator_camera_config,
+                tick_count=tick_count,
+                scenario_name=scenario_name,
+            )
 
         return result

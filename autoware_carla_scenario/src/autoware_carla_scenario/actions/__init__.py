@@ -2,6 +2,7 @@
 
 from .base import BaseAction, TickTiming
 from .lane_change import LaneChangeAction, LaneChangeDirection
+from .traffic_signal import TrafficLightTarget, TrafficSignalAction
 from .turn import TurnAction, TurnDirection
 
 __all__ = [
@@ -9,6 +10,8 @@ __all__ = [
     "LaneChangeAction",
     "LaneChangeDirection",
     "TickTiming",
+    "TrafficLightTarget",
+    "TrafficSignalAction",
     "TurnAction",
     "TurnDirection",
 ]

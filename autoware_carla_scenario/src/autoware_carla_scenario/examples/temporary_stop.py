@@ -35,9 +35,10 @@ from autoware_carla_scenario import (
     StickyCondition,
     TemporaryStopCondition,
     TimeoutCondition,
+    TrafficLightTarget,
+    TrafficSignalAction,
     find_actor_by_role_name,
     get_stop_line_poses_with_following,
-    set_all_traffic_lights_state,
     snap_to_carla_road,
     to_opendrive,
 )
@@ -108,8 +109,11 @@ class TemporaryStopScenario(BaseScenario):
         self.log_actor_position(ego_actor, label="ego")
 
         # --- Set all traffic lights to green ---
-        n = set_all_traffic_lights_state(world, carla.TrafficLightState.Green)
-        logger.info("Set %d traffic lights to green", n)
+        TrafficSignalAction(
+            state=carla.TrafficLightState.Green,
+            lanelet2_traffic_light_ids=TrafficLightTarget.ALL,
+            label="set_all_green",
+        ).execute(world)
 
         # --- Auto-detect stop line from spawn lanelet + following lanelets ---
         spawn_lanelet_id = ll2_pose.lanelet_id

@@ -123,6 +123,19 @@
   {% endif %}
 </div>
 
+<!-- Recording Video -->
+{% if result.video_filename %}
+<div class="mb-6">
+  <h2 class="text-lg font-semibold text-gray-700 mb-2">Recording</h2>
+  <div class="bg-white rounded-lg shadow p-4">
+    <video controls preload="metadata" class="w-full rounded">
+      <source src="/video/{{ session_type }}/{{ date }}/{{ time }}/{{ index }}/{{ result.video_filename }}" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+  </div>
+</div>
+{% endif %}
+
 <!-- Overrides -->
 {% if result.overrides %}
 <div class="mb-6">
