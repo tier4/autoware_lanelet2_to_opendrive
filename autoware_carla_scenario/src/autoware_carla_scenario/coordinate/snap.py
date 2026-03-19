@@ -13,12 +13,11 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union, overload
+from typing import Union, overload
+
+import carla
 
 from .poses import CarlaWorldPose, Lanelet2Pose, OpenDrivePose
-
-if TYPE_CHECKING:
-    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -311,12 +310,10 @@ def _snap_carla_via_waypoint(
     Uses ``get_waypoint()`` to project x/y onto the nearest road and the
     nearest spawn point for z.  The original yaw is preserved.
     """
-    import carla as _carla  # noqa: PLC0415
-
     carla_map = world.get_map()
 
     waypoint = carla_map.get_waypoint(
-        _carla.Location(x=pose.x, y=pose.y, z=0.0),
+        carla.Location(x=pose.x, y=pose.y, z=0.0),
     )
     if waypoint is None:
         logger.warning(
@@ -429,10 +426,8 @@ def refine_z_with_ground_projection(
         A missing ground hit indicates that the spawn location is outside the
         physics mesh (e.g. off-road or the map is not loaded correctly).
     """
-    import carla as _carla  # noqa: PLC0415
-
     cfg = _ground_projection_config
-    origin = _carla.Location(
+    origin = carla.Location(
         x=x,
         y=y,
         z=z_estimate + cfg.ray_distance_upper,
@@ -461,7 +456,7 @@ def refine_z_with_ground_projection(
             "or the CARLA map is not loaded correctly."
         )
 
-    if result.label == _carla.CityObjectLabel.NONE:
+    if result.label == carla.CityObjectLabel.NONE:
         logger.warning(
             "ground_projection hit at (%.2f, %.2f) has CityObjectLabel.NONE. "
             "Enable semantic tags on the map's ground meshes for more "

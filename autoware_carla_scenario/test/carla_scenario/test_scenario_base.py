@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import List, Optional
 from unittest.mock import MagicMock
 
+import carla
 import pytest
 
 from autoware_carla_scenario import (
@@ -62,8 +63,6 @@ class _CountingCondition(BaseCondition):
 
 
 def _make_ego_config() -> EgoConfig:
-    import carla
-
     return EgoConfig(
         spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0, y=0, z=0))),
         vehicle_type="vehicle.mini.cooper",

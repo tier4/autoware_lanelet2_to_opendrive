@@ -11,12 +11,9 @@ import logging
 import subprocess
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import carla
 import numpy as np
-
-if TYPE_CHECKING:
-    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +65,6 @@ class CameraRecorder:
         fov: float = DEFAULT_FOV,
         fps: float = DEFAULT_FPS,
     ) -> None:
-        import carla as _carla  # noqa: PLC0415
-
         self._lock = threading.Lock()
         self._output_path = output_path
         self._frame_count = 0
@@ -83,9 +78,9 @@ class CameraRecorder:
 
         # Place the camera at the same relative position as the spectator.
         # In the actor's local frame: -x = behind, +z = above.
-        transform = _carla.Transform(
-            _carla.Location(x=-offset_back, y=0.0, z=offset_up),
-            _carla.Rotation(pitch=pitch),
+        transform = carla.Transform(
+            carla.Location(x=-offset_back, y=0.0, z=offset_up),
+            carla.Rotation(pitch=pitch),
         )
         self._sensor: "carla.Actor | None" = world.spawn_actor(
             camera_bp, transform, attach_to=actor

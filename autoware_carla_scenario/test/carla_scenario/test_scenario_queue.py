@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import carla
 import pytest
 
 from autoware_carla_scenario import (
@@ -22,8 +23,6 @@ from autoware_carla_scenario import (
 
 
 def _make_ego_config() -> EgoConfig:
-    import carla
-
     return EgoConfig(
         spawn_location=SpawnTransform(carla.Transform(carla.Location(x=0, y=0, z=0))),
         vehicle_type="vehicle.mini.cooper",
