@@ -45,10 +45,10 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_carla_scenario import (
     BaseScenario,
     EgoConfig,
+    GroundProjectionConfig,
     Lanelet2Pose,
     ScenarioQueue,
     SpawnTransform,
-    configure_ground_projection,
 )
 from autoware_carla_scenario.conditions import ScenarioResult
 
@@ -316,8 +316,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
 
 def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     """Instantiate the correct scenario class based on ``cfg.scenario.name``."""
-    # Apply ground projection parameters from entity config before building.
-    configure_ground_projection(
+    ground_projection = GroundProjectionConfig(
         ray_distance_upper=float(cfg.entity.ground_projection_ray_distance_upper),
         ray_distance_lower=float(cfg.entity.ground_projection_ray_distance_lower),
     )
@@ -348,6 +347,7 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
             ego,
             config=IntersectionPassingConfig(**scenario_dict),
             spawn_pose=spawn_pose,
+            ground_projection=ground_projection,
         )
 
     # --- traffic_light_compliance ---
@@ -356,6 +356,7 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
             ego,
             config=TrafficLightComplianceConfig(**scenario_dict),
             spawn_pose=spawn_pose,
+            ground_projection=ground_projection,
         )
 
     # --- lane_change ---
@@ -364,6 +365,7 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
             ego,
             config=LaneChangeConfig(**scenario_dict),
             spawn_pose=spawn_pose,
+            ground_projection=ground_projection,
         )
 
     # --- temporary_stop ---
@@ -372,6 +374,7 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
             ego,
             config=TemporaryStopConfig(**scenario_dict),
             spawn_pose=spawn_pose,
+            ground_projection=ground_projection,
         )
 
     msg = f"Unknown scenario name: {scenario_name!r}"

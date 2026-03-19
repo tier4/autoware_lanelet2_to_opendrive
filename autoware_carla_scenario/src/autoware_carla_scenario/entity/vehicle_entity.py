@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     import carla
 
     from ..coordinate.poses import OpenDrivePose
+    from ..coordinate.snap import GroundProjectionConfig
 
 from ..entity_role import EntityRole
 from ._spawn import SpawnLocation, spawn_vehicle_actor
@@ -34,6 +35,7 @@ class VehicleEntityConfig:
     spawn_retry_max_count: int = 0
     spawn_retry_t_step: float = 0.1
     od_pose: Optional["OpenDrivePose"] = None
+    ground_projection: Optional["GroundProjectionConfig"] = None
 
 
 class VehicleEntity:
@@ -110,6 +112,7 @@ class VehicleEntity:
             od_pose=self._config.od_pose,
             spawn_retry_max_count=self._config.spawn_retry_max_count,
             spawn_retry_t_step=self._config.spawn_retry_t_step,
+            ground_projection=self._config.ground_projection,
         )
         return self._vehicle
 
