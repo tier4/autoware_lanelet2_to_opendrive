@@ -19,7 +19,7 @@ _warmup_done: bool = False
 
 @dataclass
 class VehicleEntityConfig:
-    """Configuration for spawning an NPC vehicle entity.
+    """Configuration for spawning a vehicle entity (ego or NPC).
 
     *spawn_location* determines where the vehicle is placed — either an
     explicit :class:`SpawnTransform` or a :class:`SpawnPointIndex`.
@@ -29,6 +29,8 @@ class VehicleEntityConfig:
     spawn_location: SpawnLocation
     vehicle_type: str = "vehicle.mini.cooper"
     initial_speed_kmh: float = 0.0
+    spawn_retry_max_count: int = 0
+    spawn_retry_z_step: float = 0.1
 
 
 class VehicleEntity:
@@ -102,6 +104,8 @@ class VehicleEntity:
             self._config.vehicle_type,
             str(self._config.role_name),
             self._config.spawn_location,
+            spawn_retry_max_count=self._config.spawn_retry_max_count,
+            spawn_retry_z_step=self._config.spawn_retry_z_step,
         )
         return self._vehicle
 

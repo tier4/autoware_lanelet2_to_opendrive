@@ -316,10 +316,10 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
 
 def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
     """Instantiate the correct scenario class based on ``cfg.scenario.name``."""
-    # Apply ground projection parameters from ego config before building.
+    # Apply ground projection parameters from entity config before building.
     configure_ground_projection(
-        ray_distance_upper=float(cfg.ego.ground_projection_ray_distance_upper),
-        ray_distance_lower=float(cfg.ego.ground_projection_ray_distance_lower),
+        ray_distance_upper=float(cfg.entity.ground_projection_ray_distance_upper),
+        ray_distance_lower=float(cfg.entity.ground_projection_ray_distance_lower),
     )
 
     scenario_name: str = cfg.scenario.name
@@ -332,6 +332,8 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
         ),
         vehicle_type=cfg.ego.vehicle_type,
         initial_speed_kmh=float(cfg.ego.initial_speed_kmh),
+        spawn_retry_max_count=int(cfg.entity.spawn_retry_max_count),
+        spawn_retry_z_step=float(cfg.entity.spawn_retry_z_step),
     )
 
     # Build spawn pose from ego config (lanelet2-specific, kept in examples layer).

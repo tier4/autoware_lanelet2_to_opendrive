@@ -162,6 +162,8 @@ class IntersectionPassingScenario(BaseScenario):
                     spawn_location=SpawnTransform(npc_snapped.to_carla_transform()),
                     vehicle_type=npc_cfg.vehicle_type,
                     initial_speed_kmh=npc_cfg.initial_speed_kmh,
+                    spawn_retry_max_count=self.ego_config.spawn_retry_max_count,
+                    spawn_retry_z_step=self.ego_config.spawn_retry_z_step,
                 )
             )
             npc_entity.spawn(world)
