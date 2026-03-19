@@ -32,7 +32,7 @@ class EgoConfig(VehicleEntityConfig):
         vehicle_type: str = "vehicle.mini.cooper",
         initial_speed_kmh: float = 0.0,
         spawn_retry_max_count: int = 0,
-        spawn_retry_z_step: float = 0.1,
+        spawn_retry_t_step: float = 0.1,
     ) -> None:
         super().__init__(
             role_name=EGO_ROLE_NAME,
@@ -40,7 +40,7 @@ class EgoConfig(VehicleEntityConfig):
             vehicle_type=vehicle_type,
             initial_speed_kmh=initial_speed_kmh,
             spawn_retry_max_count=spawn_retry_max_count,
-            spawn_retry_z_step=spawn_retry_z_step,
+            spawn_retry_t_step=spawn_retry_t_step,
         )
 
 

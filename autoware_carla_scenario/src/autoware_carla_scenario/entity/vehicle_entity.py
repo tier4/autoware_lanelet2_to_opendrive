@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Optional, Union
 if TYPE_CHECKING:
     import carla
 
+    from ..coordinate.poses import OpenDrivePose
+
 from ..entity_role import EntityRole
 from ._spawn import SpawnLocation, spawn_vehicle_actor
 
@@ -30,7 +32,8 @@ class VehicleEntityConfig:
     vehicle_type: str = "vehicle.mini.cooper"
     initial_speed_kmh: float = 0.0
     spawn_retry_max_count: int = 0
-    spawn_retry_z_step: float = 0.1
+    spawn_retry_t_step: float = 0.1
+    od_pose: Optional["OpenDrivePose"] = None
 
 
 class VehicleEntity:
@@ -104,8 +107,9 @@ class VehicleEntity:
             self._config.vehicle_type,
             str(self._config.role_name),
             self._config.spawn_location,
+            od_pose=self._config.od_pose,
             spawn_retry_max_count=self._config.spawn_retry_max_count,
-            spawn_retry_z_step=self._config.spawn_retry_z_step,
+            spawn_retry_t_step=self._config.spawn_retry_t_step,
         )
         return self._vehicle
 

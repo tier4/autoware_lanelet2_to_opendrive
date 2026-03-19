@@ -7,6 +7,7 @@ entity:
   ground_projection_ray_distance_lower: 10.0
   # Spawn retry parameters.
   # When spawn fails (e.g. location occupied or out of map bounds),
-  # retry by shifting z upward in increments of spawn_retry_z_step (m).
+  # retry by shifting the OpenDRIVE lateral offset t in increments of
+  # spawn_retry_t_step (m) and recomputing the spawn position.
   spawn_retry_max_count: 10
-  spawn_retry_z_step: 0.1
+  spawn_retry_t_step: 0.1

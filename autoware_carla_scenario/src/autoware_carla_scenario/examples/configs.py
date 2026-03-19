@@ -68,7 +68,7 @@ class EntityConfig:
     spawn_retry_max_count: int = 10
 
     #: Upward shift (metres) per retry attempt when the initial spawn fails.
-    spawn_retry_z_step: float = 0.1
+    spawn_retry_t_step: float = 0.1
 
 
 @dataclass

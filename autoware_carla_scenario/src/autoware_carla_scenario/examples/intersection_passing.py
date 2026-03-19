@@ -144,6 +144,7 @@ class IntersectionPassingScenario(BaseScenario):
 
         # Update ego_config so the framework spawns the ego at the snapped pose
         self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
+        self.ego_config.od_pose = od_pose
 
         # Use BaseScenario helpers for common post-tick patterns
         ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
@@ -155,7 +156,8 @@ class IntersectionPassingScenario(BaseScenario):
             npc_pose = Lanelet2Pose(
                 lanelet_id=npc_cfg.spawn_lanelet_id, s=npc_cfg.spawn_s
             )
-            npc_snapped = snap_to_carla_road(to_opendrive(npc_pose), world)
+            npc_od_pose = to_opendrive(npc_pose)
+            npc_snapped = snap_to_carla_road(npc_od_pose, world)
             npc_entity = VehicleEntity(
                 VehicleEntityConfig(
                     role_name=EntityRole.npc(i),
@@ -163,7 +165,8 @@ class IntersectionPassingScenario(BaseScenario):
                     vehicle_type=npc_cfg.vehicle_type,
                     initial_speed_kmh=npc_cfg.initial_speed_kmh,
                     spawn_retry_max_count=self.ego_config.spawn_retry_max_count,
-                    spawn_retry_z_step=self.ego_config.spawn_retry_z_step,
+                    spawn_retry_t_step=self.ego_config.spawn_retry_t_step,
+                    od_pose=npc_od_pose,
                 )
             )
             npc_entity.spawn(world)

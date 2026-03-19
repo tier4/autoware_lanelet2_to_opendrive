@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     import carla
+
+    from ..coordinate.poses import OpenDrivePose
 
 logger = logging.getLogger(__name__)
 
@@ -36,18 +38,20 @@ def spawn_vehicle_actor(
     role_name: str,
     spawn_location: SpawnLocation,
     *,
+    od_pose: Optional["OpenDrivePose"] = None,
     spawn_retry_max_count: int = 0,
-    spawn_retry_z_step: float = 0.1,
+    spawn_retry_t_step: float = 0.1,
 ) -> "carla.Actor":
     """Spawn a vehicle actor in the CARLA world.
 
     This is the shared implementation used by both :class:`EgoVehicle` and
     :class:`VehicleEntity`.
 
-    When the initial spawn fails and *spawn_retry_max_count* > 0, the
-    function retries by shifting the spawn location upward (positive z)
-    in increments of *spawn_retry_z_step* metres, up to
-    *spawn_retry_max_count* attempts.
+    When the initial spawn fails and *spawn_retry_max_count* > 0 and
+    *od_pose* is provided, the function retries by shifting the lateral
+    offset *t* in the OpenDRIVE coordinate system in increments of
+    *spawn_retry_t_step* metres, recomputing the CARLA position via
+    :func:`snap_to_carla_road` for each attempt.
 
     Args:
         world: The CARLA world instance.
@@ -55,9 +59,12 @@ def spawn_vehicle_actor(
         role_name: Value for the ``role_name`` actor attribute.
         spawn_location: Where to place the vehicle \u2014 either an explicit
             :class:`SpawnTransform` or a :class:`SpawnPointIndex`.
-        spawn_retry_max_count: Maximum number of upward-shift retries
+        od_pose: Optional :class:`OpenDrivePose` used to recompute the
+            spawn position with a shifted *t* on retry.
+        spawn_retry_max_count: Maximum number of lateral-shift retries
             when the initial spawn fails.  0 disables retries.
-        spawn_retry_z_step: Upward shift (metres) per retry attempt.
+        spawn_retry_t_step: Lateral shift in OpenDRIVE *t* (metres) per
+            retry attempt.
 
     Returns:
         The spawned vehicle actor.
@@ -68,8 +75,6 @@ def spawn_vehicle_actor(
         RuntimeError: If the actor could not be placed at the location
             even after all retry attempts.
     """
-    import carla as _carla  # noqa: PLC0415
-
     bp_lib = world.get_blueprint_library()
 
     # Validate blueprint \u2013 bp_lib.find() raises an opaque C++ exception when
@@ -112,35 +117,35 @@ def spawn_vehicle_actor(
     )
     actor = world.try_spawn_actor(vehicle_bp, resolved_transform)
 
-    # Retry with upward z-shift when the initial spawn fails.
-    if actor is None and spawn_retry_max_count > 0:
-        original_z = resolved_transform.location.z
+    # Retry with lateral t-shift in OpenDRIVE coordinates when spawn fails.
+    if actor is None and spawn_retry_max_count > 0 and od_pose is not None:
+        from ..coordinate.snap import snap_to_carla_road  # noqa: PLC0415
+
+        original_t = od_pose.t
         for attempt in range(1, spawn_retry_max_count + 1):
-            new_z = original_z + spawn_retry_z_step * attempt
-            retry_transform = _carla.Transform(
-                _carla.Location(
-                    x=resolved_transform.location.x,
-                    y=resolved_transform.location.y,
-                    z=new_z,
-                ),
-                resolved_transform.rotation,
-            )
+            new_t = original_t + spawn_retry_t_step * attempt
+            shifted_pose = replace(od_pose, t=new_t)
+            snapped = snap_to_carla_road(shifted_pose, world)
+            retry_transform = snapped.to_carla_transform()
             logger.info(
-                "Spawn retry %d/%d for '%s': z=%.3f -> %.3f (+%.3f)",
+                "Spawn retry %d/%d for '%s': t=%.3f -> %.3f "
+                "(x=%.3f, y=%.3f, z=%.3f)",
                 attempt,
                 spawn_retry_max_count,
                 role_name,
-                original_z,
-                new_z,
-                spawn_retry_z_step * attempt,
+                original_t,
+                new_t,
+                retry_transform.location.x,
+                retry_transform.location.y,
+                retry_transform.location.z,
             )
             actor = world.try_spawn_actor(vehicle_bp, retry_transform)
             if actor is not None:
                 logger.info(
-                    "Spawn succeeded on retry %d for '%s' at z=%.3f",
+                    "Spawn succeeded on retry %d for '%s' at t=%.3f",
                     attempt,
                     role_name,
-                    new_z,
+                    new_t,
                 )
                 break
 

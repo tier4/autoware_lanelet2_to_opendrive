@@ -30,4 +30,4 @@ entity:
   ground_projection_ray_distance_upper: 5.0
   ground_projection_ray_distance_lower: 10.0
   spawn_retry_max_count: 10
-  spawn_retry_z_step: 0.1
+  spawn_retry_t_step: 0.1

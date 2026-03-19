@@ -45,6 +45,7 @@ from autoware_carla_scenario import (
     find_actor_by_role_name,
     set_all_traffic_lights_state,
     snap_to_carla_road,
+    to_opendrive,
 )
 
 from .configs import TrafficLightComplianceConfig
@@ -99,7 +100,8 @@ class TrafficLightComplianceScenario(BaseScenario):
             msg = "spawn_pose is required for TrafficLightComplianceScenario"
             raise ValueError(msg)
         spawn_pose = self._spawn_pose
-        snapped = snap_to_carla_road(spawn_pose, world)
+        od_pose = to_opendrive(spawn_pose)
+        snapped = snap_to_carla_road(od_pose, world)
 
         logger.info(
             "Snap Lanelet2Pose(lanelet_id=%d, s=%.1f, t=%.1f) to CARLA road: "
@@ -115,6 +117,7 @@ class TrafficLightComplianceScenario(BaseScenario):
 
         # Update ego_config so the framework spawns the ego at the snapped pose
         self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
+        self.ego_config.od_pose = od_pose
 
         # Use BaseScenario helpers for common post-tick patterns
         ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
