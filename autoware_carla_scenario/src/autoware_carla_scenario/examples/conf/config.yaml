@@ -2,6 +2,7 @@ defaults:
   - _self_
   - server: localhost
   - ego: default
+  - entity: default
   - traffic_manager: default
   - scenario: intersection_passing/left_turn
   - map: nishishinjuku
@@ -24,5 +25,9 @@ ego:
   initial_speed_kmh: 0.0
   spawn_lanelet_id: 242
   spawn_s: 25.0
+
+entity:
   ground_projection_ray_distance_upper: 5.0
   ground_projection_ray_distance_lower: 10.0
+  spawn_retry_max_count: 10
+  spawn_retry_t_step: 0.1

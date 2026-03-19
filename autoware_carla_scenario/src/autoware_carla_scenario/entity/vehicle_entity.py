@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Optional, Union
 if TYPE_CHECKING:
     import carla
 
+    from ..coordinate.poses import OpenDrivePose
+
 from ..entity_role import EntityRole
 from ._spawn import SpawnLocation, spawn_vehicle_actor
 
@@ -19,7 +21,7 @@ _warmup_done: bool = False
 
 @dataclass
 class VehicleEntityConfig:
-    """Configuration for spawning an NPC vehicle entity.
+    """Configuration for spawning a vehicle entity (ego or NPC).
 
     *spawn_location* determines where the vehicle is placed — either an
     explicit :class:`SpawnTransform` or a :class:`SpawnPointIndex`.
@@ -29,6 +31,9 @@ class VehicleEntityConfig:
     spawn_location: SpawnLocation
     vehicle_type: str = "vehicle.mini.cooper"
     initial_speed_kmh: float = 0.0
+    spawn_retry_max_count: int = 0
+    spawn_retry_t_step: float = 0.1
+    od_pose: Optional["OpenDrivePose"] = None
 
 
 class VehicleEntity:
@@ -102,6 +107,9 @@ class VehicleEntity:
             self._config.vehicle_type,
             str(self._config.role_name),
             self._config.spawn_location,
+            od_pose=self._config.od_pose,
+            spawn_retry_max_count=self._config.spawn_retry_max_count,
+            spawn_retry_t_step=self._config.spawn_retry_t_step,
         )
         return self._vehicle
 
