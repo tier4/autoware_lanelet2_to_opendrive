@@ -118,35 +118,43 @@ def spawn_vehicle_actor(
     actor = world.try_spawn_actor(vehicle_bp, resolved_transform)
 
     # Retry with lateral t-shift in OpenDRIVE coordinates when spawn fails.
+    # Each step tries both +t and -t so the vehicle is placed on whichever
+    # side of the lane centre is free first.
     if actor is None and spawn_retry_max_count > 0 and od_pose is not None:
         from ..coordinate.snap import snap_to_carla_road  # noqa: PLC0415
 
         original_t = od_pose.t
         for attempt in range(1, spawn_retry_max_count + 1):
-            new_t = original_t + spawn_retry_t_step * attempt
-            shifted_pose = replace(od_pose, t=new_t)
-            snapped = snap_to_carla_road(shifted_pose, world)
-            retry_transform = snapped.to_carla_transform()
-            logger.info(
-                "Spawn retry %d/%d for '%s': t=%.3f -> %.3f "
-                "(x=%.3f, y=%.3f, z=%.3f)",
-                attempt,
-                spawn_retry_max_count,
-                role_name,
-                original_t,
-                new_t,
-                retry_transform.location.x,
-                retry_transform.location.y,
-                retry_transform.location.z,
-            )
-            actor = world.try_spawn_actor(vehicle_bp, retry_transform)
-            if actor is not None:
+            delta = spawn_retry_t_step * attempt
+            for sign, label in ((+1, "+"), (-1, "-")):
+                new_t = original_t + sign * delta
+                shifted_pose = replace(od_pose, t=new_t)
+                snapped = snap_to_carla_road(shifted_pose, world)
+                retry_transform = snapped.to_carla_transform()
                 logger.info(
-                    "Spawn succeeded on retry %d for '%s' at t=%.3f",
+                    "Spawn retry %d/%d (%st) for '%s': t=%.3f -> %.3f "
+                    "(x=%.3f, y=%.3f, z=%.3f)",
                     attempt,
+                    spawn_retry_max_count,
+                    label,
                     role_name,
+                    original_t,
                     new_t,
+                    retry_transform.location.x,
+                    retry_transform.location.y,
+                    retry_transform.location.z,
                 )
+                actor = world.try_spawn_actor(vehicle_bp, retry_transform)
+                if actor is not None:
+                    logger.info(
+                        "Spawn succeeded on retry %d (%st) for '%s' at t=%.3f",
+                        attempt,
+                        label,
+                        role_name,
+                        new_t,
+                    )
+                    break
+            if actor is not None:
                 break
 
     if actor is None:
