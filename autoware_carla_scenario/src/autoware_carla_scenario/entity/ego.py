@@ -43,6 +43,9 @@ class EgoVehicle:
             config.vehicle_type,
             str(EGO_ROLE_NAME),
             config.spawn_location,
+            od_pose=config.od_pose,
+            spawn_retry_max_count=config.spawn_retry_max_count,
+            spawn_retry_t_step=config.spawn_retry_t_step,
         )
         return self._vehicle
 

@@ -122,6 +122,7 @@ class LaneChangeScenario(BaseScenario):
 
         # Update ego_config so the framework spawns the ego at the snapped pose
         self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
+        self.ego_config.od_pose = od_pose
 
         # Use BaseScenario helpers for common post-tick patterns
         ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
