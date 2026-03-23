@@ -143,12 +143,13 @@ class TrafficLightComplianceScenario(BaseScenario):
             )
         )
 
-        # 2) Verify ego moving after green phase (>= 3.5 s)
+        # 2) Verify ego moving after green phase
+        green_check_time = cfg.light_switch_delay_seconds + 0.5
         moving_after_green = StickyCondition(
             AndCondition(
                 [
                     ElapsedTimeCondition(
-                        3.5,
+                        green_check_time,
                         ComparisonRule.GREATER_THAN_OR_EQUAL,
                         label="green_phase_elapsed",
                     ),
@@ -164,17 +165,23 @@ class TrafficLightComplianceScenario(BaseScenario):
 
         self.register_pass_condition(AndCondition([stopped_at_red, moving_after_green]))
 
-        # --- Fail: ego moved during red phase (1.0–2.9 s) ---
+        # --- Fail: ego moved during red phase ---
+        # Window: [merging_time, light_switch_delay - 0.1]
+        # After merging_time the ego should have stopped; the window
+        # closes just before the green signal to avoid false positives
+        # during the transition.
+        red_window_start = cfg.merging_time_seconds
+        red_window_end = cfg.light_switch_delay_seconds - 0.1
         self.register_fail_condition(
             AndCondition(
                 [
                     ElapsedTimeCondition(
-                        1.0,
+                        red_window_start,
                         ComparisonRule.GREATER_THAN_OR_EQUAL,
                         label="red_phase_start",
                     ),
                     ElapsedTimeCondition(
-                        2.9,
+                        red_window_end,
                         ComparisonRule.LESS_THAN,
                         label="red_phase_end",
                     ),
