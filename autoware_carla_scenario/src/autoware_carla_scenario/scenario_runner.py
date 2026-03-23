@@ -634,8 +634,12 @@ class ScenarioRunner:
             ego.destroy()
             logger.info("[%s] Ego destroyed", scenario_name)
 
-            # Restore original world and TrafficManager settings
-            tm.set_synchronous_mode(original_synchronous)
+            # Shut down the TrafficManager so the next run starts with a
+            # fresh instance (resets InMemoryMap cache and internal state).
+            tm.shut_down()
+            logger.info("[%s] TrafficManager shut down", scenario_name)
+
+            # Restore original world settings
             settings.synchronous_mode = original_synchronous
             settings.fixed_delta_seconds = original_delta
             world.apply_settings(settings)
