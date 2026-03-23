@@ -2,7 +2,7 @@
 scenario:
   name: traffic_light_compliance
   light_switch_delay_seconds: 3.0
-  merging_time_seconds: 1.0
+  merging_time_seconds: 1.5
   timeout_seconds: 5.0
   moving_speed_kmh: 1.0
 
@@ -28,6 +28,7 @@ sweep:
             constraints:
               - type: equals
                 value: any
+
   bindings:
     ego.spawn_s:
       type: stop_line_offset
