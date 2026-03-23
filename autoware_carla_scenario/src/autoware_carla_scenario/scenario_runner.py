@@ -404,9 +404,9 @@ class ScenarioRunner:
         finally:
             if camera_recorder is not None:
                 camera_recorder.stop()
-            # Stop the replayer and clean up replay actors
+            # Stop the replayer; leftover actors are cleaned up by the
+            # reload_world() call at the end of run_scenario().
             self._client.stop_replayer(keep_actors=False)
-            _destroy_all_dynamic_actors(world, scenario_name)
 
     # ------------------------------------------------------------------
     # Scenario execution
@@ -437,10 +437,10 @@ class ScenarioRunner:
 
         world = self._world
 
-        # Enable synchronous mode so we control the simulation tick rate
+        # Enable synchronous mode so we control the simulation tick rate.
+        # Original settings are not saved because reload_world() at the
+        # end of this method resets everything to defaults.
         settings = world.get_settings()
-        original_synchronous = settings.synchronous_mode
-        original_delta = settings.fixed_delta_seconds
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = 0.05  # 20 Hz
         world.apply_settings(settings)
@@ -615,35 +615,11 @@ class ScenarioRunner:
             if recording_started:
                 self._client.stop_recorder()
                 logger.info("[%s] Recorder stopped", scenario_name)
-            # Destroy NPC entities registered by the scenario
-            for entity in scenario._entities:
-                try:
-                    entity.destroy()
-                    logger.info(
-                        "[%s] Destroyed NPC %s", scenario_name, entity.role_name
-                    )
-                except Exception:
-                    logger.warning(
-                        "[%s] Failed to destroy NPC %s",
-                        scenario_name,
-                        entity.role_name,
-                        exc_info=True,
-                    )
 
-            logger.info("[%s] Destroying ego vehicle ...", scenario_name)
-            ego.destroy()
-            logger.info("[%s] Ego destroyed", scenario_name)
-
-            # Restore original world and TrafficManager settings
-            tm.set_synchronous_mode(original_synchronous)
-            settings.synchronous_mode = original_synchronous
-            settings.fixed_delta_seconds = original_delta
-            world.apply_settings(settings)
-            # Tick once to flush destroyed actors and applied settings on
-            # the server side, ensuring the world is in a clean state
-            # before the next scenario starts.
-            world.tick()
-            logger.info("[%s] World settings restored", scenario_name)
+            # Shut down the TrafficManager so the next run starts with a
+            # fresh instance (resets InMemoryMap cache and internal state).
+            tm.shut_down()
+            logger.info("[%s] TrafficManager shut down", scenario_name)
             logger.info("[%s] === Cleanup done ===", scenario_name)
 
         if result is not None:
@@ -674,6 +650,25 @@ class ScenarioRunner:
                 spectator_config=scenario._spectator_camera_config,
                 tick_count=tick_count,
                 scenario_name=scenario_name,
+            )
+
+        # Reload the world to guarantee a completely clean state (all
+        # actors, sensors, and physics state are reset).  This is more
+        # reliable than destroying actors individually, which can fail
+        # with "failed to destroy actor" errors from the CARLA server.
+        # Flush any pending server-side operations (e.g. replayer
+        # shutdown) before reloading to avoid std::exception errors.
+        try:
+            world = self._client.get_world()
+            world.tick()
+            self._client.reload_world()
+            self._world = self._client.get_world()
+            logger.info("[%s] World reloaded", scenario_name)
+        except Exception:
+            logger.warning(
+                "[%s] reload_world failed — world may retain residual state",
+                scenario_name,
+                exc_info=True,
             )
 
         return result
