@@ -21,7 +21,7 @@ Usage::
 from .frames import CoordinateFrame, FrameMismatchError, frame_of
 from .map_manager import MapManager
 from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
-from .snap import configure_ground_projection, snap_to_carla_road
+from .snap import GroundProjectionConfig, snap_to_carla_road
 from .stop_line import get_stop_line_poses, get_stop_line_poses_with_following
 from .transform import (
     project_onto_road,
@@ -32,7 +32,7 @@ from .transform import (
 )
 
 __all__ = [
-    "configure_ground_projection",
+    "GroundProjectionConfig",
     "AnyPose",
     "CarlaWorldPose",
     "CoordinateFrame",

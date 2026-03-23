@@ -37,6 +37,7 @@ from autoware_carla_scenario import (
     ComparisonRule,
     EgoConfig,
     ElapsedTimeCondition,
+    GroundProjectionConfig,
     Lanelet2Pose,
     SpawnTransform,
     SpeedCondition,
@@ -77,10 +78,12 @@ class TrafficLightComplianceScenario(BaseScenario):
         ego_config: EgoConfig,
         config: TrafficLightComplianceConfig | None = None,
         spawn_pose: Lanelet2Pose | None = None,
+        ground_projection: GroundProjectionConfig | None = None,
     ) -> None:
         super().__init__(ego_config)
         self._config = config or TrafficLightComplianceConfig()
         self._spawn_pose = spawn_pose
+        self._ground_projection = ground_projection or GroundProjectionConfig()
 
     def setup(self) -> None:
         """Snap ego spawn, set lights to red, register conditions."""
@@ -92,7 +95,9 @@ class TrafficLightComplianceScenario(BaseScenario):
             raise ValueError(msg)
         spawn_pose = self._spawn_pose
         od_pose = to_opendrive(spawn_pose)
-        snapped = snap_to_carla_road(od_pose, world)
+        snapped = snap_to_carla_road(
+            od_pose, world, ground_projection=self._ground_projection
+        )
 
         logger.info(
             "Snap Lanelet2Pose(lanelet_id=%d, s=%.1f, t=%.1f) to CARLA road: "
@@ -109,6 +114,7 @@ class TrafficLightComplianceScenario(BaseScenario):
         # Update ego_config so the framework spawns the ego at the snapped pose
         self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
         self.ego_config.od_pose = od_pose
+        self.ego_config.ground_projection = self._ground_projection
 
         # Use BaseScenario helpers for common post-tick patterns
         ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731

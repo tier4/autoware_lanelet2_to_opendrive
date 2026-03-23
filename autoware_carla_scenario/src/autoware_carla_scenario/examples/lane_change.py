@@ -38,6 +38,7 @@ from autoware_carla_scenario import (
     BaseScenario,
     EgoConfig,
     EntityLanePositionCondition,
+    GroundProjectionConfig,
     LaneChangeAction,
     LaneChangeDirection,
     Lanelet2Pose,
@@ -89,10 +90,12 @@ class LaneChangeScenario(BaseScenario):
         ego_config: EgoConfig,
         config: LaneChangeConfig | None = None,
         spawn_pose: Lanelet2Pose | None = None,
+        ground_projection: GroundProjectionConfig | None = None,
     ) -> None:
         super().__init__(ego_config)
         self._config = config or LaneChangeConfig()
         self._spawn_pose = spawn_pose
+        self._ground_projection = ground_projection or GroundProjectionConfig()
 
     def setup(self) -> None:
         """Snap ego spawn to CARLA road, register lane-change action and conditions."""
@@ -105,7 +108,9 @@ class LaneChangeScenario(BaseScenario):
             raise ValueError(msg)
         ll2_pose = self._spawn_pose
         od_pose = to_opendrive(ll2_pose)
-        snapped = snap_to_carla_road(od_pose, world)
+        snapped = snap_to_carla_road(
+            od_pose, world, ground_projection=self._ground_projection
+        )
 
         logger.info(
             "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
@@ -123,6 +128,7 @@ class LaneChangeScenario(BaseScenario):
         # Update ego_config so the framework spawns the ego at the snapped pose
         self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
         self.ego_config.od_pose = od_pose
+        self.ego_config.ground_projection = self._ground_projection
 
         # Use BaseScenario helpers for common post-tick patterns
         ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731

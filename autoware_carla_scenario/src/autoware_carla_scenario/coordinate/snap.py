@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _SPAWN_POINT_WARN_DISTANCE: float = 10.0
 
 
-@dataclass
+@dataclass(frozen=True)
 class GroundProjectionConfig:
     """Tunable parameters for the ground-projection z-refinement.
 
@@ -44,35 +44,12 @@ class GroundProjectionConfig:
     z_log_threshold: float = 0.01
 
 
-_ground_projection_config = GroundProjectionConfig()
-
-
-def configure_ground_projection(
-    *,
-    ray_distance_upper: float | None = None,
-    ray_distance_lower: float | None = None,
-) -> None:
-    """Update the module-level :class:`GroundProjectionConfig`.
-
-    Only the parameters that are explicitly passed (not ``None``) are changed.
-    Call this before any :func:`snap_to_carla_road` invocation so that the
-    snap pipeline uses the desired values.
-    """
-    if ray_distance_upper is not None:
-        _ground_projection_config.ray_distance_upper = ray_distance_upper
-    if ray_distance_lower is not None:
-        _ground_projection_config.ray_distance_lower = ray_distance_lower
-    logger.info(
-        "Ground projection config updated: ray_distance_upper=%.2f, ray_distance_lower=%.2f",
-        _ground_projection_config.ray_distance_upper,
-        _ground_projection_config.ray_distance_lower,
-    )
-
-
 @overload
 def snap_to_carla_road(
     pose: Lanelet2Pose,
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig = ...,
 ) -> CarlaWorldPose: ...
 
 
@@ -80,6 +57,8 @@ def snap_to_carla_road(
 def snap_to_carla_road(
     pose: OpenDrivePose,
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig = ...,
 ) -> CarlaWorldPose: ...
 
 
@@ -87,12 +66,16 @@ def snap_to_carla_road(
 def snap_to_carla_road(
     pose: CarlaWorldPose,
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig = ...,
 ) -> CarlaWorldPose: ...
 
 
 def snap_to_carla_road(
     pose: Union[CarlaWorldPose, Lanelet2Pose, OpenDrivePose],
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig = GroundProjectionConfig(),
 ) -> CarlaWorldPose:
     """Snap a pose onto the CARLA drivable surface.
 
@@ -123,6 +106,9 @@ def snap_to_carla_road(
         A Lanelet2, OpenDRIVE, or CARLA world pose to snap.
     world:
         An active ``carla.World`` instance.
+    ground_projection:
+        Parameters for the ground-projection z-refinement.  Defaults to
+        :class:`GroundProjectionConfig` with its default values.
 
     Returns
     -------
@@ -130,10 +116,14 @@ def snap_to_carla_road(
         A new pose snapped to the road surface.
     """
     if isinstance(pose, Lanelet2Pose):
-        return _snap_lanelet2_via_opendrive(pose, world)
+        return _snap_lanelet2_via_opendrive(
+            pose, world, ground_projection=ground_projection
+        )
     if isinstance(pose, OpenDrivePose):
-        return _snap_opendrive_via_waypoint_xodr(pose, world)
-    return _snap_carla_via_waypoint(pose, world)
+        return _snap_opendrive_via_waypoint_xodr(
+            pose, world, ground_projection=ground_projection
+        )
+    return _snap_carla_via_waypoint(pose, world, ground_projection=ground_projection)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +134,8 @@ def snap_to_carla_road(
 def _snap_lanelet2_via_opendrive(
     pose: Lanelet2Pose,
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig,
 ) -> CarlaWorldPose:
     """Snap a Lanelet2 pose by projecting through OpenDRIVE geometry.
 
@@ -210,7 +202,11 @@ def _snap_lanelet2_via_opendrive(
     snapped_z = _z_from_nearest_spawn_point(carla_from_od.x, carla_from_od.y, world)
     base_z = snapped_z if snapped_z is not None else carla_from_od.z
     refined_z = refine_z_with_ground_projection(
-        carla_from_od.x, carla_from_od.y, base_z, world
+        carla_from_od.x,
+        carla_from_od.y,
+        base_z,
+        world,
+        ground_projection=ground_projection,
     )
 
     result = CarlaWorldPose(
@@ -243,6 +239,8 @@ def _snap_lanelet2_via_opendrive(
 def _snap_opendrive_via_waypoint_xodr(
     pose: OpenDrivePose,
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig,
 ) -> CarlaWorldPose:
     """Snap an OpenDRIVE pose using ``carla.Map.get_waypoint_xodr``.
 
@@ -271,7 +269,11 @@ def _snap_opendrive_via_waypoint_xodr(
 
     tf = waypoint.transform
     refined_z = refine_z_with_ground_projection(
-        tf.location.x, tf.location.y, tf.location.z, world
+        tf.location.x,
+        tf.location.y,
+        tf.location.z,
+        world,
+        ground_projection=ground_projection,
     )
 
     result = CarlaWorldPose(
@@ -304,6 +306,8 @@ def _snap_opendrive_via_waypoint_xodr(
 def _snap_carla_via_waypoint(
     pose: CarlaWorldPose,
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig,
 ) -> CarlaWorldPose:
     """Snap a CARLA world pose using the waypoint API.
 
@@ -329,7 +333,9 @@ def _snap_carla_via_waypoint(
 
     snapped_z = _z_from_nearest_spawn_point(snapped_x, snapped_y, world)
     base_z = snapped_z if snapped_z is not None else pose.z
-    refined_z = refine_z_with_ground_projection(snapped_x, snapped_y, base_z, world)
+    refined_z = refine_z_with_ground_projection(
+        snapped_x, snapped_y, base_z, world, ground_projection=ground_projection
+    )
 
     result = CarlaWorldPose(
         x=snapped_x,
@@ -398,6 +404,8 @@ def refine_z_with_ground_projection(
     y: float,
     z_estimate: float,
     world: "carla.World",
+    *,
+    ground_projection: GroundProjectionConfig = GroundProjectionConfig(),
 ) -> float:
     """Refine *z_estimate* by casting a downward ray via ``world.ground_projection``.
 
@@ -413,6 +421,9 @@ def refine_z_with_ground_projection(
         The best z estimate from existing logic (spawn-point / waypoint).
     world:
         An active ``carla.World`` instance.
+    ground_projection:
+        Parameters controlling the ray search range and logging threshold.
+        Defaults to :class:`GroundProjectionConfig` with its default values.
 
     Returns
     -------
@@ -426,7 +437,7 @@ def refine_z_with_ground_projection(
         A missing ground hit indicates that the spawn location is outside the
         physics mesh (e.g. off-road or the map is not loaded correctly).
     """
-    cfg = _ground_projection_config
+    cfg = ground_projection
     origin = carla.Location(
         x=x,
         y=y,

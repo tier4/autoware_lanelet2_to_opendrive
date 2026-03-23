@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     import carla
 
     from ..coordinate.poses import OpenDrivePose
+    from ..coordinate.snap import GroundProjectionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def spawn_vehicle_actor(
     od_pose: Optional["OpenDrivePose"] = None,
     spawn_retry_max_count: int = 0,
     spawn_retry_t_step: float = 0.1,
+    ground_projection: Optional["GroundProjectionConfig"] = None,
 ) -> "carla.Actor":
     """Spawn a vehicle actor in the CARLA world.
 
@@ -65,6 +67,10 @@ def spawn_vehicle_actor(
             when the initial spawn fails.  0 disables retries.
         spawn_retry_t_step: Lateral shift in OpenDRIVE *t* (metres) per
             retry attempt.
+        ground_projection: Ground projection config used when snapping
+            the shifted pose on retry.  Defaults to
+            :class:`~autoware_carla_scenario.coordinate.snap.GroundProjectionConfig`
+            with its default values.
 
     Returns:
         The spawned vehicle actor.
@@ -121,15 +127,20 @@ def spawn_vehicle_actor(
     # Each step tries both +t and -t so the vehicle is placed on whichever
     # side of the lane centre is free first.
     if actor is None and spawn_retry_max_count > 0 and od_pose is not None:
-        from ..coordinate.snap import snap_to_carla_road  # noqa: PLC0415
+        from ..coordinate.snap import GroundProjectionConfig, snap_to_carla_road  # noqa: PLC0415
 
+        gp = (
+            ground_projection
+            if ground_projection is not None
+            else GroundProjectionConfig()
+        )
         original_t = od_pose.t
         for attempt in range(1, spawn_retry_max_count + 1):
             delta = spawn_retry_t_step * attempt
             for sign, label in ((+1, "+"), (-1, "-")):
                 new_t = original_t + sign * delta
                 shifted_pose = replace(od_pose, t=new_t)
-                snapped = snap_to_carla_road(shifted_pose, world)
+                snapped = snap_to_carla_road(shifted_pose, world, ground_projection=gp)
                 retry_transform = snapped.to_carla_transform()
                 logger.info(
                     "Spawn retry %d/%d (%st) for '%s': t=%.3f -> %.3f "
