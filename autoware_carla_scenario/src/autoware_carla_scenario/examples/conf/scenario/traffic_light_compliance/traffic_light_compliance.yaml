@@ -31,4 +31,4 @@ sweep:
   bindings:
     ego.spawn_s:
       type: stop_line_offset
-      offset: 10.0
+      offset: 12.0
