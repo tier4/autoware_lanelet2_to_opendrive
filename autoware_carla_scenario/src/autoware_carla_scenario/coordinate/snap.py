@@ -116,9 +116,13 @@ def snap_to_carla_road(
         A new pose snapped to the road surface.
     """
     if isinstance(pose, Lanelet2Pose):
-        return _snap_lanelet2_via_opendrive(pose, world, ground_projection=ground_projection)
+        return _snap_lanelet2_via_opendrive(
+            pose, world, ground_projection=ground_projection
+        )
     if isinstance(pose, OpenDrivePose):
-        return _snap_opendrive_via_waypoint_xodr(pose, world, ground_projection=ground_projection)
+        return _snap_opendrive_via_waypoint_xodr(
+            pose, world, ground_projection=ground_projection
+        )
     return _snap_carla_via_waypoint(pose, world, ground_projection=ground_projection)
 
 
@@ -198,7 +202,11 @@ def _snap_lanelet2_via_opendrive(
     snapped_z = _z_from_nearest_spawn_point(carla_from_od.x, carla_from_od.y, world)
     base_z = snapped_z if snapped_z is not None else carla_from_od.z
     refined_z = refine_z_with_ground_projection(
-        carla_from_od.x, carla_from_od.y, base_z, world, ground_projection=ground_projection
+        carla_from_od.x,
+        carla_from_od.y,
+        base_z,
+        world,
+        ground_projection=ground_projection,
     )
 
     result = CarlaWorldPose(
@@ -261,7 +269,11 @@ def _snap_opendrive_via_waypoint_xodr(
 
     tf = waypoint.transform
     refined_z = refine_z_with_ground_projection(
-        tf.location.x, tf.location.y, tf.location.z, world, ground_projection=ground_projection
+        tf.location.x,
+        tf.location.y,
+        tf.location.z,
+        world,
+        ground_projection=ground_projection,
     )
 
     result = CarlaWorldPose(
@@ -321,7 +333,9 @@ def _snap_carla_via_waypoint(
 
     snapped_z = _z_from_nearest_spawn_point(snapped_x, snapped_y, world)
     base_z = snapped_z if snapped_z is not None else pose.z
-    refined_z = refine_z_with_ground_projection(snapped_x, snapped_y, base_z, world, ground_projection=ground_projection)
+    refined_z = refine_z_with_ground_projection(
+        snapped_x, snapped_y, base_z, world, ground_projection=ground_projection
+    )
 
     result = CarlaWorldPose(
         x=snapped_x,

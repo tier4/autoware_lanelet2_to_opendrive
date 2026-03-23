@@ -95,7 +95,9 @@ class TrafficLightComplianceScenario(BaseScenario):
             raise ValueError(msg)
         spawn_pose = self._spawn_pose
         od_pose = to_opendrive(spawn_pose)
-        snapped = snap_to_carla_road(od_pose, world, ground_projection=self._ground_projection)
+        snapped = snap_to_carla_road(
+            od_pose, world, ground_projection=self._ground_projection
+        )
 
         logger.info(
             "Snap Lanelet2Pose(lanelet_id=%d, s=%.1f, t=%.1f) to CARLA road: "

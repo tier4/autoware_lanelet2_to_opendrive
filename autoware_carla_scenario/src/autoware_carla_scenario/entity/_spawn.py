@@ -129,7 +129,11 @@ def spawn_vehicle_actor(
     if actor is None and spawn_retry_max_count > 0 and od_pose is not None:
         from ..coordinate.snap import GroundProjectionConfig, snap_to_carla_road  # noqa: PLC0415
 
-        gp = ground_projection if ground_projection is not None else GroundProjectionConfig()
+        gp = (
+            ground_projection
+            if ground_projection is not None
+            else GroundProjectionConfig()
+        )
         original_t = od_pose.t
         for attempt in range(1, spawn_retry_max_count + 1):
             delta = spawn_retry_t_step * attempt

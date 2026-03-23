@@ -131,7 +131,9 @@ class IntersectionPassingScenario(BaseScenario):
             raise ValueError(msg)
         ll2_pose = self._spawn_pose
         od_pose = to_opendrive(ll2_pose)
-        snapped = snap_to_carla_road(od_pose, world, ground_projection=self._ground_projection)
+        snapped = snap_to_carla_road(
+            od_pose, world, ground_projection=self._ground_projection
+        )
 
         logger.info(
             "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
@@ -162,7 +164,9 @@ class IntersectionPassingScenario(BaseScenario):
                 lanelet_id=npc_cfg.spawn_lanelet_id, s=npc_cfg.spawn_s
             )
             npc_od_pose = to_opendrive(npc_pose)
-            npc_snapped = snap_to_carla_road(npc_od_pose, world, ground_projection=self._ground_projection)
+            npc_snapped = snap_to_carla_road(
+                npc_od_pose, world, ground_projection=self._ground_projection
+            )
             npc_entity = VehicleEntity(
                 VehicleEntityConfig(
                     role_name=EntityRole.npc(i),

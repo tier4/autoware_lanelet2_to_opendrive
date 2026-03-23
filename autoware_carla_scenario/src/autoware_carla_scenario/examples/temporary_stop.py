@@ -87,7 +87,9 @@ class TemporaryStopScenario(BaseScenario):
             raise ValueError(msg)
         ll2_pose = self._spawn_pose
         od_pose = to_opendrive(ll2_pose)
-        snapped = snap_to_carla_road(od_pose, world, ground_projection=self._ground_projection)
+        snapped = snap_to_carla_road(
+            od_pose, world, ground_projection=self._ground_projection
+        )
 
         logger.info(
             "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
