@@ -60,9 +60,9 @@ async def index(request: Request) -> HTMLResponse:
     """Session list page."""
     sessions = scanner.scan_sessions(_base_path())
     return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
+        request=request,
+        name="index.html",
+        context={
             "sessions": sessions,
             "page": "index",
         },
@@ -78,9 +78,9 @@ async def session_detail(
     passed_count = sum(1 for it in items if it.passed is True)
     total_count = len(items)
     return templates.TemplateResponse(
-        "session.html",
-        {
-            "request": request,
+        request=request,
+        name="session.html",
+        context={
             "items": items,
             "session_type": session_type,
             "date": date,
@@ -109,9 +109,9 @@ async def scenario_detail(
             scenario_name = it.scenario_name
             break
     return templates.TemplateResponse(
-        "scenario.html",
-        {
-            "request": request,
+        request=request,
+        name="scenario.html",
+        context={
             "result": result,
             "scenario_name": scenario_name,
             "session_type": session_type,
@@ -152,8 +152,9 @@ async def refresh(request: Request) -> HTMLResponse:
     scanner.clear_cache()
     sessions = scanner.scan_sessions(_base_path())
     return templates.TemplateResponse(
-        "partials/session_table.html",
-        {"request": request, "sessions": sessions},
+        request=request,
+        name="partials/session_table.html",
+        context={"sessions": sessions},
     )
 
 
