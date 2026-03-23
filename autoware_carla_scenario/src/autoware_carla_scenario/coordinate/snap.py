@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _SPAWN_POINT_WARN_DISTANCE: float = 10.0
 
 
-@dataclass
+@dataclass(frozen=True)
 class GroundProjectionConfig:
     """Tunable parameters for the ground-projection z-refinement.
 
@@ -135,7 +135,7 @@ def _snap_lanelet2_via_opendrive(
     pose: Lanelet2Pose,
     world: "carla.World",
     *,
-    ground_projection: GroundProjectionConfig = GroundProjectionConfig(),
+    ground_projection: GroundProjectionConfig,
 ) -> CarlaWorldPose:
     """Snap a Lanelet2 pose by projecting through OpenDRIVE geometry.
 
@@ -240,7 +240,7 @@ def _snap_opendrive_via_waypoint_xodr(
     pose: OpenDrivePose,
     world: "carla.World",
     *,
-    ground_projection: GroundProjectionConfig = GroundProjectionConfig(),
+    ground_projection: GroundProjectionConfig,
 ) -> CarlaWorldPose:
     """Snap an OpenDRIVE pose using ``carla.Map.get_waypoint_xodr``.
 
@@ -307,7 +307,7 @@ def _snap_carla_via_waypoint(
     pose: CarlaWorldPose,
     world: "carla.World",
     *,
-    ground_projection: GroundProjectionConfig = GroundProjectionConfig(),
+    ground_projection: GroundProjectionConfig,
 ) -> CarlaWorldPose:
     """Snap a CARLA world pose using the waypoint API.
 
