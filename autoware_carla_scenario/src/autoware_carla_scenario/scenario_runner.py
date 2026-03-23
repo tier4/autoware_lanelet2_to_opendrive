@@ -656,7 +656,11 @@ class ScenarioRunner:
         # actors, sensors, and physics state are reset).  This is more
         # reliable than destroying actors individually, which can fail
         # with "failed to destroy actor" errors from the CARLA server.
+        # Flush any pending server-side operations (e.g. replayer
+        # shutdown) before reloading to avoid std::exception errors.
         try:
+            world = self._client.get_world()
+            world.tick()
             self._client.reload_world()
             self._world = self._client.get_world()
             logger.info("[%s] World reloaded", scenario_name)
