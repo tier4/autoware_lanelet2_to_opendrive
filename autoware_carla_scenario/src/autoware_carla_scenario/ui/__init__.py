@@ -20,6 +20,6 @@ def main() -> None:
         app_module.BASE_PATH = Path(env_base).resolve()
 
     host = os.environ.get("VIEWER_HOST", "0.0.0.0")  # noqa: S104
-    port = int(os.environ.get("VIEWER_PORT", "8080"))
+    port = int(os.environ.get("VIEWER_PORT", "9000"))
 
     uvicorn.run(app, host=host, port=port, log_level="info")

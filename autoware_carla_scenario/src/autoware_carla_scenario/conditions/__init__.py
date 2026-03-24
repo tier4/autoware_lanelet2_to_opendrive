@@ -19,6 +19,8 @@ from .composition import (
     SpeedDirection,
     StandstillCondition,
     TemporaryStopCondition,
+    WaypointCheckType,
+    WaypointCondition,
 )
 from .elapsed_time import ElapsedTimeCondition
 from .entity_existence import EntityExistenceCondition
@@ -52,6 +54,8 @@ __all__ = [
     "StickyCondition",
     "TemporaryStopCondition",
     "TimeoutCondition",
+    "WaypointCheckType",
+    "WaypointCondition",
     "TrafficSignalCondition",
     "find_actor_by_role_name",
     "find_actor_in_list",
