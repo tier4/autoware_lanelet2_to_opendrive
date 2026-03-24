@@ -27,7 +27,9 @@ sweep:
           - type: not
             constraint:
               type: equals
-              value: 222 # Exclude lanelet 222 because of CARLA Traffic manager assing a ego vehicle to another lanelet while passing intersection and always fails.
+              # Exclude lanelet 222 because of CARLA Traffic manager assing a ego vehicle to another lanelet while passing intersection and always fails.
+              # TODO: Remove this exclusion after CARLA Traffic manager is fixed, this value is depends on scenario and map, so you cannot use this scenario in another map.
+              value: 222
           - type: or
             constraints:
               - type: equals
