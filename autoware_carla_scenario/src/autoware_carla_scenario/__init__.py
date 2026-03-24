@@ -95,6 +95,8 @@ from .conditions import (
     TemporaryStopCondition,
     TimeoutCondition,
     TrafficSignalCondition,
+    WaypointCheckType,
+    WaypointCondition,
     find_actor_by_role_name,
 )
 from .constants import EGO_ROLE_NAME
@@ -214,6 +216,8 @@ __all__ = [
     "TrafficLightTarget",
     "TrafficSignalAction",
     "TrafficSignalCondition",
+    "WaypointCheckType",
+    "WaypointCondition",
     "TurnAction",
     "TurnDirection",
 ]
