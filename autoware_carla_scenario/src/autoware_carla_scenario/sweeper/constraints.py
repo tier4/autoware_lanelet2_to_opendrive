@@ -27,6 +27,11 @@ combinations::
       constraint:
         type: has_traffic_light_stop_line
 
+Dead-end filtering::
+
+    # Exclude dead-end lanelets (no following lanelet in routing graph)
+    - type: no_deadend
+
 Simple value constraints::
 
     # Match a specific lanelet by ID
@@ -204,6 +209,54 @@ class IsJunctionConstraint:
         return "turn_direction" in lanelet.attributes
 
 
+@dataclass(frozen=True)
+class NoDeadEndConstraint:
+    """Matches lanelets that are **not** dead ends.
+
+    A lanelet is considered a dead end when it has no following lanelets
+    in the routing graph — i.e. the road terminates with no continuation.
+
+    This is a pre-computed constraint: during binding, the routing graph
+    is queried once to build a set of dead-end lanelet IDs.  The
+    per-lanelet ``evaluate()`` call then performs a simple set-membership
+    check.
+
+    Usage::
+
+        # Filter out dead-end lanelets
+        - type: no_deadend
+
+        # Combine with other constraints
+        - type: and
+          constraints:
+            - type: no_deadend
+            - type: has_traffic_light_stop_line
+    """
+
+    type: str = "no_deadend"
+
+    def find_dead_end_ids(
+        self, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> set[int]:
+        """Return IDs of lanelets that are dead ends (no following lanelets)."""
+        if routing_graph is None:
+            routing_graph = create_routing_graph(lanelet_map)
+        dead_ends: set[int] = set()
+        for lanelet in lanelet_map.laneletLayer:
+            if not routing_graph.following(lanelet):
+                dead_ends.add(lanelet.id)
+        logger.info(
+            "no_deadend: %d dead-end lanelet(s) identified: %s",
+            len(dead_ends),
+            sorted(dead_ends),
+        )
+        return dead_ends
+
+    def evaluate(self, lanelet: Any) -> bool:
+        """Return ``True`` if *lanelet* is **not** a dead end."""
+        return lanelet.id not in self._cached_ids  # type: ignore[attr-defined]
+
+
 # ---------------------------------------------------------------------------
 # Composite constraints (and / or / not)
 # ---------------------------------------------------------------------------
@@ -329,6 +382,9 @@ def _bind_set_level_constraints(
     if isinstance(constraint, (PreviousOfConstraint, FollowingOfConstraint)):
         ids = constraint.find_matching_ids(lanelet_map, routing_graph)
         object.__setattr__(constraint, "_cached_ids", ids)
+    if isinstance(constraint, NoDeadEndConstraint):
+        ids = constraint.find_dead_end_ids(lanelet_map, routing_graph)
+        object.__setattr__(constraint, "_cached_ids", ids)
     if hasattr(constraint, "constraints"):
         for child in constraint.constraints:
             _bind_set_level_constraints(child, lanelet_map, routing_graph)
@@ -347,6 +403,7 @@ _LEAF_REGISTRY: dict[str, type] = {
     "is_junction": IsJunctionConstraint,
     "equals": EqualsConstraint,
     "in_set": InSetConstraint,
+    "no_deadend": NoDeadEndConstraint,
 }
 
 
@@ -445,8 +502,8 @@ def find_matching_lanelets(
     Returns:
         Sorted list of lanelet IDs that pass every constraint.
     """
-    # Pre-compute cached IDs for set-level constraints (previous_of, following_of)
-    # so that their evaluate() calls become simple set-membership checks.
+    # Pre-compute cached IDs for set-level constraints (previous_of, following_of,
+    # no_deadend) so that their evaluate() calls become simple lookups.
     for c in constraints:
         _bind_set_level_constraints(c, lanelet_map, routing_graph)
 

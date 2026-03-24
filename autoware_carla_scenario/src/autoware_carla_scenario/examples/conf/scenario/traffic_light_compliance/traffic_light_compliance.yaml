@@ -20,6 +20,7 @@ sweep:
             constraints:
               - type: has_traffic_light_stop_line
               - type: is_junction
+          - type: no_deadend
           - type: not
             constraint:
               type: in_set
