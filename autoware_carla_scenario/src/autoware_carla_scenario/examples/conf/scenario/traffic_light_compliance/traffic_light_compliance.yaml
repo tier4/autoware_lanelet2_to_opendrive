@@ -1,9 +1,9 @@
 # @package _global_
 scenario:
   name: traffic_light_compliance
-  light_switch_delay_seconds: 3.0
-  merging_time_seconds: 1.5
-  timeout_seconds: 5.0
+  light_switch_delay_seconds: 5.0
+  merging_time_seconds: 3.0
+  timeout_seconds: 8.0
   moving_speed_kmh: 1.0
 
 ego:
@@ -38,4 +38,4 @@ sweep:
   bindings:
     ego.spawn_s:
       type: stop_line_offset
-      offset: 12.0
+      offset: 10.0
