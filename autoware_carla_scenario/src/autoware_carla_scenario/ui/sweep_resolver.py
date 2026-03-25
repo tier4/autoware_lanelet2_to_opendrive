@@ -110,8 +110,12 @@ def resolve_sweep(
         ]
         for binding in bindings:
             try:
-                value = binding.resolve(lid, lanelet_map, routing_graph)
-                overrides.append(f"{binding.target_key}={value}")
+                result = binding.resolve(lid, lanelet_map, routing_graph)
+                overrides.append(f"{binding.target_key}={result.value}")
+                if result.lanelet_id_override is not None:
+                    overrides[1] = (
+                        f"{constraint_target_key}={result.lanelet_id_override}"
+                    )
             except Exception:
                 logger.warning(
                     "Binding %s failed for lanelet %d; skipping.",
