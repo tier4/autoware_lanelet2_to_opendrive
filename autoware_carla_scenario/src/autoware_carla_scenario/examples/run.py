@@ -333,6 +333,7 @@ def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
         initial_speed_kmh=float(cfg.ego.initial_speed_kmh),
         spawn_retry_max_count=int(cfg.entity.spawn_retry_max_count),
         spawn_retry_t_step=float(cfg.entity.spawn_retry_t_step),
+        spawn_retry_z_step=float(cfg.entity.spawn_retry_z_step),
     )
 
     # Build spawn pose from ego config (lanelet2-specific, kept in examples layer).

@@ -175,6 +175,7 @@ class IntersectionPassingScenario(BaseScenario):
                     initial_speed_kmh=npc_cfg.initial_speed_kmh,
                     spawn_retry_max_count=self.ego_config.spawn_retry_max_count,
                     spawn_retry_t_step=self.ego_config.spawn_retry_t_step,
+                    spawn_retry_z_step=self.ego_config.spawn_retry_z_step,
                     od_pose=npc_od_pose,
                     ground_projection=self._ground_projection,
                 )

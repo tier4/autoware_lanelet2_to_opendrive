@@ -70,6 +70,9 @@ class EntityConfig:
     #: Upward shift (metres) per retry attempt when the initial spawn fails.
     spawn_retry_t_step: float = 0.1
 
+    #: Vertical shift (metres) per retry attempt.
+    spawn_retry_z_step: float = 0.5
+
 
 @dataclass
 class EgoVehicleConfig:

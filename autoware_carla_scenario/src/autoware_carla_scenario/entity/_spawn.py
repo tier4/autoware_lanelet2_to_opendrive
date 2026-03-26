@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
-from dataclasses import dataclass, replace
+import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
@@ -42,6 +44,7 @@ def spawn_vehicle_actor(
     od_pose: Optional["OpenDrivePose"] = None,
     spawn_retry_max_count: int = 0,
     spawn_retry_t_step: float = 0.1,
+    spawn_retry_z_step: float = 0.5,
     ground_projection: Optional["GroundProjectionConfig"] = None,
 ) -> "carla.Actor":
     """Spawn a vehicle actor in the CARLA world.
@@ -67,6 +70,7 @@ def spawn_vehicle_actor(
             when the initial spawn fails.  0 disables retries.
         spawn_retry_t_step: Lateral shift in OpenDRIVE *t* (metres) per
             retry attempt.
+        spawn_retry_z_step: Vertical shift (metres) per retry attempt.
         ground_projection: Ground projection config used when snapping
             the shifted pose on retry.  Defaults to
             :class:`~autoware_carla_scenario.coordinate.snap.GroundProjectionConfig`
@@ -123,34 +127,74 @@ def spawn_vehicle_actor(
     )
     actor = world.try_spawn_actor(vehicle_bp, resolved_transform)
 
-    # Retry with lateral t-shift in OpenDRIVE coordinates when spawn fails.
-    # Each step tries both +t and -t so the vehicle is placed on whichever
-    # side of the lane centre is free first.
+    # Retry by shifting laterally (t) and vertically (z) from the
+    # snapped lane-centre position.
     if actor is None and spawn_retry_max_count > 0 and od_pose is not None:
         from ..coordinate.snap import GroundProjectionConfig, snap_to_carla_road  # noqa: PLC0415
+
+        import carla  # noqa: PLC0415
 
         gp = (
             ground_projection
             if ground_projection is not None
             else GroundProjectionConfig()
         )
-        original_t = od_pose.t
+        # Snap once: get_waypoint_xodr already returns the lane centre.
+        base_snapped = snap_to_carla_road(od_pose, world, ground_projection=gp)
+        base_transform = base_snapped.to_carla_transform()
+        yaw_rad = math.radians(base_transform.rotation.yaw)
+        sin_yaw = math.sin(yaw_rad)
+        cos_yaw = math.cos(yaw_rad)
+        base_x = base_transform.location.x
+        base_y = base_transform.location.y
+        base_z = base_transform.location.z
+
+        logger.info(
+            "Spawn failed for '%s', starting retry "
+            "(max_count=%d, t_step=%.3f, z_step=%.3f, "
+            "base=%.3f, %.3f, %.3f)",
+            role_name,
+            spawn_retry_max_count,
+            spawn_retry_t_step,
+            spawn_retry_z_step,
+            base_x,
+            base_y,
+            base_z,
+        )
+
+        # Signs to try per axis: 0 keeps the base value, ±1 shifts.
+        _SIGNS = ((-1, "-"), (0, "0"), (+1, "+"))
+
         for attempt in range(1, spawn_retry_max_count + 1):
-            delta = spawn_retry_t_step * attempt
-            for sign, label in ((+1, "+"), (-1, "-")):
-                new_t = original_t + sign * delta
-                shifted_pose = replace(od_pose, t=new_t)
-                snapped = snap_to_carla_road(shifted_pose, world, ground_projection=gp)
-                retry_transform = snapped.to_carla_transform()
+            t_delta = spawn_retry_t_step * attempt
+            z_delta = spawn_retry_z_step * attempt
+
+            for (t_sign, t_label), (z_sign, z_label) in itertools.product(
+                _SIGNS, _SIGNS
+            ):
+                if t_sign == 0 and z_sign == 0:
+                    continue  # (0, 0) is the original position already tried
+
+                t_offset = t_sign * t_delta
+                z_offset = z_sign * z_delta
+                retry_transform = carla.Transform(
+                    carla.Location(
+                        x=base_x + sin_yaw * t_offset,
+                        y=base_y - cos_yaw * t_offset,
+                        z=base_z + z_offset,
+                    ),
+                    base_transform.rotation,
+                )
                 logger.info(
-                    "Spawn retry %d/%d (%st) for '%s': t=%.3f -> %.3f "
-                    "(x=%.3f, y=%.3f, z=%.3f)",
+                    "Spawn retry %d/%d (%st,%sz) for '%s': "
+                    "t=%.3f z=%.3f (x=%.3f, y=%.3f, z=%.3f)",
                     attempt,
                     spawn_retry_max_count,
-                    label,
+                    t_label,
+                    z_label,
                     role_name,
-                    original_t,
-                    new_t,
+                    t_offset,
+                    z_offset,
                     retry_transform.location.x,
                     retry_transform.location.y,
                     retry_transform.location.z,
@@ -158,11 +202,15 @@ def spawn_vehicle_actor(
                 actor = world.try_spawn_actor(vehicle_bp, retry_transform)
                 if actor is not None:
                     logger.info(
-                        "Spawn succeeded on retry %d (%st) for '%s' at t=%.3f",
+                        "Spawn succeeded on retry %d (%st,%sz) for '%s' "
+                        "(x=%.3f, y=%.3f, z=%.3f)",
                         attempt,
-                        label,
+                        t_label,
+                        z_label,
                         role_name,
-                        new_t,
+                        retry_transform.location.x,
+                        retry_transform.location.y,
+                        retry_transform.location.z,
                     )
                     break
             if actor is not None:
