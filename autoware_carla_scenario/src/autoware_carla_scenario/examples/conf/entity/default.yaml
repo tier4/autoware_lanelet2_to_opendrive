@@ -11,3 +11,4 @@ entity:
   # spawn_retry_t_step (m) and recomputing the spawn position.
   spawn_retry_max_count: 10
   spawn_retry_t_step: 0.1
+  spawn_retry_z_step: 0.5

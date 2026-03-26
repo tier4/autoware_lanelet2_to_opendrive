@@ -46,6 +46,7 @@ class EgoVehicle:
             od_pose=config.od_pose,
             spawn_retry_max_count=config.spawn_retry_max_count,
             spawn_retry_t_step=config.spawn_retry_t_step,
+            spawn_retry_z_step=config.spawn_retry_z_step,
             ground_projection=config.ground_projection,
         )
         return self._vehicle
