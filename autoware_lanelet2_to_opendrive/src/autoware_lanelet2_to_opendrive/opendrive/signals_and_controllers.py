@@ -181,76 +181,81 @@ class SignalsAndControllers:
                     matching_road,
                 )
 
-            for light_linestring in traffic_light.trafficLights:
-                if len(light_linestring) == 0:
-                    continue
+            # Select first non-empty linestring as representative.
+            # Multiple linestrings from the same traffic light (e.g. different
+            # bulbs sharing the same stop line) would produce duplicate signals
+            # at the same logical position (s, t, lane) on each road.  CARLA
+            # creates one trigger box per signal, so duplicates cause
+            # overlapping boxes that break vehicle tracking.  Using a single
+            # representative avoids this.
+            representative_linestring = None
+            for ls in traffic_light.trafficLights:
+                if len(ls) > 0:
+                    representative_linestring = ls
+                    break
 
-                for road_id, (
-                    road_lanelets_with_signal,
-                    matching_road,
-                ) in road_context.items():
-                    # Calculate logical s, t (stop-line based, fallback to linestring centroid)
-                    s, t = SignalsAndControllers._calculate_signal_position(
-                        traffic_light=traffic_light,
-                        light_linestring=light_linestring,
-                        road_id=road_id,
-                        lanelet_map=lanelet_map,
-                        road_lanelet_mapping=road_lanelet_mapping,
-                        road=matching_road,
-                    )
+            if representative_linestring is None:
+                continue  # All linestrings empty, skip this traffic light
 
-                    # Calculate physical position from linestring centroid
-                    position_inertial = (
-                        SignalsAndControllers._calculate_physical_position(
-                            light_linestring=light_linestring,
-                            road=matching_road,
-                            road_s=s,
-                            traffic_light_config=traffic_light_config,
-                        )
-                    )
+            for road_id, (
+                road_lanelets_with_signal,
+                matching_road,
+            ) in road_context.items():
+                # Calculate logical s, t (stop-line based, fallback to linestring centroid)
+                s, t = SignalsAndControllers._calculate_signal_position(
+                    traffic_light=traffic_light,
+                    light_linestring=representative_linestring,
+                    road_id=road_id,
+                    lanelet_map=lanelet_map,
+                    road_lanelet_mapping=road_lanelet_mapping,
+                    road=matching_road,
+                )
 
-                    # Determine lane IDs for the validity element.
-                    lane_ids: List[int] = SignalsAndControllers._get_signal_lane_ids(
-                        road_lanelets_with_signal=road_lanelets_with_signal,
-                        matching_road=matching_road,
-                    )
+                # Calculate physical position from linestring centroid
+                position_inertial = SignalsAndControllers._calculate_physical_position(
+                    light_linestring=representative_linestring,
+                    road=matching_road,
+                    road_s=s,
+                    traffic_light_config=traffic_light_config,
+                )
 
-                    # Calculate road elevation at signal position
-                    road_elevation_at_s = None
-                    if matching_road is not None:
-                        road_elevation_at_s = matching_road.get_elevation_at_s(s)
+                # Determine lane IDs for the validity element.
+                lane_ids: List[int] = SignalsAndControllers._get_signal_lane_ids(
+                    road_lanelets_with_signal=road_lanelets_with_signal,
+                    matching_road=matching_road,
+                )
 
-                    # Create Signal object
-                    signal = Signal.construct_from_lanelet2_traffic_signal(
-                        traffic_light=traffic_light,
-                        light_linestring=light_linestring,
-                        signal_id=signal_id_counter,
-                        s=s,
-                        t=t,
-                        lane_ids=lane_ids,
-                        road_elevation_at_s=road_elevation_at_s,
-                        position_inertial=position_inertial,
-                    )
+                # Calculate road elevation at signal position
+                road_elevation_at_s = None
+                if matching_road is not None:
+                    road_elevation_at_s = matching_road.get_elevation_at_s(s)
 
-                    result.add_signal(signal)
-                    all_created_signal_ids.append(signal_id_counter)
+                # Create Signal object
+                signal = Signal.construct_from_lanelet2_traffic_signal(
+                    traffic_light=traffic_light,
+                    light_linestring=representative_linestring,
+                    signal_id=signal_id_counter,
+                    s=s,
+                    t=t,
+                    lane_ids=lane_ids,
+                    road_elevation_at_s=road_elevation_at_s,
+                    position_inertial=position_inertial,
+                )
 
-                    # Track signal to road mapping
-                    result.signal_to_road_id[signal_id_counter] = road_id
+                result.add_signal(signal)
+                all_created_signal_ids.append(signal_id_counter)
 
-                    # Track lanelet2 traffic light ID to OpenDRIVE signal ID mapping
-                    if (
-                        lanelet2_traffic_light_id
-                        not in result.lanelet2_tl_id_to_signal_ids
-                    ):
-                        result.lanelet2_tl_id_to_signal_ids[
-                            lanelet2_traffic_light_id
-                        ] = []
-                    result.lanelet2_tl_id_to_signal_ids[
-                        lanelet2_traffic_light_id
-                    ].append(signal_id_counter)
+                # Track signal to road mapping
+                result.signal_to_road_id[signal_id_counter] = road_id
 
-                    signal_id_counter += 1
+                # Track lanelet2 traffic light ID to OpenDRIVE signal ID mapping
+                if lanelet2_traffic_light_id not in result.lanelet2_tl_id_to_signal_ids:
+                    result.lanelet2_tl_id_to_signal_ids[lanelet2_traffic_light_id] = []
+                result.lanelet2_tl_id_to_signal_ids[lanelet2_traffic_light_id].append(
+                    signal_id_counter
+                )
+
+                signal_id_counter += 1
 
             # Step 3: Create a controller for all signals from this regulatory element
             if all_created_signal_ids:

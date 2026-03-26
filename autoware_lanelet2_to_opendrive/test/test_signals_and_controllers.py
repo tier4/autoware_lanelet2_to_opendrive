@@ -277,50 +277,20 @@ def test_get_signal_lane_ids_rht_fallback_missing_lanelet():
 # ---------------------------------------------------------------------------
 
 
-def test_multiple_linestrings_multiple_roads_signal_count():
-    """Test that 2 LineStrings × 2 roads = 4 Signals, 1 Controller with 4 entries."""
-    from unittest.mock import Mock, patch, MagicMock
-    from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
+def _make_linestring(ls_id, points):
+    """Return a mock linestring with the given ID and points."""
+    from unittest.mock import Mock, MagicMock
 
-    # --- Mock linestrings ---
-    def _make_linestring(ls_id, points):
-        ls = MagicMock()
-        ls.id = ls_id
-        ls.__len__ = Mock(return_value=len(points))
-        ls.__getitem__ = Mock(side_effect=lambda i: points[i])
-        ls.__iter__ = Mock(side_effect=lambda: iter(points))
-        return ls
+    ls = MagicMock()
+    ls.id = ls_id
+    ls.__len__ = Mock(return_value=len(points))
+    ls.__getitem__ = Mock(side_effect=lambda i: points[i])
+    ls.__iter__ = Mock(side_effect=lambda: iter(points))
+    return ls
 
-    pt_a = MagicMock(x=10.0, y=5.0, z=8.0)
-    pt_b = MagicMock(x=12.0, y=6.0, z=9.0)
-    ls1 = _make_linestring(1001, [pt_a])
-    ls2 = _make_linestring(1002, [pt_b])
 
-    # --- Mock traffic light regulatory element ---
-    traffic_light = MagicMock()
-    traffic_light.id = 5000
-    traffic_light.trafficLights = [ls1, ls2]
-    traffic_light.stopLine = None
-    traffic_light.attributes = {}
-
-    # --- Mock lanelet map ---
-    mock_lanelet_map = MagicMock()
-    mock_lanelet_map.laneletLayer.get.return_value = MagicMock()
-
-    # Lanelet IDs 100,101 → road 0; 200,201 → road 1
-    # Both lanelets in each road carry the traffic light
-    road_to_lanelets = {0: [100, 101], 1: [200, 201]}
-    lanelet_to_road = {100: 0, 101: 0, 200: 1, 201: 1}
-    mapping = RoadLaneletMapping(
-        road_to_lanelets=road_to_lanelets, lanelet_to_road=lanelet_to_road
-    )
-
-    # Traffic light is attached to lanelets 100 and 200
-    traffic_light_map = {
-        5000: (traffic_light, [100, 200]),
-    }
-
-    # --- Mock roads ---
+def _make_mock_roads():
+    """Return a pair of mock roads for signal tests."""
     road0 = MagicMock()
     road0.id = 0
     road0.rule = TrafficRule.RHT
@@ -335,7 +305,38 @@ def test_multiple_linestrings_multiple_roads_signal_count():
     road1.get_half_width_at_s.return_value = -4.0
     road1.get_elevation_at_s.return_value = 0.0
 
-    roads = [road0, road1]
+    return [road0, road1]
+
+
+def _make_mapping():
+    """Return a RoadLaneletMapping for signal tests."""
+    return RoadLaneletMapping(
+        road_to_lanelets={0: [100, 101], 1: [200, 201]},
+        lanelet_to_road={100: 0, 101: 0, 200: 1, 201: 1},
+    )
+
+
+def test_multiple_linestrings_deduplicated_to_one_per_road():
+    """Test that duplicate linestrings are deduplicated: 2 LS × 2 roads → 2 signals."""
+    from unittest.mock import patch, MagicMock
+
+    pt_a = MagicMock(x=10.0, y=5.0, z=8.0)
+    pt_b = MagicMock(x=12.0, y=6.0, z=9.0)
+    ls1 = _make_linestring(1001, [pt_a])
+    ls2 = _make_linestring(1002, [pt_b])
+
+    traffic_light = MagicMock()
+    traffic_light.id = 5000
+    traffic_light.trafficLights = [ls1, ls2]
+    traffic_light.stopLine = None
+    traffic_light.attributes = {}
+
+    mock_lanelet_map = MagicMock()
+    mock_lanelet_map.laneletLayer.get.return_value = MagicMock()
+
+    traffic_light_map = {5000: (traffic_light, [100, 200])}
+    mapping = _make_mapping()
+    roads = _make_mock_roads()
 
     with (
         patch(
@@ -353,13 +354,132 @@ def test_multiple_linestrings_multiple_roads_signal_count():
             roads=roads,
         )
 
-    # 2 LineStrings × 2 roads = 4 signals
-    assert len(result.signals) == 4, f"Expected 4 signals, got {len(result.signals)}"
+    # Deduplicated: 1 representative linestring × 2 roads = 2 signals
+    assert len(result.signals) == 2, f"Expected 2 signals, got {len(result.signals)}"
 
-    # 1 controller covering all 4 signals
+    # 1 controller covering 2 signals
     assert len(result.controllers) == 1
-    assert len(result.controllers[0].controls) == 4
+    assert len(result.controllers[0].controls) == 2
 
-    # All signals should have position_inertial set
+    # All signals should use the first linestring (ls1, id=1001) as representative
     for sig in result.signals:
         assert sig.position_inertial is not None
+        assert "1001" in sig.name
+
+
+def test_dedup_single_linestring_unchanged():
+    """Single linestring produces one signal per road (no dedup needed)."""
+    from unittest.mock import patch, MagicMock
+
+    pt = MagicMock(x=10.0, y=5.0, z=8.0)
+    ls1 = _make_linestring(1001, [pt])
+
+    traffic_light = MagicMock()
+    traffic_light.id = 6000
+    traffic_light.trafficLights = [ls1]
+    traffic_light.stopLine = None
+    traffic_light.attributes = {}
+
+    mock_lanelet_map = MagicMock()
+    mock_lanelet_map.laneletLayer.get.return_value = MagicMock()
+
+    traffic_light_map = {6000: (traffic_light, [100, 200])}
+    mapping = _make_mapping()
+    roads = _make_mock_roads()
+
+    with (
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+            return_value=traffic_light_map,
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
+            return_value=(5.0, -3.0),
+        ),
+    ):
+        result = SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=mock_lanelet_map,
+            road_lanelet_mapping=mapping,
+            roads=roads,
+        )
+
+    assert len(result.signals) == 2
+    assert len(result.controllers) == 1
+    assert len(result.controllers[0].controls) == 2
+
+
+def test_dedup_first_empty_uses_second():
+    """When the first linestring is empty, the second non-empty one is used."""
+    from unittest.mock import patch, MagicMock
+
+    pt = MagicMock(x=10.0, y=5.0, z=8.0)
+    ls_empty = _make_linestring(1001, [])
+    ls_ok = _make_linestring(1002, [pt])
+
+    traffic_light = MagicMock()
+    traffic_light.id = 7000
+    traffic_light.trafficLights = [ls_empty, ls_ok]
+    traffic_light.stopLine = None
+    traffic_light.attributes = {}
+
+    mock_lanelet_map = MagicMock()
+    mock_lanelet_map.laneletLayer.get.return_value = MagicMock()
+
+    traffic_light_map = {7000: (traffic_light, [100, 200])}
+    mapping = _make_mapping()
+    roads = _make_mock_roads()
+
+    with (
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+            return_value=traffic_light_map,
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
+            return_value=(1.0, -2.0),
+        ),
+    ):
+        result = SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=mock_lanelet_map,
+            road_lanelet_mapping=mapping,
+            roads=roads,
+        )
+
+    # Should use ls_ok (id=1002) as representative
+    assert len(result.signals) == 2
+    for sig in result.signals:
+        assert "1002" in sig.name
+
+
+def test_dedup_all_empty_skipped():
+    """When all linestrings are empty, no signals are created."""
+    from unittest.mock import patch, MagicMock
+
+    ls_empty1 = _make_linestring(1001, [])
+    ls_empty2 = _make_linestring(1002, [])
+
+    traffic_light = MagicMock()
+    traffic_light.id = 8000
+    traffic_light.trafficLights = [ls_empty1, ls_empty2]
+    traffic_light.stopLine = None
+    traffic_light.attributes = {}
+
+    mock_lanelet_map = MagicMock()
+    mock_lanelet_map.laneletLayer.get.return_value = MagicMock()
+
+    traffic_light_map = {8000: (traffic_light, [100, 200])}
+    mapping = _make_mapping()
+    roads = _make_mock_roads()
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+        return_value=traffic_light_map,
+    ):
+        result = SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=mock_lanelet_map,
+            road_lanelet_mapping=mapping,
+            roads=roads,
+        )
+
+    assert len(result.signals) == 0
+    assert len(result.controllers) == 0
