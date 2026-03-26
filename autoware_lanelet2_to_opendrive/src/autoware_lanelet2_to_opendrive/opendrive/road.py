@@ -1,29 +1,30 @@
 """OpenDRIVE road definitions."""
 
+import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple, Union, cast
-import lxml.etree as ET
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, cast
+
 import lanelet2
+import lxml.etree as ET
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from tqdm import tqdm
 
-from .geometry import PlanView, ParamPoly3, GeometryBase
-from .elevation import ElevationProfile
-from .lane_sections import Lanes
-from .reference_line import ReferenceLine
-from .enums import ContactPoint, ElementType, RoadType, TrafficRule
-from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
-from .road_links import Predecessor, Successor, RoadLink
 from ..centerline import AsymmetryLaneletException
-from ..util import filter_lanelets_by_subtype, to_lanelet_list, LaneletInput
 from ..conversion_config import (
     LaneLinksContext,
     ParamPoly3Config,
     WidthEstimationConfig,
 )
+from ..util import LaneletInput, filter_lanelets_by_subtype, to_lanelet_list
+from .elevation import ElevationProfile
+from .enums import ContactPoint, ElementType, RoadType, TrafficRule
+from .geometry import GeometryBase, ParamPoly3, PlanView
+from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
+from .lane_sections import Lanes
+from .reference_line import ReferenceLine
+from .road_links import Predecessor, RoadLink, Successor
 
-# Import for type hints only
-from typing import TYPE_CHECKING
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .signal import Signal
@@ -823,11 +824,32 @@ class Road:
         # Build road links based on lanelet previous/following relationships
         from ..util import find_connecting_lanelet_groups, ConnectionDirection
 
+        def _resolve_road_from_groups(
+            groups: List[Set[lanelet2.core.Lanelet]],
+            mapping: Dict[int, int],
+        ) -> Optional[int]:
+            """Return the road ID from the first mapped lanelet in *groups*.
+
+            If any lanelet has ``turn_direction`` (junction lanelet), the
+            road-to-road link is deferred to the junction phase and ``None``
+            is returned.
+            """
+            has_junction = any(
+                "turn_direction" in ll.attributes for g in groups for ll in g
+            )
+            if has_junction:
+                return None
+            for group in groups:
+                for ll in group:
+                    if ll.id in mapping:
+                        return mapping[ll.id]
+            return None
+
         print(f"Building road links for {len(roads)} roads...")
         for road in tqdm(roads, desc="Building road links"):
             adjacent_group = road_to_group[road.id]
 
-            # Find preceding lanelet groups
+            # Predecessor
             try:
                 preceding_groups = find_connecting_lanelet_groups(
                     lanelet_map,
@@ -835,27 +857,21 @@ class Road:
                     ConnectionDirection.PREVIOUS,
                     routing_graph,
                 )
-
-                # Find which roads these preceding lanelets belong to
-                for preceding_group in preceding_groups:
-                    # Get the road ID for any lanelet in this group
-                    for lanelet in preceding_group:
-                        if lanelet.id in lanelet_to_road:
-                            predecessor_road_id = lanelet_to_road[lanelet.id]
-                            # Add predecessor link with contactPoint=END
-                            # (the end of the predecessor road connects to the start of current road)
-                            road.add_predecessor(
-                                element_id=predecessor_road_id,
-                                element_type=ElementType.ROAD,
-                                contact_point=ContactPoint.END,
-                            )
-                            break  # Only need to find one lanelet from the group
+                pred_road_id = _resolve_road_from_groups(
+                    preceding_groups, lanelet_to_road
+                )
+                if pred_road_id is not None:
+                    road.add_predecessor(
+                        element_id=pred_road_id,
+                        element_type=ElementType.ROAD,
+                        contact_point=ContactPoint.END,
+                    )
             except Exception as e:
                 tqdm.write(
                     f"Warning: Failed to find predecessors for road {road.id}: {e}"
                 )
 
-            # Find following lanelet groups
+            # Successor
             try:
                 following_groups = find_connecting_lanelet_groups(
                     lanelet_map,
@@ -863,21 +879,15 @@ class Road:
                     ConnectionDirection.FOLLOWING,
                     routing_graph,
                 )
-
-                # Find which roads these following lanelets belong to
-                for following_group in following_groups:
-                    # Get the road ID for any lanelet in this group
-                    for lanelet in following_group:
-                        if lanelet.id in lanelet_to_road:
-                            successor_road_id = lanelet_to_road[lanelet.id]
-                            # Add successor link with contactPoint=START
-                            # (the end of current road connects to the start of the successor road)
-                            road.add_successor(
-                                element_id=successor_road_id,
-                                element_type=ElementType.ROAD,
-                                contact_point=ContactPoint.START,
-                            )
-                            break  # Only need to find one lanelet from the group
+                succ_road_id = _resolve_road_from_groups(
+                    following_groups, lanelet_to_road
+                )
+                if succ_road_id is not None:
+                    road.add_successor(
+                        element_id=succ_road_id,
+                        element_type=ElementType.ROAD,
+                        contact_point=ContactPoint.START,
+                    )
             except Exception as e:
                 tqdm.write(
                     f"Warning: Failed to find successors for road {road.id}: {e}"
@@ -1076,6 +1086,51 @@ class Road:
         return lanelet_to_road_and_lane
 
     @staticmethod
+    def _find_connected_road(
+        road_lanelets: List[lanelet2.core.Lanelet],
+        get_connected: object,
+        own_lanelet_ids: Set[int],
+        junction_lanelet_ids: Set[int],
+        lanelet_to_road_id: Dict[int, int],
+    ) -> Optional[int]:
+        """Find a connected road, preferring non-junction roads.
+
+        Searches through connected lanelets (previous or following) for each
+        road lanelet.  Roads outside the junction are preferred; another
+        connecting road within the same junction is returned as a fallback.
+
+        Args:
+            road_lanelets: Lanelet objects belonging to the current road.
+            get_connected: Callable that returns connected lanelets for a
+                given lanelet (e.g. ``routing_graph.previous``).
+            own_lanelet_ids: Lanelet IDs of the current road (skipped to
+                avoid self-links).
+            junction_lanelet_ids: All lanelet IDs belonging to connecting
+                roads in this junction.
+            lanelet_to_road_id: Global lanelet-to-road mapping.
+
+        Returns:
+            Road ID of the connected road, or ``None`` if not found.
+        """
+        primary: Optional[int] = None
+        fallback: Optional[int] = None
+        for ll in road_lanelets:
+            for connected_ll in get_connected(ll):
+                if connected_ll.id in own_lanelet_ids:
+                    continue
+                if connected_ll.id not in lanelet_to_road_id:
+                    continue
+                road_id = lanelet_to_road_id[connected_ll.id]
+                if connected_ll.id not in junction_lanelet_ids:
+                    primary = road_id
+                    break
+                elif fallback is None:
+                    fallback = road_id
+            if primary is not None:
+                break
+        return primary if primary is not None else fallback
+
+    @staticmethod
     def set_connecting_road_links(
         lanelet_map: lanelet2.core.LaneletMap,
         connecting_roads: List["Road"],
@@ -1088,20 +1143,19 @@ class Road:
         outgoing road (successor) by analyzing the routing graph connections
         of the lanelets that make up the road.
 
+        Priority: roads outside the junction are preferred. When no outside
+        road is found, another connecting road within the same junction is
+        used (chained connecting roads).
+
         Args:
             lanelet_map: The Lanelet2 map containing connectivity information
             connecting_roads: List of roads inside junctions (junction >= 0)
             lanelet_to_road_id: Mapping from lanelet ID to road ID for ALL lanelets
             road_to_lanelet_ids: Mapping from road ID to list of lanelet IDs
         """
-
-        # Create routing graph
-        import lanelet2 as ll2
-        from lanelet2.routing import RoutingGraph, RoutingCostDistance
-
-        traffic_rules = ll2.traffic_rules.create(
-            ll2.traffic_rules.Locations.Germany,
-            ll2.traffic_rules.Participants.Vehicle,
+        traffic_rules = lanelet2.traffic_rules.create(
+            lanelet2.traffic_rules.Locations.Germany,
+            lanelet2.traffic_rules.Participants.Vehicle,
         )
         routing_graph = RoutingGraph(
             lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
@@ -1122,58 +1176,40 @@ class Road:
             if not road_lanelet_ids:
                 continue
 
-            # Get lanelet objects for this road
             road_lanelets = [
                 lanelet_map.laneletLayer.get(lid)
                 for lid in road_lanelet_ids
                 if lid in lanelet_map.laneletLayer
             ]
-
             if not road_lanelets:
                 continue
 
-            # Find predecessor: look at all lanelets' previous connections
-            # that are OUTSIDE the junction
-            predecessor_road_id = None
-            for lanelet in road_lanelets:
-                previous_lanelets = routing_graph.previous(lanelet)
-                for prev_ll in previous_lanelets:
-                    # Skip if predecessor is also in a junction
-                    if prev_ll.id in junction_lanelet_ids:
-                        continue
-                    # Find the road ID for this predecessor
-                    if prev_ll.id in lanelet_to_road_id:
-                        predecessor_road_id = lanelet_to_road_id[prev_ll.id]
-                        break
-                if predecessor_road_id is not None:
-                    break
+            own_lanelet_ids = set(road_lanelet_ids)
 
-            if predecessor_road_id is not None:
+            pred_id = Road._find_connected_road(
+                road_lanelets,
+                routing_graph.previous,
+                own_lanelet_ids,
+                junction_lanelet_ids,
+                lanelet_to_road_id,
+            )
+            if pred_id is not None:
                 road.add_predecessor(
-                    element_id=predecessor_road_id,
+                    element_id=pred_id,
                     element_type=ElementType.ROAD,
                     contact_point=ContactPoint.END,
                 )
 
-            # Find successor: look at all lanelets' following connections
-            # that are OUTSIDE the junction
-            successor_road_id = None
-            for lanelet in road_lanelets:
-                following_lanelets = routing_graph.following(lanelet)
-                for next_ll in following_lanelets:
-                    # Skip if successor is also in a junction
-                    if next_ll.id in junction_lanelet_ids:
-                        continue
-                    # Find the road ID for this successor
-                    if next_ll.id in lanelet_to_road_id:
-                        successor_road_id = lanelet_to_road_id[next_ll.id]
-                        break
-                if successor_road_id is not None:
-                    break
-
-            if successor_road_id is not None:
+            succ_id = Road._find_connected_road(
+                road_lanelets,
+                routing_graph.following,
+                own_lanelet_ids,
+                junction_lanelet_ids,
+                lanelet_to_road_id,
+            )
+            if succ_id is not None:
                 road.add_successor(
-                    element_id=successor_road_id,
+                    element_id=succ_id,
                     element_type=ElementType.ROAD,
                     contact_point=ContactPoint.START,
                 )
@@ -1218,7 +1254,7 @@ class Road:
                 #   → incoming road starts at junction → set predecessor
                 if connection.contact_point == ContactPoint.START:
                     # The end of incoming road connects to junction
-                    # Set successor to junction (if not already set)
+                    # Set successor to junction
                     if (
                         incoming_road.link is None
                         or incoming_road.link.successor is None
@@ -1228,9 +1264,25 @@ class Road:
                             element_type=ElementType.JUNCTION,
                             contact_point=None,  # Junction links don't have contact point
                         )
+                    elif incoming_road.link.successor.element_type == ElementType.ROAD:
+                        # A road-to-road successor was set earlier, but this road
+                        # is actually incoming to a junction. Junction link takes
+                        # priority so that connecting-road lane links work correctly.
+                        logger.info(
+                            "Road %d: overwriting road successor %d with "
+                            "junction %d (junction link takes priority)",
+                            incoming_road.id,
+                            incoming_road.link.successor.element_id,
+                            junction.id,
+                        )
+                        incoming_road.add_successor(
+                            element_id=junction.id,
+                            element_type=ElementType.JUNCTION,
+                            contact_point=None,
+                        )
                 elif connection.contact_point == ContactPoint.END:
                     # The start of incoming road connects to junction
-                    # Set predecessor to junction (if not already set)
+                    # Set predecessor to junction
                     if (
                         incoming_road.link is None
                         or incoming_road.link.predecessor is None
@@ -1239,4 +1291,21 @@ class Road:
                             element_id=junction.id,
                             element_type=ElementType.JUNCTION,
                             contact_point=None,  # Junction links don't have contact point
+                        )
+                    elif (
+                        incoming_road.link.predecessor.element_type == ElementType.ROAD
+                    ):
+                        # Same as above: junction link takes priority over
+                        # road-to-road predecessor.
+                        logger.info(
+                            "Road %d: overwriting road predecessor %d with "
+                            "junction %d (junction link takes priority)",
+                            incoming_road.id,
+                            incoming_road.link.predecessor.element_id,
+                            junction.id,
+                        )
+                        incoming_road.add_predecessor(
+                            element_id=junction.id,
+                            element_type=ElementType.JUNCTION,
+                            contact_point=None,
                         )

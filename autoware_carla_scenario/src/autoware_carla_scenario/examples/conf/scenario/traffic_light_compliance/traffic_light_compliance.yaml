@@ -33,7 +33,7 @@ sweep:
           - type: or
             constraints:
               - type: equals
-                value: any
+                value: 3002137
 
   bindings:
     ego.spawn_s:
