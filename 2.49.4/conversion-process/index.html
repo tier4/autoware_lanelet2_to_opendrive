@@ -1,0 +1,4307 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Convert Lanelet2 map format to OpenDRIVE format for Autoware autonomous driving software">
+      
+      
+      
+        <link rel="canonical" href="https://tier4.github.io/autoware_lanelet2_to_opendrive/2.49.4/conversion-process/">
+      
+      
+        <link rel="prev" href="../stop_line_objects/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Conversion Process - Autoware Lanelet2 to OpenDRIVE</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../css/timeago.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#conversion-process-flow" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Autoware Lanelet2 to OpenDRIVE" class="md-header__button md-logo" aria-label="Autoware Lanelet2 to OpenDRIVE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Autoware Lanelet2 to OpenDRIVE
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Conversion Process
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../usage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../carla_opendrive_lanelet2_mapping/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CARLA OpenDRIVE Mapping
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../limitations/" class="md-tabs__link">
+          
+  
+  
+  Known Limitations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../signals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Signals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../crosswalk_objects/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Crosswalk Objects
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../stop_line_objects/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Stop Line Objects
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Conversion Process
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../development/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Development
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Autoware Lanelet2 to OpenDRIVE" class="md-nav__button md-logo" aria-label="Autoware Lanelet2 to OpenDRIVE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Autoware Lanelet2 to OpenDRIVE
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../carla_opendrive_lanelet2_mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CARLA OpenDRIVE Mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Known Limitations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/stop-line-position/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stop Line Position
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/lane-width/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lane Width
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/special-signals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Special Signals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/priority-right-of-way/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Priority Right-of-Way
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/geometric-approximation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Geometric Approximation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/coordinate-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coordinate System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Signals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../crosswalk_objects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crosswalk Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stop_line_objects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stop Line Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion Process
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion Process
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#high-level-processing-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-Level Processing Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detailed-processing-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detailed Processing Stages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Detailed Processing Stages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-map-loading-and-preprocessing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 1: Map Loading and Preprocessing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stage 1: Map Loading and Preprocessing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-origin-specification-and-coordinate-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1: Origin Specification and Coordinate Systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-coordinate-transformations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2: Coordinate Transformations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-map-loading-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3: Map Loading Process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-preprocessing-operations-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.4: Preprocessing Operations (Optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1.4: Preprocessing Operations (Optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#preprocessing-operation-parameters-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preprocessing Operation Parameters Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operation-behavior-and-impact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operation Behavior and Impact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detailed-operation-descriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detailed Operation Descriptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#15-merge-operation-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.5: Merge Operation Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#16-validation-and-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.6: Validation and Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#17-configuration-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.7: Configuration Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-lanelet-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 2: Lanelet Classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-3-road-grouping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 3: Road Grouping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-4-road-metadata-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 4: Road Metadata Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-5-lane-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 5: Lane Construction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-6-traffic-signal-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 6: Traffic Signal Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-7-junction-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 7: Junction Processing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-8-road-lane-linking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 8: Road-Lane Linking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-85-crosswalk-object-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 8.5: Crosswalk Object Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-86-stop-line-object-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 8.6: Stop Line Object Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-9-opendrive-xml-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 9: OpenDRIVE XML Generation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-system-and-yaml-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration System and YAML Files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration System and YAML Files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-file-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration File Hierarchy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration File Hierarchy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-main-configuration-confconfigyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Main Configuration (conf/config.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-map-configurations-confmapyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Map Configurations (conf/map/*.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-target-configurations-conftargetyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Target Configurations (conf/target/*.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opendrive-coordinate-system-and-lane-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenDRIVE Coordinate System and Lane Placement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-composition-and-merging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Composition and Merging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#command-line-override-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-Line Override Syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-examples-and-behaviors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Examples and Behaviors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration Examples and Behaviors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-1-basic-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 1: Basic Conversion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-2-carla-compatible-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 2: CARLA-Compatible Conversion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-3-preprocessing-custom-origin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 3: Preprocessing + Custom Origin
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-4-validation-only-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 4: Validation Only (Dry Run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#preprocessing-operation-execution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preprocessing Operation Execution Order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugging-configuration-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging Configuration Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#best-practices-for-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices for Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lanelet2-tag-usage-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Tag Usage Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lanelet2 Tag Usage Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tags-used-by-converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tags Used by Converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tags-not-used-by-converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tags NOT Used by Converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#geometry-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Geometry Attributes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tag-reading-code-locations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tag Reading Code Locations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices-for-input-maps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices for Input Maps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting-tag-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting Tag Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting Tag Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#missing-road-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Missing Road Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#missing-speed-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Missing Speed Limits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#incorrect-lane-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incorrect Lane Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#junctions-not-detected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Junctions Not Detected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traffic-lights-not-exported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traffic Lights Not Exported
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Enhancements
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#high-level-processing-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-Level Processing Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detailed-processing-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detailed Processing Stages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Detailed Processing Stages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-map-loading-and-preprocessing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 1: Map Loading and Preprocessing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stage 1: Map Loading and Preprocessing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-origin-specification-and-coordinate-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1: Origin Specification and Coordinate Systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-coordinate-transformations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2: Coordinate Transformations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-map-loading-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3: Map Loading Process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-preprocessing-operations-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.4: Preprocessing Operations (Optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1.4: Preprocessing Operations (Optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#preprocessing-operation-parameters-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preprocessing Operation Parameters Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operation-behavior-and-impact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operation Behavior and Impact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detailed-operation-descriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detailed Operation Descriptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#15-merge-operation-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.5: Merge Operation Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#16-validation-and-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.6: Validation and Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#17-configuration-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.7: Configuration Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-lanelet-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 2: Lanelet Classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-3-road-grouping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 3: Road Grouping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-4-road-metadata-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 4: Road Metadata Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-5-lane-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 5: Lane Construction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-6-traffic-signal-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 6: Traffic Signal Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-7-junction-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 7: Junction Processing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-8-road-lane-linking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 8: Road-Lane Linking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-85-crosswalk-object-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 8.5: Crosswalk Object Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-86-stop-line-object-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 8.6: Stop Line Object Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-9-opendrive-xml-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 9: OpenDRIVE XML Generation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-system-and-yaml-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration System and YAML Files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration System and YAML Files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-file-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration File Hierarchy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration File Hierarchy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-main-configuration-confconfigyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Main Configuration (conf/config.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-map-configurations-confmapyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Map Configurations (conf/map/*.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-target-configurations-conftargetyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Target Configurations (conf/target/*.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opendrive-coordinate-system-and-lane-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenDRIVE Coordinate System and Lane Placement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-composition-and-merging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Composition and Merging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#command-line-override-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-Line Override Syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-examples-and-behaviors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Examples and Behaviors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration Examples and Behaviors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-1-basic-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 1: Basic Conversion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-2-carla-compatible-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 2: CARLA-Compatible Conversion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-3-preprocessing-custom-origin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 3: Preprocessing + Custom Origin
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-4-validation-only-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 4: Validation Only (Dry Run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#preprocessing-operation-execution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preprocessing Operation Execution Order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugging-configuration-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging Configuration Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#best-practices-for-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices for Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lanelet2-tag-usage-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet2 Tag Usage Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lanelet2 Tag Usage Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tags-used-by-converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tags Used by Converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tags-not-used-by-converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tags NOT Used by Converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#geometry-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Geometry Attributes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tag-reading-code-locations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tag Reading Code Locations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices-for-input-maps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices for Input Maps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting-tag-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting Tag Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting Tag Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#missing-road-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Missing Road Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#missing-speed-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Missing Speed Limits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#incorrect-lane-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incorrect Lane Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#junctions-not-detected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Junctions Not Detected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traffic-lights-not-exported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traffic Lights Not Exported
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Enhancements
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="conversion-process-flow">Conversion Process Flow<a class="headerlink" href="#conversion-process-flow" title="Permanent link">&para;</a></h1>
+<p>This page provides a comprehensive overview of the Lanelet2 to OpenDRIVE conversion process, including detailed processing steps, data flow, and tag usage.</p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>The converter transforms Lanelet2 map data into OpenDRIVE format through a multi-stage pipeline that:</p>
+<ol>
+<li>Loads and preprocesses Lanelet2 map data</li>
+<li>Classifies lanelets into roads and junctions</li>
+<li>Extracts metadata from lanelet attributes (tags)</li>
+<li>Constructs OpenDRIVE objects (roads, lanes, signals)</li>
+<li>Establishes connectivity between elements</li>
+<li>Exports to OpenDRIVE XML format</li>
+</ol>
+<hr />
+<h2 id="high-level-processing-pipeline">High-Level Processing Pipeline<a class="headerlink" href="#high-level-processing-pipeline" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TD
+    A[Load Lanelet2 Map] --&gt; B{Preprocessing&lt;br/&gt;Enabled?}
+    B --&gt;|Yes| C[Preprocess Lanelets&lt;br/&gt;merge/remove/replace]
+    B --&gt;|No| D[Filter by Subtype]
+    C --&gt; D
+
+    D --&gt; E[Classify Lanelets]
+    E --&gt; F[Junction Lanelets&lt;br/&gt;has turn_direction]
+    E --&gt; G[Regular Road Lanelets&lt;br/&gt;no turn_direction]
+
+    F --&gt; H[Group Junction Lanelets&lt;br/&gt;by spatial overlap]
+    G --&gt; I[Group Road Lanelets&lt;br/&gt;by lateral adjacency]
+
+    H --&gt; J[Build Junction Objects]
+    I --&gt; K[Build Road Objects]
+
+    K --&gt; L[Extract Road Metadata&lt;br/&gt;location, speed_limit]
+    L --&gt; M[Construct Lane Objects&lt;br/&gt;subtype, speed_limit]
+
+    M --&gt; N[Extract Traffic Signals&lt;br/&gt;from regulatory elements]
+
+    J --&gt; O[Establish Road-Lane Links]
+    N --&gt; O
+
+    O --&gt; P[Build Junction Connections]
+    P --&gt; R[Extract Crosswalk Objects&lt;br/&gt;subtype=crosswalk lanelets]
+    R --&gt; S[Extract Stop Line Objects&lt;br/&gt;type=stop_line linestrings]
+    S --&gt; Q[Generate OpenDRIVE XML]
+
+    style A fill:#e1f5ff
+    style Q fill:#c8e6c9
+    style E fill:#fff9c4
+    style L fill:#ffe0b2
+    style N fill:#f8bbd0
+    style R fill:#e8f5e9
+    style S fill:#f3e5f5</code></pre>
+<hr />
+<h2 id="detailed-processing-stages">Detailed Processing Stages<a class="headerlink" href="#detailed-processing-stages" title="Permanent link">&para;</a></h2>
+<h3 id="stage-1-map-loading-and-preprocessing">Stage 1: Map Loading and Preprocessing<a class="headerlink" href="#stage-1-map-loading-and-preprocessing" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Load the Lanelet2 map, apply coordinate transformations, and optionally execute preprocessing operations to clean or modify the map structure.</p>
+<p><strong>Input:</strong></p>
+<ul>
+<li>Lanelet2 OSM file path</li>
+<li>Origin specification (MGRS grid code OR lat/lon coordinates)</li>
+<li>Optional coordinate offset (x, y, z)</li>
+<li>Optional preprocessing operations (8 types available)</li>
+</ul>
+<hr />
+<h4 id="11-origin-specification-and-coordinate-systems"><strong>1.1: Origin Specification and Coordinate Systems</strong><a class="headerlink" href="#11-origin-specification-and-coordinate-systems" title="Permanent link">&para;</a></h4>
+<p>The converter supports three methods for specifying the map origin:</p>
+<p><strong>Method 1: MGRS Grid Code Only</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">mgrs_code</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;54SUE&quot;</span>
+</code></pre></div>
+- Converts MGRS grid to lat/lon using zero-padding to grid origin
+- Example: "54SUE" → "54SUE0000000000" (grid southwest corner)
+- Used when map is already aligned to MGRS grid</p>
+<p><strong>Method 2: MGRS Grid Code + Offset</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">mgrs_code</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;54SUE&quot;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">offset</span><span class="p">:</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">81550.0</span><span class="w">  </span><span class="c1"># Easting offset in meters</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">150100.0</span><span class="w"> </span><span class="c1"># Northing offset in meters</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">z</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">      </span><span class="c1"># Altitude offset in meters (optional)</span>
+</code></pre></div>
+- Applies offset to MGRS grid origin
+- Useful for maps with local coordinate systems
+- <strong>Coordinate offset is subtracted</strong> during export: <code>output = coordinate - offset</code></p>
+<p><strong>Method 3: Latitude/Longitude</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">origin</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">lat</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">35.6762</span><span class="w">   </span><span class="c1"># Latitude in decimal degrees [-90, 90]</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">lon</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">139.6503</span><span class="w">  </span><span class="c1"># Longitude in decimal degrees [-180, 180]</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">altitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">  </span><span class="c1"># Altitude in meters (optional)</span>
+</code></pre></div>
+- Direct lat/lon origin specification
+- MGRS grid is derived automatically for PROJ string generation
+- Validates latitude and longitude ranges</p>
+<div class="admonition note">
+<p class="admonition-title">Mutual Exclusivity</p>
+<p>Only <strong>one</strong> origin method can be specified. Using both MGRS and lat/lon will raise a validation error.</p>
+</div>
+<hr />
+<h4 id="12-coordinate-transformations"><strong>1.2: Coordinate Transformations</strong><a class="headerlink" href="#12-coordinate-transformations" title="Permanent link">&para;</a></h4>
+<p><strong>A. WGS84 to Local Coordinates</strong></p>
+<p>During map loading (<code>load_lanelet2_map()</code> in <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L52-L81">main.py:52-81</a>):
+1. Creates <code>MGRSProjector</code> with specified origin
+2. Lanelet2 library transforms WGS84 (lat/lon) to local XY coordinates
+3. Projection uses UTM zone derived from longitude: <code>zone = int((lon + 180) / 6) + 1</code>
+4. Prints summary: number of lanelets, linestrings, and points loaded</p>
+<p><strong>B. Coordinate Offset Application</strong></p>
+<p>Global offset system (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/config.py#L155-L207">config.py:155-207</a>):
+- Set before map loading via <code>COORDINATE_OFFSET.set(x, y, z)</code>
+- Applied during OpenDRIVE export when extracting geometry
+- <strong>Subtraction operation</strong>: <code>output_coordinate = lanelet2_coordinate - offset</code>
+- Makes output coordinates relative to offset point
+- Used when map has large coordinate values that need normalization</p>
+<p><strong>C. PROJ String Generation</strong></p>
+<p>For OpenDRIVE <code>&lt;geoReference&gt;</code> element:
+- <strong>From MGRS</strong>: <code>mgrs_to_proj_string()</code> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/projection.py">projection.py</a>)
+- <strong>From Lat/Lon</strong>: <code>latlon_to_proj_string()</code> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/projection.py">projection.py</a>)</p>
+<p>Format: <code>+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m +no_defs</code></p>
+<hr />
+<h4 id="13-map-loading-process"><strong>1.3: Map Loading Process</strong><a class="headerlink" href="#13-map-loading-process" title="Permanent link">&para;</a></h4>
+<p><strong>Function:</strong> <code>load_lanelet2_map()</code> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L52-L81">main.py:52-81</a>)</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li><strong>Create Projector</strong></li>
+<li>
+<p>Initialize <code>MGRSProjector</code> with origin</p>
+</li>
+<li>
+<p><strong>Load OSM File</strong></p>
+</li>
+<li>
+<p>Call <code>lanelet2.io.load(path, projector)</code></p>
+</li>
+<li>
+<p><strong>Validate</strong></p>
+</li>
+<li>
+<p>Check file exists, handle errors</p>
+</li>
+<li>
+<p><strong>Report Statistics</strong></p>
+</li>
+<li>Number of lanelets loaded</li>
+<li>Number of linestrings</li>
+<li>
+<p>Number of points</p>
+</li>
+<li>
+<p><strong>Return</strong></p>
+</li>
+<li><code>lanelet2.core.LaneletMap</code> object</li>
+</ol>
+<p><strong>Map Structure:</strong></p>
+<ul>
+<li><code>laneletLayer</code>: All lanelets (road segments)</li>
+<li><code>lineStringLayer</code>: Standalone linestrings (e.g., stop lines)</li>
+<li><code>regulatoryElementLayer</code>: Traffic signals, speed limits, right-of-way rules</li>
+<li><code>pointLayer</code>: All geometric points</li>
+</ul>
+<hr />
+<h4 id="14-preprocessing-operations-optional"><strong>1.4: Preprocessing Operations (Optional)</strong><a class="headerlink" href="#14-preprocessing-operations-optional" title="Permanent link">&para;</a></h4>
+<p>Eight preprocessing operation types are available, executed in this order:</p>
+<hr />
+<h5 id="preprocessing-operation-parameters-summary"><strong>Preprocessing Operation Parameters Summary</strong><a class="headerlink" href="#preprocessing-operation-parameters-summary" title="Permanent link">&para;</a></h5>
+<p>The following table lists all preprocessing operations and their parameters:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Move Point</strong></td>
+<td><code>point_id</code></td>
+<td>int</td>
+<td>✓</td>
+<td>-</td>
+<td>ID of point to move</td>
+</tr>
+<tr>
+<td></td>
+<td><code>new_x</code></td>
+<td>float</td>
+<td>✓</td>
+<td>-</td>
+<td>New X coordinate (meters)</td>
+</tr>
+<tr>
+<td></td>
+<td><code>new_y</code></td>
+<td>float</td>
+<td>✓</td>
+<td>-</td>
+<td>New Y coordinate (meters)</td>
+</tr>
+<tr>
+<td></td>
+<td><code>new_z</code></td>
+<td>float</td>
+<td>✗</td>
+<td>(unchanged)</td>
+<td>New Z coordinate (meters)</td>
+</tr>
+<tr>
+<td><strong>Delete Point</strong></td>
+<td><code>point_ids</code></td>
+<td>List[int]</td>
+<td>✓</td>
+<td>-</td>
+<td>List of point IDs to delete</td>
+</tr>
+<tr>
+<td><strong>Validate</strong></td>
+<td><code>first_lanelet_id</code></td>
+<td>int</td>
+<td>✓</td>
+<td>-</td>
+<td>ID of first lanelet</td>
+</tr>
+<tr>
+<td></td>
+<td><code>second_lanelet_id</code></td>
+<td>int</td>
+<td>✓</td>
+<td>-</td>
+<td>ID of second lanelet (successor)</td>
+</tr>
+<tr>
+<td></td>
+<td><code>tolerance</code></td>
+<td>float</td>
+<td>✗</td>
+<td>0.001</td>
+<td>Max distance for continuity (meters)</td>
+</tr>
+<tr>
+<td><strong>Replace</strong></td>
+<td><code>lanelet_ids</code></td>
+<td>List[int]</td>
+<td>✓</td>
+<td>-</td>
+<td>List of lanelet IDs to merge and replace</td>
+</tr>
+<tr>
+<td></td>
+<td><code>validate</code></td>
+<td>bool</td>
+<td>✗</td>
+<td>false</td>
+<td>Validate continuity before merging</td>
+</tr>
+<tr>
+<td></td>
+<td><code>tolerance</code></td>
+<td>float</td>
+<td>✗</td>
+<td>0.001</td>
+<td>Max distance for continuity check (meters)</td>
+</tr>
+<tr>
+<td><strong>Merge</strong></td>
+<td><code>lanelet_ids</code></td>
+<td>List[int]</td>
+<td>✓</td>
+<td>-</td>
+<td>List of lanelet IDs to merge</td>
+</tr>
+<tr>
+<td></td>
+<td><code>validate</code></td>
+<td>bool</td>
+<td>✗</td>
+<td>false</td>
+<td>Validate continuity before merging</td>
+</tr>
+<tr>
+<td></td>
+<td><code>base_id</code></td>
+<td>int</td>
+<td>✗</td>
+<td>(auto)</td>
+<td>Base ID for merged lanelet</td>
+</tr>
+<tr>
+<td></td>
+<td><code>tolerance</code></td>
+<td>float</td>
+<td>✗</td>
+<td>0.001</td>
+<td>Max distance for continuity check (meters)</td>
+</tr>
+<tr>
+<td><strong>Remove</strong></td>
+<td><code>lanelet_ids</code></td>
+<td>List[int]</td>
+<td>✓</td>
+<td>-</td>
+<td>List of lanelet IDs to remove (old style)</td>
+</tr>
+<tr>
+<td><strong>Remove Lanelet</strong></td>
+<td><code>lanelet_ids</code></td>
+<td>List[int]</td>
+<td>✓</td>
+<td>-</td>
+<td>List of lanelet IDs to completely remove</td>
+</tr>
+<tr>
+<td><strong>Remove Turn Direction</strong></td>
+<td><code>lanelet_ids</code></td>
+<td>List[int]</td>
+<td>✓</td>
+<td>-</td>
+<td>List of lanelet IDs (empty = all lanelets)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key:</strong></p>
+<ul>
+<li>✓ = Required parameter</li>
+<li>✗ = Optional parameter</li>
+<li>Default values from <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/config.py">config.py</a> and operation dataclasses</li>
+</ul>
+<hr />
+<h5 id="operation-behavior-and-impact"><strong>Operation Behavior and Impact</strong><a class="headerlink" href="#operation-behavior-and-impact" title="Permanent link">&para;</a></h5>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Modifies Map</th>
+<th>Creates New Elements</th>
+<th>Removes Elements</th>
+<th>Validation</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Move Point</strong></td>
+<td>✓</td>
+<td>✗</td>
+<td>✗</td>
+<td>✗</td>
+<td>Fix misaligned geometry, adjust point positions</td>
+</tr>
+<tr>
+<td><strong>Delete Point</strong></td>
+<td>✓</td>
+<td>✗</td>
+<td>✓ (points)</td>
+<td>Min 2 points/linestring</td>
+<td>Remove redundant points, simplify geometry</td>
+</tr>
+<tr>
+<td><strong>Validate</strong></td>
+<td>✗</td>
+<td>✗</td>
+<td>✗</td>
+<td>✓</td>
+<td>Debug connectivity, verify lanelet continuity</td>
+</tr>
+<tr>
+<td><strong>Replace</strong></td>
+<td>✓</td>
+<td>✓ (merged)</td>
+<td>✓ (originals)</td>
+<td>Optional</td>
+<td>Merge lanelets and remove originals</td>
+</tr>
+<tr>
+<td><strong>Merge</strong></td>
+<td>✓</td>
+<td>✓ (merged)</td>
+<td>✗</td>
+<td>Optional</td>
+<td>Create merged lanelet, keep originals</td>
+</tr>
+<tr>
+<td><strong>Remove</strong></td>
+<td>✓</td>
+<td>✗</td>
+<td>✓ (lanelets)</td>
+<td>✗</td>
+<td>Legacy removal (prefer Remove Lanelet)</td>
+</tr>
+<tr>
+<td><strong>Remove Lanelet</strong></td>
+<td>✓</td>
+<td>✗</td>
+<td>✓ (lanelets)</td>
+<td>✗</td>
+<td>Completely remove unwanted lanelets</td>
+</tr>
+<tr>
+<td><strong>Remove Turn Direction</strong></td>
+<td>✓</td>
+<td>✗</td>
+<td>✗</td>
+<td>✗</td>
+<td>Convert junction lanelets to regular roads</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Execution Order:</strong> Move Point → Delete Point → Validate → Replace → Merge → Remove → Remove Lanelet → Remove Turn Direction</p>
+<p><strong>Key:</strong></p>
+<ul>
+<li>✓ = Yes / Applies</li>
+<li>✗ = No / Does not apply</li>
+</ul>
+<hr />
+<h5 id="detailed-operation-descriptions"><strong>Detailed Operation Descriptions</strong><a class="headerlink" href="#detailed-operation-descriptions" title="Permanent link">&para;</a></h5>
+<p><strong>A. Move Point Operations</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L311-L379">geometry.py:311-379</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">move_point_operations</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">point_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12345</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">new_x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.5</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">new_y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">200.3</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">new_z</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span><span class="w">  </span><span class="c1"># Optional</span>
+</code></pre></div>
+- Moves individual points to new coordinates
+- Updates all lanelets containing the point
+- Updates <code>local_x</code>, <code>local_y</code>, <code>ele</code> attributes</p>
+<p><strong>Use case</strong>: When parallel lanelets need to be bundled as the same Road in OpenDRIVE, which requires equal lengths. If consecutive lanelets are divided at diagonal boundaries, using MergeOperation would cause length misalignment and prevent lane changes. In such cases, use MovePointOperation to align the boundaries instead.</p>
+<p><strong>Before (diagonal boundaries):</strong></p>
+<p><img alt="Before" src="../image/before_move_point_operation.png" /></p>
+<p><strong>After (aligned boundaries with MovePointOperation):</strong></p>
+<p><img alt="After" src="../image/after_move_point_operation.png" /></p>
+<p><strong>B. Delete Point Operations</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L208-L308">geometry.py:208-308</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">delete_point_operations</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">point_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">12345</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">12346</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">12347</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+- Removes points from linestrings
+- Validates minimum 2 points remain per linestring
+- Reports missing points</p>
+<p><strong>Use case</strong>: Use this operation to remove unnecessary points from lanelet boundaries, simplifying the geometry while maintaining the shape.</p>
+<p><strong>Before (with unnecessary points):</strong></p>
+<p><img alt="Before" src="../image/before_delete_point_operation.png" /></p>
+<p><strong>After (points removed):</strong></p>
+<p><img alt="After" src="../image/after_delete_point_operation.png" /></p>
+<p><strong>C. Validate Operations</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L93-L131">lanelet.py:93-131</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">validate_operations</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">first_lanelet_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">second_lanelet_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">101</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.001</span><span class="w">  </span><span class="c1"># meters</span>
+</code></pre></div>
+- Checks boundary continuity between two lanelets
+- Reports pass/fail, does <strong>not</strong> modify map
+- Useful for debugging connectivity issues</p>
+<p><strong>D. Replace Operations</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L318-L401">lanelet.py:318-401</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">replace_operations</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">101</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">102</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">validate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.001</span><span class="w">  </span><span class="c1"># meters (default: 1e-3)</span>
+</code></pre></div>
+- Merges lanelets into one, removes originals
+- Optional validation before merging
+- Creates new lanelet with auto-generated ID
+- Copies attributes from first lanelet</p>
+<p><strong>E. Merge Operations</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L8-L200">lanelet.py:8-200</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">merge_operations</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">101</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">102</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">validate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">base_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span><span class="w">  </span><span class="c1"># Optional: base ID for merged lanelet</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.001</span><span class="w">  </span><span class="c1"># meters (default: 1e-3)</span>
+</code></pre></div>
+- Merges consecutive lanelets, <strong>keeps originals</strong>
+- Optional validation checks boundary continuity
+- Merged lanelet ID: <code>base_id + 3</code> (or auto-generated)
+- Connects left/right boundaries sequentially</p>
+<p><strong>Use case</strong>: When consecutive lanelets are divided at diagonal boundaries, use MergeOperation to combine them into a single continuous lanelet.</p>
+<p><strong>Before merge:</strong></p>
+<p><img alt="Before 1" src="../image/before_merge_operation_1.png" />
+<img alt="Before 2" src="../image/before_merge_operation_2.png" /></p>
+<p><strong>After merge:</strong></p>
+<p><img alt="After" src="../image/after_merge_operation.png" /></p>
+<p><strong>F. Remove Operations (Old Style)</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L661-L682">preprocess_lanelet.py:661-682</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">remove_operations</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">300</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">301</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+- Legacy removal method
+- Prefer <code>remove_lanelet_operations</code> for new code</p>
+<p><strong>G. Remove Lanelet Operations</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L822-L872">preprocess_lanelet.py:822-872</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">remove_lanelet_operations</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">300</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">301</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">302</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+- Completely removes lanelets from map
+- Creates new map without specified lanelets</p>
+<p><strong>Use case</strong>: Remove lanelets that are not needed for conversion, such as isolated lanelets without predecessors or successors. In this case, the map was converted to OpenDRIVE for CARLA simulation purposes, where isolated lanelets without connectivity are unnecessary and can be removed.</p>
+<p><strong>Before (with isolated lanelet):</strong></p>
+<p><img alt="Before" src="../image/before_remove_operation.png" /></p>
+<p><strong>After (isolated lanelet removed):</strong></p>
+<p><img alt="After" src="../image/after_remove_operation.png" />
+- Reports successful and missing lanelet IDs</p>
+<p><strong>H. Remove Turn Direction Operations</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L874-L929">preprocess_lanelet.py:874-929</a>)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">remove_turn_direction_operations</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">  </span><span class="c1"># Empty list = all lanelets</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="c1"># OR</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">101</span><span class="p p-Indicator">]</span><span class="w">  </span><span class="c1"># Specific lanelets</span>
+</code></pre></div>
+- Removes <code>turn_direction</code> attribute from lanelets
+- Empty list applies to <strong>all</strong> lanelets
+- Converts junction lanelets to regular road lanelets</p>
+<p><strong>Use case</strong>: This operation removes the Lanelet2 turn_direction attribute, which is the flag that determines whether a lanelet is classified as a Junction in OpenDRIVE. Use this when you need to convert junction lanelets to regular road lanelets.</p>
+<p><strong>Before (with turn_direction attribute):</strong></p>
+<p><img alt="Before" src="../image/before_remove_turn_direction_operation.png" /></p>
+<p><strong>After (turn_direction attribute removed):</strong></p>
+<p><img alt="After" src="../image/after_remove_turn_direction_operation.png" /></p>
+<hr />
+<h4 id="15-merge-operation-details"><strong>1.5: Merge Operation Details</strong><a class="headerlink" href="#15-merge-operation-details" title="Permanent link">&para;</a></h4>
+<p><strong>Process</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L8-L200">lanelet.py:8-200</a>):</p>
+<ol>
+<li><strong>Validation</strong> (if enabled):</li>
+<li>Check left boundary endpoint of lanelet N matches start point of lanelet N+1</li>
+<li>Check right boundary endpoint of lanelet N matches start point of lanelet N+1</li>
+<li>Calculate 3D distance: <code>sqrt((x1-x2)² + (y1-y2)² + (z1-z2)²)</code></li>
+<li>
+<p>Pass if both distances ≤ tolerance (default: 0.001m)</p>
+</li>
+<li>
+<p><strong>Boundary Connection</strong>:</p>
+</li>
+<li><strong>Left boundary</strong>: All points from first lanelet + remaining points from second (skip duplicate junction point)</li>
+<li><strong>Right boundary</strong>: Same logic as left boundary</li>
+<li>
+<p>Result: Continuous linestrings spanning both lanelets</p>
+</li>
+<li>
+<p><strong>New Lanelet Creation</strong>:</p>
+</li>
+<li>ID: <code>base_id + 3</code> (offset avoids conflicts with boundaries)</li>
+<li>Attributes copied from first lanelet</li>
+<li>
+<p>References to regulatory elements preserved</p>
+</li>
+<li>
+<p><strong>Multi-Lanelet Merging</strong>:</p>
+</li>
+<li>For N lanelets: iteratively merge pairs</li>
+<li>Base IDs incremented by 10 for each operation</li>
+</ol>
+<hr />
+<h4 id="16-validation-and-error-handling"><strong>1.6: Validation and Error Handling</strong><a class="headerlink" href="#16-validation-and-error-handling" title="Permanent link">&para;</a></h4>
+<p><strong>Origin Validation</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L243-L265">preprocess_lanelet.py:243-265</a>):
+- Ensures exactly one of: <code>mgrs_code</code> OR <code>origin</code> (lat/lon)
+- Validates <code>offset</code> only used with <code>mgrs_code</code>
+- Raises <code>ValueError</code> for invalid combinations</p>
+<p><strong>Coordinate Range Validation</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L157-L162">preprocess_lanelet.py:157-162</a>):
+- Latitude: must be in range [-90, 90]
+- Longitude: must be in range [-180, 180]
+- Raises <code>ValueError</code> if out of range</p>
+<p><strong>Continuity Validation</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L93-L131">lanelet.py:93-131</a>):
+- Checks 3D distance between consecutive lanelet boundaries
+- Used in merge and replace operations
+- Reports specific distance values when validation fails</p>
+<p><strong>Point Deletion Validation</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L208-L308">geometry.py:208-308</a>):
+- Ensures linestrings retain minimum 2 points
+- Prevents creation of invalid geometry
+- Skips linestrings that would become invalid</p>
+<hr />
+<h4 id="17-configuration-flow"><strong>1.7: Configuration Flow</strong><a class="headerlink" href="#17-configuration-flow" title="Permanent link">&para;</a></h4>
+<p><strong>Main Entry Point:</strong> <code>preprocess_and_convert_with_hydra()</code> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L741-L852">main.py:741-852</a>)</p>
+<p><strong>Execution Sequence:</strong>
+1. <strong>Parse Hydra Config</strong>: Load YAML configuration
+2. <strong>Parse Origin</strong>: Determine origin method (MGRS vs. lat/lon)
+3. <strong>Set Coordinate Offset</strong>: If offset specified, activate global offset
+4. <strong>Run Preprocessing</strong>: If operations configured, execute preprocessing
+5. <strong>Load Map</strong>: Load preprocessed (or original) Lanelet2 map
+6. <strong>Convert to OpenDRIVE</strong>: Execute conversion pipeline
+7. <strong>Write Output</strong>: Save OpenDRIVE XML file</p>
+<p><strong>Code Locations:</strong></p>
+<ul>
+<li>Main flow: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L741-L852">main.py:741-852</a></li>
+<li>Origin parsing: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L597-L738">main.py:597-738</a></li>
+<li>Preprocessing execution: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L931-L987">preprocess_lanelet.py:931-987</a></li>
+<li>Coordinate transformations: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L595-L897">util.py:595-897</a></li>
+</ul>
+<hr />
+<p><strong>Output:</strong> Preprocessed Lanelet2 map with:
+- Coordinate system aligned to specified origin
+- Optional coordinate offset applied
+- Structural modifications from preprocessing operations
+- Validated geometry and topology</p>
+<hr />
+<h3 id="stage-2-lanelet-classification">Stage 2: Lanelet Classification<a class="headerlink" href="#stage-2-lanelet-classification" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Separate lanelets into junction lanelets and regular road lanelets.</p>
+<p><strong>Criteria:</strong></p>
+<ul>
+<li><strong>Junction lanelet:</strong> Has <code>turn_direction</code> attribute (present in intersection lanelets)</li>
+<li><strong>Regular road lanelet:</strong> Does NOT have <code>turn_direction</code> attribute</li>
+</ul>
+<p><strong>Processing:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">all_lanelets</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">lanelet_map</span><span class="o">.</span><span class="n">laneletLayer</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">junction_lanelets</span> <span class="o">=</span> <span class="n">_filter_lanelets_inside_junction</span><span class="p">(</span><span class="n">all_lanelets</span><span class="p">)</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">road_lanelets</span> <span class="o">=</span> <span class="n">_filter_lanelets_outside_junction</span><span class="p">(</span><span class="n">all_lanelets</span><span class="p">)</span>
+</code></pre></div></p>
+<p><strong>Output:</strong></p>
+<ul>
+<li>List of junction lanelets</li>
+<li>List of regular road lanelets</li>
+</ul>
+<p><strong>Code Location:</strong> <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L8-L52"><code>junction.py:8-52</code></a></p>
+<hr />
+<h3 id="stage-3-road-grouping">Stage 3: Road Grouping<a class="headerlink" href="#stage-3-road-grouping" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Group adjacent road lanelets into roads based on lateral adjacency (physically adjacent lanes sharing left/right boundaries).</p>
+<p><strong>Processing:</strong>
+1. Filter lanelets by subtype (only "road" lanelets) and exclude junction lanelets
+2. Find laterally adjacent lanelets using routing graph (left/right relationships, not successor/predecessor)
+3. Group laterally adjacent lanelets into road segments using depth-first search</p>
+<p><strong>Output:</strong> List of road groups (each group = set of laterally adjacent lanelets)</p>
+<p><strong>Code Location:</strong> <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py"><code>road.py</code> – <code>Road.construct_from_lanelet_map()</code></a>, <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py"><code>util.py</code> – <code>find_adjacent_groups()</code></a></p>
+<hr />
+<h3 id="stage-4-road-metadata-extraction">Stage 4: Road Metadata Extraction<a class="headerlink" href="#stage-4-road-metadata-extraction" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Extract road-level metadata from lanelet tags.</p>
+<p><strong>Tags Used:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Purpose</th>
+<th>Mapping</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>location</code></td>
+<td>Road type classification</td>
+<td><code>"urban"</code> → <code>TOWN</code><br/><code>"highway"</code> → <code>MOTORWAY</code><br/><code>"rural"</code> → <code>RURAL</code><br/><code>"private"</code> (≤10 km/h) → <code>LOW_SPEED</code></td>
+</tr>
+<tr>
+<td><code>speed_limit</code></td>
+<td>Speed restrictions</td>
+<td>Parsed as float → <code>RoadTypeSpeed.max</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Fallback Logic:</strong>
+If <code>location</code> tag is not present, road type is inferred from speed:
+- <code>speed ≤ 10</code> → <code>LOW_SPEED</code>
+- <code>10 &lt; speed ≤ 50</code> → <code>TOWN</code>
+- <code>50 &lt; speed ≤ 100</code> → <code>RURAL</code>
+- <code>speed &gt; 100</code> → <code>MOTORWAY</code></p>
+<p><strong>Processing:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">road_type_definitions</span> <span class="o">=</span> <span class="n">Road</span><span class="o">.</span><span class="n">_extract_road_types_from_lanelets</span><span class="p">(</span><span class="n">lanelets</span><span class="p">)</span>
+</code></pre></div></p>
+<p><strong>Output:</strong> <code>RoadTypeDefinition</code> objects with speed and road type</p>
+<p><strong>Code Location:</strong> <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L479-L538"><code>road.py:479-538</code></a></p>
+<hr />
+<h3 id="stage-5-lane-construction">Stage 5: Lane Construction<a class="headerlink" href="#stage-5-lane-construction" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Construct OpenDRIVE Lane objects from Lanelet2 lanelets.</p>
+<p><strong>Tags Used:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Purpose</th>
+<th>Mapping</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>subtype</code></td>
+<td>Lane type classification</td>
+<td><code>"road"</code> or <code>"highway"</code> → <code>DRIVING</code><br/><code>"walkway"</code> → <code>SIDEWALK</code><br/><code>"bicycle_lane"</code> → <code>BIKING</code><br/>Default → <code>DRIVING</code></td>
+</tr>
+<tr>
+<td><code>speed_limit</code></td>
+<td>Lane-level speed limit</td>
+<td>Added as <code>LaneSpeed</code> at s=0.0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Processing:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">lane</span> <span class="o">=</span> <span class="n">Lane</span><span class="o">.</span><span class="n">construct_from_lanelet</span><span class="p">(</span><span class="n">lanelet</span><span class="p">,</span> <span class="n">lanelet_map</span><span class="p">,</span> <span class="n">lane_id</span><span class="p">,</span> <span class="n">direction</span><span class="p">)</span>
+</code></pre></div></p>
+<p><strong>Output:</strong> <code>Lane</code> objects with proper type and speed attributes</p>
+<p><strong>Code Location:</strong> <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L138-L239"><code>lane.py:138-239</code></a></p>
+<hr />
+<h3 id="stage-6-traffic-signal-extraction">Stage 6: Traffic Signal Extraction<a class="headerlink" href="#stage-6-traffic-signal-extraction" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Extract traffic lights and controllers from Lanelet2 regulatory elements.</p>
+<p><strong>Tags Used:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Source</th>
+<th>Purpose</th>
+<th>Mapping</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code> or <code>subtype</code></td>
+<td>Traffic light regulatory element</td>
+<td>Signal type</td>
+<td><code>"red_yellow_green"</code> or <code>"3_lights"</code> → <code>TRAFFIC_LIGHT_3_LIGHTS</code><br/><code>"pedestrian"</code> → <code>TRAFFIC_LIGHT_PEDESTRIAN</code><br/><code>"arrow"</code> → <code>TRAFFIC_LIGHT_ARROW</code></td>
+</tr>
+<tr>
+<td><code>trafficLights</code></td>
+<td>Regulatory element</td>
+<td>Signal geometry</td>
+<td>LineString3d → Signal position</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Processing:</strong>
+1. Filter all traffic light regulatory elements
+2. Extract signal positions from LineString geometries
+3. Map signals to affected roads via lanelet references
+4. Create <code>Signal</code> and <code>Controller</code> objects</p>
+<p><strong>Output:</strong></p>
+<ul>
+<li>List of <code>Signal</code> objects with positions (s, t coordinates)</li>
+<li>List of <code>Controller</code> objects grouping related signals</li>
+</ul>
+<p><strong>Code Location:</strong></p>
+<ul>
+<li>Signal extraction: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py#L75-L249"><code>signals_and_controllers.py:75-249</code></a></li>
+<li>Type mapping: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signal.py#L281-L304"><code>signal.py:281-304</code></a></li>
+</ul>
+<hr />
+<h3 id="stage-7-junction-processing">Stage 7: Junction Processing<a class="headerlink" href="#stage-7-junction-processing" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Group intersection lanelets into junction objects and create connecting roads.</p>
+<p><strong>Processing:</strong>
+1. Group junction lanelets by spatial overlap
+2. Create <code>Junction</code> objects for each group
+3. Build <code>ConnectingRoad</code> objects for junction lanes
+4. Link connecting roads to incoming/outgoing roads</p>
+<p><strong>Output:</strong> List of <code>Junction</code> objects with connections</p>
+<p><strong>Code Location:</strong></p>
+<ul>
+<li>Junction grouping: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L48-L100"><code>junction.py:48-100</code></a> – <code>find_junction_groups()</code></li>
+<li>Connecting road construction: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py"><code>road.py</code> – <code>Road.construct_connecting_roads_from_junctions()</code></a></li>
+<li>Orchestration: <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py"><code>main.py</code> – <code>_build_junction_structure()</code></a></li>
+</ul>
+<hr />
+<h3 id="stage-8-road-lane-linking">Stage 8: Road-Lane Linking<a class="headerlink" href="#stage-8-road-lane-linking" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Establish predecessor/successor relationships between roads and lanes.</p>
+<p><strong>Processing:</strong>
+1. Map lanelet successor/predecessor relationships
+2. Convert to road-level and lane-level links
+3. Set <code>Link</code> objects on <code>Road</code> and <code>Lane</code> instances</p>
+<p><strong>Output:</strong> Complete connectivity graph</p>
+<hr />
+<h3 id="stage-85-crosswalk-object-extraction">Stage 8.5: Crosswalk Object Extraction<a class="headerlink" href="#stage-85-crosswalk-object-extraction" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Convert Lanelet2 crosswalk lanelets (<code>subtype="crosswalk"</code>) into OpenDRIVE <code>&lt;object type="crosswalk"&gt;</code> elements and assign them to the nearest roads.</p>
+<p><strong>Tags Used:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>subtype="crosswalk"</code></td>
+<td>Identifies pedestrian crossing lanelets</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Processing:</strong></p>
+<ol>
+<li>Filter all lanelets with <code>subtype="crosswalk"</code></li>
+<li>For each crosswalk lanelet:
+   a. Extract four boundary vertices (<code>leftBound[0]</code>, <code>leftBound[-1]</code>, <code>rightBound[-1]</code>, <code>rightBound[0]</code>)
+   b. Compute centroid of the four vertices
+   c. Sample reference line of all roads (10 points per geometry segment)
+   d. Find the nearest road within 50 m threshold
+   e. Project centroid onto road reference line → <code>(s, t, road_hdg)</code>
+   f. Compute crosswalk heading relative to road direction → <code>hdg</code>
+   g. Compute <code>width</code> (entry span) and <code>length</code> (crossing distance)
+   h. Transform polygon vertices to object-local coordinates → <code>&lt;cornerLocal&gt;</code> points</li>
+<li>Assign <code>CrosswalkObject</code> instances to their nearest road's <code>objects</code> list</li>
+</ol>
+<p><strong>Output:</strong> <code>Road.objects</code> populated with <code>CrosswalkObject</code> instances</p>
+<p><strong>Code Location:</strong> <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py"><code>opendrive/objects.py</code></a>, <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py"><code>main.py</code> – <code>_extract_and_assign_crosswalks()</code></a></p>
+<div class="admonition info">
+<p class="admonition-title">Detailed Documentation</p>
+<p>For full details on the crosswalk conversion algorithm, coordinate systems, and CARLA behavior, see <a href="../crosswalk_objects/">Crosswalk Objects</a>.</p>
+</div>
+<hr />
+<h3 id="stage-86-stop-line-object-extraction">Stage 8.6: Stop Line Object Extraction<a class="headerlink" href="#stage-86-stop-line-object-extraction" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Convert Lanelet2 linestrings with <code>type="stop_line"</code> into OpenDRIVE <code>&lt;object type="stopLine"&gt;</code> elements and assign them to the nearest roads.</p>
+<p><strong>Tags Used:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type="stop_line"</code></td>
+<td>Identifies stop line linestrings</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Processing:</strong></p>
+<ol>
+<li>Iterate over all linestrings in <code>lineStringLayer</code>; select those with <code>type="stop_line"</code></li>
+<li>For each stop line linestring:
+   a. Compute the centroid of all 2D points
+   b. Sample reference lines of all roads (10 points per geometry segment)
+   c. Find the nearest road within 50 m threshold
+   d. Project centroid onto the road reference line → <code>(s, t, road_hdg)</code>
+   e. Compute <code>z_offset</code> as average 3D elevation minus road elevation at <code>s</code>
+   f. Compute stop line heading relative to road direction → <code>hdg</code>
+   g. Set <code>width</code> = distance from first to last point; <code>length</code> = 0 (zero thickness)</li>
+<li>Assign <code>StopLineObject</code> instances to their nearest road's <code>objects</code> list</li>
+</ol>
+<p><strong>Output:</strong> <code>Road.objects</code> populated with <code>StopLineObject</code> instances alongside any existing <code>CrosswalkObject</code> instances</p>
+<p><strong>Code Location:</strong> <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py"><code>opendrive/objects.py</code></a>, <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py"><code>main.py</code> – <code>_extract_and_assign_stop_lines()</code></a></p>
+<div class="admonition info">
+<p class="admonition-title">Detailed Documentation</p>
+<p>For full details on the stop line conversion algorithm, see <a href="../stop_line_objects/">Stop Line Objects</a>.</p>
+</div>
+<hr />
+<h3 id="stage-9-opendrive-xml-generation">Stage 9: OpenDRIVE XML Generation<a class="headerlink" href="#stage-9-opendrive-xml-generation" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose:</strong> Serialize the constructed OpenDRIVE objects to XML format.</p>
+<p><strong>Processing:</strong>
+1. Create <code>OpenDRIVE</code> root object
+2. Add all roads, junctions, and signals
+3. Serialize to XML using <code>xsdata</code> library
+4. Write to output file</p>
+<p><strong>Output:</strong> OpenDRIVE XML file</p>
+<p><strong>Code Location:</strong> <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py"><code>main.py</code></a></p>
+<hr />
+<h2 id="configuration-system-and-yaml-files">Configuration System and YAML Files<a class="headerlink" href="#configuration-system-and-yaml-files" title="Permanent link">&para;</a></h2>
+<p>This section explains the relationship between YAML configuration files and converter behavior, covering Hydra's configuration system and how settings control the conversion process.</p>
+<hr />
+<h3 id="configuration-architecture">Configuration Architecture<a class="headerlink" href="#configuration-architecture" title="Permanent link">&para;</a></h3>
+<p>The converter uses <strong>Hydra</strong> for hierarchical configuration management, allowing flexible, modular configuration through YAML files and command-line overrides.</p>
+<p><strong>Configuration Directory Structure:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>src/autoware_lanelet2_to_opendrive/conf/
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>├── config.yaml              # Main configuration file
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>├── map/                     # Map-specific configurations
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>│   ├── example.yaml
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>│   ├── example_mgrs_offset.yaml
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>│   ├── example_latlon.yaml
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>│   └── nishishinjuku.yaml
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>└── target/                  # Target simulator configurations
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>    ├── default.yaml
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>    └── carla.yaml
+</code></pre></div></p>
+<hr />
+<h3 id="configuration-file-hierarchy">Configuration File Hierarchy<a class="headerlink" href="#configuration-file-hierarchy" title="Permanent link">&para;</a></h3>
+<h4 id="1-main-configuration-confconfigyaml"><strong>1. Main Configuration</strong> (<code>conf/config.yaml</code>)<a class="headerlink" href="#1-main-configuration-confconfigyaml" title="Permanent link">&para;</a></h4>
+<p><strong>Purpose:</strong> Defines global settings and default configuration groups.</p>
+<p><strong>Key Sections:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">defaults</span><span class="p">:</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">_self_</span><span class="w">               </span><span class="c1"># Load this file first</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">map</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example</span><span class="w">         </span><span class="c1"># Default map config</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span><span class="w">      </span><span class="c1"># Default target config</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="nt">input_map_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">???</span><span class="w">      </span><span class="c1"># Required: must be specified</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="nt">output_map_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">    </span><span class="c1"># Optional: auto-generated if not set</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="nt">dry_run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">           </span><span class="c1"># Validation only (no output file)</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="nt">verbose</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">           </span><span class="c1"># Enable debug logging</span>
+</code></pre></div></p>
+<p><strong>Behavior:</strong></p>
+<ul>
+<li><code>???</code> indicates <strong>required</strong> field - must be set via CLI or config file</li>
+<li><code>null</code> indicates <strong>optional</strong> field - has fallback behavior</li>
+<li><code>defaults</code> section specifies config group defaults</li>
+</ul>
+<hr />
+<h4 id="2-map-configurations-confmapyaml"><strong>2. Map Configurations</strong> (<code>conf/map/*.yaml</code>)<a class="headerlink" href="#2-map-configurations-confmapyaml" title="Permanent link">&para;</a></h4>
+<p><strong>Purpose:</strong> Map-specific settings including origin, preprocessing operations, and special handling rules.</p>
+<p><strong>Example: <code>conf/map/example.yaml</code></strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Origin specification (choose ONE method):</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nt">mgrs_grid</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;54SUE815501&quot;</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># Preprocessing operations</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="nt">merge_operations</span><span class="p">:</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">101</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">102</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span><span class="nt">validate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.001</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="nt">remove_lanelet_operations</span><span class="p">:</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">300</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">301</span><span class="p p-Indicator">]</span>
+</code></pre></div></p>
+<p><strong>Behavior Impact:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Effect</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mgrs_grid</code></td>
+<td>Sets coordinate system origin</td>
+<td>Required (one of 3 methods)</td>
+</tr>
+<tr>
+<td><code>merge_operations</code></td>
+<td>Combines lanelets before conversion</td>
+<td>Empty (no merging)</td>
+</tr>
+<tr>
+<td><code>remove_lanelet_operations</code></td>
+<td>Removes lanelets from map</td>
+<td>Empty (no removal)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Alternative Origin Methods:</strong></p>
+<p><strong>Method A: MGRS Grid + Offset</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># conf/map/example_mgrs_offset.yaml</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nt">mgrs_grid</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;54SUE&quot;</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="nt">offset</span><span class="p">:</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">  </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">81655.73</span><span class="w">      </span><span class="c1"># Easting in meters</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50137.43</span><span class="w">      </span><span class="c1"># Northing in meters</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">  </span><span class="nt">z</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">42.49998</span><span class="w">      </span><span class="c1"># Altitude in meters</span>
+</code></pre></div>
+<strong>Behavior:</strong> Output coordinates = Lanelet2 coordinates - offset</p>
+<p><strong>Method B: Latitude/Longitude</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># conf/map/example_latlon.yaml</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="nt">lat_lon</span><span class="p">:</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="nt">latitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-33.123456</span><span class="w">   </span><span class="c1"># Decimal degrees</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">  </span><span class="nt">longitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">151.234567</span><span class="w">  </span><span class="c1"># Decimal degrees</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">  </span><span class="nt">altitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">42.5</span><span class="w">         </span><span class="c1"># Meters above sea level</span>
+</code></pre></div>
+<strong>Behavior:</strong> Direct lat/lon origin, MGRS grid auto-derived for PROJ string</p>
+<hr />
+<h4 id="3-target-configurations-conftargetyaml"><strong>3. Target Configurations</strong> (<code>conf/target/*.yaml</code>)<a class="headerlink" href="#3-target-configurations-conftargetyaml" title="Permanent link">&para;</a></h4>
+<p><strong>Purpose:</strong> Simulator-specific or use-case-specific settings.</p>
+<p><strong>Example: <code>conf/target/default.yaml</code></strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nt">exclude_non_junction_signals</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Include all traffic signals</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="nt">traffic_rule</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;RHT&quot;</span><span class="w">                  </span><span class="c1"># Right-Hand Traffic</span>
+</code></pre></div></p>
+<p><strong>Example: <code>conf/target/carla.yaml</code></strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nt">exclude_non_junction_signals</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">   </span><span class="c1"># CARLA compatibility</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="nt">traffic_rule</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;RHT&quot;</span><span class="w">                  </span><span class="c1"># Can be overridden</span>
+</code></pre></div></p>
+<div class="admonition info">
+<p class="admonition-title">CARLA-Specific Information</p>
+<p>For detailed information about how OpenDRIVE tags are used in CARLA and how Lanelet2 tags map to them, see <a href="../carla_opendrive_lanelet2_mapping/">CARLA OpenDRIVE and Lanelet2 Tag Mapping</a>.</p>
+</div>
+<p><strong>Behavior Impact:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th><code>false</code> Behavior</th>
+<th><code>true</code> Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>exclude_non_junction_signals</code></td>
+<td>Export all traffic signals</td>
+<td>Only export signals in junctions</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Traffic Rule</th>
+<th>Lane ID Ordering</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"RHT"</code></td>
+<td>Right-hand traffic (negative IDs)</td>
+<td>US, Europe, China</td>
+</tr>
+<tr>
+<td><code>"LHT"</code></td>
+<td>Left-hand traffic (negative IDs, same structure as RHT)</td>
+<td>UK, Japan, Australia</td>
+</tr>
+</tbody>
+</table>
+<h4 id="opendrive-coordinate-system-and-lane-placement">OpenDRIVE Coordinate System and Lane Placement<a class="headerlink" href="#opendrive-coordinate-system-and-lane-placement" title="Permanent link">&para;</a></h4>
+<p><strong>Road Coordinate System (s-t coordinate system)</strong>:
+- <strong>s-axis</strong>: Along the reference line (travel direction, always increasing)
+- <strong>t-axis</strong>: Lateral to the reference line (right is positive, left is negative)</p>
+<p><strong>Lane Coordinate System</strong>:
+- Each lane's s-coordinate corresponds to the road coordinate system's s-coordinate
+- Lane width is defined as the lateral distance from the reference line</p>
+<p><strong>Implementation Details</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Traffic Rule</th>
+<th>Reference Line Position</th>
+<th>Lane Position</th>
+<th>Lane ID</th>
+<th>Lane Group</th>
+<th>Lane Coordinate Direction</th>
+<th>t-coordinate Sign</th>
+<th>Compliant</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RHT</td>
+<td>Left edge (leftBound)</td>
+<td>Right side</td>
+<td>Negative (-1, -2, -3)</td>
+<td>Right lanes</td>
+<td><strong>Same as road coordinate (forward)</strong></td>
+<td>t &gt; 0</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>LHT</td>
+<td>Left edge (leftBound)</td>
+<td>Right side</td>
+<td>Negative (-1, -2, -3)</td>
+<td>Right lanes</td>
+<td><strong>Same as road coordinate (forward)</strong></td>
+<td>t &gt; 0</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key Points</strong>:</p>
+<ol>
+<li><strong>Unified reference line placement</strong></li>
+<li>Both RHT and LHT use the left edge (leftBound) as the reference line</li>
+<li>
+<p>This creates a consistent OpenDRIVE structure regardless of traffic rule</p>
+</li>
+<li>
+<p><strong>All lanes have s-axis aligned with road coordinate system</strong></p>
+</li>
+<li>For both RHT and LHT, s-coordinate increases in the travel direction</li>
+<li>
+<p>No need to reverse lane coordinate systems</p>
+</li>
+<li>
+<p><strong>Lane ID sign determines width definition direction</strong></p>
+</li>
+<li>
+<p>Both RHT and LHT use negative IDs (right lanes): from reference line to the right (t &gt; 0)</p>
+</li>
+<li>
+<p><strong>Traffic rule indication</strong></p>
+</li>
+<li>The <code>road@rule</code> attribute ("RHT" or "LHT") indicates the traffic direction</li>
+<li>This is the authoritative source for determining left-hand vs right-hand traffic</li>
+</ol>
+<p><strong>Visual Representation</strong>:</p>
+<p>RHT (Right-Hand Traffic):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>Reference Line (s-axis →, left edge)
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>[s=0] ━━━━━━━━━━━━━━━━━━━━━━━━━━━→ [s=L]
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>         ↓ (t &gt; 0, right direction)
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>    [Lane -1]  s-axis → (same as road coordinate)
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>    [Lane -2]  s-axis → (same as road coordinate)
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>    [Lane -3]  s-axis → (same as road coordinate)
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>    road@rule=&quot;RHT&quot;
+</code></pre></div></p>
+<p>LHT (Left-Hand Traffic):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>Reference Line (s-axis →, left edge)
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>[s=0] ━━━━━━━━━━━━━━━━━━━━━━━━━━━→ [s=L]
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>         ↓ (t &gt; 0, right direction)
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>    [Lane -1]  s-axis → (same as road coordinate)
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    [Lane -2]  s-axis → (same as road coordinate)
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    [Lane -3]  s-axis → (same as road coordinate)
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>    road@rule=&quot;LHT&quot; (indicates left-hand traffic direction)
+</code></pre></div></p>
+<p><strong>Note</strong>: Both RHT and LHT use the same geometric structure. The <code>road@rule</code> attribute is the only difference, which CARLA uses to determine the correct vehicle driving direction.</p>
+<hr />
+<h3 id="configuration-composition-and-merging">Configuration Composition and Merging<a class="headerlink" href="#configuration-composition-and-merging" title="Permanent link">&para;</a></h3>
+<p><strong>Hydra Configuration Resolution Order:</strong></p>
+<ol>
+<li><strong>Load <code>config.yaml</code></strong> (base configuration)</li>
+<li><strong>Merge <code>map/&lt;name&gt;.yaml</code></strong> (selected via <code>map=&lt;name&gt;</code>)</li>
+<li><strong>Merge <code>target/&lt;name&gt;.yaml</code></strong> (selected via <code>target=&lt;name&gt;</code>)</li>
+<li><strong>Apply command-line overrides</strong> (highest priority)</li>
+</ol>
+<p><strong>Example Merge Process:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">    </span><span class="nv">map</span><span class="o">=</span>nishishinjuku<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nv">target</span><span class="o">=</span>carla<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">    </span><span class="nv">input_map_path</span><span class="o">=</span>/path/to/map.osm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">    </span><span class="nv">verbose</span><span class="o">=</span><span class="nb">true</span>
+</code></pre></div>
+<p><strong>Resolution Steps:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>File</th>
+<th>Settings Loaded</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>config.yaml</code></td>
+<td><code>defaults</code>, <code>dry_run=false</code>, <code>verbose=false</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>map/nishishinjuku.yaml</code></td>
+<td><code>mgrs_grid</code>, <code>merge_operations</code>, etc.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>target/carla.yaml</code></td>
+<td><code>exclude_non_junction_signals=true</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>CLI override</td>
+<td><code>input_map_path=/path/to/map.osm</code>, <code>verbose=true</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Final Configuration:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nt">input_map_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/path/to/map.osm</span><span class="w">  </span><span class="c1"># From CLI</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="nt">mgrs_grid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;from nishishinjuku&gt;</span><span class="w">    </span><span class="c1"># From map config</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="nt">exclude_non_junction_signals</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w"> </span><span class="c1"># From target config</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="nt">verbose</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                      </span><span class="c1"># From CLI override</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="nt">dry_run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">                     </span><span class="c1"># From config.yaml</span>
+</code></pre></div></p>
+<hr />
+<h3 id="command-line-override-syntax">Command-Line Override Syntax<a class="headerlink" href="#command-line-override-syntax" title="Permanent link">&para;</a></h3>
+<p><strong>Basic Syntax:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span>&lt;key&gt;<span class="o">=</span>&lt;value&gt;
+</code></pre></div></p>
+<p><strong>Common Overrides:</strong></p>
+<p><strong>1. Change Configuration Groups:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="nv">map</span><span class="o">=</span>my_custom_map<span class="w"> </span><span class="nv">target</span><span class="o">=</span>carla
+</code></pre></div></p>
+<p><strong>2. Override Simple Values:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="nv">verbose</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">traffic_rule</span><span class="o">=</span>LHT
+</code></pre></div></p>
+<p><strong>3. Override Nested Values:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>offset.x<span class="o">=</span><span class="m">100</span>.5<span class="w"> </span>offset.y<span class="o">=</span><span class="m">200</span>.3<span class="w"> </span>offset.z<span class="o">=</span><span class="m">10</span>.0
+</code></pre></div></p>
+<p><strong>4. Add Preprocessing Operations:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>+merge_operations<span class="o">=</span><span class="s1">&#39;[{lanelet_ids: [100,101], validate: true}]&#39;</span>
+</code></pre></div></p>
+<p><strong>5. Null Out Optional Values:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="nv">output_map_path</span><span class="o">=</span>null
+</code></pre></div></p>
+<hr />
+<h3 id="configuration-examples-and-behaviors">Configuration Examples and Behaviors<a class="headerlink" href="#configuration-examples-and-behaviors" title="Permanent link">&para;</a></h3>
+<h4 id="example-1-basic-conversion"><strong>Example 1: Basic Conversion</strong><a class="headerlink" href="#example-1-basic-conversion" title="Permanent link">&para;</a></h4>
+<p><strong>Command:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">    </span><span class="nv">map</span><span class="o">=</span>example<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">    </span><span class="nv">input_map_path</span><span class="o">=</span>input.osm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="w">    </span><span class="nv">output_map_path</span><span class="o">=</span>output.xodr
+</code></pre></div></p>
+<p><strong>Configuration Result:</strong></p>
+<ul>
+<li>Origin: MGRS <code>54SUE815501</code></li>
+<li>No preprocessing operations</li>
+<li>Include all signals</li>
+<li>Right-hand traffic</li>
+<li>Output: <code>output.xodr</code></li>
+</ul>
+<p><strong>Behavior:</strong>
+1. Load <code>input.osm</code> with MGRS origin
+2. Convert all lanelets to OpenDRIVE
+3. Include all traffic signals
+4. Write to <code>output.xodr</code></p>
+<hr />
+<h4 id="example-2-carla-compatible-conversion"><strong>Example 2: CARLA-Compatible Conversion</strong><a class="headerlink" href="#example-2-carla-compatible-conversion" title="Permanent link">&para;</a></h4>
+<p><strong>Command:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="w">    </span><span class="nv">map</span><span class="o">=</span>my_map<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">    </span><span class="nv">target</span><span class="o">=</span>carla<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="w">    </span><span class="nv">input_map_path</span><span class="o">=</span>input.osm
+</code></pre></div></p>
+<p><strong>Configuration Result:</strong></p>
+<ul>
+<li>Origin: From <code>map/my_map.yaml</code></li>
+<li><code>exclude_non_junction_signals=true</code> (CARLA requirement)</li>
+<li>Auto-generated output path</li>
+<li>Right-hand traffic</li>
+</ul>
+<p><strong>Behavior:</strong>
+1. Load map with specified origin
+2. Convert lanelets to OpenDRIVE
+3. <strong>Filter out</strong> traffic signals NOT in junctions
+4. Write to auto-generated path: <code>input.xodr</code></p>
+<hr />
+<h4 id="example-3-preprocessing-custom-origin"><strong>Example 3: Preprocessing + Custom Origin</strong><a class="headerlink" href="#example-3-preprocessing-custom-origin" title="Permanent link">&para;</a></h4>
+<p><strong>Command:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">    </span><span class="nv">map</span><span class="o">=</span>example<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">    </span><span class="nv">input_map_path</span><span class="o">=</span>input.osm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="w">    </span><span class="nv">mgrs_grid</span><span class="o">=</span>54SUE<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="w">    </span>offset.x<span class="o">=</span><span class="m">81655</span>.73<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="w">    </span>offset.y<span class="o">=</span><span class="m">50137</span>.43<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="w">    </span>offset.z<span class="o">=</span><span class="m">42</span>.5<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="w">    </span>+merge_operations<span class="o">=</span><span class="s1">&#39;[{lanelet_ids: [100,101,102], validate: true}]&#39;</span>
+</code></pre></div></p>
+<p><strong>Configuration Result:</strong></p>
+<ul>
+<li>Origin: MGRS <code>54SUE</code> with offset</li>
+<li>Merge operations: Combine lanelets 100, 101, 102</li>
+<li>Coordinate offset applied: x=81655.73, y=50137.43, z=42.5</li>
+</ul>
+<p><strong>Behavior:</strong>
+1. Load map with MGRS+offset origin
+2. <strong>Preprocess:</strong> Merge lanelets 100, 101, 102 (validates continuity first)
+3. Convert to OpenDRIVE
+4. <strong>Apply offset:</strong> Output coords = Lanelet2 coords - offset
+5. Write to auto-generated path</p>
+<hr />
+<h4 id="example-4-validation-only-dry-run"><strong>Example 4: Validation Only (Dry Run)</strong><a class="headerlink" href="#example-4-validation-only-dry-run" title="Permanent link">&para;</a></h4>
+<p><strong>Command:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="w">    </span><span class="nv">map</span><span class="o">=</span>example<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="w">    </span><span class="nv">input_map_path</span><span class="o">=</span>input.osm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="w">    </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="w">    </span><span class="nv">verbose</span><span class="o">=</span><span class="nb">true</span>
+</code></pre></div></p>
+<p><strong>Configuration Result:</strong></p>
+<ul>
+<li><code>dry_run=true</code>: No output file written</li>
+<li><code>verbose=true</code>: Detailed logging enabled</li>
+</ul>
+<p><strong>Behavior:</strong>
+1. Load and parse map
+2. Execute all conversion steps
+3. <strong>Validate</strong> geometry and topology
+4. Log detailed information
+5. <strong>Skip</strong> writing output file
+6. Report validation results</p>
+<h3 id="configuration-validation">Configuration Validation<a class="headerlink" href="#configuration-validation" title="Permanent link">&para;</a></h3>
+<p><strong>Runtime Validation Checks:</strong></p>
+<ol>
+<li><strong>Origin Mutual Exclusivity</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L243-L265">preprocess_lanelet.py:243-265</a>)</li>
+<li>Error if both <code>mgrs_grid</code> and <code>lat_lon</code> specified</li>
+<li>
+<p>Error if <code>offset</code> used without <code>mgrs_grid</code></p>
+</li>
+<li>
+<p><strong>Required Fields</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L741-L852">main.py:741-852</a>)</p>
+</li>
+<li>
+<p>Error if <code>input_map_path</code> not specified (marked with <code>???</code>)</p>
+</li>
+<li>
+<p><strong>Coordinate Ranges</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L157-L162">preprocess_lanelet.py:157-162</a>)</p>
+</li>
+<li>Error if latitude not in [-90, 90]</li>
+<li>
+<p>Error if longitude not in [-180, 180]</p>
+</li>
+<li>
+<p><strong>Traffic Rule</strong> (<a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/conversion_config.py#L63-L68">conversion_config.py:63-68</a>)</p>
+</li>
+<li>Error if <code>traffic_rule</code> not in ["RHT", "LHT", null]</li>
+</ol>
+<p><strong>Validation Error Examples:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="c1"># Error: Missing required field</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="nv">map</span><span class="o">=</span>example
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="c1"># Error: Missing required field &#39;input_map_path&#39;</span>
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a>
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a><span class="c1"># Error: Conflicting origin methods</span>
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a><span class="w">    </span><span class="nv">mgrs_grid</span><span class="o">=</span>54SUE<span class="w"> </span>lat_lon.latitude<span class="o">=</span><span class="m">35</span>.0
+<a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a><span class="c1"># Error: Cannot specify both mgrs_grid and lat_lon</span>
+<a id="__codelineno-35-9" name="__codelineno-35-9" href="#__codelineno-35-9"></a>
+<a id="__codelineno-35-10" name="__codelineno-35-10" href="#__codelineno-35-10"></a><span class="c1"># Error: Invalid coordinate range</span>
+<a id="__codelineno-35-11" name="__codelineno-35-11" href="#__codelineno-35-11"></a>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-35-12" name="__codelineno-35-12" href="#__codelineno-35-12"></a><span class="w">    </span>lat_lon.latitude<span class="o">=</span><span class="m">95</span>.0
+<a id="__codelineno-35-13" name="__codelineno-35-13" href="#__codelineno-35-13"></a><span class="c1"># Error: Latitude must be in range [-90, 90]</span>
+</code></pre></div>
+<hr />
+<h3 id="preprocessing-operation-execution-order">Preprocessing Operation Execution Order<a class="headerlink" href="#preprocessing-operation-execution-order" title="Permanent link">&para;</a></h3>
+<p>When multiple preprocessing operations are configured, they execute in this fixed order:</p>
+<ol>
+<li><strong>Move Point Operations</strong> (modify individual points)</li>
+<li><strong>Delete Point Operations</strong> (remove points from linestrings)</li>
+<li><strong>Validate Operations</strong> (reporting only, no modification)</li>
+<li><strong>Replace Operations</strong> (merge + remove originals)</li>
+<li><strong>Merge Operations</strong> (merge, keep originals)</li>
+<li><strong>Remove Operations</strong> (legacy removal method)</li>
+<li><strong>Remove Lanelet Operations</strong> (complete lanelet removal)</li>
+<li><strong>Remove Turn Direction Operations</strong> (attribute removal)</li>
+</ol>
+<p><strong>Example Configuration with Multiple Operations:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="c1"># conf/map/complex_preprocessing.yaml</span>
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="nt">move_point_operations</span><span class="p">:</span>
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">point_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12345</span>
+<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="w">    </span><span class="nt">new_x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span>
+<a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a><span class="w">    </span><span class="nt">new_y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">200.0</span>
+<a id="__codelineno-36-6" name="__codelineno-36-6" href="#__codelineno-36-6"></a>
+<a id="__codelineno-36-7" name="__codelineno-36-7" href="#__codelineno-36-7"></a><span class="nt">delete_point_operations</span><span class="p">:</span>
+<a id="__codelineno-36-8" name="__codelineno-36-8" href="#__codelineno-36-8"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">point_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">12346</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">12347</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-36-9" name="__codelineno-36-9" href="#__codelineno-36-9"></a>
+<a id="__codelineno-36-10" name="__codelineno-36-10" href="#__codelineno-36-10"></a><span class="nt">validate_operations</span><span class="p">:</span>
+<a id="__codelineno-36-11" name="__codelineno-36-11" href="#__codelineno-36-11"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">first_lanelet_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+<a id="__codelineno-36-12" name="__codelineno-36-12" href="#__codelineno-36-12"></a><span class="w">    </span><span class="nt">second_lanelet_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">101</span>
+<a id="__codelineno-36-13" name="__codelineno-36-13" href="#__codelineno-36-13"></a><span class="w">    </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.001</span>
+<a id="__codelineno-36-14" name="__codelineno-36-14" href="#__codelineno-36-14"></a>
+<a id="__codelineno-36-15" name="__codelineno-36-15" href="#__codelineno-36-15"></a><span class="nt">replace_operations</span><span class="p">:</span>
+<a id="__codelineno-36-16" name="__codelineno-36-16" href="#__codelineno-36-16"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">101</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">102</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-36-17" name="__codelineno-36-17" href="#__codelineno-36-17"></a><span class="w">    </span><span class="nt">validate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-36-18" name="__codelineno-36-18" href="#__codelineno-36-18"></a>
+<a id="__codelineno-36-19" name="__codelineno-36-19" href="#__codelineno-36-19"></a><span class="nt">remove_lanelet_operations</span><span class="p">:</span>
+<a id="__codelineno-36-20" name="__codelineno-36-20" href="#__codelineno-36-20"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">lanelet_ids</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">300</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">301</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><strong>Execution Sequence:</strong>
+1. Move point 12345 to (100.0, 200.0)
+2. Delete points 12346, 12347
+3. Validate continuity: 100 → 101 (report only)
+4. Replace 100, 101, 102 with merged lanelet (originals removed)
+5. Remove lanelets 300, 301</p>
+<hr />
+<h3 id="debugging-configuration-issues">Debugging Configuration Issues<a class="headerlink" href="#debugging-configuration-issues" title="Permanent link">&para;</a></h3>
+<p><strong>View Resolved Configuration:</strong></p>
+<p>Hydra can print the final merged configuration:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="w">    </span><span class="nv">map</span><span class="o">=</span>example<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="w">    </span><span class="nv">target</span><span class="o">=</span>carla<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="w">    </span>--cfg<span class="w"> </span>job
+</code></pre></div>
+<p><strong>Enable Verbose Logging:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="w">    </span><span class="nv">map</span><span class="o">=</span>example<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">    </span><span class="nv">input_map_path</span><span class="o">=</span>input.osm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a><span class="w">    </span><span class="nv">verbose</span><span class="o">=</span><span class="nb">true</span>
+</code></pre></div>
+<p><strong>Output Shows:</strong></p>
+<ul>
+<li>Origin parsing details</li>
+<li>Coordinate offset activation</li>
+<li>Preprocessing operation execution</li>
+<li>Lanelet classification counts</li>
+<li>Road/junction construction progress</li>
+</ul>
+<p><strong>Check Configuration File Syntax:</strong></p>
+<p>Hydra will report YAML syntax errors at startup:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>autoware_lanelet2_to_opendrive.main<span class="w"> </span><span class="nv">map</span><span class="o">=</span>broken
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="c1"># Error: Invalid YAML syntax in conf/map/broken.yaml</span>
+</code></pre></div></p>
+<hr />
+<h3 id="best-practices-for-configuration">Best Practices for Configuration<a class="headerlink" href="#best-practices-for-configuration" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Create Custom Map Configs:</strong></li>
+<li>Copy <code>conf/map/example.yaml</code> as a template</li>
+<li>Name files descriptively: <code>conf/map/my_project_area.yaml</code></li>
+<li>
+<p>Include comments explaining special handling</p>
+</li>
+<li>
+<p><strong>Use Version Control for Configs:</strong></p>
+</li>
+<li>Track map-specific configurations in git</li>
+<li>
+<p>Document why specific preprocessing operations are needed</p>
+</li>
+<li>
+<p><strong>Validate Before Full Conversion:</strong></p>
+</li>
+<li>Use <code>dry_run=true</code> to test configuration</li>
+<li>
+<p>Use <code>validate_operations</code> to check lanelet continuity</p>
+</li>
+<li>
+<p><strong>Test Configuration Composition:</strong></p>
+</li>
+<li>Use <code>--cfg job</code> to verify final merged configuration</li>
+<li>
+<p>Test with <code>verbose=true</code> to understand behavior</p>
+</li>
+<li>
+<p><strong>Override Carefully:</strong></p>
+</li>
+<li>Prefer map configs over CLI overrides for repeatability</li>
+<li>
+<p>Use CLI overrides for one-off changes or testing</p>
+</li>
+<li>
+<p><strong>Document Preprocessing Rationale:</strong></p>
+</li>
+<li>Add YAML comments explaining why operations are needed</li>
+<li>Reference lanelet IDs and issue descriptions</li>
+</ol>
+<hr />
+<h2 id="lanelet2-tag-usage-summary">Lanelet2 Tag Usage Summary<a class="headerlink" href="#lanelet2-tag-usage-summary" title="Permanent link">&para;</a></h2>
+<p>This section summarizes which Lanelet2 tags are used by the converter and which are ignored.</p>
+<h3 id="tags-used-by-converter">Tags Used by Converter<a class="headerlink" href="#tags-used-by-converter" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Scope</th>
+<th>Used In</th>
+<th>Purpose</th>
+<th>Required?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>subtype</code></strong></td>
+<td>Lanelet</td>
+<td>Lane construction</td>
+<td>Determines lane type (DRIVING, SIDEWALK, BIKING)</td>
+<td>No (defaults to DRIVING)</td>
+</tr>
+<tr>
+<td><strong><code>subtype="crosswalk"</code></strong></td>
+<td>Lanelet</td>
+<td>Crosswalk object extraction</td>
+<td>Identifies pedestrian crossing lanelets</td>
+<td>Yes (for crosswalk objects)</td>
+</tr>
+<tr>
+<td><strong><code>type="stop_line"</code></strong></td>
+<td>LineString</td>
+<td>Stop line object extraction</td>
+<td>Identifies stop line linestrings</td>
+<td>Yes (for stop line objects)</td>
+</tr>
+<tr>
+<td><strong><code>speed_limit</code></strong></td>
+<td>Lanelet</td>
+<td>Road &amp; Lane metadata</td>
+<td>Sets speed restrictions</td>
+<td>No (uses fallback values)</td>
+</tr>
+<tr>
+<td><strong><code>location</code></strong></td>
+<td>Lanelet</td>
+<td>Road type classification</td>
+<td>Determines road type (TOWN, MOTORWAY, etc.)</td>
+<td>No (inferred from speed)</td>
+</tr>
+<tr>
+<td><strong><code>turn_direction</code></strong></td>
+<td>Lanelet</td>
+<td>Junction detection</td>
+<td>Identifies intersection lanelets</td>
+<td>Yes (for junctions)</td>
+</tr>
+<tr>
+<td><strong><code>type</code></strong> / <strong><code>subtype</code></strong></td>
+<td>Traffic light</td>
+<td>Signal type mapping</td>
+<td>Maps to OpenDRIVE signal types</td>
+<td>No (defaults available)</td>
+</tr>
+<tr>
+<td><strong><code>trafficLights</code></strong></td>
+<td>Regulatory element</td>
+<td>Signal positioning</td>
+<td>Provides signal geometry</td>
+<td>Yes (for signals)</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Tag Extraction Priority</p>
+<ul>
+<li><strong>Lane level:</strong> <code>subtype</code>, <code>speed_limit</code> are read per-lanelet</li>
+<li><strong>Road level:</strong> <code>location</code>, <code>speed_limit</code> are aggregated across lanelets in a road</li>
+<li><strong>Junction detection:</strong> <code>turn_direction</code> presence/absence is binary classifier</li>
+</ul>
+</div>
+<hr />
+<h3 id="tags-not-used-by-converter">Tags NOT Used by Converter<a class="headerlink" href="#tags-not-used-by-converter" title="Permanent link">&para;</a></h3>
+<p>The following Lanelet2 tags are commonly found in maps but are <strong>not currently used</strong> by this converter:</p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Scope</th>
+<th>Typical Use</th>
+<th>Reason Not Used</th>
+<th>Future Consideration</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>participant</code></strong></td>
+<td>Lanelet</td>
+<td>Specifies allowed users (vehicle, pedestrian, bicycle)</td>
+<td>Not mapped to OpenDRIVE lane access restrictions</td>
+<td>Could enhance lane <code>&lt;access&gt;</code> elements</td>
+</tr>
+<tr>
+<td><strong><code>one_way</code></strong></td>
+<td>Lanelet</td>
+<td>Indicates one-way streets</td>
+<td>Lanelet2 directionality already encoded in geometry</td>
+<td>Redundant with Lanelet2 semantics</td>
+</tr>
+<tr>
+<td><strong><code>vehicle</code></strong></td>
+<td>Lanelet</td>
+<td>Vehicle type restrictions (car, bus, truck)</td>
+<td>Not mapped to OpenDRIVE lane restrictions</td>
+<td>Could enhance lane <code>&lt;access&gt;</code> rules</td>
+</tr>
+<tr>
+<td><strong><code>region</code></strong></td>
+<td>Lanelet</td>
+<td>Administrative region or area type</td>
+<td>Not relevant to OpenDRIVE geometry</td>
+<td>Out of scope for geometric conversion</td>
+</tr>
+<tr>
+<td><strong><code>dynamic_speed_limit</code></strong></td>
+<td>Regulatory element</td>
+<td>Variable speed limits</td>
+<td>OpenDRIVE does not support dynamic attributes</td>
+<td>Static conversion only</td>
+</tr>
+<tr>
+<td><strong><code>traffic_sign</code></strong></td>
+<td>Regulatory element</td>
+<td>Traffic sign information</td>
+<td>Partially supported (only traffic lights)</td>
+<td>Future enhancement for general signs</td>
+</tr>
+<tr>
+<td><strong><code>right_of_way</code></strong></td>
+<td>Regulatory element</td>
+<td>Priority rules at intersections</td>
+<td>Not encoded in OpenDRIVE junctions</td>
+<td>Complex to map without controller logic</td>
+</tr>
+<tr>
+<td><strong><code>surface</code></strong></td>
+<td>Lanelet</td>
+<td>Road surface type (asphalt, gravel, etc.)</td>
+<td>Not part of OpenDRIVE road specification</td>
+<td>Could add as <code>&lt;userData&gt;</code> if needed</td>
+</tr>
+<tr>
+<td><strong><code>width</code></strong></td>
+<td>Lanelet boundary</td>
+<td>Lane width information</td>
+<td>Currently computed from geometry</td>
+<td>Could improve width calculation accuracy</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Ignored Attributes</p>
+<p>Tags not listed in "Tags Used by Converter" are silently ignored. No warnings are currently emitted for unused tags.</p>
+</div>
+<hr />
+<h3 id="geometry-attributes">Geometry Attributes<a class="headerlink" href="#geometry-attributes" title="Permanent link">&para;</a></h3>
+<p>The following Point-level attributes are created during preprocessing but are not sourced from original Lanelet2 tags:</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Source</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>local_x</code></td>
+<td>Calculated</td>
+<td>Local X coordinate after coordinate transformation</td>
+</tr>
+<tr>
+<td><code>local_y</code></td>
+<td>Calculated</td>
+<td>Local Y coordinate after coordinate transformation</td>
+</tr>
+<tr>
+<td><code>ele</code></td>
+<td>Lanelet2 Point.z</td>
+<td>Elevation (passed through from original data)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="tag-reading-code-locations">Tag Reading Code Locations<a class="headerlink" href="#tag-reading-code-locations" title="Permanent link">&para;</a></h2>
+<p>For developers seeking to understand or modify tag handling:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>File</th>
+<th>Code Link</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Road type extraction</strong></td>
+<td><code>opendrive/road.py</code></td>
+<td><a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L453-L513">Lines 453-513</a></td>
+<td>Reads <code>location</code> and <code>speed_limit</code> tags</td>
+</tr>
+<tr>
+<td><strong>Lane type extraction</strong></td>
+<td><code>opendrive/lane.py</code></td>
+<td><a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L150-L216">Lines 150-216</a></td>
+<td>Reads <code>subtype</code> and <code>speed_limit</code> tags</td>
+</tr>
+<tr>
+<td><strong>Junction filtering</strong></td>
+<td><code>junction.py</code></td>
+<td><a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L8-L52">Lines 8-52</a></td>
+<td>Checks for <code>turn_direction</code> tag presence</td>
+</tr>
+<tr>
+<td><strong>Signal type mapping</strong></td>
+<td><code>opendrive/signal.py</code></td>
+<td><a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signal.py#L281-L304">Lines 281-304</a></td>
+<td>Reads <code>type</code>/<code>subtype</code> from traffic lights</td>
+</tr>
+<tr>
+<td><strong>Signal extraction</strong></td>
+<td><code>opendrive/signals_and_controllers.py</code></td>
+<td><a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py#L75-L249">Lines 75-249</a></td>
+<td>Extracts regulatory elements</td>
+</tr>
+<tr>
+<td><strong>Subtype filtering</strong></td>
+<td><code>util.py</code></td>
+<td><a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L456-L503">Lines 456-503</a></td>
+<td>Filters lanelets by <code>subtype</code></td>
+</tr>
+<tr>
+<td><strong>Stop line extraction</strong></td>
+<td><code>opendrive/objects.py</code></td>
+<td><a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py"><code>StopLineObject</code></a>, <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py"><code>find_nearest_road_for_linestring()</code></a></td>
+<td>Reads <code>type</code> tag from linestrings, detects <code>stop_line</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="best-practices-for-input-maps">Best Practices for Input Maps<a class="headerlink" href="#best-practices-for-input-maps" title="Permanent link">&para;</a></h2>
+<p>To ensure optimal conversion results:</p>
+<ol>
+<li><strong>Tag Required Attributes:</strong></li>
+<li>Add <code>location</code> tag to lanelets for proper road type classification</li>
+<li>Add <code>speed_limit</code> tag for accurate speed restrictions</li>
+<li>
+<p>Add <code>turn_direction</code> to intersection lanelets for junction detection</p>
+</li>
+<li>
+<p><strong>Consistent Subtype Usage:</strong></p>
+</li>
+<li>Use standard subtypes: <code>"road"</code>, <code>"highway"</code>, <code>"walkway"</code>, <code>"bicycle_lane"</code></li>
+<li>
+<p>Avoid custom subtypes that won't be recognized</p>
+</li>
+<li>
+<p><strong>Traffic Light Setup:</strong></p>
+</li>
+<li>Ensure traffic lights have <code>type</code> or <code>subtype</code> attributes</li>
+<li>
+<p>Link traffic lights to appropriate lanelets via regulatory elements</p>
+</li>
+<li>
+<p><strong>Geometry Quality:</strong></p>
+</li>
+<li>Ensure lanelet boundaries are properly connected</li>
+<li>Verify successor/predecessor relationships are correct</li>
+<li>Check for gaps or overlaps in the lanelet network</li>
+</ol>
+<hr />
+<h2 id="troubleshooting-tag-issues">Troubleshooting Tag Issues<a class="headerlink" href="#troubleshooting-tag-issues" title="Permanent link">&para;</a></h2>
+<h3 id="missing-road-types">Missing Road Types<a class="headerlink" href="#missing-road-types" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Roads classified incorrectly or as generic type</p>
+<p><strong>Cause:</strong> Missing <code>location</code> tag</p>
+<p><strong>Solution:</strong> Add <code>location</code> attribute to lanelets with values: <code>"urban"</code>, <code>"highway"</code>, <code>"rural"</code>, or <code>"private"</code></p>
+<hr />
+<h3 id="missing-speed-limits">Missing Speed Limits<a class="headerlink" href="#missing-speed-limits" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> No speed limits in output OpenDRIVE</p>
+<p><strong>Cause:</strong> Missing <code>speed_limit</code> tag</p>
+<p><strong>Solution:</strong> Add <code>speed_limit</code> attribute to lanelets with numeric values in km/h</p>
+<hr />
+<h3 id="incorrect-lane-types">Incorrect Lane Types<a class="headerlink" href="#incorrect-lane-types" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Sidewalks or bike lanes classified as driving lanes</p>
+<p><strong>Cause:</strong> Missing or incorrect <code>subtype</code> tag</p>
+<p><strong>Solution:</strong> Ensure <code>subtype</code> is set correctly:
+- Driving lanes: <code>"road"</code> or <code>"highway"</code>
+- Sidewalks: <code>"walkway"</code>
+- Bike lanes: <code>"bicycle_lane"</code></p>
+<hr />
+<h3 id="junctions-not-detected">Junctions Not Detected<a class="headerlink" href="#junctions-not-detected" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Intersection lanelets treated as regular roads</p>
+<p><strong>Cause:</strong> Missing <code>turn_direction</code> tag on junction lanelets</p>
+<p><strong>Solution:</strong> Add <code>turn_direction</code> attribute to all lanelets within intersections (value can be <code>"straight"</code>, <code>"left"</code>, <code>"right"</code>, etc.)</p>
+<hr />
+<h3 id="traffic-lights-not-exported">Traffic Lights Not Exported<a class="headerlink" href="#traffic-lights-not-exported" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Traffic signals missing from OpenDRIVE output</p>
+<p><strong>Cause:</strong></p>
+<ul>
+<li>Regulatory elements not properly defined</li>
+<li>Missing <code>type</code> or <code>subtype</code> on traffic light</li>
+</ul>
+<p><strong>Solution:</strong></p>
+<ul>
+<li>Ensure traffic lights are added as regulatory elements</li>
+<li>Add <code>type</code> or <code>subtype</code> attribute with standard values</li>
+<li>Verify traffic lights reference the correct lanelets</li>
+</ul>
+<hr />
+<h2 id="future-enhancements">Future Enhancements<a class="headerlink" href="#future-enhancements" title="Permanent link">&para;</a></h2>
+<p>Potential improvements to tag handling:</p>
+<ol>
+<li><strong>Extended Tag Support:</strong></li>
+<li>Support <code>participant</code> tag for lane access restrictions</li>
+<li>Support <code>vehicle</code> tag for vehicle type restrictions</li>
+<li>
+<p>Support general <code>traffic_sign</code> regulatory elements</p>
+</li>
+<li>
+<p><strong>Tag Validation:</strong></p>
+</li>
+<li>Emit warnings for unknown tags</li>
+<li>Validate tag values against known schemas</li>
+<li>
+<p>Report missing recommended tags</p>
+</li>
+<li>
+<p><strong>Dynamic Attributes:</strong></p>
+</li>
+<li>Support time-based speed limits</li>
+<li>
+<p>Support conditional lane restrictions</p>
+</li>
+<li>
+<p><strong>Surface and Material:</strong></p>
+</li>
+<li>Map <code>surface</code> tag to OpenDRIVE surface properties</li>
+<li>Support lane material specifications</li>
+</ol>
+<hr />
+<h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../api/">API Reference</a> - Detailed API documentation for all classes</li>
+<li><a href="../usage/">Usage Guide</a> - Command-line usage and examples</li>
+<li><a href="../signals/">Signals</a> - Detailed signal conversion documentation</li>
+<li><a href="../limitations/">Known Limitations</a> - Current converter limitations</li>
+<li><a href="../carla_opendrive_lanelet2_mapping/">CARLA OpenDRIVE and Lanelet2 Tag Mapping</a> - CARLA-specific tag usage and mapping details</li>
+</ul>
+
+
+
+
+
+
+
+  
+    
+  
+  
+    
+  
+
+
+  <aside class="md-source-file">
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Last update">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 26, 2026 09:21:09 UTC"><span class="timeago" datetime="2026-02-26T09:21:09+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 26, 2026 09:21:09 UTC">2026-02-26</span>
+  </span>
+
+    
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Created">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 3, 2026 06:12:44 UTC"><span class="timeago" datetime="2026-02-03T06:12:44+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 3, 2026 06:12:44 UTC">2026-02-03</span>
+  </span>
+
+    
+    
+    
+  </aside>
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../js/timeago.min.js"></script>
+      
+        <script src="../js/timeago_mkdocs_material.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+      
+    
+  </body>
+</html>
