@@ -29,8 +29,14 @@ from autoware_carla_scenario.coordinate.transform import (
 )
 
 DATA_DIR = Path(__file__).parent / "data"
-XODR_PATH = DATA_DIR / "nishishinjuku.xodr"
-OSM_PATH = DATA_DIR / "nishishinjuku.osm"
+_CONVERTER_TEST_DATA = (
+    Path(__file__).resolve().parents[3]
+    / "autoware_lanelet2_to_opendrive"
+    / "test"
+    / "data"
+)
+XODR_PATH = _CONVERTER_TEST_DATA / "nishishinjuku_carla.xodr"
+OSM_PATH = _CONVERTER_TEST_DATA / "nishishinjuku.osm"
 
 
 # ---------------------------------------------------------------------------
