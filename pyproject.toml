@@ -28,6 +28,7 @@ dev = [
 
 [tool.mypy]
 ignore_missing_imports = true
+exclude = ["conftest\\.py$"]
 
 [[tool.mypy.overrides]]
 # Pre-existing type errors in the l2o package are out of scope for this PR.
