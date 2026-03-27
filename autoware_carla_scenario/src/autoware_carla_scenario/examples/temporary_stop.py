@@ -64,8 +64,8 @@ class TemporaryStopScenario(BaseScenario):
     def __init__(
         self,
         ego_config: EgoConfig,
+        spawn_pose: Lanelet2Pose,
         config: TemporaryStopConfig | None = None,
-        spawn_pose: Lanelet2Pose | None = None,
         ground_projection: GroundProjectionConfig | None = None,
     ) -> None:
         super().__init__(
@@ -80,7 +80,7 @@ class TemporaryStopScenario(BaseScenario):
 
         # --- Compute ego spawn from Lanelet2Pose via OpenDrivePose ---
         self._setup_ego_spawn()
-        assert self._spawn_pose is not None  # validated by _setup_ego_spawn
+        assert self._spawn_pose is not None  # narrow type for mypy
 
         # --- Set all traffic lights to green ---
         TrafficSignalAction(

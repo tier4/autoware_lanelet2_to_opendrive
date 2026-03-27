@@ -111,8 +111,8 @@ class IntersectionPassingScenario(BaseScenario):
     def __init__(
         self,
         ego_config: EgoConfig,
+        spawn_pose: Lanelet2Pose,
         config: IntersectionPassingConfig | None = None,
-        spawn_pose: Lanelet2Pose | None = None,
         ground_projection: GroundProjectionConfig | None = None,
     ) -> None:
         super().__init__(

@@ -84,8 +84,8 @@ class LaneChangeScenario(BaseScenario):
     def __init__(
         self,
         ego_config: EgoConfig,
+        spawn_pose: Lanelet2Pose,
         config: LaneChangeConfig | None = None,
-        spawn_pose: Lanelet2Pose | None = None,
         ground_projection: GroundProjectionConfig | None = None,
     ) -> None:
         super().__init__(
