@@ -190,7 +190,7 @@ jobs:
           install-system-deps: "true"
           install-dev-deps: "true"
 
-      - name: Build documentation with version info
+      - name: Build lanelet2-to-opendrive documentation
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
           # Get git info
@@ -209,6 +209,25 @@ jobs:
           # Build HTML documentation
           uv run mkdocs build --config-file autoware_lanelet2_to_opendrive/mkdocs.yml
 
+      - name: Build carla-scenario documentation
+        if: steps.pr-labels.outputs.bump_type != 'none'
+        run: |
+          # Get git info
+          GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          VERSION="${{ steps.bump-version.outputs.new_version }}"
+          export GIT_BRANCH GIT_COMMIT VERSION
+
+          # Update mkdocs.yml with version info
+          cat >> autoware_carla_scenario/mkdocs.yml << EOF
+            version_string: v${VERSION}
+            git_branch: ${GIT_BRANCH}
+            git_commit: ${GIT_COMMIT}
+          EOF
+
+          # Build HTML documentation
+          uv run mkdocs build --config-file autoware_carla_scenario/mkdocs.yml
+
       - name: Generate PDF documentation
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
@@ -216,7 +235,7 @@ jobs:
           ENABLE_PDF_EXPORT=1
           export ENABLE_PDF_EXPORT
 
-          # Build with PDF plugin enabled
+          # Build with PDF plugin enabled (lanelet2-to-opendrive)
           uv run mkdocs build --config-file autoware_lanelet2_to_opendrive/mkdocs.yml
 
           # Copy PDF to root for easy access
@@ -224,11 +243,23 @@ jobs:
             cp autoware_lanelet2_to_opendrive/site/pdf/documentation.pdf documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
           fi
 
+          # Build with PDF plugin enabled (carla-scenario)
+          uv run mkdocs build --config-file autoware_carla_scenario/mkdocs.yml
+
+          # Copy PDF to root for easy access
+          if [ -f autoware_carla_scenario/site/pdf/documentation.pdf ]; then
+            cp autoware_carla_scenario/site/pdf/documentation.pdf carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          fi
+
       - name: Create documentation archive
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
           cd autoware_lanelet2_to_opendrive/site
           zip -r ../../documentation-v${{ steps.bump-version.outputs.new_version }}.zip .
+          cd ../..
+
+          cd autoware_carla_scenario/site
+          zip -r ../../carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.zip .
           cd ../..
 
       - name: Upload HTML documentation to release
@@ -242,6 +273,17 @@ jobs:
           asset_name: documentation-v${{ steps.bump-version.outputs.new_version }}.zip
           asset_content_type: application/zip
 
+      - name: Upload carla-scenario HTML documentation to release
+        if: steps.pr-labels.outputs.bump_type != 'none'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.zip
+          asset_name: carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.zip
+          asset_content_type: application/zip
+
       - name: Upload PDF documentation to release
         if: steps.pr-labels.outputs.bump_type != 'none'
         uses: actions/upload-release-asset@v1
@@ -253,6 +295,17 @@ jobs:
           asset_name: documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
           asset_content_type: application/pdf
 
+      - name: Upload carla-scenario PDF documentation to release
+        if: steps.pr-labels.outputs.bump_type != 'none'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          asset_name: carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+          asset_content_type: application/pdf
+
       - name: Deploy to GitHub Pages with mike
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
@@ -262,7 +315,7 @@ jobs:
           # Fetch gh-pages branch
           git fetch origin gh-pages --depth=1 || true
 
-          # Deploy new version with mike
+          # Deploy lanelet2-to-opendrive docs
           uv run mike deploy --push --update-aliases --config-file autoware_lanelet2_to_opendrive/mkdocs.yml ${{ steps.bump-version.outputs.new_version }} latest
 
           # Set latest as default version
