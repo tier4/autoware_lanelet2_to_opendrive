@@ -190,65 +190,33 @@ jobs:
           install-system-deps: "true"
           install-dev-deps: "true"
 
-      - name: Build lanelet2-to-opendrive documentation
+      - name: Build documentation with PDF
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
-          # Get git info
           GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           GIT_COMMIT=$(git rev-parse --short HEAD)
           VERSION="${{ steps.bump-version.outputs.new_version }}"
-          export GIT_BRANCH GIT_COMMIT VERSION
+          export GIT_BRANCH GIT_COMMIT VERSION ENABLE_PDF_EXPORT=1
 
-          # Update mkdocs.yml with version info
-          cat >> autoware_lanelet2_to_opendrive/mkdocs.yml << EOF
+          # Inject version info into both mkdocs configs
+          for pkg_dir in autoware_lanelet2_to_opendrive autoware_carla_scenario; do
+            cat >> "${pkg_dir}/mkdocs.yml" << EOF
             version_string: v${VERSION}
             git_branch: ${GIT_BRANCH}
             git_commit: ${GIT_COMMIT}
           EOF
+          done
 
-          # Build HTML documentation
+          # Build both packages (produces HTML + PDF in one pass each)
           uv run mkdocs build --config-file autoware_lanelet2_to_opendrive/mkdocs.yml
-
-      - name: Build carla-scenario documentation
-        if: steps.pr-labels.outputs.bump_type != 'none'
-        run: |
-          # Get git info
-          GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          GIT_COMMIT=$(git rev-parse --short HEAD)
-          VERSION="${{ steps.bump-version.outputs.new_version }}"
-          export GIT_BRANCH GIT_COMMIT VERSION
-
-          # Update mkdocs.yml with version info
-          cat >> autoware_carla_scenario/mkdocs.yml << EOF
-            version_string: v${VERSION}
-            git_branch: ${GIT_BRANCH}
-            git_commit: ${GIT_COMMIT}
-          EOF
-
-          # Build HTML documentation
           uv run mkdocs build --config-file autoware_carla_scenario/mkdocs.yml
 
-      - name: Generate PDF documentation
-        if: steps.pr-labels.outputs.bump_type != 'none'
-        run: |
-          # Enable PDF export
-          ENABLE_PDF_EXPORT=1
-          export ENABLE_PDF_EXPORT
-
-          # Build with PDF plugin enabled (lanelet2-to-opendrive)
-          uv run mkdocs build --config-file autoware_lanelet2_to_opendrive/mkdocs.yml
-
-          # Copy PDF to root for easy access
+          # Copy PDFs to root for release upload
           if [ -f autoware_lanelet2_to_opendrive/site/pdf/documentation.pdf ]; then
-            cp autoware_lanelet2_to_opendrive/site/pdf/documentation.pdf documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+            cp autoware_lanelet2_to_opendrive/site/pdf/documentation.pdf documentation-v${VERSION}.pdf
           fi
-
-          # Build with PDF plugin enabled (carla-scenario)
-          uv run mkdocs build --config-file autoware_carla_scenario/mkdocs.yml
-
-          # Copy PDF to root for easy access
           if [ -f autoware_carla_scenario/site/pdf/documentation.pdf ]; then
-            cp autoware_carla_scenario/site/pdf/documentation.pdf carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
+            cp autoware_carla_scenario/site/pdf/documentation.pdf carla-scenario-documentation-v${VERSION}.pdf
           fi
 
       - name: Create documentation archive
