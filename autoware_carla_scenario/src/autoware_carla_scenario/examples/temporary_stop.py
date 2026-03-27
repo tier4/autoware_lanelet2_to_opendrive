@@ -31,16 +31,13 @@ from autoware_carla_scenario import (
     EgoConfig,
     GroundProjectionConfig,
     Lanelet2Pose,
-    SpawnTransform,
     SpeedCondition,
     StickyCondition,
     TemporaryStopCondition,
     TimeoutCondition,
     TrafficLightTarget,
     TrafficSignalAction,
-    find_actor_by_role_name,
     get_stop_line_poses_with_following,
-    snap_to_carla_road,
     to_opendrive,
 )
 
@@ -67,14 +64,14 @@ class TemporaryStopScenario(BaseScenario):
     def __init__(
         self,
         ego_config: EgoConfig,
+        spawn_pose: Lanelet2Pose,
         config: TemporaryStopConfig | None = None,
-        spawn_pose: Lanelet2Pose | None = None,
         ground_projection: GroundProjectionConfig | None = None,
     ) -> None:
-        super().__init__(ego_config)
+        super().__init__(
+            ego_config, spawn_pose=spawn_pose, ground_projection=ground_projection
+        )
         self._config = config or TemporaryStopConfig()
-        self._spawn_pose = spawn_pose
-        self._ground_projection = ground_projection or GroundProjectionConfig()
 
     def setup(self) -> None:
         """Snap ego spawn to CARLA road, register temporary stop condition."""
@@ -82,37 +79,8 @@ class TemporaryStopScenario(BaseScenario):
         cfg = self._config
 
         # --- Compute ego spawn from Lanelet2Pose via OpenDrivePose ---
-        if self._spawn_pose is None:
-            msg = "spawn_pose is required for TemporaryStopScenario"
-            raise ValueError(msg)
-        ll2_pose = self._spawn_pose
-        od_pose = to_opendrive(ll2_pose)
-        snapped = snap_to_carla_road(
-            od_pose, world, ground_projection=self._ground_projection
-        )
-
-        logger.info(
-            "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
-            "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
-            ll2_pose.lanelet_id,
-            od_pose.road_id,
-            od_pose.lane_id,
-            od_pose.s,
-            snapped.x,
-            snapped.y,
-            snapped.z,
-            snapped.yaw,
-        )
-
-        # Update ego_config so the framework spawns the ego at the snapped pose
-        self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
-        self.ego_config.od_pose = od_pose
-        self.ego_config.ground_projection = self._ground_projection
-
-        # Use BaseScenario helpers for common post-tick patterns
-        ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
-        self.follow_with_spectator(ego_actor)
-        self.log_actor_position(ego_actor, label="ego")
+        self._setup_ego_spawn()
+        assert self._spawn_pose is not None  # narrow type for mypy
 
         # --- Set all traffic lights to green ---
         TrafficSignalAction(
@@ -122,7 +90,7 @@ class TemporaryStopScenario(BaseScenario):
         ).execute(world)
 
         # --- Auto-detect stop line from spawn lanelet + following lanelets ---
-        spawn_lanelet_id = ll2_pose.lanelet_id
+        spawn_lanelet_id = self._spawn_pose.lanelet_id
         stop_poses = get_stop_line_poses_with_following(spawn_lanelet_id)
         if not stop_poses:
             msg = (
