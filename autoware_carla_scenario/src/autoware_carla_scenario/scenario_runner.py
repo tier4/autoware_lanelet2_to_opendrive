@@ -436,6 +436,12 @@ class ScenarioRunner:
             self._world = self._client.get_world()
 
         world = self._world
+        scenario_name = type(scenario).__name__
+
+        # Destroy any leftover actors from a previous scenario that may
+        # have survived a failed reload_world().  On a clean world this
+        # is a no-op.
+        _destroy_all_dynamic_actors(world, scenario_name)
 
         # Enable synchronous mode so we control the simulation tick rate.
         # Original settings are not saved because reload_world() at the
@@ -458,7 +464,6 @@ class ScenarioRunner:
         result: Optional[ScenarioResult] = None
 
         try:
-            scenario_name = type(scenario).__name__
             logger.info("[%s] === Setup start ===", scenario_name)
             scenario.set_client(self._client, tm_port=self._tm_port)
             scenario.setup()
@@ -612,6 +617,19 @@ class ScenarioRunner:
         finally:
             logger.info("[%s] === Cleanup start ===", scenario_name)
             _vehicle_entity_module._warmup_done = False
+
+            # Explicitly destroy the ego vehicle so it does not persist
+            # if reload_world() fails later.
+            try:
+                ego.destroy()
+                logger.info("[%s] Ego vehicle destroyed", scenario_name)
+            except Exception:
+                logger.warning(
+                    "[%s] Failed to destroy ego vehicle",
+                    scenario_name,
+                    exc_info=True,
+                )
+
             if recording_started:
                 self._client.stop_recorder()
                 logger.info("[%s] Recorder stopped", scenario_name)
@@ -662,13 +680,26 @@ class ScenarioRunner:
             world = self._client.get_world()
             world.tick()
             self._client.reload_world()
+            # After reload, get the fresh world and tick it once so that
+            # CARLA fully initialises the new world state.
             self._world = self._client.get_world()
-            logger.info("[%s] World reloaded", scenario_name)
+            self._world.tick()
+            logger.info("[%s] World reloaded and ticked", scenario_name)
         except Exception:
             logger.warning(
                 "[%s] reload_world failed — world may retain residual state",
                 scenario_name,
                 exc_info=True,
             )
+            # Ensure self._world is refreshed even on failure so that the
+            # next scenario does not operate on a stale world reference.
+            try:
+                self._world = self._client.get_world()
+            except Exception:
+                logger.warning(
+                    "[%s] Failed to refresh world reference after reload failure",
+                    scenario_name,
+                    exc_info=True,
+                )
 
         return result
