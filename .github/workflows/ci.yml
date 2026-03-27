@@ -103,26 +103,19 @@ jobs:
         install-dev-deps: "true"
         run-precommit: "false"
 
-    - name: Build documentation
-      run: |
-        GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-        GIT_COMMIT=$(git rev-parse --short HEAD)
-        export GIT_BRANCH GIT_COMMIT
+    - name: Build lanelet2-to-opendrive documentation
+      uses: ./.github/actions/build-docs
+      with:
+        package-dir: autoware_lanelet2_to_opendrive
+        config-file: mkdocs.ci.yml
+        strict: "true"
 
-        # Inject version info and build each package
-        for pkg_dir in autoware_lanelet2_to_opendrive autoware_carla_scenario; do
-          VERSION=$(grep '^version = ' "${pkg_dir}/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
-          export VERSION
-
-          cat >> "${pkg_dir}/mkdocs.yml" << EOF
-          version_string: v${VERSION}
-          git_branch: ${GIT_BRANCH}
-          git_commit: ${GIT_COMMIT}
-        EOF
-
-          # Use mkdocs.ci.yml to exclude with-pdf plugin (avoids PDF WARNING in strict mode)
-          uv run mkdocs build --strict --config-file "${pkg_dir}/mkdocs.ci.yml"
-        done
+    - name: Build carla-scenario documentation
+      uses: ./.github/actions/build-docs
+      with:
+        package-dir: autoware_carla_scenario
+        config-file: mkdocs.ci.yml
+        strict: "true"
 
     - name: Upload lanelet2-to-opendrive documentation artifact
       uses: actions/upload-artifact@v4
