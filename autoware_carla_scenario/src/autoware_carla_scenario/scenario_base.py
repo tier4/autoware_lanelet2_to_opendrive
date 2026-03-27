@@ -10,9 +10,16 @@ from typing import Callable, List, Optional, Union
 import carla
 
 from .actions import BaseAction
-from .conditions import BaseCondition
+from .conditions import BaseCondition, find_actor_by_role_name
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
-from .entity._spawn import SpawnLocation
+from .coordinate import (
+    GroundProjectionConfig,
+    Lanelet2Pose,
+    OpenDrivePose,
+    snap_to_carla_road,
+    to_opendrive,
+)
+from .entity._spawn import SpawnLocation, SpawnTransform
 from .entity.vehicle_entity import VehicleEntity, VehicleEntityConfig
 
 logger = logging.getLogger(__name__)
@@ -75,17 +82,30 @@ class BaseScenario(ABC):
     STABILIZE_TICKS: int = 5
 
     def __init__(
-        self, ego_config: EgoConfig, *, random_seed: int = DEFAULT_RANDOM_SEED
+        self,
+        ego_config: EgoConfig,
+        *,
+        spawn_pose: Lanelet2Pose | None = None,
+        ground_projection: GroundProjectionConfig | None = None,
+        random_seed: int = DEFAULT_RANDOM_SEED,
     ) -> None:
         """Initialize the scenario with an ego vehicle configuration.
 
         Args:
             ego_config: Spawn configuration for the ego vehicle.
+            spawn_pose: Optional Lanelet2 pose for the ego spawn point.
+                When provided, :meth:`_setup_ego_spawn` can convert it to a
+                CARLA-snapped spawn location.
+            ground_projection: Ground-projection settings used when snapping
+                poses to the CARLA road surface.  Defaults to
+                :class:`GroundProjectionConfig` with default values.
             random_seed: Seed for the CARLA TrafficManager random device.
                 Using a fixed seed ensures deterministic NPC behaviour across
                 runs.  Defaults to :attr:`DEFAULT_RANDOM_SEED` (``0``).
         """
         self.ego_config = ego_config
+        self._spawn_pose = spawn_pose
+        self._ground_projection = ground_projection or GroundProjectionConfig()
         self.random_seed = random_seed
         self._client: Optional["carla.Client"] = None
         self._tm_port: int = DEFAULT_TM_PORT
@@ -147,6 +167,54 @@ class BaseScenario(ABC):
     # ------------------------------------------------------------------
     # Abstract interface – must be implemented by subclasses
     # ------------------------------------------------------------------
+
+    def _setup_ego_spawn(self) -> OpenDrivePose:
+        """Convert the Lanelet2 spawn pose to CARLA and update ego_config.
+
+        Converts :attr:`_spawn_pose` through OpenDRIVE to a CARLA world
+        position, snaps it to the road surface, updates :attr:`ego_config`
+        with the resulting spawn location, and registers spectator-follow
+        and position-logging callbacks.
+
+        Returns:
+            The intermediate :class:`OpenDrivePose` (useful for deriving
+            target lane IDs, route conditions, etc.).
+
+        Raises:
+            ValueError: If :attr:`_spawn_pose` is ``None``.
+        """
+        if self._spawn_pose is None:
+            msg = f"spawn_pose is required for {type(self).__name__}"
+            raise ValueError(msg)
+        ll2_pose = self._spawn_pose
+        od_pose = to_opendrive(ll2_pose)
+        world = self.world
+        snapped = snap_to_carla_road(
+            od_pose, world, ground_projection=self._ground_projection
+        )
+
+        logger.info(
+            "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
+            "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
+            ll2_pose.lanelet_id,
+            od_pose.road_id,
+            od_pose.lane_id,
+            od_pose.s,
+            snapped.x,
+            snapped.y,
+            snapped.z,
+            snapped.yaw,
+        )
+
+        self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
+        self.ego_config.od_pose = od_pose
+        self.ego_config.ground_projection = self._ground_projection
+
+        ego_actor = lambda: find_actor_by_role_name(world, EGO_ROLE_NAME)  # noqa: E731
+        self.follow_with_spectator(ego_actor)
+        self.log_actor_position(ego_actor, label="ego")
+
+        return od_pose
 
     @abstractmethod
     def setup(self) -> None:
