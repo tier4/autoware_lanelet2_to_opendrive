@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+<!-- Version warning for outdated documentation (only shown when using mike versioning) -->
+{% block outdated %}
+  {% if version is defined and version.title %}
+    You are viewing documentation for version <strong>{{ version.title }}</strong>.
+    <a href="{{ '../' ~ base_url }}">
+      <strong>Click here to view the latest version.</strong>
+    </a>
+  {% endif %}
+{% endblock %}
