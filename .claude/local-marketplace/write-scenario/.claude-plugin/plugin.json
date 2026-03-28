@@ -1,0 +1,9 @@
+{
+  "name": "write-scenario",
+  "version": "0.1.0",
+  "description": "Interactive CARLA test scenario writer for autoware_carla_scenario package",
+  "author": {
+    "name": "tier4",
+    "url": "https://github.com/tier4/autoware_lanelet2_to_opendrive"
+  }
+}

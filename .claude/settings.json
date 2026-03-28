@@ -1,0 +1,14 @@
+{
+  "enabledPlugins": {
+    "write-scenario@local": true
+  },
+  "extraKnownMarketplaces": {
+    "local": {
+      "source": {
+        "source": "github",
+        "repo": "tier4/autoware_lanelet2_to_opendrive",
+        "path": ".claude/local-marketplace"
+      }
+    }
+  }
+}

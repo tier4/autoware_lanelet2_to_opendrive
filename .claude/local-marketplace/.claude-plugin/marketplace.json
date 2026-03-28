@@ -1,0 +1,13 @@
+{
+  "name": "local",
+  "owner": {
+    "name": "tier4"
+  },
+  "plugins": [
+    {
+      "name": "write-scenario",
+      "source": "./write-scenario",
+      "description": "Interactive CARLA test scenario writer for autoware_carla_scenario package"
+    }
+  ]
+}
