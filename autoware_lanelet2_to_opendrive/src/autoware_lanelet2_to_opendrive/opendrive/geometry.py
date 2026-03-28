@@ -1,29 +1,16 @@
 """OpenDRIVE geometry definitions."""
 
-import sys
 from dataclasses import dataclass
 from typing import List, Optional, TYPE_CHECKING
 import lxml.etree as ET
 import numpy as np
 
 from .enums import GeometryType
+from .xml_utils import replace_subnormal
 
 if TYPE_CHECKING:
     from ..spline import Splines
     from ..conversion_config import ParamPoly3Config
-
-_FLOAT_MIN_NORMAL = sys.float_info.min
-
-
-def _replace_subnormal(value: float) -> float:
-    """Return 0.0 if value is an IEEE 754 subnormal float, otherwise return it unchanged.
-
-    Subnormals (0 < |value| < sys.float_info.min) can cause issues in some XML
-    parsers and downstream tools.
-    """
-    if 0.0 < abs(value) < _FLOAT_MIN_NORMAL:
-        return 0.0
-    return value
 
 
 @dataclass
@@ -472,7 +459,7 @@ class ParamPoly3(GeometryBase):
         elem = super().to_xml()
         poly_elem = ET.SubElement(elem, "paramPoly3")
         for attr in ("aU", "bU", "cU", "dU", "aV", "bV", "cV", "dV"):
-            poly_elem.set(attr, str(_replace_subnormal(getattr(self, attr))))
+            poly_elem.set(attr, str(replace_subnormal(getattr(self, attr))))
         poly_elem.set("pRange", self.pRange)
         return elem
 

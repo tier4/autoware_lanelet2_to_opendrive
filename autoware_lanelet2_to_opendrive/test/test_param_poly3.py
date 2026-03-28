@@ -5,10 +5,8 @@ import sys
 import numpy as np
 import pytest
 from autoware_lanelet2_to_opendrive.spline import Splines
-from autoware_lanelet2_to_opendrive.opendrive.geometry import (
-    ParamPoly3,
-    _replace_subnormal,
-)
+from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3
+from autoware_lanelet2_to_opendrive.opendrive.xml_utils import replace_subnormal
 
 
 class TestParamPoly3FromSpline:
@@ -266,34 +264,34 @@ class TestParamPoly3DynamicSegments:
 
 
 class TestReplaceSubnormal:
-    """Tests for _replace_subnormal and subnormal handling in to_xml."""
+    """Tests for replace_subnormal and subnormal handling in to_xml."""
 
     def test_subnormal_replaced_with_zero(self):
         """Test that subnormal values are replaced with 0.0."""
-        assert _replace_subnormal(5e-324) == 0.0
-        assert _replace_subnormal(1e-310) == 0.0
-        assert _replace_subnormal(-5e-324) == 0.0
-        assert _replace_subnormal(-1e-310) == 0.0
+        assert replace_subnormal(5e-324) == 0.0
+        assert replace_subnormal(1e-310) == 0.0
+        assert replace_subnormal(-5e-324) == 0.0
+        assert replace_subnormal(-1e-310) == 0.0
 
     def test_zero_unchanged(self):
         """Test that zero remains zero."""
-        assert _replace_subnormal(0.0) == 0.0
-        assert _replace_subnormal(-0.0) == 0.0
+        assert replace_subnormal(0.0) == 0.0
+        assert replace_subnormal(-0.0) == 0.0
 
     def test_normal_values_unchanged(self):
         """Test that normal (non-subnormal) values are not modified."""
         min_normal = sys.float_info.min  # ~2.2250738585072014e-308
-        assert _replace_subnormal(min_normal) == min_normal
-        assert _replace_subnormal(1.0) == 1.0
-        assert _replace_subnormal(-1.0) == -1.0
-        assert _replace_subnormal(1e-100) == 1e-100
+        assert replace_subnormal(min_normal) == min_normal
+        assert replace_subnormal(1.0) == 1.0
+        assert replace_subnormal(-1.0) == -1.0
+        assert replace_subnormal(1e-100) == 1e-100
 
     def test_boundary_at_min_normal(self):
         """Test the boundary between subnormal and normal values."""
         min_normal = sys.float_info.min
         just_below = min_normal / 2.0
-        assert _replace_subnormal(just_below) == 0.0
-        assert _replace_subnormal(min_normal) == min_normal
+        assert replace_subnormal(just_below) == 0.0
+        assert replace_subnormal(min_normal) == min_normal
 
     def test_to_xml_replaces_subnormal_coefficients(self):
         """Test that to_xml outputs 0.0 for subnormal coefficients."""

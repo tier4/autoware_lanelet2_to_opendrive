@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import List
 import lxml.etree as ET
 
+from .xml_utils import replace_subnormal
+
 
 @dataclass
 class Elevation:
@@ -20,9 +22,8 @@ class Elevation:
         elem = ET.Element("elevation")
         elem.set("s", str(self.s))
         elem.set("a", str(self.a))
-        elem.set("b", str(self.b))
-        elem.set("c", str(self.c))
-        elem.set("d", str(self.d))
+        for attr in ("b", "c", "d"):
+            elem.set(attr, str(replace_subnormal(getattr(self, attr))))
         return elem
 
 

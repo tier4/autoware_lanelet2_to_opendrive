@@ -5,6 +5,7 @@ from typing import Optional
 import lxml.etree as ET
 
 from .enums import RoadMarkType, RoadMarkColor, RoadMarkLaneChange, SpeedUnit, RoadType
+from .xml_utils import replace_subnormal
 
 
 @dataclass
@@ -21,10 +22,8 @@ class LaneWidth:
         """Convert to XML element."""
         elem = ET.Element("width")
         elem.set("sOffset", str(self.s_offset))
-        elem.set("a", str(self.a))
-        elem.set("b", str(self.b))
-        elem.set("c", str(self.c))
-        elem.set("d", str(self.d))
+        for attr in ("a", "b", "c", "d"):
+            elem.set(attr, str(replace_subnormal(getattr(self, attr))))
         return elem
 
 
@@ -75,10 +74,8 @@ class LaneBorder:
         """Convert to XML element."""
         elem = ET.Element("border")
         elem.set("sOffset", str(self.s_offset))
-        elem.set("a", str(self.a))
-        elem.set("b", str(self.b))
-        elem.set("c", str(self.c))
-        elem.set("d", str(self.d))
+        for attr in ("a", "b", "c", "d"):
+            elem.set(attr, str(replace_subnormal(getattr(self, attr))))
         return elem
 
 
