@@ -21,8 +21,7 @@ class Elevation:
         """Convert to XML element."""
         elem = ET.Element("elevation")
         elem.set("s", str(self.s))
-        elem.set("a", str(self.a))
-        for attr in ("b", "c", "d"):
+        for attr in ("a", "b", "c", "d"):
             elem.set(attr, str(replace_subnormal(getattr(self, attr))))
         return elem
 
