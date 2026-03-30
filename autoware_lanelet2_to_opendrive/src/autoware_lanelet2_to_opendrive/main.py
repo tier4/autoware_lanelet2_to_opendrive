@@ -771,7 +771,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     pitch=0.0,
                     orientation="-" if signal_t < 0 else "+",
                     dynamic="no",
-                    country="OpenDRIVE",
+                    country="DE",
                     type=signal_type,
                     subtype=-1,
                     value=-1.0,

@@ -33,7 +33,7 @@ def test_add_signal():
         t=-2.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
     )
@@ -71,7 +71,7 @@ def test_signals_and_controllers_repr():
         t=-2.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
     )
@@ -98,7 +98,7 @@ def test_signals_and_controllers_to_xml():
         t=-3.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
     )
@@ -176,7 +176,7 @@ def test_multiple_signals_single_controller():
         t=-2.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
     )
@@ -187,7 +187,7 @@ def test_multiple_signals_single_controller():
         t=-2.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
     )

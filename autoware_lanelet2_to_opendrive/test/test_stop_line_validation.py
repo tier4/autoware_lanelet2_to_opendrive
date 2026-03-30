@@ -201,19 +201,19 @@ class TestParseStopLinesFromXodr:
                 <signals>
                   <signal id="100" name="StopLine_1812" type="294"
                           s="10.0" t="0.0" zOffset="0.0" orientation="-"
-                          dynamic="no" country="OpenDRIVE" subtype="-1"/>
+                          dynamic="no" country="DE" subtype="-1"/>
                   <signal id="101" name="StopSign_1864" type="206"
                           s="20.0" t="0.0" zOffset="0.0" orientation="-"
-                          dynamic="no" country="OpenDRIVE" subtype="-1"/>
+                          dynamic="no" country="DE" subtype="-1"/>
                   <signal id="102" name="YieldSign_1230" type="205"
                           s="30.0" t="0.0" zOffset="0.0" orientation="-"
-                          dynamic="no" country="OpenDRIVE" subtype="-1"/>
+                          dynamic="no" country="DE" subtype="-1"/>
                   <signal id="103" name="StopLine_1230" type="294"
                           s="30.0" t="0.0" zOffset="0.0" orientation="-"
-                          dynamic="no" country="OpenDRIVE" subtype="-1"/>
+                          dynamic="no" country="DE" subtype="-1"/>
                   <signal id="50" name="TrafficLight_999" type="1000001"
                           s="10.0" t="-5.0" zOffset="3.0" orientation="-"
-                          dynamic="yes" country="OpenDRIVE" subtype="-1"/>
+                          dynamic="yes" country="DE" subtype="-1"/>
                 </signals>
               </road>
             </OpenDRIVE>
@@ -262,13 +262,13 @@ class TestParseStopLinesFromXodr:
                 <signals>
                   <signal id="100" name="StopLine_1812" type="294"
                           s="10.0" t="0.0" zOffset="0.0" orientation="-"
-                          dynamic="no" country="OpenDRIVE" subtype="-1">
+                          dynamic="no" country="DE" subtype="-1">
                     <dependency id="50" type="trafficLight"/>
                     <dependency id="51" type="trafficLight"/>
                   </signal>
                   <signal id="50" name="TrafficLight_999" type="1000001"
                           s="10.0" t="-5.0" zOffset="3.0" orientation="-"
-                          dynamic="yes" country="OpenDRIVE" subtype="-1"/>
+                          dynamic="yes" country="DE" subtype="-1"/>
                 </signals>
               </road>
             </OpenDRIVE>
@@ -289,7 +289,7 @@ class TestParseStopLinesFromXodr:
                 <signals>
                   <signal id="100" name="StopLine_1812" type="294"
                           s="10.0" t="0.0" zOffset="0.0" orientation="-"
-                          dynamic="no" country="OpenDRIVE" subtype="-1"/>
+                          dynamic="no" country="DE" subtype="-1"/>
                 </signals>
               </road>
             </OpenDRIVE>
