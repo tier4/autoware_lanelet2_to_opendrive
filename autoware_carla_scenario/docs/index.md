@@ -21,6 +21,7 @@ This package provides a framework for creating and running automated scenario te
 
 - [Installation Guide](installation.md) - Get started with installing the package
 - [Usage Guide](usage.md) - Learn how to run scenarios
+- [Architecture](architecture.md) - Software architecture and design decisions
 - [API Reference](api.md) - Detailed API documentation
 - [Development Guide](development.md) - Contributing and development setup
 
