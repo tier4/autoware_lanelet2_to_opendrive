@@ -187,7 +187,7 @@ class Signal:
     t: float  # t-coordinate lateral offset from the road reference line
     dynamic: str  # "yes" or "no" - whether signal changes during simulation
     orientation: str  # "+" or "-" - orientation with respect to road direction
-    country: str  # Country code (e.g., "OpenDRIVE", "US", "DE")
+    country: str  # Country code (e.g., "DE", "US", "JP")
     type: int  # Signal type ID
     subtype: int  # Signal subtype ID
     z_offset: float = 0.0  # Height offset
@@ -434,7 +434,7 @@ class Signal:
             pitch=0.0,
             orientation=orientation,
             dynamic="yes",  # Traffic lights are always dynamic
-            country="OpenDRIVE",  # Use OpenDRIVE country code for simulation
+            country="DE",  # Use German StVO country code
             type=signal_type,
             subtype=signal_subtype,
             value=-1.0,  # No speed limit value for traffic lights
@@ -452,7 +452,7 @@ class Signal:
 class SignalType:
     """Common signal type IDs for OpenDRIVE signals."""
 
-    # Traffic lights (type 1000001-1000003 commonly used with country="OpenDRIVE")
+    # Traffic lights (type 1000001-1000003 commonly used with country="DE")
     TRAFFIC_LIGHT_3_LIGHTS = (
         1000001  # Standard 3-light traffic signal (red, yellow, green)
     )
@@ -472,4 +472,4 @@ class SignalType:
     STOP_LINE = 294
 
     # Custom types should use appropriate country codes and follow
-    # national regulations or use country="OpenDRIVE" for simulation-specific signals
+    # national regulations (e.g., country="DE" for German StVO signals)

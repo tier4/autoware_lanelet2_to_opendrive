@@ -49,7 +49,7 @@ def test_signal_creation():
         pitch=0.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
         value=-1.0,
@@ -74,7 +74,7 @@ def test_signal_to_xml():
         z_offset=-0.69904327392578125,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=1000001,
         subtype=-1,
         height=1.1595988571643829,
@@ -89,7 +89,7 @@ def test_signal_to_xml():
     assert xml.get("name") == "Signal_3Light_Post01"
     assert xml.get("orientation") == "-"
     assert xml.get("dynamic") == "yes"
-    assert xml.get("country") == "OpenDRIVE"
+    assert xml.get("country") == "DE"
     assert xml.get("type") == "1000001"
     assert xml.get("subtype") == "-1"
 
@@ -109,7 +109,7 @@ def test_signal_xml_formatting():
         t=-4.4797897637266599,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=1000001,
         subtype=-1,
     )
@@ -130,7 +130,7 @@ def test_signal_repr():
         t=-3.2,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=1000001,
         subtype=-1,
     )
@@ -154,7 +154,7 @@ def test_complete_signal_xml_output():
         pitch=0.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=1000001,
         subtype=-1,
         value=-1.0,
@@ -172,7 +172,7 @@ def test_complete_signal_xml_output():
     assert 'name="Signal_3Light_Post01"' in xml_string
     assert 'orientation="-"' in xml_string
     assert 'dynamic="yes"' in xml_string
-    assert 'country="OpenDRIVE"' in xml_string
+    assert 'country="DE"' in xml_string
     assert 'type="1000001"' in xml_string
     assert 'subtype="-1"' in xml_string
 
@@ -227,7 +227,7 @@ def test_construct_from_lanelet2_traffic_signal_basic():
     assert signal.z_offset == 5.0
     assert signal.orientation == "-"
     assert signal.dynamic == "yes"
-    assert signal.country == "OpenDRIVE"
+    assert signal.country == "DE"
     assert signal.type == SignalType.TRAFFIC_LIGHT_3_LIGHTS
     assert signal.subtype == -1
     assert len(signal.validities) == 1
@@ -518,7 +518,7 @@ def test_signal_to_signal_reference_xml():
         t=6.51,  # Original signal lateral offset
         orientation="+",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=1000001,
         subtype=-1,
         validities=[Validity(from_lane=-1, to_lane=-1)],
@@ -553,7 +553,7 @@ def test_signal_reference_with_multiple_validities():
         t=-3.5,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=1000001,
         subtype=-1,
         validities=[
@@ -576,7 +576,7 @@ def test_signal_reference_without_validities():
         t=-4.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=1000001,
         subtype=-1,
         validities=None,
@@ -627,7 +627,7 @@ def test_stop_line_signal_with_dependencies():
         t=0.0,
         orientation="-",
         dynamic="no",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.STOP_LINE,
         subtype=-1,
         dependencies=[
@@ -662,7 +662,7 @@ def test_traffic_light_signal_with_stop_line_reference():
         t=-4.5,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
         references=[
@@ -695,7 +695,7 @@ def test_signal_dependency_ordering_after_validity():
         t=-2.0,
         orientation="-",
         dynamic="no",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.STOP_LINE,
         subtype=-1,
         validities=[Validity(from_lane=-1, to_lane=-1)],
@@ -721,7 +721,7 @@ def test_signal_no_dependencies_no_elements():
         t=-3.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
     )
@@ -751,7 +751,7 @@ def test_stop_sign_signal_creation():
         z_offset=0.0,
         orientation="-",
         dynamic="no",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.STOP_SIGN,
         subtype=-1,
         value=-1.0,
@@ -775,7 +775,7 @@ def test_stop_sign_signal_to_xml():
         t=-1.0,
         orientation="-",
         dynamic="no",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.STOP_SIGN,
         subtype=-1,
         validities=[Validity(from_lane=-1, to_lane=-1)],
@@ -806,7 +806,7 @@ def test_stop_sign_signal_has_no_dependencies():
         t=-3.0,
         orientation="-",
         dynamic="no",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.STOP_SIGN,
         subtype=-1,
     )
@@ -839,7 +839,7 @@ def test_yield_sign_signal_creation():
         z_offset=0.0,
         orientation="-",
         dynamic="no",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.YIELD_SIGN,
         subtype=-1,
         value=-1.0,
@@ -872,7 +872,7 @@ def test_road_marking_stop_line_with_yield_dependency():
         z_offset=0.0,
         orientation="-",
         dynamic="no",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.STOP_LINE,
         subtype=-1,
         value=-1.0,
@@ -935,7 +935,7 @@ def test_signal_with_position_inertial_xml():
         t=-4.5,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
         validities=[Validity(from_lane=-1, to_lane=-1)],
@@ -968,7 +968,7 @@ def test_signal_without_position_inertial_xml():
         t=-3.0,
         orientation="-",
         dynamic="yes",
-        country="OpenDRIVE",
+        country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
     )

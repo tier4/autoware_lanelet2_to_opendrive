@@ -38,7 +38,7 @@ traffic_light = Signal(
     pitch=0.0,
     orientation="-",
     dynamic="yes",  # Traffic lights are dynamic
-    country="OpenDRIVE",
+    country="DE",
     type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
     subtype=-1,
     value=-1.0,
@@ -69,7 +69,7 @@ signal = Signal(
     pitch=0.0,
     orientation="-",
     dynamic="yes",  # Changes during simulation
-    country="OpenDRIVE",
+    country="DE",
     type=1000001,  # 3-light traffic signal
     subtype=-1,
     value=-1.0,
@@ -90,7 +90,7 @@ The `SignalType` class provides constants for common signal types:
 - **`TRAFFIC_LIGHT_PEDESTRIAN`** (1000002): Pedestrian traffic light
 - **`TRAFFIC_LIGHT_ARROW`** (1000003): Arrow traffic light
 
-These types use `country="OpenDRIVE"` for simulation-specific signals. For national regulations, use appropriate country codes (e.g., "US", "DE", "JP").
+These types use `country="DE"` (German StVO). For other national regulations, use appropriate country codes (e.g., "US", "JP").
 
 ## Signal Attributes
 
@@ -102,7 +102,7 @@ These types use `country="OpenDRIVE"` for simulation-specific signals. For natio
 - **`t`**: Lateral offset from road reference line (m)
 - **`orientation`**: "+" or "-" (orientation with respect to road direction)
 - **`dynamic`**: "yes" or "no" (whether signal changes during simulation)
-- **`country`**: Country code or "OpenDRIVE"
+- **`country`**: Country code (e.g., "DE", "US", "JP")
 - **`type`**: Signal type ID
 - **`subtype`**: Signal subtype ID
 
@@ -150,7 +150,7 @@ The implementation generates OpenDRIVE-compliant XML:
         zOffset="0.0000000000000000e+00"
         orientation="-"
         dynamic="yes"
-        country="OpenDRIVE"
+        country="DE"
         type="1000001"
         subtype="-1"
         height="1.2000000000000000e+00"
