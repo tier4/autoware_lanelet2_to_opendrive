@@ -204,6 +204,102 @@ class IsJunctionConstraint:
         return "turn_direction" in lanelet.attributes
 
 
+@dataclass(frozen=True)
+class LaneletLengthConstraint:
+    """Matches lanelets whose 2D centerline length satisfies a comparison rule.
+
+    Uses ``lanelet2.geometry.length2d()`` to compute the length and the
+    :class:`~autoware_carla_scenario.conditions.comparison.ComparisonRule`
+    enum for the comparison operator::
+
+        # Only lanelets at least 10 metres long
+        - type: lanelet_length
+          rule: greater_than_or_equal
+          value: 10.0
+
+        # Lanelets shorter than 5 metres
+        - type: lanelet_length
+          rule: less_than
+          value: 5.0
+
+    Supported ``rule`` values: ``greater_than``, ``less_than``,
+    ``equal_to``, ``greater_than_or_equal``, ``less_than_or_equal``.
+    """
+
+    rule: str = "greater_than_or_equal"
+    value: float = 0.0
+
+    def __post_init__(self) -> None:
+        from ..conditions.comparison import ComparisonRule
+
+        valid = {r.name.lower() for r in ComparisonRule}
+        if self.rule not in valid:
+            raise ValueError(f"Unknown rule {self.rule!r}. Available: {sorted(valid)}")
+
+    def evaluate(self, lanelet: Any) -> bool:
+        """Return ``True`` if lanelet length satisfies the comparison rule."""
+        import lanelet2.geometry
+
+        from ..conditions.comparison import ComparisonRule, compare
+
+        length = lanelet2.geometry.length2d(lanelet)
+        rule_enum = ComparisonRule[self.rule.upper()]
+        return compare(length, rule_enum, self.value)
+
+
+@dataclass(frozen=True)
+class HasAdjacentConstraint:
+    """Matches lanelets that have an adjacent lane in the specified direction.
+
+    Uses the routing graph to determine whether a same-direction passable
+    neighbour exists via ``routing_graph.left()`` or
+    ``routing_graph.right()``.  This is useful for finding lanelets
+    suitable for lane-change scenarios::
+
+        # Lanelets with a left adjacent lane
+        - type: has_adjacent
+          value: left
+
+        # Lanelets with a right adjacent lane
+        - type: has_adjacent
+          value: right
+
+    Combine with ``not`` to find lanelets *without* an adjacent lane
+    (lane-change-fail scenarios)::
+
+        - type: not
+          constraint:
+            type: has_adjacent
+            value: left
+    """
+
+    value: str = "left"
+
+    def __post_init__(self) -> None:
+        if self.value not in ("left", "right"):
+            raise ValueError(
+                f"HasAdjacentConstraint value must be 'left' or 'right', "
+                f"got {self.value!r}"
+            )
+
+    def find_matching_ids(
+        self, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> set[int]:
+        """Return IDs of lanelets that have an adjacent lane."""
+        if routing_graph is None:
+            routing_graph = create_routing_graph(lanelet_map)
+        getter = routing_graph.left if self.value == "left" else routing_graph.right
+        result: set[int] = set()
+        for lanelet in lanelet_map.laneletLayer:
+            if getter(lanelet) is not None:
+                result.add(lanelet.id)
+        return result
+
+    def evaluate(self, lanelet: Any) -> bool:
+        """Check membership in pre-computed adjacent set."""
+        return lanelet.id in self._cached_ids  # type: ignore[attr-defined]
+
+
 # ---------------------------------------------------------------------------
 # Composite constraints (and / or / not)
 # ---------------------------------------------------------------------------
@@ -326,7 +422,9 @@ def _bind_set_level_constraints(
     ``find_matching_ids`` and stores the result as ``_cached_ids`` using
     ``object.__setattr__`` (the dataclasses are frozen).
     """
-    if isinstance(constraint, (PreviousOfConstraint, FollowingOfConstraint)):
+    if isinstance(
+        constraint, (PreviousOfConstraint, FollowingOfConstraint, HasAdjacentConstraint)
+    ):
         ids = constraint.find_matching_ids(lanelet_map, routing_graph)
         object.__setattr__(constraint, "_cached_ids", ids)
     if hasattr(constraint, "constraints"):
@@ -345,6 +443,8 @@ _LEAF_REGISTRY: dict[str, type] = {
     "has_stop_line": HasStopLineConstraint,
     "has_traffic_light_stop_line": HasTrafficLightStopLineConstraint,
     "is_junction": IsJunctionConstraint,
+    "has_adjacent": HasAdjacentConstraint,
+    "lanelet_length": LaneletLengthConstraint,
     "equals": EqualsConstraint,
     "in_set": InSetConstraint,
 }
