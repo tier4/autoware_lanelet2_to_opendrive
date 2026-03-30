@@ -52,13 +52,18 @@ Use the `debug-concrete-scenario` command (or `scenario-debugging` skill) to exe
 
 This stage autonomously runs the execute → analyze → fix loop. See the `scenario-debugging` skill for log analysis patterns and common failure fixes. Once the user confirms the behavior matches intent, proceed to Stage 3.
 
-### Stage 3: Define Logical Scenario Parameters
+### Stage 3: Review and Define Logical Scenario Parameters
 
-Decide which values become parameters. **Prioritize orthogonality** between parameters — orthogonal parameters simplify constraint solving in the sweeper.
+Use the `scenario-review` skill to analyze the parameter design before defining logical parameters. The review skill provides a structured process for:
 
-**Key rule:** When an NPC spawn depends on the ego's position (e.g., "spawn NPC on the lanelet before ego"), make only the ego's lanelet ID a parameter. Compute the NPC position in Python from the ego parameter.
+1. Identifying candidate parameters from the concrete scenario
+2. Analyzing orthogonality between parameter pairs
+3. Classifying each candidate as parameter, binding, Python-computed, or constant
+4. Validating NPC dependency design (NPC positions derived from ego must be computed in Python, not swept)
+5. Verifying sweeper compatibility (constraint/binding types exist)
+6. Presenting a review summary for user confirmation
 
-Write parameters as a dataclass in `configs.py` and corresponding YAML in `conf/scenario/`. Concrete and logical parameters share the same YAML file.
+After the review is confirmed, write parameters as a dataclass in `configs.py` and corresponding YAML in `conf/scenario/`. Concrete and logical parameters share the same YAML file.
 
 ### Stage 4: Discover Constraints/Bindings and Add Sweep Config
 
