@@ -11,6 +11,7 @@ from .reference_line import ReferenceLine
 from ..conversion_config import WidthEstimationConfig
 from .enums import RoadMarkType, RoadMarkColor, RoadMarkLaneChange
 from .lane_elements import RoadMark
+from .xml_utils import replace_subnormal
 
 
 class LaneSection:
@@ -245,10 +246,8 @@ class LaneSection:
         if self.lane_offset:
             offset_elem = ET.SubElement(elem, "laneOffset")
             offset_elem.set("s", str(self.lane_offset["s"]))
-            offset_elem.set("a", str(self.lane_offset["a"]))
-            offset_elem.set("b", str(self.lane_offset["b"]))
-            offset_elem.set("c", str(self.lane_offset["c"]))
-            offset_elem.set("d", str(self.lane_offset["d"]))
+            for key in ("a", "b", "c", "d"):
+                offset_elem.set(key, str(replace_subnormal(self.lane_offset[key])))
 
         # Add left lanes
         if self.left_lanes:

@@ -6,6 +6,7 @@ import lxml.etree as ET
 import numpy as np
 
 from .enums import GeometryType
+from .xml_utils import replace_subnormal
 
 if TYPE_CHECKING:
     from ..spline import Splines
@@ -457,14 +458,8 @@ class ParamPoly3(GeometryBase):
         """Convert to XML element."""
         elem = super().to_xml()
         poly_elem = ET.SubElement(elem, "paramPoly3")
-        poly_elem.set("aU", str(self.aU))
-        poly_elem.set("bU", str(self.bU))
-        poly_elem.set("cU", str(self.cU))
-        poly_elem.set("dU", str(self.dU))
-        poly_elem.set("aV", str(self.aV))
-        poly_elem.set("bV", str(self.bV))
-        poly_elem.set("cV", str(self.cV))
-        poly_elem.set("dV", str(self.dV))
+        for attr in ("aU", "bU", "cU", "dU", "aV", "bV", "cV", "dV"):
+            poly_elem.set(attr, str(replace_subnormal(getattr(self, attr))))
         poly_elem.set("pRange", self.pRange)
         return elem
 

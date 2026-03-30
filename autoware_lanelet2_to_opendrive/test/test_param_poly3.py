@@ -1,9 +1,12 @@
 """Tests for ParamPoly3 geometry class."""
 
+import sys
+
 import numpy as np
 import pytest
 from autoware_lanelet2_to_opendrive.spline import Splines
 from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3
+from autoware_lanelet2_to_opendrive.opendrive.xml_utils import replace_subnormal
 
 
 class TestParamPoly3FromSpline:
@@ -258,3 +261,95 @@ class TestParamPoly3DynamicSegments:
 
         # Zero length: should return min_segments
         assert ParamPoly3._calculate_optimal_num_segments(0.0) == 1
+
+
+class TestReplaceSubnormal:
+    """Tests for replace_subnormal and subnormal handling in to_xml."""
+
+    def test_subnormal_replaced_with_zero(self):
+        """Test that subnormal values are replaced with 0.0."""
+        assert replace_subnormal(5e-324) == 0.0
+        assert replace_subnormal(1e-310) == 0.0
+        assert replace_subnormal(-5e-324) == 0.0
+        assert replace_subnormal(-1e-310) == 0.0
+
+    def test_zero_unchanged(self):
+        """Test that zero remains zero."""
+        assert replace_subnormal(0.0) == 0.0
+        assert replace_subnormal(-0.0) == 0.0
+
+    def test_normal_values_unchanged(self):
+        """Test that normal (non-subnormal) values are not modified."""
+        min_normal = sys.float_info.min  # ~2.2250738585072014e-308
+        assert replace_subnormal(min_normal) == min_normal
+        assert replace_subnormal(1.0) == 1.0
+        assert replace_subnormal(-1.0) == -1.0
+        assert replace_subnormal(1e-100) == 1e-100
+
+    def test_boundary_at_min_normal(self):
+        """Test the boundary between subnormal and normal values."""
+        min_normal = sys.float_info.min
+        just_below = min_normal / 2.0
+        assert replace_subnormal(just_below) == 0.0
+        assert replace_subnormal(min_normal) == min_normal
+
+    def test_to_xml_replaces_subnormal_coefficients(self):
+        """Test that to_xml outputs 0.0 for subnormal coefficients."""
+        subnormal_val = 5e-324
+        segment = ParamPoly3(
+            s=0.0,
+            x=0.0,
+            y=0.0,
+            hdg=0.0,
+            length=1.0,
+            aU=subnormal_val,
+            bU=1.0,
+            cU=-subnormal_val,
+            dU=0.0,
+            aV=subnormal_val,
+            bV=0.0,
+            cV=0.0,
+            dV=-subnormal_val,
+        )
+
+        xml_elem = segment.to_xml()
+        poly3_elem = xml_elem.find("paramPoly3")
+
+        assert poly3_elem.get("aU") == "0.0"
+        assert poly3_elem.get("bU") == "1.0"
+        assert poly3_elem.get("cU") == "0.0"
+        assert poly3_elem.get("dU") == "0.0"
+        assert poly3_elem.get("aV") == "0.0"
+        assert poly3_elem.get("bV") == "0.0"
+        assert poly3_elem.get("cV") == "0.0"
+        assert poly3_elem.get("dV") == "0.0"
+
+    def test_to_xml_preserves_normal_coefficients(self):
+        """Test that to_xml preserves normal coefficient values."""
+        segment = ParamPoly3(
+            s=0.0,
+            x=0.0,
+            y=0.0,
+            hdg=0.0,
+            length=1.0,
+            aU=0.0,
+            bU=1.0,
+            cU=-0.5,
+            dU=0.1,
+            aV=0.0,
+            bV=0.01,
+            cV=-0.02,
+            dV=0.003,
+        )
+
+        xml_elem = segment.to_xml()
+        poly3_elem = xml_elem.find("paramPoly3")
+
+        assert poly3_elem.get("aU") == "0.0"
+        assert poly3_elem.get("bU") == "1.0"
+        assert poly3_elem.get("cU") == "-0.5"
+        assert poly3_elem.get("dU") == "0.1"
+        assert poly3_elem.get("aV") == "0.0"
+        assert poly3_elem.get("bV") == "0.01"
+        assert poly3_elem.get("cV") == "-0.02"
+        assert poly3_elem.get("dV") == "0.003"
