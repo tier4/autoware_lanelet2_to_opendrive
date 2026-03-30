@@ -56,12 +56,16 @@ Use `/debug-concrete-scenario <name>/<variant>` to execute the scenario, analyze
 
 This stage is handled by the `debug-concrete-scenario` command, which autonomously runs the execute → analyze → fix loop and reports back. Once the user confirms the behavior matches their intent, proceed to Stage 5.
 
-### Stage 5: Define Logical Scenario Parameters
+### Stage 5: Review and Define Logical Scenario Parameters
 
-Once the concrete scenario passes, discuss which values should become parameters:
-1. List candidate parameters and explain orthogonality considerations
-2. Recommend which parameters to expose vs. compute in Python
-3. Confirm the parameter set with the user
+Once the concrete scenario passes, use the `scenario-review` skill to analyze the parameter design:
+
+1. **Identify candidates:** List all hardcoded values that could vary across test runs
+2. **Analyze orthogonality:** Check each parameter pair for independence using the orthogonality checklist
+3. **Classify each candidate:** Determine whether each value should be a parameter, binding, Python-computed, or constant
+4. **Validate NPC dependencies:** Ensure NPC positions that depend on ego are computed in Python, not swept independently
+5. **Verify sweeper compatibility:** Confirm constraint/binding types exist for the proposed parameter design
+6. **Present review summary:** Show the classification and orthogonality check results, then confirm the parameter set with the user
 
 Update the YAML config to include concrete parameter values (these serve as the default concrete scenario).
 
