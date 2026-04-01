@@ -307,10 +307,10 @@ jobs:
           HYDRA_FULL_ERROR=1 uv run convert \
             map=nishishinjuku \
             target=carla \
-            input_map_path=test/data/nishishinjuku.osm
+            input_map_path=autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm
 
       - name: Rename output to sample_nishishinjuku.xodr
-        run: mv test/data/nishishinjuku.xodr sample_nishishinjuku.xodr
+        run: mv autoware_lanelet2_to_opendrive/test/data/nishishinjuku.xodr sample_nishishinjuku.xodr
 
       - name: Upload sample xodr to GitHub Release
         run: |
