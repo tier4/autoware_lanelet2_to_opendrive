@@ -1,5 +1,7 @@
 """Tests for utility functions."""
 
+from unittest.mock import MagicMock
+
 import lanelet2
 from autoware_lanelet2_to_opendrive.projection import (
     mgrs_to_lanelet2_origin,
@@ -9,6 +11,9 @@ from autoware_lanelet2_to_opendrive.projection import (
     latlon_to_proj_string,
 )
 from autoware_lanelet2_to_opendrive.util import (
+    TrafficLightAdapter,
+    _matches_element_type,
+    _maybe_wrap,
     find_lanelets_without_next,
     find_lanelets_without_previous,
     find_terminal_lanelets,
@@ -894,3 +899,110 @@ def test_latlon_to_proj_string_utm_zone_calculation():
     # Zone 60: 174 to 180 (e.g., lon=177 should be zone 60)
     proj_zone60 = latlon_to_proj_string(0.0, 177.0)
     assert "+zone=60" in proj_zone60
+
+
+# ---------------------------------------------------------------------------
+# TrafficLightAdapter and subtype-based detection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_generic_traffic_light_reg_elem(
+    elem_id: int = 42,
+) -> MagicMock:
+    """Create a mock generic RegulatoryElement that mimics a traffic_light."""
+    reg = MagicMock()
+    reg.id = elem_id
+    reg.attributes = {"subtype": "traffic_light", "type": "regulatory_element"}
+
+    # Simulate ConstRuleParameterMap with bracket access and ``in`` operator
+    ls1 = MagicMock()
+    ls1.id = 100
+    ls1.__len__ = lambda _self: 3
+    ls2 = MagicMock()
+    ls2.id = 101
+    ls2.__len__ = lambda _self: 3
+
+    ref_line = MagicMock()
+    ref_line.id = 200
+
+    params = {
+        "refers": [ls1, ls2],
+        "ref_line": [ref_line],
+        "light_bulbs": [ls1],
+    }
+    reg.parameters = params
+
+    # Ensure the mock does NOT have native trafficLights property
+    del reg.trafficLights
+    del reg.stopLine
+
+    return reg
+
+
+def test_traffic_light_adapter_traffic_lights():
+    """TrafficLightAdapter.trafficLights returns 'refers' parameter."""
+    reg = _make_generic_traffic_light_reg_elem()
+    adapter = TrafficLightAdapter(reg)
+
+    tls = adapter.trafficLights
+    assert len(tls) == 2
+
+
+def test_traffic_light_adapter_stop_line():
+    """TrafficLightAdapter.stopLine returns first 'ref_line' parameter."""
+    reg = _make_generic_traffic_light_reg_elem()
+    adapter = TrafficLightAdapter(reg)
+
+    sl = adapter.stopLine
+    assert sl is not None
+    assert sl.id == 200
+
+
+def test_traffic_light_adapter_stop_line_empty():
+    """TrafficLightAdapter.stopLine returns None when ref_line is missing."""
+    reg = _make_generic_traffic_light_reg_elem()
+    del reg.parameters["ref_line"]
+    adapter = TrafficLightAdapter(reg)
+
+    assert adapter.stopLine is None
+
+
+def test_traffic_light_adapter_id_and_attributes():
+    """TrafficLightAdapter delegates id and attributes."""
+    reg = _make_generic_traffic_light_reg_elem(elem_id=99)
+    adapter = TrafficLightAdapter(reg)
+
+    assert adapter.id == 99
+    assert adapter.attributes["subtype"] == "traffic_light"
+
+
+def test_matches_element_type_subtype_fallback():
+    """_matches_element_type detects traffic_light via subtype attribute."""
+    reg = _make_generic_traffic_light_reg_elem()
+    assert _matches_element_type(reg, "trafficLights") is True
+
+
+def test_matches_element_type_unknown_type():
+    """_matches_element_type returns False for unknown element types."""
+    reg = _make_generic_traffic_light_reg_elem()
+    # MagicMock auto-creates attributes, so use spec to restrict
+    reg = MagicMock(spec=["id", "attributes", "parameters"])
+    reg.id = 42
+    reg.attributes = {"subtype": "traffic_light", "type": "regulatory_element"}
+    reg.parameters = {}
+    assert _matches_element_type(reg, "unknownType") is False
+
+
+def test_maybe_wrap_wraps_generic_reg_elem():
+    """_maybe_wrap wraps generic RegulatoryElement for trafficLights."""
+    reg = _make_generic_traffic_light_reg_elem()
+    wrapped = _maybe_wrap(reg, "trafficLights")
+    assert isinstance(wrapped, TrafficLightAdapter)
+
+
+def test_maybe_wrap_passes_through_native_subclass():
+    """_maybe_wrap returns native TrafficLight subclass unchanged."""
+    reg = MagicMock()
+    reg.trafficLights = [MagicMock()]  # has native property
+    wrapped = _maybe_wrap(reg, "trafficLights")
+    assert wrapped is reg  # not wrapped

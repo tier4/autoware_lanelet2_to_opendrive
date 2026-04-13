@@ -14,9 +14,14 @@ import hydra
 import mgrs as mgrs_lib
 from omegaconf import DictConfig, OmegaConf
 
-# Import autoware extensions before loading maps to ensure proper registration
-# The order matters: projection module must be imported to register extensions
+# Import autoware extensions before loading maps to ensure proper registration.
+# The order matters: importing both projection AND regulatory_elements is
+# required.  The regulatory_elements import registers AutowareTrafficLight
+# (and other custom types) with the lanelet2 C++ factory so that
+# lanelet2.io.load() creates the correct subclasses instead of falling back
+# to generic RegulatoryElement.
 from autoware_lanelet2_extension_python.projection import MGRSProjector
+import autoware_lanelet2_extension_python.regulatory_elements as _ll2_ext_reg  # noqa: F401
 import lanelet2
 
 from autoware_lanelet2_to_opendrive.projection import (

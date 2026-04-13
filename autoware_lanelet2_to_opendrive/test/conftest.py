@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-# Import autoware extensions before any tests to ensure proper registration
+# Import autoware extensions before any tests to ensure proper registration.
+# Both projection AND regulatory_elements must be imported so that the
+# lanelet2 C++ factory recognises custom types (AutowareTrafficLight,
+# RoadMarking, DetectionArea, etc.) when loading maps.
 from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
+import autoware_lanelet2_extension_python.regulatory_elements as _ll2_ext_reg  # noqa: F401
 import lanelet2  # noqa: F401
-
-# The above imports ensure that Autoware lanelet2 extensions are registered
-# before any test modules are loaded. This prevents issues with missing
-# regulatory elements like 'road_marking' and 'detection_area'.
 
 
 @pytest.fixture(scope="session")

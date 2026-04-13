@@ -542,12 +542,117 @@ def sort_adjacent_groups(
     return sorted_lanelets
 
 
+# Mapping from element_type property names to lanelet2 subtype attribute values.
+# When lanelet2 loads a regulatory element as a generic RegulatoryElement
+# instead of the specific subclass (e.g. TrafficLight), the property-based
+# detection (hasattr) fails.  This mapping allows fallback detection via the
+# ``subtype`` attribute stored in the OSM data.
+_ELEMENT_TYPE_TO_SUBTYPE: Dict[str, str] = {
+    "trafficLights": "traffic_light",
+    "speedLimits": "speed_limit",
+}
+
+
+class TrafficLightAdapter:
+    """Adapter that wraps a generic RegulatoryElement to provide the TrafficLight interface.
+
+    When lanelet2 fails to instantiate a ``TrafficLight`` subclass (returning a
+    plain ``RegulatoryElement`` instead), downstream code that accesses
+    ``.trafficLights`` and ``.stopLine`` breaks.  This adapter reads the raw
+    ``parameters`` dict and exposes the same properties.
+
+    Mapping (standard lanelet2 TrafficLight → parameter keys):
+        * ``trafficLights`` → ``parameters["refers"]``
+        * ``stopLine``      → ``parameters["ref_line"]`` (first element or None)
+    """
+
+    def __init__(self, reg_elem: lanelet2.core.RegulatoryElement) -> None:
+        self._reg_elem = reg_elem
+
+    # --- Delegate common attributes to the wrapped element ---
+    @property
+    def id(self) -> int:
+        return self._reg_elem.id
+
+    @property
+    def attributes(self):  # noqa: ANN201
+        return self._reg_elem.attributes
+
+    @property
+    def parameters(self):  # noqa: ANN201
+        return self._reg_elem.parameters
+
+    # --- TrafficLight-specific properties ---
+    @property
+    def trafficLights(self) -> list:  # noqa: N802
+        """Return the ``refers`` linestrings (traffic light positions)."""
+        params = self._reg_elem.parameters
+        if "refers" in params:
+            return list(params["refers"])
+        return []
+
+    @property
+    def stopLine(self):  # noqa: ANN201, N802
+        """Return the first ``ref_line`` linestring, or None."""
+        params = self._reg_elem.parameters
+        if "ref_line" in params:
+            ref_lines = list(params["ref_line"])
+            return ref_lines[0] if ref_lines else None
+        return None
+
+
+def _matches_element_type(
+    reg_elem: lanelet2.core.RegulatoryElement,
+    element_type: str,
+) -> bool:
+    """Check whether *reg_elem* matches *element_type*.
+
+    First tries the native property (e.g. ``reg_elem.trafficLights``).
+    If the element is a generic ``RegulatoryElement`` (property missing),
+    falls back to checking ``reg_elem.attributes['subtype']``.
+    """
+    # Fast path: native subclass exposes the property directly.
+    if hasattr(reg_elem, element_type) and getattr(reg_elem, element_type):
+        return True
+
+    # Slow path: check subtype attribute for generic RegulatoryElement.
+    expected_subtype = _ELEMENT_TYPE_TO_SUBTYPE.get(element_type)
+    if expected_subtype is None:
+        return False
+
+    try:
+        return dict(reg_elem.attributes).get("subtype") == expected_subtype
+    except Exception:
+        return False
+
+
+def _maybe_wrap(
+    reg_elem: lanelet2.core.RegulatoryElement,
+    element_type: str,
+) -> lanelet2.core.RegulatoryElement:
+    """Wrap a generic RegulatoryElement in an adapter if needed.
+
+    If the element is already the correct subclass (e.g. TrafficLight),
+    return it unchanged.  Otherwise wrap it so that downstream code can
+    access ``.trafficLights`` / ``.stopLine`` transparently.
+    """
+    if element_type == "trafficLights" and not hasattr(reg_elem, "trafficLights"):
+        return TrafficLightAdapter(reg_elem)  # type: ignore[return-value]
+    return reg_elem
+
+
 def filter_regulatory_element_by_type(
     lanelet_map: lanelet2.core.LaneletMap,
     element_type: str,
 ) -> Dict[int, tuple[lanelet2.core.RegulatoryElement, Set[int]]]:
     """
     Filter regulatory elements of specified type from lanelet map.
+
+    Detection uses the native subclass property when available (e.g.
+    ``TrafficLight.trafficLights``).  When lanelet2 loads an element as a
+    generic ``RegulatoryElement``, the function falls back to checking the
+    ``subtype`` attribute in the OSM data and wraps the element in an
+    adapter so that downstream code can use the same API.
 
     Args:
         lanelet_map: Lanelet2 map containing regulatory elements
@@ -561,11 +666,11 @@ def filter_regulatory_element_by_type(
     for lanelet in lanelet_map.laneletLayer:
         # Get all regulatory elements of the specified type for this lanelet
         for reg_elem in lanelet.regulatoryElements:
-            # Check if this regulatory element has the specified type attribute
-            if hasattr(reg_elem, element_type) and getattr(reg_elem, element_type):
+            if _matches_element_type(reg_elem, element_type):
                 reg_elem_id = reg_elem.id
                 if reg_elem_id not in element_map:
-                    element_map[reg_elem_id] = (reg_elem, set())
+                    wrapped = _maybe_wrap(reg_elem, element_type)
+                    element_map[reg_elem_id] = (wrapped, set())
                 element_map[reg_elem_id][1].add(lanelet.id)
 
     return element_map
