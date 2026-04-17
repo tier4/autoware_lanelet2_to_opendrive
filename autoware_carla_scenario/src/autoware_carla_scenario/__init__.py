@@ -62,6 +62,7 @@ Public API re-exported for convenience::
 """
 
 from .actions import (
+    AttachCameraSensorAction,
     AttachCarlaCameraSensorAction,
     BaseAction,
     LaneChangeAction,
@@ -216,6 +217,7 @@ __all__ = [
     "RelativeAcceleration",
     "FrenetAcceleration",
     # Actions
+    "AttachCameraSensorAction",
     "AttachCarlaCameraSensorAction",
     "BaseAction",
     "LaneChangeAction",
