@@ -28,6 +28,10 @@ inputs:
     description: Continue even if pre-commit fails (uses '|| true')
     required: false
     default: "false"
+  carla-extra:
+    description: "uv extra for CARLA version selection (e.g. 'carla' for 0.10.0, 'carla-0-9-16' for 0.9.16)"
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -71,7 +75,12 @@ runs:
     - name: Install Python dependencies
       if: inputs.install-dev-deps == 'true'
       shell: bash
-      run: uv sync --dev
+      run: |
+        if [ -n "${{ inputs.carla-extra }}" ]; then
+          uv sync --dev --extra "${{ inputs.carla-extra }}"
+        else
+          uv sync --dev
+        fi
       env:
         GIT_AUTH_TOKEN: ${{ inputs.gh-pat }}
 

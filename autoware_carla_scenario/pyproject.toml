@@ -7,7 +7,6 @@ authors = [
 ]
 requires-python = ">=3.10,<3.11"
 dependencies = [
-    "carla>=0.10.0",
     "pyxodr>=0.1.0",
     "opencv-python>=4.8",
     "numpy>=1.21",
@@ -24,6 +23,18 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "ffmpeg-python>=0.2.0",
+]
+
+[project.optional-dependencies]
+carla = ["carla==0.10.0"]
+carla-0-9-16 = ["carla==0.9.16"]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "carla" },
+        { extra = "carla-0-9-16" },
+    ],
 ]
 
 [build-system]

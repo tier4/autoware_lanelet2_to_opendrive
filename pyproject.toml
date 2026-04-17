@@ -1,3 +1,6 @@
+[tool.uv]
+find-links = ["carla_wheels"]
+
 [tool.uv.workspace]
 members = [
     "autoware_lanelet2_to_opendrive",
@@ -6,7 +9,6 @@ members = [
 
 [tool.uv.sources]
 lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", rev = "7745347645fd04aa8e4230cfa8793e253aad6753" }
-carla = { path = "carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" }
 
 [dependency-groups]
 dev = [

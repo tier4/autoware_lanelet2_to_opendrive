@@ -189,6 +189,7 @@ jobs:
           gh-pat: ${{ secrets.GH_PAT }}
           install-system-deps: "true"
           install-dev-deps: "true"
+          carla-extra: "carla"
 
       - name: Build lanelet2-to-opendrive documentation with PDF
         if: steps.pr-labels.outputs.bump_type != 'none'
@@ -301,6 +302,7 @@ jobs:
           gh-pat: ${{ secrets.GH_PAT }}
           install-system-deps: "true"
           install-dev-deps: "true"
+          carla-extra: "carla"
 
       - name: Run conversion for nishishinjuku sample
         run: |
