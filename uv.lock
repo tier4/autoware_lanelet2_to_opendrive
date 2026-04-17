@@ -6,6 +6,10 @@ resolution-markers = [
     "platform_machine == 'aarch64' and sys_platform == 'linux'",
     "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
+conflicts = [[
+    { package = "autoware-carla-scenario", extra = "carla" },
+    { package = "autoware-carla-scenario", extra = "carla-0-9-16" },
+]]
 
 [manifest]
 members = [
@@ -107,7 +111,6 @@ name = "autoware-carla-scenario"
 version = "0.1.0"
 source = { editable = "autoware_carla_scenario" }
 dependencies = [
-    { name = "carla" },
     { name = "fastapi" },
     { name = "ffmpeg-python" },
     { name = "hydra-core" },
@@ -126,9 +129,18 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+carla = [
+    { name = "carla", version = "0.10.0", source = { registry = "carla_wheels" } },
+]
+carla-0-9-16 = [
+    { name = "carla", version = "0.9.16", source = { registry = "https://pypi.org/simple" } },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "carla", path = "carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" },
+    { name = "carla", marker = "extra == 'carla'", specifier = "==0.10.0" },
+    { name = "carla", marker = "extra == 'carla-0-9-16'", specifier = "==0.9.16" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "hydra-core", specifier = ">=1.3.2" },
@@ -146,6 +158,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
+provides-extras = ["carla", "carla-0-9-16"]
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
@@ -153,7 +166,6 @@ version = "2.51.2"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },
-    { name = "carla" },
     { name = "hydra-core" },
     { name = "lanelet2" },
     { name = "lanelet2-python-api-for-autoware" },
@@ -168,7 +180,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "asam-qc-opendrive", specifier = ">=1.0.0" },
-    { name = "carla", path = "carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" },
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "lanelet2", specifier = ">=1.2.2" },
     { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
@@ -272,10 +283,29 @@ wheels = [
 
 [[package]]
 name = "carla"
-version = "0.10.0"
-source = { path = "carla_wheels/carla-0.10.0-cp310-cp310-linux_x86_64.whl" }
+version = "0.9.16"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform == 'darwin'",
+    "platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+]
 wheels = [
-    { filename = "carla-0.10.0-cp310-cp310-linux_x86_64.whl", hash = "sha256:ebf73f0938c2e9533ad89616b334c96991fd20ae7beedcbe1e5d1f563a8cc68a" },
+    { url = "https://files.pythonhosted.org/packages/67/be/cea470d588566ce532addc8c414c0ed53fe4d54af75b8eb7b092591279a5/carla-0.9.16-cp310-cp310-manylinux_2_31_x86_64.whl", hash = "sha256:52b1f2fafb0655e25954f9f6d1e97c211a4da404217fd1d0094b4b7350737c95", size = 34199760, upload-time = "2025-09-14T07:54:35.054Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/57/48b5df460e4b53b445c3c4d9c1167f5d12c51c4f35167e476288121ae71e/carla-0.9.16-cp310-cp310-win_amd64.whl", hash = "sha256:5e7d46f13216f0c65ec5ccc6a4b922d0d939be4ef97e07167a4b5f4595865ca6", size = 5035050, upload-time = "2025-09-14T07:54:38.302Z" },
+]
+
+[[package]]
+name = "carla"
+version = "0.10.0"
+source = { registry = "carla_wheels" }
+resolution-markers = [
+    "sys_platform == 'darwin'",
+    "platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+]
+wheels = [
+    { path = "carla-0.10.0-cp310-cp310-linux_x86_64.whl" },
 ]
 
 [[package]]
@@ -292,7 +322,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
+    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -349,7 +379,7 @@ name = "click"
 version = "8.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3d/fa/656b739db8587d7b5dfa22e22ed02566950fbfbcdc20311993483657a5c0/click-8.3.1.tar.gz", hash = "sha256:12ff4785d337a1bb490bb7e9c2b1ee5da3112e94a8622f26a6c77f5d2fc6842a", size = 295065, upload-time = "2025-11-15T20:45:42.706Z" }
 wheels = [
@@ -529,8 +559,8 @@ wheels = [
 
 [package.optional-dependencies]
 woff = [
-    { name = "brotli", marker = "platform_python_implementation == 'CPython'" },
-    { name = "brotlicffi", marker = "platform_python_implementation != 'CPython'" },
+    { name = "brotli", marker = "platform_python_implementation == 'CPython' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
+    { name = "brotlicffi", marker = "platform_python_implementation != 'CPython' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
     { name = "zopfli" },
 ]
 
@@ -907,7 +937,7 @@ version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
     { name = "ghp-import" },
     { name = "jinja2" },
     { name = "markdown" },
@@ -961,7 +991,7 @@ dependencies = [
     { name = "babel" },
     { name = "gitpython" },
     { name = "mkdocs" },
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
+    { name = "tzdata", marker = "sys_platform == 'win32' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/aa/16/25d7b1b930a802bf8b0c6ee64a9b34ea6e7d0a34c6bc69adbbb59b9d2f4b/mkdocs_git_revision_date_localized_plugin-1.5.1.tar.gz", hash = "sha256:2b0239455cd84784dd87ac8dfc9253fe4b2dd35e102696f21b5d34e2175981c6", size = 449557, upload-time = "2026-01-26T13:34:30.912Z" }
 wheels = [
@@ -1056,7 +1086,7 @@ name = "mypy"
 version = "1.19.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "librt", marker = "platform_python_implementation != 'PyPy'" },
+    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
     { name = "mypy-extensions" },
     { name = "pathspec" },
     { name = "tomli" },
@@ -1367,7 +1397,7 @@ name = "pytest"
 version = "9.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
     { name = "exceptiongroup" },
     { name = "iniconfig" },
     { name = "packaging" },
@@ -1654,7 +1684,7 @@ name = "tqdm"
 version = "4.67.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
 wheels = [
@@ -1728,11 +1758,11 @@ wheels = [
 
 [package.optional-dependencies]
 standard = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
     { name = "httptools" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
-    { name = "uvloop", marker = "platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'" },
+    { name = "uvloop", marker = "(platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32') or (platform_python_implementation == 'PyPy' and extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16') or (sys_platform == 'cygwin' and extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16') or (sys_platform == 'win32' and extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
     { name = "watchfiles" },
     { name = "websockets" },
 ]

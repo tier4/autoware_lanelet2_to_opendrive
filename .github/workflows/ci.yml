@@ -12,6 +12,7 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10"]
+        carla-extra: ["carla", "carla-0-9-16"]
 
     steps:
     - uses: actions/checkout@v4
@@ -25,6 +26,7 @@ jobs:
         install-dev-deps: "true"
         run-precommit: "true"
         precommit-continue-on-error: "true"
+        carla-extra: ${{ matrix.carla-extra }}
 
     - name: Run tests
       run: uv run pytest -v --tb=short -n auto
@@ -160,6 +162,7 @@ jobs:
         install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
+        carla-extra: "carla"
 
     - name: Convert Lanelet2 map to OpenDRIVE (CARLA target)
       run: |
