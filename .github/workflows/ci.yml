@@ -49,6 +49,7 @@ jobs:
         install-dev-deps: "true"
         run-precommit: "true"
         precommit-continue-on-error: "false"
+        carla-extra: "carla"
 
   auto-format:
     name: Auto-fix formatting
@@ -74,6 +75,7 @@ jobs:
           install-system-deps: "true"
           install-dev-deps: "true"
           run-precommit: "false"
+          carla-extra: "carla"
 
       - name: Run pre-commit auto-fix
         run: uv run pre-commit run --all-files || true
@@ -104,6 +106,7 @@ jobs:
         install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
+        carla-extra: "carla"
 
     - name: Build lanelet2-to-opendrive documentation
       uses: ./.github/actions/build-docs
