@@ -62,6 +62,7 @@ Public API re-exported for convenience::
 """
 
 from .actions import (
+    AttachCarlaCameraSensorAction,
     BaseAction,
     LaneChangeAction,
     LaneChangeDirection,
@@ -70,6 +71,12 @@ from .actions import (
     TrafficSignalAction,
     TurnAction,
     TurnDirection,
+)
+from .sensor import (
+    CameraSensorBase,
+    CameraSensorConfig,
+    CarlaCameraSensor,
+    CarlaCameraSensorConfig,
 )
 from .scenario_runner import ScenarioRunner
 from .conditions import (
@@ -209,6 +216,7 @@ __all__ = [
     "RelativeAcceleration",
     "FrenetAcceleration",
     # Actions
+    "AttachCarlaCameraSensorAction",
     "BaseAction",
     "LaneChangeAction",
     "LaneChangeDirection",
@@ -220,4 +228,9 @@ __all__ = [
     "WaypointCondition",
     "TurnAction",
     "TurnDirection",
+    # Sensors
+    "CameraSensorBase",
+    "CameraSensorConfig",
+    "CarlaCameraSensor",
+    "CarlaCameraSensorConfig",
 ]
