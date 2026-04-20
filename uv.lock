@@ -162,7 +162,7 @@ provides-extras = ["carla", "carla-0-9-16"]
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "2.52.0"
+version = "2.53.0"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },

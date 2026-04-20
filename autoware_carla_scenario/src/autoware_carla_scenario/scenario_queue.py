@@ -280,7 +280,7 @@ class ScenarioQueue:
         """Return a session-scoped pytest fixture that manages this queue.
 
         The generated fixture automatically skips when
-        ``CARLA_UE5_EXECUTABLE`` is not set, so callers do not need to
+        ``CARLA_EXECUTABLE`` is not set, so callers do not need to
         add a manual ``pytest.skip`` guard.
 
         Args:
