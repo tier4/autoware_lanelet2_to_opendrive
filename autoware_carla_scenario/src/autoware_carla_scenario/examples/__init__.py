@@ -9,6 +9,15 @@ from .configs import (
     ServerConfig,
     TrafficLightComplianceConfig,
 )
+from .run import (
+    build_ego_and_spawn,
+    build_scenario,
+    get_scenario_registry,
+    register_scenario,
+    register_scenario_builder,
+    run_scenario,
+    run_scenario_with_queue,
+)
 
 __all__ = [
     "EgoVehicleConfig",
@@ -18,4 +27,12 @@ __all__ = [
     "ScenarioRunConfig",
     "ServerConfig",
     "TrafficLightComplianceConfig",
+    # Scenario registry (Issue #420)
+    "build_ego_and_spawn",
+    "build_scenario",
+    "get_scenario_registry",
+    "register_scenario",
+    "register_scenario_builder",
+    "run_scenario",
+    "run_scenario_with_queue",
 ]

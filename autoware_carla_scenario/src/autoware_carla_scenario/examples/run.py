@@ -33,7 +33,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 import carla
 import hydra
@@ -67,6 +67,169 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Scenario Registry
+# ---------------------------------------------------------------------------
+
+#: Callable that creates a :class:`BaseScenario` from its decomposed parts.
+#: Signature: ``(ego, scenario_dict, spawn_pose, ground_projection) -> scenario``
+ScenarioBuilder = Callable[
+    [EgoConfig, dict[str, Any], Lanelet2Pose, GroundProjectionConfig],
+    BaseScenario,
+]
+
+#: Callable that replaces the entire :func:`build_scenario` logic.
+#: Signature: ``(cfg) -> (ego, scenario)``
+BuildScenarioFn = Callable[[DictConfig], tuple[EgoConfig, BaseScenario]]
+
+_SCENARIO_REGISTRY: dict[str, ScenarioBuilder] = {}
+
+
+def register_scenario(
+    name: str,
+    scenario_cls: type[BaseScenario],
+    config_cls: type,
+) -> None:
+    """Register a scenario class and its config class under *name*.
+
+    This creates a standard builder that follows the convention used by all
+    built-in scenarios::
+
+        scenario_cls(ego, config=config_cls(**scenario_dict),
+                     spawn_pose=spawn_pose, ground_projection=ground_projection)
+
+    Downstream projects can call this at import time to make their custom
+    scenarios available to :func:`build_scenario` and the CLI runner::
+
+        from autoware_carla_scenario.examples.run import register_scenario
+        register_scenario("my_scenario", MyScenario, MyScenarioConfig)
+    """
+
+    def _builder(
+        ego: EgoConfig,
+        scenario_dict: dict[str, Any],
+        spawn_pose: Lanelet2Pose,
+        ground_projection: GroundProjectionConfig,
+    ) -> BaseScenario:
+        config = config_cls(**scenario_dict)
+        return scenario_cls(  # type: ignore[call-arg]
+            ego,
+            config=config,
+            spawn_pose=spawn_pose,
+            ground_projection=ground_projection,
+        )
+
+    _SCENARIO_REGISTRY[name] = _builder
+
+
+def register_scenario_builder(name: str, builder: ScenarioBuilder) -> None:
+    """Register a custom builder function under *name*.
+
+    Use this instead of :func:`register_scenario` when the scenario
+    constructor does not follow the standard ``(ego, config=..., ...)``
+    pattern and you need full control over instantiation.
+    """
+    _SCENARIO_REGISTRY[name] = builder
+
+
+def get_scenario_registry() -> dict[str, ScenarioBuilder]:
+    """Return a **copy** of the current scenario registry.
+
+    Useful for introspection (e.g. listing available scenarios).
+    """
+    return dict(_SCENARIO_REGISTRY)
+
+
+# Register built-in scenarios.
+register_scenario(
+    "intersection_passing", IntersectionPassingScenario, IntersectionPassingConfig
+)
+register_scenario(
+    "traffic_light_compliance",
+    TrafficLightComplianceScenario,
+    TrafficLightComplianceConfig,
+)
+register_scenario("lane_change", LaneChangeScenario, LaneChangeConfig)
+register_scenario("temporary_stop", TemporaryStopScenario, TemporaryStopConfig)
+
+
+# ---------------------------------------------------------------------------
+# Reusable helpers
+# ---------------------------------------------------------------------------
+
+
+def build_ego_and_spawn(
+    cfg: DictConfig,
+) -> tuple[EgoConfig, Lanelet2Pose, GroundProjectionConfig]:
+    """Extract :class:`EgoConfig`, spawn pose, and ground-projection config.
+
+    This is the common preamble shared by all built-in scenarios.  Downstream
+    projects can call this helper and then instantiate their own scenario class
+    without duplicating the boilerplate.
+    """
+    ground_projection = GroundProjectionConfig(
+        ray_distance_upper=float(cfg.entity.ground_projection_ray_distance_upper),
+        ray_distance_lower=float(cfg.entity.ground_projection_ray_distance_lower),
+    )
+    ego = EgoConfig(
+        spawn_location=SpawnTransform(
+            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
+        ),
+        vehicle_type=cfg.ego.vehicle_type,
+        initial_speed_kmh=float(cfg.ego.initial_speed_kmh),
+        spawn_retry_max_count=int(cfg.entity.spawn_retry_max_count),
+        spawn_retry_t_step=float(cfg.entity.spawn_retry_t_step),
+        spawn_retry_z_step=float(cfg.entity.spawn_retry_z_step),
+    )
+    spawn_pose = Lanelet2Pose(
+        lanelet_id=cfg.ego.spawn_lanelet_id,
+        s=cfg.ego.spawn_s,
+    )
+    return ego, spawn_pose, ground_projection
+
+
+def run_scenario_with_queue(
+    scenario: BaseScenario,
+    *,
+    host: str = "localhost",
+    port: int = 2000,
+    tm_port: int = 8000,
+    xodr_path: Path | None = None,
+    lanelet2_path: Path | None = None,
+    map_name: str | None = None,
+    cooldown_seconds: float = 0.0,
+    cooldown_max_retries: int = 0,
+    output_dir: Path = Path("scenario_outputs"),
+) -> ScenarioResult:
+    """Run a single pre-built scenario using :class:`ScenarioQueue`.
+
+    This is the extracted orchestration logic that was previously embedded
+    inside :func:`run_scenario`.  Downstream projects can use this to execute
+    their own ``BaseScenario`` subclasses without duplicating the queue setup::
+
+        scenario = MyCustomScenario(ego, config=my_cfg, ...)
+        result = run_scenario_with_queue(
+            scenario, host="localhost", port=2000,
+            output_dir=Path("outputs"),
+        )
+    """
+    queue = ScenarioQueue(
+        host=host,
+        port=port,
+        tm_port=tm_port,
+        xodr_path=xodr_path,
+        lanelet2_path=lanelet2_path,
+        map_name=map_name,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_max_retries=cooldown_max_retries,
+        output_dir=output_dir,
+    )
+    queue.add(scenario)
+    with queue:
+        results = queue.run_all()
+    return results[0]
+
 
 # Directory containing Hydra config files (conf/ next to this module).
 _CONF_DIR = Path(__file__).resolve().parent / "conf"
@@ -254,7 +417,12 @@ def _make_batch_output_dir() -> Path:
     return output_dir.resolve()
 
 
-def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
+def run_batch(
+    scenario_names: list[str],
+    overrides: list[str],
+    *,
+    build_scenario_fn: BuildScenarioFn | None = None,
+) -> None:
     """Compose configs, build scenarios, and run them in a single queue."""
     configs = [_compose_config(name, overrides) for name in scenario_names]
 
@@ -302,7 +470,7 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
 
     for i, (name, cfg) in enumerate(zip(scenario_names, configs), 1):
         logger.info("Building scenario [%d/%d]: %s", i, len(scenario_names), name)
-        _ego, scenario = build_scenario(cfg)
+        _ego, scenario = build_scenario(cfg, build_scenario_fn=build_scenario_fn)
         queue.add(scenario)
 
     logger.info("All %d scenario(s) built. Starting execution...", len(scenario_names))
@@ -314,76 +482,54 @@ def run_batch(scenario_names: list[str], overrides: list[str]) -> None:
     sys.exit(0 if all_passed else 1)
 
 
-def build_scenario(cfg: DictConfig) -> tuple[EgoConfig, BaseScenario]:
-    """Instantiate the correct scenario class based on ``cfg.scenario.name``."""
-    ground_projection = GroundProjectionConfig(
-        ray_distance_upper=float(cfg.entity.ground_projection_ray_distance_upper),
-        ray_distance_lower=float(cfg.entity.ground_projection_ray_distance_lower),
-    )
+def build_scenario(
+    cfg: DictConfig,
+    *,
+    build_scenario_fn: BuildScenarioFn | None = None,
+) -> tuple[EgoConfig, BaseScenario]:
+    """Instantiate the correct scenario class based on ``cfg.scenario.name``.
 
+    Parameters
+    ----------
+    cfg:
+        Resolved Hydra config containing ``scenario.name`` and related keys.
+    build_scenario_fn:
+        Optional callable that completely replaces the default registry
+        lookup.  When provided, it is called as ``build_scenario_fn(cfg)``
+        and its return value is forwarded to the caller.
+    """
+    if build_scenario_fn is not None:
+        return build_scenario_fn(cfg)
+
+    # Validate the name before doing any expensive work.
     scenario_name: str = cfg.scenario.name
+    builder = _SCENARIO_REGISTRY.get(scenario_name)
+    if builder is None:
+        registered = sorted(_SCENARIO_REGISTRY)
+        msg = (
+            f"Unknown scenario name: {scenario_name!r}. "
+            f"Registered scenarios: {registered}"
+        )
+        raise ValueError(msg)
+
+    ego, spawn_pose, ground_projection = build_ego_and_spawn(cfg)
     scenario_dict = _to_dict(cfg.scenario)
-
-    # For lanelet-based scenarios, use a dummy spawn that setup() overwrites.
-    ego = EgoConfig(
-        spawn_location=SpawnTransform(
-            carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
-        ),
-        vehicle_type=cfg.ego.vehicle_type,
-        initial_speed_kmh=float(cfg.ego.initial_speed_kmh),
-        spawn_retry_max_count=int(cfg.entity.spawn_retry_max_count),
-        spawn_retry_t_step=float(cfg.entity.spawn_retry_t_step),
-        spawn_retry_z_step=float(cfg.entity.spawn_retry_z_step),
-    )
-
-    # Build spawn pose from ego config (lanelet2-specific, kept in examples layer).
-    spawn_pose = Lanelet2Pose(
-        lanelet_id=cfg.ego.spawn_lanelet_id,
-        s=cfg.ego.spawn_s,
-    )
-
-    # --- intersection_passing (also handles left_turn / right_turn via turn_direction) ---
-    if scenario_name == "intersection_passing":
-        return ego, IntersectionPassingScenario(
-            ego,
-            config=IntersectionPassingConfig(**scenario_dict),
-            spawn_pose=spawn_pose,
-            ground_projection=ground_projection,
-        )
-
-    # --- traffic_light_compliance ---
-    if scenario_name == "traffic_light_compliance":
-        return ego, TrafficLightComplianceScenario(
-            ego,
-            config=TrafficLightComplianceConfig(**scenario_dict),
-            spawn_pose=spawn_pose,
-            ground_projection=ground_projection,
-        )
-
-    # --- lane_change ---
-    if scenario_name == "lane_change":
-        return ego, LaneChangeScenario(
-            ego,
-            config=LaneChangeConfig(**scenario_dict),
-            spawn_pose=spawn_pose,
-            ground_projection=ground_projection,
-        )
-
-    # --- temporary_stop ---
-    if scenario_name == "temporary_stop":
-        return ego, TemporaryStopScenario(
-            ego,
-            config=TemporaryStopConfig(**scenario_dict),
-            spawn_pose=spawn_pose,
-            ground_projection=ground_projection,
-        )
-
-    msg = f"Unknown scenario name: {scenario_name!r}"
-    raise ValueError(msg)
+    return ego, builder(ego, scenario_dict, spawn_pose, ground_projection)
 
 
-def run_scenario(cfg: DictConfig) -> ScenarioResult:
+def run_scenario(
+    cfg: DictConfig,
+    *,
+    build_scenario_fn: BuildScenarioFn | None = None,
+) -> ScenarioResult:
     """Build and execute a scenario from a resolved Hydra config.
+
+    Parameters
+    ----------
+    cfg:
+        Resolved Hydra config.
+    build_scenario_fn:
+        Optional callable forwarded to :func:`build_scenario`.
 
     Returns the :class:`ScenarioResult` so that callers (including Hydra
     multirun) can inspect it without the process being terminated.
@@ -394,14 +540,12 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
     """
     logger.info("Resolved config:\n%s", OmegaConf.to_yaml(cfg))
 
-    _ego, scenario = build_scenario(cfg)
+    _ego, scenario = build_scenario(cfg, build_scenario_fn=build_scenario_fn)
 
-    # Build optional paths
     xodr_path = Path(cfg.map.xodr_path) if cfg.map.get("xodr_path") else None
     lanelet2_path = (
         Path(cfg.map.lanelet2_path) if cfg.map.get("lanelet2_path") else None
     )
-
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
     cooldown_max_retries = int(cfg.server.get("cooldown_max_retries", 0))
 
@@ -409,7 +553,8 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
     # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
     output_dir = Path(HydraConfig.get().runtime.output_dir)
 
-    queue = ScenarioQueue(
+    result = run_scenario_with_queue(
+        scenario,
         host=cfg.server.host,
         port=cfg.server.port,
         tm_port=cfg.traffic_manager.port,
@@ -420,15 +565,9 @@ def run_scenario(cfg: DictConfig) -> ScenarioResult:
         cooldown_max_retries=cooldown_max_retries,
         output_dir=output_dir,
     )
-    queue.add(scenario)
 
-    with queue:
-        results = queue.run_all()
-
-    result = results[0]
     status = "PASSED" if result.passed else "FAILED"
     print(f"{status}: {result.message} ({result.elapsed_seconds:.2f}s)")  # noqa: T201
-    # JSON is already written by ScenarioRunner; print the absolute path.
     scenario_name = type(scenario).__name__
     json_path = (output_dir / f"{scenario_name}_result.json").resolve()
     print(f"Result JSON: {json_path}")  # noqa: T201
