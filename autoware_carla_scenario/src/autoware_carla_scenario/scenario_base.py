@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
+
+if TYPE_CHECKING:
+    from .entity.ego import EgoVehicle
 
 import carla
 
@@ -88,6 +91,7 @@ class BaseScenario(ABC):
         spawn_pose: Lanelet2Pose | None = None,
         ground_projection: GroundProjectionConfig | None = None,
         random_seed: int = DEFAULT_RANDOM_SEED,
+        ego_type: type[EgoVehicle] | None = None,
     ) -> None:
         """Initialize the scenario with an ego vehicle configuration.
 
@@ -102,8 +106,15 @@ class BaseScenario(ABC):
             random_seed: Seed for the CARLA TrafficManager random device.
                 Using a fixed seed ensures deterministic NPC behaviour across
                 runs.  Defaults to :attr:`DEFAULT_RANDOM_SEED` (``0``).
+            ego_type: :class:`EgoVehicle` subclass to instantiate for the ego
+                actor.  Pass :class:`AutowareEntity` to disable TrafficManager
+                autopilot on the ego vehicle.  ``None`` (default) uses
+                :class:`EgoVehicle`.
         """
+        from .entity.ego import EgoVehicle as _EgoVehicle  # noqa: PLC0415
+
         self.ego_config = ego_config
+        self.ego_type = ego_type or _EgoVehicle
         self._spawn_pose = spawn_pose
         self._ground_projection = ground_projection or GroundProjectionConfig()
         self.random_seed = random_seed

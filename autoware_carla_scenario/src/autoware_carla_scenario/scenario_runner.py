@@ -21,7 +21,6 @@ from .conditions.base import BaseCondition, ConditionStatus, find_actor_by_role_
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
 from .coordinate.poses import CarlaWorldPose
 from .coordinate.transform import to_opendrive
-from .entity import EgoVehicle
 from .entity import vehicle_entity as _vehicle_entity_module
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
@@ -458,7 +457,7 @@ class ScenarioRunner:
         tm.set_synchronous_mode(True)
         tm.set_random_device_seed(scenario.random_seed)
 
-        ego = EgoVehicle()
+        ego = scenario.ego_type()
         recording_started = False
         tick_count = 0
         result: Optional[ScenarioResult] = None
@@ -487,9 +486,17 @@ class ScenarioRunner:
             for _ in range(scenario.STABILIZE_TICKS):
                 world.tick()
 
-            # Enable autopilot on every vehicle (all NPCs use TrafficManager)
+            # Enable autopilot on vehicles managed by TrafficManager.
+            # When the ego opts out (e.g. AutowareEntity), its actor is
+            # excluded so external control can drive it instead.
+            skip_ids: set[int] = set()
+            if not ego.use_autopilot and ego_actor is not None:
+                skip_ids.add(ego_actor.id)
+
             n_autopilot = 0
             for actor in world.get_actors().filter("vehicle.*"):
+                if actor.id in skip_ids:
+                    continue
                 actor.set_autopilot(True, self._tm_port)
                 n_autopilot += 1
             if n_autopilot:
@@ -497,6 +504,11 @@ class ScenarioRunner:
                     "Autopilot enabled on %d vehicle(s) after %d warm-up ticks",
                     n_autopilot,
                     scenario.STABILIZE_TICKS,
+                )
+            if skip_ids:
+                logger.info(
+                    "Autopilot skipped for ego (id=%s) — external control expected",
+                    ", ".join(str(i) for i in skip_ids),
                 )
 
             # Apply initial speeds after warm-up stabilisation
