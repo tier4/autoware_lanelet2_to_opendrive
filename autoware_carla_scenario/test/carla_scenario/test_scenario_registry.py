@@ -48,6 +48,28 @@ def _make_ego() -> EgoConfig:
     )
 
 
+def _make_unknown_scenario_cfg() -> DictConfig:
+    """Config with an unregistered scenario name, suitable for error-path tests."""
+    return OmegaConf.create(
+        {
+            "scenario": {"name": "__nonexistent__"},
+            "entity": {
+                "ground_projection_ray_distance_upper": 10.0,
+                "ground_projection_ray_distance_lower": 1.0,
+                "spawn_retry_max_count": 3,
+                "spawn_retry_t_step": 0.1,
+                "spawn_retry_z_step": 0.1,
+            },
+            "ego": {
+                "vehicle_type": "vehicle.mini.cooper",
+                "initial_speed_kmh": 0.0,
+                "spawn_lanelet_id": 1,
+                "spawn_s": 0.0,
+            },
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests for registry API
 # ---------------------------------------------------------------------------
@@ -152,7 +174,7 @@ class TestScenarioRegistry:
 
 
 class TestBuildScenarioInjectable:
-    """Tests for the build_scenario_fn parameter (Option B)."""
+    """Tests for the build_scenario_fn parameter."""
 
     def test_build_scenario_fn_overrides_registry(self) -> None:
         """When build_scenario_fn is given, it should be used instead of the registry."""
@@ -173,51 +195,15 @@ class TestBuildScenarioInjectable:
         """build_scenario should raise ValueError for unregistered names."""
         from autoware_carla_scenario.examples.run import build_scenario
 
-        cfg = OmegaConf.create(
-            {
-                "scenario": {"name": "__nonexistent__"},
-                "entity": {
-                    "ground_projection_ray_distance_upper": 10.0,
-                    "ground_projection_ray_distance_lower": 1.0,
-                    "spawn_retry_max_count": 3,
-                    "spawn_retry_t_step": 0.1,
-                    "spawn_retry_z_step": 0.1,
-                },
-                "ego": {
-                    "vehicle_type": "vehicle.mini.cooper",
-                    "initial_speed_kmh": 0.0,
-                    "spawn_lanelet_id": 1,
-                    "spawn_s": 0.0,
-                },
-            }
-        )
         with pytest.raises(ValueError, match="Unknown scenario name"):
-            build_scenario(cfg)
+            build_scenario(_make_unknown_scenario_cfg())
 
     def test_build_scenario_unknown_name_lists_registered(self) -> None:
         """The error message should list registered scenario names."""
         from autoware_carla_scenario.examples.run import build_scenario
 
-        cfg = OmegaConf.create(
-            {
-                "scenario": {"name": "__nonexistent__"},
-                "entity": {
-                    "ground_projection_ray_distance_upper": 10.0,
-                    "ground_projection_ray_distance_lower": 1.0,
-                    "spawn_retry_max_count": 3,
-                    "spawn_retry_t_step": 0.1,
-                    "spawn_retry_z_step": 0.1,
-                },
-                "ego": {
-                    "vehicle_type": "vehicle.mini.cooper",
-                    "initial_speed_kmh": 0.0,
-                    "spawn_lanelet_id": 1,
-                    "spawn_s": 0.0,
-                },
-            }
-        )
         with pytest.raises(ValueError, match="Registered scenarios"):
-            build_scenario(cfg)
+            build_scenario(_make_unknown_scenario_cfg())
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +212,7 @@ class TestBuildScenarioInjectable:
 
 
 class TestBuildEgoAndSpawn:
-    """Tests for the build_ego_and_spawn() helper (Option C)."""
+    """Tests for the build_ego_and_spawn() helper."""
 
     def test_returns_ego_spawn_and_ground_projection(self) -> None:
         """build_ego_and_spawn should return a 3-tuple from the config."""

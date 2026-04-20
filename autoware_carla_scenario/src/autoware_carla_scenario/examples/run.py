@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Scenario Registry (Option A from Issue #420)
+# Scenario Registry
 # ---------------------------------------------------------------------------
 
 #: Callable that creates a :class:`BaseScenario` from its decomposed parts.
@@ -155,7 +155,7 @@ register_scenario("temporary_stop", TemporaryStopScenario, TemporaryStopConfig)
 
 
 # ---------------------------------------------------------------------------
-# Reusable helpers (Option C from Issue #420)
+# Reusable helpers
 # ---------------------------------------------------------------------------
 
 
@@ -494,20 +494,15 @@ def build_scenario(
     cfg:
         Resolved Hydra config containing ``scenario.name`` and related keys.
     build_scenario_fn:
-        Optional callable that completely replaces the default lookup logic.
-        When provided, it is called as ``build_scenario_fn(cfg)`` and its
-        return value is forwarded to the caller.  This is **Option B** from
-        `Issue #420 <https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/420>`_.
+        Optional callable that completely replaces the default registry
+        lookup.  When provided, it is called as ``build_scenario_fn(cfg)``
+        and its return value is forwarded to the caller.
     """
-    # Option B: injectable builder takes precedence.
     if build_scenario_fn is not None:
         return build_scenario_fn(cfg)
 
-    # Option A: look up from registry.
-    ego, spawn_pose, ground_projection = build_ego_and_spawn(cfg)
+    # Validate the name before doing any expensive work.
     scenario_name: str = cfg.scenario.name
-    scenario_dict = _to_dict(cfg.scenario)
-
     builder = _SCENARIO_REGISTRY.get(scenario_name)
     if builder is None:
         registered = sorted(_SCENARIO_REGISTRY)
@@ -517,6 +512,8 @@ def build_scenario(
         )
         raise ValueError(msg)
 
+    ego, spawn_pose, ground_projection = build_ego_and_spawn(cfg)
+    scenario_dict = _to_dict(cfg.scenario)
     return ego, builder(ego, scenario_dict, spawn_pose, ground_projection)
 
 
@@ -545,12 +542,10 @@ def run_scenario(
 
     _ego, scenario = build_scenario(cfg, build_scenario_fn=build_scenario_fn)
 
-    # Build optional paths
     xodr_path = Path(cfg.map.xodr_path) if cfg.map.get("xodr_path") else None
     lanelet2_path = (
         Path(cfg.map.lanelet2_path) if cfg.map.get("lanelet2_path") else None
     )
-
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
     cooldown_max_retries = int(cfg.server.get("cooldown_max_retries", 0))
 
@@ -558,7 +553,8 @@ def run_scenario(
     # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
     output_dir = Path(HydraConfig.get().runtime.output_dir)
 
-    queue = ScenarioQueue(
+    result = run_scenario_with_queue(
+        scenario,
         host=cfg.server.host,
         port=cfg.server.port,
         tm_port=cfg.traffic_manager.port,
@@ -569,15 +565,9 @@ def run_scenario(
         cooldown_max_retries=cooldown_max_retries,
         output_dir=output_dir,
     )
-    queue.add(scenario)
 
-    with queue:
-        results = queue.run_all()
-
-    result = results[0]
     status = "PASSED" if result.passed else "FAILED"
     print(f"{status}: {result.message} ({result.elapsed_seconds:.2f}s)")  # noqa: T201
-    # JSON is already written by ScenarioRunner; print the absolute path.
     scenario_name = type(scenario).__name__
     json_path = (output_dir / f"{scenario_name}_result.json").resolve()
     print(f"Result JSON: {json_path}")  # noqa: T201
