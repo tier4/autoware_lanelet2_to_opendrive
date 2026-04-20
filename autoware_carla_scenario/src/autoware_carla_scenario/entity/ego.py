@@ -15,6 +15,10 @@ from ._spawn import spawn_vehicle_actor
 class EgoVehicle:
     """Manages the ego vehicle actor."""
 
+    #: When ``True`` (default), :class:`ScenarioRunner` enables
+    #: TrafficManager autopilot on this actor after warm-up.
+    use_autopilot: bool = True
+
     def __init__(self) -> None:
         self._vehicle: Optional["carla.Actor"] = None
 

@@ -3,6 +3,7 @@
 Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
+        AutowareEntity,
         EGO_ROLE_NAME,
         EntityRole,
         ScenarioRunner,
@@ -127,6 +128,7 @@ from .coordinate import (
     to_opendrive,
 )
 from .entity import (
+    AutowareEntity,
     EgoVehicle,
     SpawnLocation,
     SpawnPointIndex,
@@ -180,6 +182,7 @@ __all__ = [
     "StandstillCondition",
     "StickyCondition",
     "TemporaryStopCondition",
+    "AutowareEntity",
     "EgoConfig",
     "EgoVehicle",
     "SpawnLocation",
