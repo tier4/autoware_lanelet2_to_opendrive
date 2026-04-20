@@ -21,7 +21,7 @@ class CarlaServerManager:
     """Start and stop a CARLA UE5 server process.
 
     The path to the ``CarlaUE5.sh`` executable is read from the
-    ``CARLA_UE5_EXECUTABLE`` environment variable.
+    ``CARLA_EXECUTABLE`` environment variable.
 
     If *reuse_if_running* is ``True`` (the default) and a CARLA server is
     already reachable on *host*:*port* at the time :meth:`start` is called,
@@ -42,7 +42,7 @@ class CarlaServerManager:
         manager.stop()    # no-op if the server was not launched by us
     """
 
-    ENV_VAR: str = "CARLA_UE5_EXECUTABLE"
+    ENV_VAR: str = "CARLA_EXECUTABLE"
 
     def __init__(
         self,
@@ -84,11 +84,11 @@ class CarlaServerManager:
         Behaviour:
         1. If *reuse_if_running* is ``True`` and the server is already
            reachable, record that we are reusing it and return immediately.
-        2. Otherwise, read ``CARLA_UE5_EXECUTABLE``, launch the process, and
+        2. Otherwise, read ``CARLA_EXECUTABLE``, launch the process, and
            poll until the server accepts connections.
 
         Raises:
-            RuntimeError: If ``CARLA_UE5_EXECUTABLE`` is not set (when a new
+            RuntimeError: If ``CARLA_EXECUTABLE`` is not set (when a new
                 process must be launched), the executable does not exist, or
                 the server does not become reachable within *timeout* seconds.
         """

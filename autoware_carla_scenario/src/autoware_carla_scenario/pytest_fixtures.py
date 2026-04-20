@@ -52,7 +52,7 @@ class CarlaScenarioFixture:
         @pytest.fixture(scope="session")
         def carla_queue():
             if not os.environ.get(CarlaServerManager.ENV_VAR):
-                pytest.skip("CARLA_UE5_EXECUTABLE not set")
+                pytest.skip("CARLA_EXECUTABLE not set")
             with _queue:
                 _queue.run_all()
                 yield _queue

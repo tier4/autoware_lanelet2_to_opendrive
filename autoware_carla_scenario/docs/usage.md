@@ -503,7 +503,7 @@ Where `status` is one of: `"running"`, `"idle"`, or `"done"`.
 
 | Variable | Used By | Description |
 |----------|---------|-------------|
-| `CARLA_UE5_EXECUTABLE` | scenario runner | Path to CARLA binary executable |
+| `CARLA_EXECUTABLE` | scenario runner | Path to CARLA binary executable |
 | `NISHISHINJUKU_XODR_PATH` | map config | Override default OpenDRIVE file path for nishishinjuku |
 | `NISHISHINJUKU_LANELET2_PATH` | map config | Override default Lanelet2 file path for nishishinjuku |
 | `VIEWER_BASE_PATH` | viewer | Base path for scenario results |
