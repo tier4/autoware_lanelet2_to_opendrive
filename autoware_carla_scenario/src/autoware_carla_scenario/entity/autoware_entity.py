@@ -34,7 +34,6 @@ from cyclonedds.sub import DataReader
 from cyclonedds.topic import Topic
 
 from ..dds.msg import (
-    ActuationCommandStamped,
     Control,
     Engage,
     GearCommand,
@@ -51,20 +50,16 @@ from .ego import EgoVehicle
 logger = logging.getLogger(__name__)
 
 # -- Autoware GearCommand constants ------------------------------------
-_GEAR_NEUTRAL: int = 1
-_GEAR_DRIVE: int = 2
 _GEAR_REVERSE: int = 20
 _GEAR_REVERSE_2: int = 21
 _GEAR_PARK: int = 22
 _REVERSE_GEARS: frozenset[int] = frozenset({_GEAR_REVERSE, _GEAR_REVERSE_2})
 
 # -- Autoware TurnIndicatorsCommand constants --------------------------
-_TURN_DISABLE: int = 1
 _TURN_LEFT: int = 2
 _TURN_RIGHT: int = 3
 
 # -- Autoware HazardLightsCommand constants ----------------------------
-_HAZARD_DISABLE: int = 1
 _HAZARD_ENABLE: int = 2
 
 #: WaitSet poll interval in nanoseconds (1 second).
@@ -122,12 +117,6 @@ _INPUT_TOPICS: list[_TopicSpec] = [
         Control,
         per_frame=True,
         attr="_current_ackermann_cmd",
-    ),
-    _TopicSpec(
-        "actuation_command",
-        ActuationCommandStamped,
-        per_frame=True,
-        attr="_current_actuation_cmd",
     ),
     # ---- Event-driven runtime topics (Listener) ----
     _TopicSpec("engage", Engage),
@@ -199,12 +188,12 @@ class AutowareEntity(EgoVehicle):
         # --- Runtime command state ---
         self._is_engaged: bool = False
         self._current_ackermann_cmd: Optional[Control] = None
-        self._current_actuation_cmd: Optional[ActuationCommandStamped] = None
         self._current_manual_ackermann_cmd: Optional[Control] = None
         self._current_gear_cmd: Optional[GearCommand] = None
         self._current_manual_gear_cmd: Optional[GearCommand] = None
         self._current_turn_indicators_cmd: Optional[TurnIndicatorsCommand] = None
         self._current_hazard_lights_cmd: Optional[HazardLightsCommand] = None
+        self._last_light_state: Optional[int] = None
 
         # --- DDS entities (created by setup_dds) ---
         self._participant: Optional[DomainParticipant] = None
@@ -502,69 +491,69 @@ class AutowareEntity(EgoVehicle):
         and the per-frame WaitSet; this method simply reads the latest
         values and forwards them to the CARLA actor.
 
-        When :attr:`is_engaged` is ``False`` the vehicle is left
-        untouched (state frozen).
+        When :attr:`is_engaged` is ``False`` the vehicle is actively
+        braked to hold it in place.
         """
-        if self._vehicle is None or not self._is_engaged:
+        if self._vehicle is None:
             return
 
-        self._apply_motion_control()
-        self._apply_lights()
-
-    def _apply_motion_control(self) -> None:
-        """Send ackermann or actuation commands to the CARLA vehicle."""
-        assert self._vehicle is not None
         import carla as _carla
 
-        gear_cmd = self._current_manual_gear_cmd or self._current_gear_cmd
-        is_reverse = gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS
-        is_park = gear_cmd is not None and gear_cmd.command == _GEAR_PARK
+        if not self._is_engaged:
+            self._vehicle.apply_control(
+                _carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True)
+            )
+            return
 
-        if is_park:
+        gear_cmd = (
+            self._current_manual_gear_cmd
+            if self._current_manual_gear_cmd is not None
+            else self._current_gear_cmd
+        )
+        is_reverse = gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS
+
+        self._apply_motion_control(_carla, gear_cmd, is_reverse)
+        self._apply_lights(_carla, is_reverse)
+
+    def _apply_motion_control(
+        self,
+        _carla: Any,
+        gear_cmd: Optional[GearCommand],
+        is_reverse: bool,
+    ) -> None:
+        """Send ackermann control commands to the CARLA vehicle."""
+        assert self._vehicle is not None
+
+        if gear_cmd is not None and gear_cmd.command == _GEAR_PARK:
             self._vehicle.apply_control(_carla.VehicleControl(hand_brake=True))
             return
 
         ackermann_cmd = (
-            self._current_manual_ackermann_cmd or self._current_ackermann_cmd
+            self._current_manual_ackermann_cmd
+            if self._current_manual_ackermann_cmd is not None
+            else self._current_ackermann_cmd
         )
-        if ackermann_cmd is not None:
-            speed = float(ackermann_cmd.longitudinal.velocity)
-            if is_reverse:
-                speed = -abs(speed)
-            self._vehicle.apply_ackermann_control(
-                _carla.VehicleAckermannControl(
-                    steer=float(ackermann_cmd.lateral.steering_tire_angle),
-                    steer_speed=float(
-                        ackermann_cmd.lateral.steering_tire_rotation_rate
-                    ),
-                    speed=speed,
-                    acceleration=float(ackermann_cmd.longitudinal.acceleration),
-                    jerk=float(ackermann_cmd.longitudinal.jerk),
-                )
-            )
+        if ackermann_cmd is None:
             return
 
-        if self._current_actuation_cmd is not None:
-            act = self._current_actuation_cmd.actuation
-            self._vehicle.apply_control(
-                _carla.VehicleControl(
-                    throttle=max(0.0, min(1.0, float(act.accel_cmd))),
-                    brake=max(0.0, min(1.0, float(act.brake_cmd))),
-                    steer=max(-1.0, min(1.0, float(act.steer_cmd))),
-                    reverse=is_reverse,
-                )
+        speed = float(ackermann_cmd.longitudinal.velocity)
+        if is_reverse:
+            speed = -abs(speed)
+        self._vehicle.apply_ackermann_control(
+            _carla.VehicleAckermannControl(
+                steer=float(ackermann_cmd.lateral.steering_tire_angle),
+                steer_speed=float(ackermann_cmd.lateral.steering_tire_rotation_rate),
+                speed=speed,
+                acceleration=float(ackermann_cmd.longitudinal.acceleration),
+                jerk=float(ackermann_cmd.longitudinal.jerk),
             )
-
-    def _apply_lights(self) -> None:
-        """Update CARLA vehicle light state from indicator/hazard commands."""
-        assert self._vehicle is not None
-        import carla as _carla
-
-        current = int(self._vehicle.get_light_state())
-        blinker_mask = int(_carla.VehicleLightState.LeftBlinker) | int(
-            _carla.VehicleLightState.RightBlinker
         )
-        lights = current & ~blinker_mask
+
+    def _apply_lights(self, _carla: Any, is_reverse: bool) -> None:
+        """Update CARLA vehicle light state only when it has changed."""
+        assert self._vehicle is not None
+
+        lights = 0
 
         if self._current_turn_indicators_cmd is not None:
             cmd = self._current_turn_indicators_cmd.command
@@ -581,13 +570,12 @@ class AutowareEntity(EgoVehicle):
                 _carla.VehicleLightState.RightBlinker
             )
 
-        gear_cmd = self._current_manual_gear_cmd or self._current_gear_cmd
-        if gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS:
+        if is_reverse:
             lights |= int(_carla.VehicleLightState.Reverse)
-        else:
-            lights &= ~int(_carla.VehicleLightState.Reverse)
 
-        self._vehicle.set_light_state(_carla.VehicleLightState(lights))
+        if lights != self._last_light_state:
+            self._vehicle.set_light_state(_carla.VehicleLightState(lights))
+            self._last_light_state = lights
 
     # ------------------------------------------------------------------
     # Shutdown / cleanup
