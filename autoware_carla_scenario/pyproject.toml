@@ -25,6 +25,7 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "ffmpeg-python>=0.2.0",
+    "cyclonedds>=0.10.0",
 ]
 
 [project.optional-dependencies]
