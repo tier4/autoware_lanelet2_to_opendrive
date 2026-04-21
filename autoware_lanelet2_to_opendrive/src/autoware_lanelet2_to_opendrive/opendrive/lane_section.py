@@ -9,8 +9,8 @@ if TYPE_CHECKING:
     from .lane import Lane
 from .reference_line import ReferenceLine
 from ..conversion_config import WidthEstimationConfig
-from .enums import RoadMarkType, RoadMarkColor, RoadMarkLaneChange
-from .lane_elements import RoadMark
+from .enums import RoadMarkType, RoadMarkLaneChange
+from .lane_elements import road_mark_from_linestring_attrs
 from .xml_utils import replace_subnormal
 
 
@@ -165,37 +165,63 @@ class LaneSection:
                 lane_section._add_right_lane(lane)
             lanes_built.append(lane)
 
-        # Assign road marks based on lane-change permission.
+        # Assign road marks by combining the boundary LineString attributes
+        # with the routing-graph-derived lane-change permission.
         #
         # In OpenDRIVE, the road mark on a lane describes its INNER (center-side) boundary:
         #   RHT – lane -(i+1) road mark = boundary between lane -i and lane -(i+1)
         #   LHT – lane +(i+1) road mark = boundary between lane +i and lane +(i+1)
         #
-        # For every lane (including i == 0, the innermost), we check whether
-        # the lanelet at position i can change outward:
-        #   RHT outward = right  → routing_graph.right(lanelets_ordered[i])
-        #   LHT outward = left   → routing_graph.left(lanelets_ordered[i])
+        # The inner boundary LineString for lanelet i is:
+        #   RHT – leftBound  (shared with lanelet i-1 or with reference line)
+        #   LHT – rightBound (shared with lanelet i-1 or with reference line)
+        # Its type/subtype/color/lane_change attributes drive the roadMark
+        # type, weight, and colour via ``road_mark_from_linestring_attrs``.
         #
-        # When the innermost lanelet permits outward lane changes, the road
-        # mark must reflect that (laneChange="both") so that simulators like
-        # CARLA do not block the manoeuvre.
+        # The routing graph provides the authoritative outward lane-change
+        # permission; we preserve that decision while allowing the helper
+        # to supply the visual mark description.
+        #
+        # References:
+        #   - docs/spec-mapping/lanelet2-autoware-profile.md §"Boundary marking types"
+        #   - docs/spec-mapping/opendrive-14-carla-profile.md §"Road marks"
         for i, lane in enumerate(lanes_built):
+            lanelet_here = lanelets_ordered[i]
             if is_lht:
-                can_change = routing_graph.left(lanelets_ordered[i]) is not None
+                can_change = routing_graph.left(lanelet_here) is not None
+                inner_bound = lanelet_here.rightBound
             else:
-                can_change = routing_graph.right(lanelets_ordered[i]) is not None
-            mark_type = RoadMarkType.BROKEN if can_change else RoadMarkType.SOLID
-            lane_change = (
-                RoadMarkLaneChange.BOTH if can_change else RoadMarkLaneChange.NONE
+                can_change = routing_graph.right(lanelet_here) is not None
+                inner_bound = lanelet_here.leftBound
+
+            rm = road_mark_from_linestring_attrs(
+                s_offset=0.0,
+                attrs=dict(inner_bound.attributes),
+                is_lht=is_lht,
             )
-            lane._add_road_mark(
-                RoadMark(
-                    s_offset=0.0,
-                    type=mark_type,
-                    color=RoadMarkColor.STANDARD,
-                    lane_change=lane_change,
+
+            # If the LineString attributes did not specify a lane_change,
+            # fall back to the routing-graph-derived permission so
+            # simulators such as CARLA do not block a legal manoeuvre.
+            if rm.lane_change is None:
+                rm.lane_change = (
+                    RoadMarkLaneChange.BOTH if can_change else RoadMarkLaneChange.NONE
                 )
-            )
+
+            # If the LineString did not specify a type (fallback solid) but
+            # the routing graph says a lane change is permitted, relax the
+            # mark to BROKEN to remain visually consistent with behaviour.
+            # ``AttributeMap`` supports __contains__ and __getitem__ but not
+            # ``.get``; convert to dict for safe lookups.
+            inner_attrs = dict(inner_bound.attributes)
+            if (
+                rm.type == RoadMarkType.SOLID
+                and not inner_attrs.get("subtype")
+                and can_change
+            ):
+                rm.type = RoadMarkType.BROKEN
+
+            lane._add_road_mark(rm)
 
         return lane_section
 
