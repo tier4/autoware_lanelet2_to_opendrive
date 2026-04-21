@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic Lanelet2 fixture for Task 5 (P0-4) per-lane speed change along s.
+
+  Layout (looking from above, one lane of road, two lanelets chained along s):
+    Lanelet A (id=5001, speed_limit=60)
+      left  bound = way 4001  (nodes 3001→3002)   local_y=50200
+      right bound = way 4002  (nodes 3003→3004)   local_y=50196.5
+      extents along x: 81700 → 81710 (10 m)
+    Lanelet B (id=5002, speed_limit=40)
+      left  bound = way 4003  (nodes 3002→3005)   continues lanelet A's left bound
+      right bound = way 4004  (nodes 3004→3006)   continues lanelet A's right bound
+      extents along x: 81710 → 81720 (10 m)
+    Node 3002 is shared between way 4001 (end) and way 4003 (start), and
+    node 3004 is shared between way 4002 (end) and way 4004 (start), so
+    lanelet B is the longitudinal successor of lanelet A.
+
+  Both lanelets carry subtype=road; the speed_limit attribute differs so
+  the converter must emit two lane speeds (60 km/h, then 40 km/h).
+
+  All nodes carry local_x/local_y/ele/mgrs_code so the MGRSProjector
+  (mgrs_grid=54SUE, offset=81655.73/50137.43) used by the
+  example_mgrs_offset map config resolves them.
+-->
+<osm generator="speed_change_mini_fixture">
+  <MetaInfo format_version="1" map_version="1"/>
+
+  <!-- Left boundary: shared start node -->
+  <node id="3001" lat="35.68856" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <!-- Left boundary: middle shared node (end of A's left, start of B's left) -->
+  <node id="3002" lat="35.68865" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <!-- Right boundary: start node -->
+  <node id="3003" lat="35.68856" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <!-- Right boundary: middle shared node -->
+  <node id="3004" lat="35.68865" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <!-- Left boundary: end of B -->
+  <node id="3005" lat="35.68874" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <!-- Right boundary: end of B -->
+  <node id="3006" lat="35.68874" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- Left boundary of lanelet A -->
+  <way id="4001">
+    <nd ref="3001"/>
+    <nd ref="3002"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Right boundary of lanelet A -->
+  <way id="4002">
+    <nd ref="3003"/>
+    <nd ref="3004"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Left boundary of lanelet B (continues 4001) -->
+  <way id="4003">
+    <nd ref="3002"/>
+    <nd ref="3005"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Right boundary of lanelet B (continues 4002) -->
+  <way id="4004">
+    <nd ref="3004"/>
+    <nd ref="3006"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- Lanelet A: speed_limit=60 -->
+  <relation id="5001">
+    <member type="way" role="left" ref="4001"/>
+    <member type="way" role="right" ref="4002"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="speed_limit" v="60"/>
+    <tag k="location" v="urban"/>
+  </relation>
+
+  <!-- Lanelet B: speed_limit=40, longitudinal successor of A -->
+  <relation id="5002">
+    <member type="way" role="left" ref="4003"/>
+    <member type="way" role="right" ref="4004"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="speed_limit" v="40"/>
+    <tag k="location" v="urban"/>
+  </relation>
+</osm>
