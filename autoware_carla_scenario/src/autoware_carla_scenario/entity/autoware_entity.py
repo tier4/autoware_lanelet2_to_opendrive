@@ -221,10 +221,6 @@ class AutowareEntity(EgoVehicle):
         """Whether Autoware has engaged (``True`` → motion enabled)."""
         return self._is_engaged
 
-    @is_engaged.setter
-    def is_engaged(self, value: bool) -> None:
-        self._is_engaged = value
-
     def publish_engage(self, value: bool) -> None:
         """Publish an :class:`Engage` message via DDS.
 
@@ -240,7 +236,9 @@ class AutowareEntity(EgoVehicle):
         writer = self._writers.get("engage")
         if writer is None:
             raise RuntimeError("Call setup_dds() before publish_engage().")
-        writer.write(Engage(stamp=Time(sec=0, nanosec=0), engage=value))
+        now_ns = time.time_ns()
+        stamp = Time(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
+        writer.write(Engage(stamp=stamp, engage=value))
         logger.info("Published engage=%s", value)
 
     # ------------------------------------------------------------------
@@ -298,6 +296,8 @@ class AutowareEntity(EgoVehicle):
         self._shutdown_guard = GuardCondition(self._participant)
         self._frame_waitset = WaitSet(self._participant)
 
+        engage_topic: Optional[Topic] = None
+
         for spec in _INPUT_TOPICS:
             qos = spec.qos or DEFAULT_QOS
             dds_name = self._resolve_topic_name(spec.name)
@@ -318,17 +318,14 @@ class AutowareEntity(EgoVehicle):
             else:
                 reader = DataReader(self._participant, topic, qos=qos)
 
+            if spec.name == "engage":
+                engage_topic = topic
+
             self._readers[spec.name] = reader
             logger.debug("Subscribed to %s (%s)", spec.name, dds_name)
 
-        # Create a DataWriter for the engage topic so that EngageAction
-        # (and other code) can publish engage commands via DDS.
-        engage_topic: Topic = Topic(
-            self._participant,
-            self._resolve_topic_name("engage"),
-            Engage,
-            qos=DEFAULT_QOS,
-        )
+        # Reuse the engage Topic from the reader loop for the DataWriter.
+        assert engage_topic is not None
         self._writers["engage"] = DataWriter(
             self._participant, engage_topic, qos=DEFAULT_QOS
         )
