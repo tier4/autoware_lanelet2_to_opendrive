@@ -13,6 +13,55 @@ if TYPE_CHECKING:
     from ..conversion_config import ParamPoly3Config
 
 
+def evaluate_plan_view_world(
+    x: float,
+    y: float,
+    hdg: float,
+    p: float,
+    param_poly3_coeffs: Optional[
+        Tuple[float, float, float, float, float, float, float, float]
+    ] = None,
+) -> Tuple[float, float]:
+    """Evaluate a planView geometry at parameter ``p`` in the world XY frame.
+
+    This is the shared pure kernel used by both the dataclass-based path
+    (``road.py``) and the lxml-based path (``evaluate_road_endpoints``).
+
+    Only ``<paramPoly3>`` and ``<line>`` geometries are supported today.
+    If ``param_poly3_coeffs`` is ``None`` the function falls back to a
+    straight line along ``hdg`` (equivalent to an OpenDRIVE ``<line/>``).
+    Arc and spiral geometries would require extending this helper.
+
+    Args:
+        x: Geometry start X (world frame).
+        y: Geometry start Y (world frame).
+        hdg: Geometry heading at start (radians).
+        p: Arc-length parameter at which to evaluate (``0`` gives the start,
+            ``length`` gives the end).
+        param_poly3_coeffs: Optional ``(aU, bU, cU, dU, aV, bV, cV, dV)``
+            cubic coefficients.  When ``None`` the geometry is treated as a
+            straight line.
+
+    Returns:
+        Tuple ``(wx, wy)`` with the evaluated world coordinates.
+    """
+    cos_hdg = np.cos(hdg)
+    sin_hdg = np.sin(hdg)
+
+    if param_poly3_coeffs is not None:
+        aU, bU, cU, dU, aV, bV, cV, dV = param_poly3_coeffs
+        local_u = aU + bU * p + cU * p * p + dU * p * p * p
+        local_v = aV + bV * p + cV * p * p + dV * p * p * p
+        wx = x + local_u * cos_hdg - local_v * sin_hdg
+        wy = y + local_u * sin_hdg + local_v * cos_hdg
+        return (wx, wy)
+
+    # Fallback: straight line along heading (also covers <line/>).
+    wx = x + p * cos_hdg
+    wy = y + p * sin_hdg
+    return (wx, wy)
+
+
 def evaluate_road_endpoints(
     root: ET._Element,
 ) -> Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
@@ -81,7 +130,12 @@ def evaluate_road_endpoints(
 def _eval_geometry_world(
     geom_elem: ET._Element, p: float
 ) -> Optional[Tuple[float, float]]:
-    """Evaluate a planView geometry at arc-length ``p`` in world XY."""
+    """Evaluate a lxml planView ``<geometry>`` element at arc-length ``p``.
+
+    Thin lxml-attribute adapter around :func:`evaluate_plan_view_world`.
+    Only ``<paramPoly3>`` and ``<line>`` geometries are supported today —
+    arc and spiral would need the shared kernel extended.
+    """
     try:
         x = float(geom_elem.get("x"))
         y = float(geom_elem.get("y"))
@@ -89,30 +143,23 @@ def _eval_geometry_world(
     except (TypeError, ValueError):
         return None
 
-    cos_hdg = np.cos(hdg)
-    sin_hdg = np.sin(hdg)
-
     param_poly3 = geom_elem.find("paramPoly3")
+    coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
+        None
+    )
     if param_poly3 is not None:
-        aU = float(param_poly3.get("aU", "0.0"))
-        bU = float(param_poly3.get("bU", "0.0"))
-        cU = float(param_poly3.get("cU", "0.0"))
-        dU = float(param_poly3.get("dU", "0.0"))
-        aV = float(param_poly3.get("aV", "0.0"))
-        bV = float(param_poly3.get("bV", "0.0"))
-        cV = float(param_poly3.get("cV", "0.0"))
-        dV = float(param_poly3.get("dV", "0.0"))
+        coeffs = (
+            float(param_poly3.get("aU", "0.0")),
+            float(param_poly3.get("bU", "0.0")),
+            float(param_poly3.get("cU", "0.0")),
+            float(param_poly3.get("dU", "0.0")),
+            float(param_poly3.get("aV", "0.0")),
+            float(param_poly3.get("bV", "0.0")),
+            float(param_poly3.get("cV", "0.0")),
+            float(param_poly3.get("dV", "0.0")),
+        )
 
-        local_u = aU + bU * p + cU * p * p + dU * p * p * p
-        local_v = aV + bV * p + cV * p * p + dV * p * p * p
-        wx = x + local_u * cos_hdg - local_v * sin_hdg
-        wy = y + local_u * sin_hdg + local_v * cos_hdg
-        return (wx, wy)
-
-    # Fallback: straight line along heading (also covers <line/>).
-    wx = x + p * cos_hdg
-    wy = y + p * sin_hdg
-    return (wx, wy)
+    return evaluate_plan_view_world(x, y, hdg, p, coeffs)
 
 
 def _eval_elevation_at_s(elevation_profile: Optional[ET._Element], s: float) -> float:

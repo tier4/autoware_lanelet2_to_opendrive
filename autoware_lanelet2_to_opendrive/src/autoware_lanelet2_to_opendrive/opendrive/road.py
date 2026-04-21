@@ -1,7 +1,6 @@
 """OpenDRIVE road definitions."""
 
 import logging
-import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, cast
 
@@ -19,7 +18,7 @@ from ..conversion_config import (
 from ..util import LaneletInput, filter_lanelets_by_subtype, to_lanelet_list
 from .elevation import ElevationProfile
 from .enums import ContactPoint, ElementType, RoadType, TrafficRule
-from .geometry import GeometryBase, ParamPoly3, PlanView
+from .geometry import GeometryBase, ParamPoly3, PlanView, evaluate_plan_view_world
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
@@ -37,24 +36,33 @@ def _evaluate_plan_view_world(
     This returns the coordinate that the rendered OpenDRIVE paramPoly3 +
     planView actually resolves to, which can differ slightly from the raw
     OSM boundary endpoint because of spline-fit approximation.
+
+    Note: only ``<paramPoly3>`` and ``<line>`` geometries are expected
+    here today; arc/spiral would require extending both this wrapper and
+    the shared :func:`evaluate_plan_view_world` kernel in ``geometry.py``.
     """
     if plan_view is None or not plan_view.geometries:
         return None
 
     geom = plan_view.geometries[0] if at_start else plan_view.geometries[-1]
     p = 0.0 if at_start else geom.length
-    cos_hdg = math.cos(geom.hdg)
-    sin_hdg = math.sin(geom.hdg)
 
+    coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
+        None
+    )
     if isinstance(geom, ParamPoly3):
-        local_u = geom.aU + geom.bU * p + geom.cU * p * p + geom.dU * p * p * p
-        local_v = geom.aV + geom.bV * p + geom.cV * p * p + geom.dV * p * p * p
-        wx = geom.x + local_u * cos_hdg - local_v * sin_hdg
-        wy = geom.y + local_u * sin_hdg + local_v * cos_hdg
-    else:
-        wx = geom.x + p * cos_hdg
-        wy = geom.y + p * sin_hdg
-    return (wx, wy)
+        coeffs = (
+            geom.aU,
+            geom.bU,
+            geom.cU,
+            geom.dU,
+            geom.aV,
+            geom.bV,
+            geom.cV,
+            geom.dV,
+        )
+
+    return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs)
 
 
 def _evaluate_elevation_profile(elevation_profile: ElevationProfile, s: float) -> float:
