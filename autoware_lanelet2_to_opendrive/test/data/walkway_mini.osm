@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic Lanelet2 fixture for Task 2 (P0-1) walkway sidewalk emission.
+
+  Layout (looking from above, LHT):
+    Left bound (L) ---- road lanelet R ---- shared bound (S) ---- walkway W ---- right bound (E)
+    y=50200 (L)           y=50196.5 (S)                                          y=50194.5 (E)
+
+  Two lanelets:
+    - relation 5001: subtype=road      (left=way 4001, right=way 4002)
+    - relation 5002: subtype=walkway   (left=way 4002, right=way 4003)
+  They share way 4002 so the walkway is laterally adjacent to the road
+  via a shared physical boundary.
+
+  All nodes carry local_x/local_y/ele/mgrs_code so the MGRSProjector
+  (mgrs_grid=54SUE, offset=81655.73/50137.43) used by the nishishinjuku
+  map config resolves them.
+-->
+<osm generator="walkway_mini_fixture">
+  <MetaInfo format_version="1" map_version="1"/>
+
+  <!-- Left boundary of the road lanelet -->
+  <node id="3001" lat="35.68856" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3002" lat="35.68865" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- Shared boundary: right of the road lanelet, left of the walkway -->
+  <node id="3003" lat="35.68856" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3004" lat="35.68865" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- Right boundary of the walkway lanelet -->
+  <node id="3005" lat="35.68856" lon="139.69254">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50194.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3006" lat="35.68865" lon="139.69254">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.0"/>
+    <tag k="local_y" v="50194.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- Left boundary linestring for the road lanelet -->
+  <way id="4001">
+    <nd ref="3001"/>
+    <nd ref="3002"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- Shared boundary linestring between road and walkway -->
+  <way id="4002">
+    <nd ref="3003"/>
+    <nd ref="3004"/>
+    <tag k="type" v="virtual"/>
+  </way>
+
+  <!-- Right boundary linestring for the walkway lanelet -->
+  <way id="4003">
+    <nd ref="3005"/>
+    <nd ref="3006"/>
+    <tag k="type" v="virtual"/>
+  </way>
+
+  <!-- Road lanelet -->
+  <relation id="5001">
+    <member type="way" role="left" ref="4001"/>
+    <member type="way" role="right" ref="4002"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="speed_limit" v="40"/>
+    <tag k="location" v="urban"/>
+    <tag k="one_way" v="yes"/>
+    <tag k="participant:vehicle" v="yes"/>
+  </relation>
+
+  <!-- Walkway lanelet (shares boundary 4002 with the road lanelet) -->
+  <relation id="5002">
+    <member type="way" role="left" ref="4002"/>
+    <member type="way" role="right" ref="4003"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="walkway"/>
+    <tag k="speed_limit" v="10"/>
+    <tag k="location" v="urban"/>
+    <tag k="one_way" v="no"/>
+    <tag k="participant:pedestrian" v="yes"/>
+  </relation>
+</osm>

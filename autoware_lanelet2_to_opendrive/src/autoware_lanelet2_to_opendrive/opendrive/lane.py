@@ -168,6 +168,8 @@ class Lane:
                 lane_type = LaneType.DRIVING
             elif subtype == "walkway":
                 lane_type = LaneType.SIDEWALK
+            elif subtype == "road_shoulder":
+                lane_type = LaneType.SHOULDER
             elif subtype == "bicycle_lane":
                 lane_type = LaneType.BIKING
             else:

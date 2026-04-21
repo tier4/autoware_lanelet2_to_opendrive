@@ -733,8 +733,12 @@ class Road:
         # Filter out lanelets inside junctions
         from ..junction import _filter_lanelets_outside_junction
 
+        # Include walkway lanelets so they can be emitted as lane[type=sidewalk].
+        # Different subtypes form separate adjacent groups because the routing
+        # graph treats them as different participant classes, so walkways will
+        # not be grouped together with road lanelets here.
         road_lanelets = _filter_lanelets_outside_junction(
-            filter_lanelets_by_subtype(all_lanelets, ["road"])
+            filter_lanelets_by_subtype(all_lanelets, ["road", "highway", "walkway"])
         )
 
         if not road_lanelets:
