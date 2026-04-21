@@ -1,20 +1,26 @@
 """Autoware ego vehicle controlled via DDS topic I/O.
 
 This entity subscribes to the same input topics as Autoware's
-``simple_planning_simulator`` node.  A :class:`cyclonedds.core.WaitSet`
-gates the simulation: the CARLA tick loop must **not** advance until
-:meth:`AutowareEntity.wait_for_initialization` returns, ensuring that
-``initialpose`` and ``initialtwist`` have been received.
+``simple_planning_simulator`` node.
+
+**Per-frame topics** (control commands, trajectory) are synchronised
+with a :class:`~cyclonedds.core.WaitSet` — the tick loop blocks in
+:meth:`wait_for_frame_data` until at least one new sample arrives.
+
+**Event-driven topics** (engage, gear, indicators, …) are handled by
+:class:`~cyclonedds.core.Listener` callbacks that store the latest
+sample asynchronously as soon as it is published.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from cyclonedds.core import (
     GuardCondition,
+    Listener,
     ReadCondition,
     SampleState,
     WaitSet,
@@ -45,14 +51,14 @@ _WAIT_POLL_NS: int = 1_000_000_000
 
 
 # ------------------------------------------------------------------
-# Topic specification helper
+# Topic specification
 # ------------------------------------------------------------------
 
 
 class _TopicSpec:
-    """Lightweight descriptor for a single DDS input topic."""
+    """Descriptor for a single DDS input topic."""
 
-    __slots__ = ("name", "msg_type", "qos", "required_for_init")
+    __slots__ = ("name", "msg_type", "qos", "required_for_init", "per_frame", "attr")
 
     def __init__(
         self,
@@ -61,14 +67,17 @@ class _TopicSpec:
         qos: Any = None,
         *,
         required_for_init: bool = False,
+        per_frame: bool = False,
+        attr: str | None = None,
     ) -> None:
         self.name = name
         self.msg_type = msg_type
-        self.qos = qos  # ``None`` → resolved to DEFAULT_QOS in setup_dds()
+        self.qos = qos
         self.required_for_init = required_for_init
+        self.per_frame = per_frame
+        self.attr = attr
 
 
-#: All input topic specifications.
 _INPUT_TOPICS: list[_TopicSpec] = [
     # ---- Initialisation topics ----
     _TopicSpec(
@@ -86,29 +95,44 @@ _INPUT_TOPICS: list[_TopicSpec] = [
         LaneletMapBin,
         qos=TRANSIENT_LOCAL_QOS,
     ),
-    # ---- Runtime topics ----
+    # ---- Per-frame runtime topics (WaitSet) ----
+    _TopicSpec(
+        "ackermann_control_command",
+        AckermannControlCommand,
+        per_frame=True,
+        attr="_current_ackermann_cmd",
+    ),
+    _TopicSpec(
+        "actuation_command",
+        ActuationCommandStamped,
+        per_frame=True,
+        attr="_current_actuation_cmd",
+    ),
+    _TopicSpec(
+        "trajectory",
+        Trajectory,
+        per_frame=True,
+        attr="_current_trajectory",
+    ),
+    # ---- Event-driven runtime topics (Listener) ----
     _TopicSpec("engage", Engage),
-    _TopicSpec("ackermann_control_command", AckermannControlCommand),
-    _TopicSpec("actuation_command", ActuationCommandStamped),
-    _TopicSpec("manual_ackermann_control_command", AckermannControlCommand),
-    _TopicSpec("gear_command", GearCommand),
-    _TopicSpec("manual_gear_command", GearCommand),
-    _TopicSpec("turn_indicators_command", TurnIndicatorsCommand),
-    _TopicSpec("hazard_lights_command", HazardLightsCommand),
-    _TopicSpec("trajectory", Trajectory),
-]
-
-#: Runtime topic key → instance attribute name.
-_RT_ATTRS: list[tuple[str, str | None]] = [
-    ("engage", None),  # special: extract .engage bool
-    ("ackermann_control_command", "_current_ackermann_cmd"),
-    ("actuation_command", "_current_actuation_cmd"),
-    ("manual_ackermann_control_command", "_current_manual_ackermann_cmd"),
-    ("gear_command", "_current_gear_cmd"),
-    ("manual_gear_command", "_current_manual_gear_cmd"),
-    ("turn_indicators_command", "_current_turn_indicators_cmd"),
-    ("hazard_lights_command", "_current_hazard_lights_cmd"),
-    ("trajectory", "_current_trajectory"),
+    _TopicSpec(
+        "manual_ackermann_control_command",
+        AckermannControlCommand,
+        attr="_current_manual_ackermann_cmd",
+    ),
+    _TopicSpec("gear_command", GearCommand, attr="_current_gear_cmd"),
+    _TopicSpec("manual_gear_command", GearCommand, attr="_current_manual_gear_cmd"),
+    _TopicSpec(
+        "turn_indicators_command",
+        TurnIndicatorsCommand,
+        attr="_current_turn_indicators_cmd",
+    ),
+    _TopicSpec(
+        "hazard_lights_command",
+        HazardLightsCommand,
+        attr="_current_hazard_lights_cmd",
+    ),
 ]
 
 
@@ -125,13 +149,11 @@ class AutowareEntity(EgoVehicle):
     1. ``spawn(world, config)`` – create the CARLA actor (inherited).
     2. ``setup_dds()``          – create DDS participant & data readers.
     3. ``wait_for_initialization(timeout_sec)`` – block until
-       ``initialpose`` **and** ``initialtwist`` arrive on the DDS bus.
-    4. Per-tick: call ``poll_runtime_topics()`` to ingest the latest
-       control commands published by Autoware.
+       ``initialpose`` **and** ``initialtwist`` arrive.
+    4. Per-tick: call ``wait_for_frame_data()`` to block until a
+       per-frame control command arrives, then read the latest samples.
+       Event-driven topics are updated automatically via Listeners.
     5. ``destroy()`` – tear down DDS entities and the CARLA actor.
-
-    ``vector_map`` is also subscribed (transient-local QoS) but is
-    **not** required for initialisation to succeed.
     """
 
     use_autopilot: bool = False
@@ -159,7 +181,7 @@ class AutowareEntity(EgoVehicle):
         self._initial_twist: Optional[TwistStamped] = None
         self._vector_map: Optional[LaneletMapBin] = None
 
-        # --- Runtime command state (updated each tick) ---
+        # --- Runtime command state ---
         self._simulate_motion: bool = False
         self._current_ackermann_cmd: Optional[AckermannControlCommand] = None
         self._current_actuation_cmd: Optional[ActuationCommandStamped] = None
@@ -174,6 +196,9 @@ class AutowareEntity(EgoVehicle):
         self._participant: Optional[DomainParticipant] = None
         self._readers: dict[str, DataReader] = {}
         self._shutdown_guard: Optional[GuardCondition] = None
+        self._frame_waitset: Optional[WaitSet] = None
+        self._frame_conditions: list[ReadCondition] = []
+        self._listeners: list[Listener] = []
 
     # ------------------------------------------------------------------
     # Properties
@@ -186,17 +211,14 @@ class AutowareEntity(EgoVehicle):
 
     @property
     def initial_pose(self) -> Optional[PoseWithCovarianceStamped]:
-        """The received ``initialpose`` message, or ``None``."""
         return self._initial_pose
 
     @property
     def initial_twist(self) -> Optional[TwistStamped]:
-        """The received ``initialtwist`` message, or ``None``."""
         return self._initial_twist
 
     @property
     def vector_map(self) -> Optional[LaneletMapBin]:
-        """The received ``vector_map`` message, or ``None``."""
         return self._vector_map
 
     @property
@@ -217,8 +239,37 @@ class AutowareEntity(EgoVehicle):
             return f"rt/{self._topic_prefix}/input/{short_name}"
         return f"rt/input/{short_name}"
 
+    def _make_event_callback(self, spec: _TopicSpec) -> Callable[[DataReader], None]:
+        """Build a Listener callback that stores the latest sample."""
+        if spec.name == "engage":
+
+            def _on_engage(reader: DataReader) -> None:
+                samples = reader.take()
+                if samples:
+                    self._simulate_motion = samples[-1].engage
+                    logger.debug("engage=%s", self._simulate_motion)
+
+            return _on_engage
+
+        assert spec.attr is not None
+        attr = spec.attr
+
+        def _on_event(reader: DataReader) -> None:
+            samples = reader.take()
+            if samples:
+                setattr(self, attr, samples[-1])
+
+        return _on_event
+
     def setup_dds(self) -> None:
         """Create the DDS domain participant and data readers.
+
+        * **Per-frame topics** get a :class:`ReadCondition` attached to
+          ``_frame_waitset`` so :meth:`wait_for_frame_data` can block.
+        * **Event-driven topics** get a :class:`Listener` whose
+          ``on_data_available`` callback stores the latest sample.
+        * **Initialisation topics** get plain readers (polled explicitly
+          in :meth:`wait_for_initialization`).
 
         Idempotent – calling twice is a harmless no-op.
         """
@@ -228,12 +279,28 @@ class AutowareEntity(EgoVehicle):
 
         self._participant = DomainParticipant(domain_id=self._domain_id)
         self._shutdown_guard = GuardCondition(self._participant)
+        self._frame_waitset = WaitSet(self._participant)
 
         for spec in _INPUT_TOPICS:
             qos = spec.qos or DEFAULT_QOS
             dds_name = self._resolve_topic_name(spec.name)
             topic: Topic = Topic(self._participant, dds_name, spec.msg_type, qos=qos)
-            reader = DataReader(self._participant, topic, qos=qos)
+
+            if spec.per_frame:
+                reader = DataReader(self._participant, topic, qos=qos)
+                rc = ReadCondition(reader, SampleState.NotRead)
+                self._frame_waitset.attach(rc)
+                self._frame_conditions.append(rc)
+            elif self._is_event_topic(spec):
+                callback = self._make_event_callback(spec)
+                listener = Listener(on_data_available=callback)
+                self._listeners.append(listener)
+                reader = DataReader(
+                    self._participant, topic, qos=qos, listener=listener
+                )
+            else:
+                reader = DataReader(self._participant, topic, qos=qos)
+
             self._readers[spec.name] = reader
             logger.debug("Subscribed to %s (%s)", spec.name, dds_name)
 
@@ -243,6 +310,15 @@ class AutowareEntity(EgoVehicle):
             self._domain_id,
         )
 
+    @staticmethod
+    def _is_event_topic(spec: _TopicSpec) -> bool:
+        """True for runtime topics that are NOT per-frame and NOT init."""
+        return (
+            not spec.required_for_init
+            and not spec.per_frame
+            and spec.name != "vector_map"
+        )
+
     # ------------------------------------------------------------------
     # Initialisation – WaitSet gated
     # ------------------------------------------------------------------
@@ -250,9 +326,10 @@ class AutowareEntity(EgoVehicle):
     def wait_for_initialization(self, timeout_sec: float = 30.0) -> None:
         """Block until all required initialisation data has arrived.
 
-        A :class:`~cyclonedds.core.WaitSet` monitors ``initialpose``,
-        ``initialtwist``, and (optionally) ``vector_map``.  The method
-        returns as soon as both **required** topics have been received.
+        A temporary :class:`~cyclonedds.core.WaitSet` monitors
+        ``initialpose``, ``initialtwist``, and (optionally)
+        ``vector_map``.  Returns as soon as both **required** topics
+        have been received.
 
         Args:
             timeout_sec: Maximum seconds to wait.
@@ -266,13 +343,11 @@ class AutowareEntity(EgoVehicle):
 
         waitset = WaitSet(self._participant)
 
-        # Attach read-conditions for init-related readers.
         for spec in _INPUT_TOPICS:
             if spec.required_for_init or spec.name == "vector_map":
                 rc = ReadCondition(self._readers[spec.name], SampleState.NotRead)
                 waitset.attach(rc)
 
-        # Allow early exit via request_shutdown().
         if self._shutdown_guard is not None:
             waitset.attach(self._shutdown_guard)
 
@@ -300,10 +375,6 @@ class AutowareEntity(EgoVehicle):
 
         logger.info("Initialisation complete.")
 
-    # ------------------------------------------------------------------
-    # Initialisation helpers
-    # ------------------------------------------------------------------
-
     def _poll_init_data(self) -> None:
         """Read (and consume) samples from initialisation-related readers.
 
@@ -315,13 +386,11 @@ class AutowareEntity(EgoVehicle):
         has not yet been received – this matches the behaviour of the
         original C++ ``simple_planning_simulator`` callback.
         """
-        # --- initialpose (required) ---
         pose_samples = self._readers["initialpose"].take()
         if pose_samples and self._initial_pose is None:
             self._initial_pose = pose_samples[-1]
             logger.info("Received initialpose")
 
-        # --- initialtwist (required, but only after initialpose) ---
         twist_samples = self._readers["initialtwist"].take()
         if twist_samples:
             if self._initial_pose is not None and self._initial_twist is None:
@@ -330,7 +399,6 @@ class AutowareEntity(EgoVehicle):
             else:
                 logger.debug("Discarding initialtwist (initialpose not yet received)")
 
-        # --- vector_map (optional) ---
         map_samples = self._readers["vector_map"].take()
         if map_samples and self._vector_map is None:
             self._vector_map = map_samples[-1]
@@ -346,32 +414,36 @@ class AutowareEntity(EgoVehicle):
         return missing
 
     # ------------------------------------------------------------------
-    # Runtime polling (call once per simulation tick)
+    # Per-frame runtime – WaitSet gated
     # ------------------------------------------------------------------
 
-    def poll_runtime_topics(self) -> None:
-        """Ingest the latest sample from every runtime input reader.
+    def wait_for_frame_data(self, timeout_ns: int = _WAIT_POLL_NS) -> None:
+        """Block until at least one per-frame topic has new data.
 
-        Should be called **once per CARLA tick** so that the most recent
-        control commands are available for the vehicle model update.
+        After the WaitSet triggers, all per-frame readers are drained
+        and the latest sample for each is stored.  Event-driven topics
+        are updated automatically by their Listener callbacks.
+
+        Args:
+            timeout_ns: Maximum wait in nanoseconds.
+
+        Raises:
+            RuntimeError: If :meth:`setup_dds` has not been called yet.
         """
-        for key, attr in _RT_ATTRS:
-            reader = self._readers.get(key)
-            if reader is None:
+        if self._frame_waitset is None:
+            raise RuntimeError("Call setup_dds() before wait_for_frame_data().")
+
+        self._frame_waitset.wait(timeout=timeout_ns)
+
+        for spec in _INPUT_TOPICS:
+            if not spec.per_frame or spec.attr is None:
                 continue
-            samples = reader.take()
-            if not samples:
-                continue
-            sample = samples[-1]
-            if attr is None:
-                # ``engage`` topic: extract the boolean flag.
-                self._simulate_motion = sample.engage
-                logger.debug("engage=%s", self._simulate_motion)
-            else:
-                setattr(self, attr, sample)
+            samples = self._readers[spec.name].take()
+            if samples:
+                setattr(self, spec.attr, samples[-1])
 
     # ------------------------------------------------------------------
-    # Shutdown helpers
+    # Shutdown / cleanup
     # ------------------------------------------------------------------
 
     def request_shutdown(self) -> None:
@@ -381,6 +453,9 @@ class AutowareEntity(EgoVehicle):
 
     def destroy(self) -> None:
         """Tear down DDS entities and destroy the CARLA actor."""
+        self._frame_conditions.clear()
+        self._listeners.clear()
+        self._frame_waitset = None
         self._readers.clear()
         self._shutdown_guard = None
         self._participant = None
