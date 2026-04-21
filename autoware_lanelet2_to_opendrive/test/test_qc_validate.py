@@ -1,12 +1,18 @@
+import glob
+import sys
 from unittest.mock import MagicMock
 
+import pytest
 from qc_baselib import IssueSeverity
 from qc_baselib.models.result import StatusType
 
+from autoware_lanelet2_to_opendrive import qc_validate
 from autoware_lanelet2_to_opendrive.qc_validate import (
     DEFAULT_IGNORE_FILE,
     count_errors,
     load_ignore_patterns,
+    main,
+    validate,
 )
 
 
@@ -74,3 +80,41 @@ def test_count_errors_skips_skipped_checkers():
 
     result.get_checker_result.side_effect = _skipped_checker
     assert count_errors(result, []) == 0
+
+
+def test_validate_cleans_up_temp_file_on_exception(monkeypatch, tmp_path):
+    """validate() must delete its .xqar temp file even when run_checks raises."""
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("run_checks exploded")
+
+    monkeypatch.setattr(qc_validate, "run_checks", _boom)
+
+    before = set(glob.glob("/tmp/tmp*.xqar"))
+    with pytest.raises(RuntimeError, match="run_checks exploded"):
+        validate(tmp_path / "does_not_need_to_exist.xodr", ignore_patterns=[])
+    after = set(glob.glob("/tmp/tmp*.xqar"))
+
+    leaked = after - before
+    assert leaked == set(), f"validate() leaked temp files: {leaked}"
+
+
+def test_main_prints_fail_and_exits_2_on_exception(monkeypatch, capsys, tmp_path):
+    """main() must surface unexpected validate() exceptions with exit code 2."""
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(qc_validate, "validate", _boom)
+
+    fake_xodr = tmp_path / "fake.xodr"
+    fake_xodr.write_text("<OpenDRIVE/>", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["qc_validate", str(fake_xodr)])
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "qc-validate: FAIL (exception:" in captured.err
+    assert "RuntimeError: boom" in captured.err

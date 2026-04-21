@@ -8,6 +8,7 @@ cross-validation and the longer analysis report, use `analyze_xodr.py`.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import tempfile
@@ -74,26 +75,33 @@ def validate(
     )
     with tempfile.NamedTemporaryFile(suffix=".xqar", delete=False) as tmp:
         result_path = tmp.name
-    config = Configuration()
-    config.set_config_param("InputFile", str(xodr_path))
-    config.register_checker_bundle(constants.BUNDLE_NAME)
-    config.set_checker_bundle_param(constants.BUNDLE_NAME, "resultFile", result_path)
+    try:
+        config = Configuration()
+        config.set_config_param("InputFile", str(xodr_path))
+        config.register_checker_bundle(constants.BUNDLE_NAME)
+        config.set_checker_bundle_param(
+            constants.BUNDLE_NAME, "resultFile", result_path
+        )
 
-    # qc-opendrive's run_checks populates a Result object in-place; the second
-    # argument must be a Result (not a string path).  Mirrors analyze_xodr.py.
-    result = Result()
-    result.register_checker_bundle(
-        name=constants.BUNDLE_NAME,
-        description="OpenDrive checker bundle",
-        version=constants.BUNDLE_VERSION,
-        summary="",
-    )
-    result.set_result_version(version=constants.BUNDLE_VERSION)
-    run_checks(config, result)
+        # qc-opendrive's run_checks populates a Result object in-place; the second
+        # argument must be a Result (not a string path).  Mirrors analyze_xodr.py.
+        result = Result()
+        result.register_checker_bundle(
+            name=constants.BUNDLE_NAME,
+            description="OpenDrive checker bundle",
+            version=constants.BUNDLE_VERSION,
+            summary="",
+        )
+        result.set_result_version(version=constants.BUNDLE_VERSION)
+        run_checks(config, result)
 
-    errors = count_errors(result, patterns)
-    Path(result_path).unlink(missing_ok=True)
-    return errors
+        errors = count_errors(result, patterns)
+        return errors
+    finally:
+        try:
+            os.unlink(result_path)
+        except FileNotFoundError:
+            pass
 
 
 def main() -> None:
@@ -109,7 +117,14 @@ def main() -> None:
     )
     args = parser.parse_args()
     patterns = load_ignore_patterns(args.ignore_file)
-    errors = validate(args.xodr, patterns)
+    try:
+        errors = validate(args.xodr, patterns)
+    except Exception as exc:
+        print(
+            f"qc-validate: FAIL (exception: {type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     if errors > 0:
         print(f"qc-validate: FAIL ({errors} ERROR-level issues)", file=sys.stderr)
         sys.exit(1)
