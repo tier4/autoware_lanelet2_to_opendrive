@@ -1,7 +1,7 @@
 """ReferenceLine implementation for OpenDRIVE conversion."""
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Set, Union
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple, Union
 
 import lanelet2
 import lxml.etree as ET
@@ -35,6 +35,8 @@ class ReferenceLine:
         centerline_2d: Splines,
         height_spline: CubicSpline1D,
         elevation_offset: float = 0.0,
+        start_xyz: Optional[Tuple[float, float, float]] = None,
+        end_xyz: Optional[Tuple[float, float, float]] = None,
     ):
         """
         Initialize a ReferenceLine with a 2D centerline spline and height spline.
@@ -43,6 +45,11 @@ class ReferenceLine:
             centerline_2d: 2D spline (XY coordinates only) representing the reference line
             height_spline: 1D spline mapping XY arc length (s) to relative elevation (z)
             elevation_offset: Absolute elevation (z coordinate) at the road start point (s=0)
+            start_xyz: World-frame 3D position of the reference line at s=0.
+                Stored so the junction phase can align connecting roads with
+                their linked incoming/outgoing regular roads (P0-2).
+            end_xyz: World-frame 3D position of the reference line at
+                s=total_length.
         """
         self.centerline_2d: Splines = centerline_2d
         self.height_spline: CubicSpline1D = height_spline
@@ -50,6 +57,11 @@ class ReferenceLine:
         # Store the absolute elevation at the road start point (s=0)
         # This is needed for calculating signal z_offsets correctly
         self.elevation_offset = elevation_offset
+
+        # World-frame 3D endpoints of the reference line (s=0 and s=length).
+        # Used by the junction phase to plumb connecting-road overrides.
+        self.start_xyz: Optional[Tuple[float, float, float]] = start_xyz
+        self.end_xyz: Optional[Tuple[float, float, float]] = end_xyz
 
         # Create a Lane instance for the reference line
         # Import here to avoid circular import
@@ -71,6 +83,8 @@ class ReferenceLine:
             lanelet2.core.LaneletLayer,
         ],
         traffic_rule: Optional[str] = None,
+        start_xyz_override: Optional[Tuple[float, float, float]] = None,
+        end_xyz_override: Optional[Tuple[float, float, float]] = None,
     ) -> "ReferenceLine":
         """
         Construct a ReferenceLine from a group of Lanelet2 lanelets.
@@ -82,6 +96,16 @@ class ReferenceLine:
                          Defaults to "RHT" if not specified.
                          Both RHT and LHT use leftmost lanelet's left boundary as reference line.
                          The road@rule attribute indicates the traffic direction.
+            start_xyz_override: Optional (x, y, z) world-frame coordinate that
+                replaces the first sampled point of the reference line before
+                spline fitting.  Used by the junction phase to pin a
+                connecting road's s=0 endpoint to the incoming road's
+                endpoint (P0-2 junction endpoint fidelity).
+            end_xyz_override: Optional (x, y, z) world-frame coordinate that
+                replaces the last sampled point of the reference line before
+                spline fitting.  Used by the junction phase to pin a
+                connecting road's s=length endpoint to the outgoing road's
+                endpoint.
 
         Returns:
             ReferenceLine instance constructed from the center of the lanelet group
@@ -191,6 +215,30 @@ class ReferenceLine:
                         f"LHT rightBound direction is correct (dot product={dot_product:.4f})"
                     )
 
+        # Apply world-frame endpoint overrides (P0-2 junction endpoint fidelity).
+        # These are set by the junction phase so that a connecting road's first
+        # and last points become exactly the world-frame endpoint of the
+        # linked incoming / outgoing road reference line.  The spline fitter
+        # enforces hard position constraints at s=0 and s=length, so the
+        # resulting paramPoly3 will land exactly on these world coordinates.
+        if start_xyz_override is not None:
+            override = np.asarray(start_xyz_override, dtype=float)
+            if override.shape != (3,):
+                raise ValueError(
+                    f"start_xyz_override must have shape (3,), got {override.shape}"
+                )
+            points_3d = points_3d.copy()
+            points_3d[0] = override
+        if end_xyz_override is not None:
+            override = np.asarray(end_xyz_override, dtype=float)
+            if override.shape != (3,):
+                raise ValueError(
+                    f"end_xyz_override must have shape (3,), got {override.shape}"
+                )
+            if start_xyz_override is None:
+                points_3d = points_3d.copy()
+            points_3d[-1] = override
+
         # Calculate XY cumulative distances (2D arc length) directly from points
         xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
         xy_arc_lengths = np.concatenate(([0], np.cumsum(xy_distances)))
@@ -215,12 +263,22 @@ class ReferenceLine:
             start_vel, end_vel = -end_vel, -start_vel
             logger.debug("Reversed velocity vectors to match reversed boundary points")
 
-        # Create B-spline directly from corrected points
+        # Create B-spline directly from corrected points.  When the caller
+        # overrode start/end points (junction endpoint fidelity, P0-2) the
+        # override point can be up to a few decimetres away from the second
+        # or second-to-last input point.  With the default weight mix
+        # (hard=80, soft=20) the LSQ solver trades ~10-20 cm of boundary
+        # error for better data fit, which re-introduces the gap we are
+        # trying to close.  Force near-exact boundary enforcement by
+        # boosting the hard-constraint weight in that case.
+        has_override = start_xyz_override is not None or end_xyz_override is not None
+        spline_hard_weight: Optional[float] = 1e6 if has_override else None
         centerline_2d = Splines(
             points_3d[:, :2],  # Use corrected XY points
             start_vel=start_vel,
             end_vel=end_vel,
             num_control_points=None,
+            hard_constraint_weight=spline_hard_weight,
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)
@@ -244,10 +302,22 @@ class ReferenceLine:
         )
 
         # Create the ReferenceLine instance with 2D centerline, height spline, and elevation offset
+        start_xyz_stored: Tuple[float, float, float] = (
+            float(points_3d[0, 0]),
+            float(points_3d[0, 1]),
+            float(points_3d[0, 2]),
+        )
+        end_xyz_stored: Tuple[float, float, float] = (
+            float(points_3d[-1, 0]),
+            float(points_3d[-1, 1]),
+            float(points_3d[-1, 2]),
+        )
         reference_line = ReferenceLine(
             centerline_2d=centerline_2d,
             height_spline=height_spline,
             elevation_offset=elevation_offset,
+            start_xyz=start_xyz_stored,
+            end_xyz=end_xyz_stored,
         )
 
         # TODO: Add road marks based on lanelet line types

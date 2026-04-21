@@ -204,6 +204,11 @@ class _Lanelet2ToOpenDRIVEConverter:
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
             width_config=self.config.width_estimation,
+            # P0-2: plumb already-built regular roads so that each
+            # connecting road's endpoints are pinned to the linked
+            # incoming/outgoing regular road endpoints.
+            regular_roads=regular_roads,
+            lanelet_to_road_id=lanelet_to_road_id,
         )
 
         # Merge lanelet-to-road mappings

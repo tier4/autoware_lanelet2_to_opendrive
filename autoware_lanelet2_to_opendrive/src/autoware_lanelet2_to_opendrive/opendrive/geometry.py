@@ -1,7 +1,7 @@
 """OpenDRIVE geometry definitions."""
 
 from dataclasses import dataclass
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import lxml.etree as ET
 import numpy as np
 
@@ -11,6 +11,132 @@ from .xml_utils import replace_subnormal
 if TYPE_CHECKING:
     from ..spline import Splines
     from ..conversion_config import ParamPoly3Config
+
+
+def evaluate_road_endpoints(
+    root: ET._Element,
+) -> Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
+    """Evaluate the 3D start and end position of every ``<road>`` in a tree.
+
+    For each road under the given OpenDRIVE root element this function walks
+    the ``planView`` (paramPoly3 / line geometries) to obtain the XY reference
+    line start and end, and then samples the ``elevationProfile`` at the same
+    s-coordinates to obtain the matching Z.
+
+    The helper exists primarily for tests that verify junction endpoint
+    fidelity: the connecting-road start and end should land on the linked
+    incoming / outgoing road endpoints in world frame.
+
+    Args:
+        root: ``<OpenDRIVE>`` element (or any element whose direct ``road``
+            children are OpenDRIVE roads).
+
+    Returns:
+        Mapping ``road_id -> ((x0, y0, z0), (x1, y1, z1))`` where the first
+        tuple is the s=0 endpoint and the second tuple is the s=length
+        endpoint.  Roads without any geometry are omitted.
+    """
+    results: Dict[
+        int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]
+    ] = {}
+
+    for road_elem in root.findall("road"):
+        road_id_str = road_elem.get("id")
+        if road_id_str is None:
+            continue
+        road_id = int(road_id_str)
+
+        plan_view = road_elem.find("planView")
+        if plan_view is None:
+            continue
+
+        geometries = plan_view.findall("geometry")
+        if not geometries:
+            continue
+
+        first_geom = geometries[0]
+        start_xy = _eval_geometry_world(first_geom, p=0.0)
+        last_geom = geometries[-1]
+        last_length = float(last_geom.get("length", "0.0"))
+        end_xy = _eval_geometry_world(last_geom, p=last_length)
+        if start_xy is None or end_xy is None:
+            continue
+
+        # Total s range of the reference line.
+        s_start = float(first_geom.get("s", "0.0"))
+        s_end = float(last_geom.get("s", "0.0")) + last_length
+
+        elevation_profile = road_elem.find("elevationProfile")
+        z_start = _eval_elevation_at_s(elevation_profile, s_start)
+        z_end = _eval_elevation_at_s(elevation_profile, s_end)
+
+        results[road_id] = (
+            (start_xy[0], start_xy[1], z_start),
+            (end_xy[0], end_xy[1], z_end),
+        )
+
+    return results
+
+
+def _eval_geometry_world(
+    geom_elem: ET._Element, p: float
+) -> Optional[Tuple[float, float]]:
+    """Evaluate a planView geometry at arc-length ``p`` in world XY."""
+    try:
+        x = float(geom_elem.get("x"))
+        y = float(geom_elem.get("y"))
+        hdg = float(geom_elem.get("hdg"))
+    except (TypeError, ValueError):
+        return None
+
+    cos_hdg = np.cos(hdg)
+    sin_hdg = np.sin(hdg)
+
+    param_poly3 = geom_elem.find("paramPoly3")
+    if param_poly3 is not None:
+        aU = float(param_poly3.get("aU", "0.0"))
+        bU = float(param_poly3.get("bU", "0.0"))
+        cU = float(param_poly3.get("cU", "0.0"))
+        dU = float(param_poly3.get("dU", "0.0"))
+        aV = float(param_poly3.get("aV", "0.0"))
+        bV = float(param_poly3.get("bV", "0.0"))
+        cV = float(param_poly3.get("cV", "0.0"))
+        dV = float(param_poly3.get("dV", "0.0"))
+
+        local_u = aU + bU * p + cU * p * p + dU * p * p * p
+        local_v = aV + bV * p + cV * p * p + dV * p * p * p
+        wx = x + local_u * cos_hdg - local_v * sin_hdg
+        wy = y + local_u * sin_hdg + local_v * cos_hdg
+        return (wx, wy)
+
+    # Fallback: straight line along heading (also covers <line/>).
+    wx = x + p * cos_hdg
+    wy = y + p * sin_hdg
+    return (wx, wy)
+
+
+def _eval_elevation_at_s(elevation_profile: Optional[ET._Element], s: float) -> float:
+    """Evaluate the absolute road-surface elevation at ``s``.
+
+    Uses the piecewise cubic ``<elevation>`` segments under the given
+    profile.  Returns 0.0 when no profile is present.
+    """
+    if elevation_profile is None:
+        return 0.0
+
+    z = 0.0
+    for elev in elevation_profile.findall("elevation"):
+        s_off = float(elev.get("s", "0.0"))
+        if s_off > s:
+            break
+        a = float(elev.get("a", "0.0"))
+        b = float(elev.get("b", "0.0"))
+        c = float(elev.get("c", "0.0"))
+        d = float(elev.get("d", "0.0"))
+        ds = s - s_off
+        z = a + b * ds + c * ds * ds + d * ds * ds * ds
+
+    return z
 
 
 @dataclass
