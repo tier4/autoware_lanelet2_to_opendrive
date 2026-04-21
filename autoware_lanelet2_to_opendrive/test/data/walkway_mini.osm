@@ -89,10 +89,6 @@
     <member type="way" role="right" ref="4002"/>
     <tag k="type" v="lanelet"/>
     <tag k="subtype" v="road"/>
-    <tag k="speed_limit" v="40"/>
-    <tag k="location" v="urban"/>
-    <tag k="one_way" v="yes"/>
-    <tag k="participant:vehicle" v="yes"/>
   </relation>
 
   <!-- Walkway lanelet (shares boundary 4002 with the road lanelet) -->
@@ -101,9 +97,5 @@
     <member type="way" role="right" ref="4003"/>
     <tag k="type" v="lanelet"/>
     <tag k="subtype" v="walkway"/>
-    <tag k="speed_limit" v="10"/>
-    <tag k="location" v="urban"/>
-    <tag k="one_way" v="no"/>
-    <tag k="participant:pedestrian" v="yes"/>
   </relation>
 </osm>

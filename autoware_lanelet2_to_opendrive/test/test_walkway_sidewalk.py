@@ -10,6 +10,11 @@ from pathlib import Path
 
 import lxml.etree as ET
 
+from autoware_lanelet2_to_opendrive.qc_validate import (
+    load_ignore_patterns,
+    validate,
+)
+
 FIXTURE = (Path(__file__).parent / "data" / "walkway_mini.osm").resolve()
 
 
@@ -37,7 +42,7 @@ def _run_convert(tmp_path: Path) -> Path:
 def test_walkway_emits_sidewalk_lane(tmp_path: Path) -> None:
     """A Lanelet2 subtype=walkway lanelet must produce lane[type=sidewalk]."""
     out = _run_convert(tmp_path)
-    root = ET.parse(str(out)).getroot()
+    root = ET.parse(out).getroot()
     sidewalks = root.findall(".//lane[@type='sidewalk']")
     assert (
         len(sidewalks) >= 1
@@ -46,11 +51,6 @@ def test_walkway_emits_sidewalk_lane(tmp_path: Path) -> None:
 
 def test_walkway_fixture_passes_qc_validate(tmp_path: Path) -> None:
     """The emitted OpenDRIVE must pass qc-framework with zero ERRORs."""
-    from autoware_lanelet2_to_opendrive.qc_validate import (
-        load_ignore_patterns,
-        validate,
-    )
-
     out = _run_convert(tmp_path)
     errors = validate(out, load_ignore_patterns())
     assert errors == 0, f"qc-framework reported {errors} ERROR(s)"
