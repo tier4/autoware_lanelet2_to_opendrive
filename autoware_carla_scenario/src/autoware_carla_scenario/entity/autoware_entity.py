@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    import carla
 
 from cyclonedds.core import (
     GuardCondition,
@@ -46,6 +49,23 @@ from ..dds.qos import DEFAULT_QOS, TRANSIENT_LOCAL_QOS
 from .ego import EgoVehicle
 
 logger = logging.getLogger(__name__)
+
+# -- Autoware GearCommand constants ------------------------------------
+_GEAR_NEUTRAL: int = 1
+_GEAR_DRIVE: int = 2
+_GEAR_REVERSE: int = 20
+_GEAR_REVERSE_2: int = 21
+_GEAR_PARK: int = 22
+_REVERSE_GEARS: frozenset[int] = frozenset({_GEAR_REVERSE, _GEAR_REVERSE_2})
+
+# -- Autoware TurnIndicatorsCommand constants --------------------------
+_TURN_DISABLE: int = 1
+_TURN_LEFT: int = 2
+_TURN_RIGHT: int = 3
+
+# -- Autoware HazardLightsCommand constants ----------------------------
+_HAZARD_DISABLE: int = 1
+_HAZARD_ENABLE: int = 2
 
 #: WaitSet poll interval in nanoseconds (1 second).
 _WAIT_POLL_NS: int = 1_000_000_000
@@ -468,6 +488,106 @@ class AutowareEntity(EgoVehicle):
             samples = self._readers[spec.name].take()
             if samples:
                 setattr(self, spec.attr, samples[-1])
+
+    # ------------------------------------------------------------------
+    # Control application (post-tick callback)
+    # ------------------------------------------------------------------
+
+    def apply_control(self, world: "carla.World") -> None:
+        """Apply the latest DDS commands to the CARLA vehicle.
+
+        Intended to be registered as a ``post_tick`` callback on the
+        scenario so it runs once per simulation tick on the main thread.
+        All command state is populated asynchronously by DDS Listeners
+        and the per-frame WaitSet; this method simply reads the latest
+        values and forwards them to the CARLA actor.
+
+        When :attr:`is_engaged` is ``False`` the vehicle is left
+        untouched (state frozen).
+        """
+        if self._vehicle is None or not self._is_engaged:
+            return
+
+        self._apply_motion_control()
+        self._apply_lights()
+
+    def _apply_motion_control(self) -> None:
+        """Send ackermann or actuation commands to the CARLA vehicle."""
+        assert self._vehicle is not None
+        import carla as _carla
+
+        gear_cmd = self._current_manual_gear_cmd or self._current_gear_cmd
+        is_reverse = gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS
+        is_park = gear_cmd is not None and gear_cmd.command == _GEAR_PARK
+
+        if is_park:
+            self._vehicle.apply_control(_carla.VehicleControl(hand_brake=True))
+            return
+
+        ackermann_cmd = (
+            self._current_manual_ackermann_cmd or self._current_ackermann_cmd
+        )
+        if ackermann_cmd is not None:
+            speed = float(ackermann_cmd.longitudinal.velocity)
+            if is_reverse:
+                speed = -abs(speed)
+            self._vehicle.apply_ackermann_control(
+                _carla.VehicleAckermannControl(
+                    steer=float(ackermann_cmd.lateral.steering_tire_angle),
+                    steer_speed=float(
+                        ackermann_cmd.lateral.steering_tire_rotation_rate
+                    ),
+                    speed=speed,
+                    acceleration=float(ackermann_cmd.longitudinal.acceleration),
+                    jerk=float(ackermann_cmd.longitudinal.jerk),
+                )
+            )
+            return
+
+        if self._current_actuation_cmd is not None:
+            act = self._current_actuation_cmd.actuation
+            self._vehicle.apply_control(
+                _carla.VehicleControl(
+                    throttle=max(0.0, min(1.0, float(act.accel_cmd))),
+                    brake=max(0.0, min(1.0, float(act.brake_cmd))),
+                    steer=max(-1.0, min(1.0, float(act.steer_cmd))),
+                    reverse=is_reverse,
+                )
+            )
+
+    def _apply_lights(self) -> None:
+        """Update CARLA vehicle light state from indicator/hazard commands."""
+        assert self._vehicle is not None
+        import carla as _carla
+
+        current = int(self._vehicle.get_light_state())
+        blinker_mask = int(_carla.VehicleLightState.LeftBlinker) | int(
+            _carla.VehicleLightState.RightBlinker
+        )
+        lights = current & ~blinker_mask
+
+        if self._current_turn_indicators_cmd is not None:
+            cmd = self._current_turn_indicators_cmd.command
+            if cmd == _TURN_LEFT:
+                lights |= int(_carla.VehicleLightState.LeftBlinker)
+            elif cmd == _TURN_RIGHT:
+                lights |= int(_carla.VehicleLightState.RightBlinker)
+
+        if (
+            self._current_hazard_lights_cmd is not None
+            and self._current_hazard_lights_cmd.command == _HAZARD_ENABLE
+        ):
+            lights |= int(_carla.VehicleLightState.LeftBlinker) | int(
+                _carla.VehicleLightState.RightBlinker
+            )
+
+        gear_cmd = self._current_manual_gear_cmd or self._current_gear_cmd
+        if gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS:
+            lights |= int(_carla.VehicleLightState.Reverse)
+        else:
+            lights &= ~int(_carla.VehicleLightState.Reverse)
+
+        self._vehicle.set_light_state(_carla.VehicleLightState(lights))
 
     # ------------------------------------------------------------------
     # Shutdown / cleanup

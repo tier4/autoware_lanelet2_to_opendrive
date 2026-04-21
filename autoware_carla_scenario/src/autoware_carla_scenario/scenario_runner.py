@@ -21,7 +21,7 @@ from .conditions.base import BaseCondition, ConditionStatus, find_actor_by_role_
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
 from .coordinate.poses import CarlaWorldPose
 from .coordinate.transform import to_opendrive
-from .entity import vehicle_entity as _vehicle_entity_module
+from .entity import AutowareEntity, vehicle_entity as _vehicle_entity_module
 from .scenario_base import BaseScenario
 from .server import CarlaServerManager
 
@@ -515,6 +515,12 @@ class ScenarioRunner:
             scenario.set_initial_speed(ego_actor)
 
             _vehicle_entity_module._warmup_done = True
+
+            # When the ego is an AutowareEntity, register its
+            # apply_control method as a post-tick callback so that
+            # DDS-received commands are forwarded to CARLA each tick.
+            if isinstance(ego, AutowareEntity):
+                scenario.register_post_tick(ego.apply_control)
 
             # Start native CARLA recorder
             output_path = self.output_dir / f"{scenario_name}.log"
