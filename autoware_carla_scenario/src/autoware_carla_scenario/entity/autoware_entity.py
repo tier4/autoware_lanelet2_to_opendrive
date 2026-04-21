@@ -26,18 +26,19 @@ from cyclonedds.core import (
     WaitSet,
 )
 from cyclonedds.domain import DomainParticipant
+from cyclonedds.pub import DataWriter
 from cyclonedds.sub import DataReader
 from cyclonedds.topic import Topic
 
 from ..dds.msg import (
-    Control,
     ActuationCommandStamped,
+    Control,
     Engage,
     GearCommand,
+    Time,
     HazardLightsCommand,
     LaneletMapBin,
     PoseWithCovarianceStamped,
-    Trajectory,
     TurnIndicatorsCommand,
     TwistStamped,
 )
@@ -108,12 +109,6 @@ _INPUT_TOPICS: list[_TopicSpec] = [
         per_frame=True,
         attr="_current_actuation_cmd",
     ),
-    _TopicSpec(
-        "trajectory",
-        Trajectory,
-        per_frame=True,
-        attr="_current_trajectory",
-    ),
     # ---- Event-driven runtime topics (Listener) ----
     _TopicSpec("engage", Engage),
     _TopicSpec(
@@ -182,7 +177,7 @@ class AutowareEntity(EgoVehicle):
         self._vector_map: Optional[LaneletMapBin] = None
 
         # --- Runtime command state ---
-        self._simulate_motion: bool = False
+        self._is_engaged: bool = False
         self._current_ackermann_cmd: Optional[Control] = None
         self._current_actuation_cmd: Optional[ActuationCommandStamped] = None
         self._current_manual_ackermann_cmd: Optional[Control] = None
@@ -190,11 +185,11 @@ class AutowareEntity(EgoVehicle):
         self._current_manual_gear_cmd: Optional[GearCommand] = None
         self._current_turn_indicators_cmd: Optional[TurnIndicatorsCommand] = None
         self._current_hazard_lights_cmd: Optional[HazardLightsCommand] = None
-        self._current_trajectory: Optional[Trajectory] = None
 
         # --- DDS entities (created by setup_dds) ---
         self._participant: Optional[DomainParticipant] = None
         self._readers: dict[str, DataReader] = {}
+        self._writers: dict[str, DataWriter] = {}
         self._shutdown_guard: Optional[GuardCondition] = None
         self._frame_waitset: Optional[WaitSet] = None
         self._frame_conditions: list[ReadCondition] = []
@@ -222,9 +217,31 @@ class AutowareEntity(EgoVehicle):
         return self._vector_map
 
     @property
-    def simulate_motion(self) -> bool:
-        """Current engage flag (``False`` → vehicle state frozen)."""
-        return self._simulate_motion
+    def is_engaged(self) -> bool:
+        """Whether Autoware has engaged (``True`` → motion enabled)."""
+        return self._is_engaged
+
+    @is_engaged.setter
+    def is_engaged(self, value: bool) -> None:
+        self._is_engaged = value
+
+    def publish_engage(self, value: bool) -> None:
+        """Publish an :class:`Engage` message via DDS.
+
+        The entity's own Listener will receive this message and update
+        :attr:`is_engaged` accordingly.
+
+        Args:
+            value: Engage state to publish.
+
+        Raises:
+            RuntimeError: If :meth:`setup_dds` has not been called yet.
+        """
+        writer = self._writers.get("engage")
+        if writer is None:
+            raise RuntimeError("Call setup_dds() before publish_engage().")
+        writer.write(Engage(stamp=Time(sec=0, nanosec=0), engage=value))
+        logger.info("Published engage=%s", value)
 
     # ------------------------------------------------------------------
     # DDS setup
@@ -246,8 +263,8 @@ class AutowareEntity(EgoVehicle):
             def _on_engage(reader: DataReader) -> None:
                 samples = reader.take()
                 if samples:
-                    self._simulate_motion = samples[-1].engage
-                    logger.debug("engage=%s", self._simulate_motion)
+                    self._is_engaged = samples[-1].engage
+                    logger.debug("engage=%s", self._is_engaged)
 
             return _on_engage
 
@@ -304,9 +321,22 @@ class AutowareEntity(EgoVehicle):
             self._readers[spec.name] = reader
             logger.debug("Subscribed to %s (%s)", spec.name, dds_name)
 
+        # Create a DataWriter for the engage topic so that EngageAction
+        # (and other code) can publish engage commands via DDS.
+        engage_topic: Topic = Topic(
+            self._participant,
+            self._resolve_topic_name("engage"),
+            Engage,
+            qos=DEFAULT_QOS,
+        )
+        self._writers["engage"] = DataWriter(
+            self._participant, engage_topic, qos=DEFAULT_QOS
+        )
+
         logger.info(
-            "DDS setup complete: %d reader(s) on domain %d",
+            "DDS setup complete: %d reader(s), %d writer(s) on domain %d",
             len(self._readers),
+            len(self._writers),
             self._domain_id,
         )
 
@@ -456,6 +486,7 @@ class AutowareEntity(EgoVehicle):
         self._frame_conditions.clear()
         self._listeners.clear()
         self._frame_waitset = None
+        self._writers.clear()
         self._readers.clear()
         self._shutdown_guard = None
         self._participant = None
