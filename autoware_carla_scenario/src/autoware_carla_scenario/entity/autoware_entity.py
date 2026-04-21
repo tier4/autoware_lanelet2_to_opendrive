@@ -30,7 +30,7 @@ from cyclonedds.sub import DataReader
 from cyclonedds.topic import Topic
 
 from ..dds.msg import (
-    AckermannControlCommand,
+    Control,
     ActuationCommandStamped,
     Engage,
     GearCommand,
@@ -98,7 +98,7 @@ _INPUT_TOPICS: list[_TopicSpec] = [
     # ---- Per-frame runtime topics (WaitSet) ----
     _TopicSpec(
         "ackermann_control_command",
-        AckermannControlCommand,
+        Control,
         per_frame=True,
         attr="_current_ackermann_cmd",
     ),
@@ -118,7 +118,7 @@ _INPUT_TOPICS: list[_TopicSpec] = [
     _TopicSpec("engage", Engage),
     _TopicSpec(
         "manual_ackermann_control_command",
-        AckermannControlCommand,
+        Control,
         attr="_current_manual_ackermann_cmd",
     ),
     _TopicSpec("gear_command", GearCommand, attr="_current_gear_cmd"),
@@ -183,9 +183,9 @@ class AutowareEntity(EgoVehicle):
 
         # --- Runtime command state ---
         self._simulate_motion: bool = False
-        self._current_ackermann_cmd: Optional[AckermannControlCommand] = None
+        self._current_ackermann_cmd: Optional[Control] = None
         self._current_actuation_cmd: Optional[ActuationCommandStamped] = None
-        self._current_manual_ackermann_cmd: Optional[AckermannControlCommand] = None
+        self._current_manual_ackermann_cmd: Optional[Control] = None
         self._current_gear_cmd: Optional[GearCommand] = None
         self._current_manual_gear_cmd: Optional[GearCommand] = None
         self._current_turn_indicators_cmd: Optional[TurnIndicatorsCommand] = None

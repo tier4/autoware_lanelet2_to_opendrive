@@ -6,6 +6,8 @@ these readers/writers are wire-compatible with a ROS 2 graph.
 
 Field **order** and **types** must match the CDR serialisation layout of
 the corresponding ``.msg`` definition exactly.
+
+Verified against msg files in pilot-auto.xx1/src (2026-04-21).
 """
 
 from __future__ import annotations
@@ -145,8 +147,9 @@ class LaneletMapBin(IdlStruct, typename="autoware_map_msgs::msg::dds_::LaneletMa
     """autoware_map_msgs/msg/LaneletMapBin."""
 
     header: Header
-    format_version: str
-    map_version: str
+    version_map_format: str
+    version_map: str
+    name_map: str
     data: sequence[uint8]  # type: ignore[type-arg]
 
 
@@ -199,40 +202,46 @@ class HazardLightsCommand(
 
 
 @dataclass
-class AckermannLateralCommand(
+class Lateral(
     IdlStruct,
-    typename="autoware_control_msgs::msg::dds_::AckermannLateralCommand_",
+    typename="autoware_control_msgs::msg::dds_::Lateral_",
 ):
-    """autoware_control_msgs/msg/AckermannLateralCommand."""
+    """autoware_control_msgs/msg/Lateral."""
 
     stamp: Time
+    control_time: Time
     steering_tire_angle: float32
     steering_tire_rotation_rate: float32
+    is_defined_steering_tire_rotation_rate: bool
 
 
 @dataclass
-class LongitudinalCommand(
+class Longitudinal(
     IdlStruct,
-    typename="autoware_control_msgs::msg::dds_::LongitudinalCommand_",
+    typename="autoware_control_msgs::msg::dds_::Longitudinal_",
 ):
-    """autoware_control_msgs/msg/LongitudinalCommand."""
+    """autoware_control_msgs/msg/Longitudinal."""
 
     stamp: Time
-    speed: float32
+    control_time: Time
+    velocity: float32
     acceleration: float32
     jerk: float32
+    is_defined_acceleration: bool
+    is_defined_jerk: bool
 
 
 @dataclass
-class AckermannControlCommand(
+class Control(
     IdlStruct,
-    typename="autoware_control_msgs::msg::dds_::AckermannControlCommand_",
+    typename="autoware_control_msgs::msg::dds_::Control_",
 ):
-    """autoware_control_msgs/msg/AckermannControlCommand."""
+    """autoware_control_msgs/msg/Control."""
 
     stamp: Time
-    lateral: AckermannLateralCommand
-    longitudinal: LongitudinalCommand
+    control_time: Time
+    lateral: Lateral
+    longitudinal: Longitudinal
 
 
 # =====================================================================
