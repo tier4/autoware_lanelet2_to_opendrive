@@ -111,6 +111,7 @@ name = "autoware-carla-scenario"
 version = "0.1.0"
 source = { editable = "autoware_carla_scenario" }
 dependencies = [
+    { name = "cyclonedds" },
     { name = "fastapi" },
     { name = "ffmpeg-python" },
     { name = "hydra-core" },
@@ -141,6 +142,7 @@ carla-0-9-16 = [
 requires-dist = [
     { name = "carla", marker = "extra == 'carla'", specifier = "==0.10.0" },
     { name = "carla", marker = "extra == 'carla-0-9-16'", specifier = "==0.9.16" },
+    { name = "cyclonedds", specifier = ">=0.10.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "hydra-core", specifier = ">=1.3.2" },
@@ -162,7 +164,7 @@ provides-extras = ["carla", "carla-0-9-16"]
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "2.54.0"
+version = "2.55.0"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },
@@ -462,6 +464,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a9/95/a3dbbb5028f35eafb79008e7522a75244477d2838f38cbb722248dabc2a8/cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c", size = 7615, upload-time = "2023-10-07T05:32:18.335Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30", size = 8321, upload-time = "2023-10-07T05:32:16.783Z" },
+]
+
+[[package]]
+name = "cyclonedds"
+version = "11.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "rich-click" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/52/f501db026eff5aed63598c51b58a09ee45cf90306791cbf7c05f1a30ebf9/cyclonedds-11.0.1.tar.gz", hash = "sha256:487cdd9e3dbe3bc6f66c3318c45979f4015bb9d32d5dfcb9bb4a67376176a526", size = 191643, upload-time = "2026-03-20T12:47:30.097Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/08/e1a580824b202f85cacc29669936906556ca8c98562001a549dcda16be6a/cyclonedds-11.0.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:a79bf83957262c24321e22455e32fc689370cdb7c9fb4c8712aa9a06919f38de", size = 925599, upload-time = "2026-03-20T12:47:32.726Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/26/42808458d2c29c522b4a1aad8595ebd75701c4c6a5d4d69eed6654e011ca/cyclonedds-11.0.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:83777f464f77481e2334e0c2df1d6d41029a09afdb2e604bc3722c69838a8418", size = 855721, upload-time = "2026-03-20T12:47:34.229Z" },
+    { url = "https://files.pythonhosted.org/packages/40/e8/4f05e7c13fdd7f7c552dab21f8e99fe12153cc3e6ff35238968b24f2019f/cyclonedds-11.0.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9eaa0e08ea41206b495f36fa4c008ff89113f78a39e54f4a17793d9a68e7b978", size = 7702433, upload-time = "2026-03-20T12:47:36.472Z" },
+    { url = "https://files.pythonhosted.org/packages/42/53/3085e85e11728e56d2d8e1114d03d29674f9b9250af5350b66b0fc378752/cyclonedds-11.0.1-cp310-cp310-win_amd64.whl", hash = "sha256:da589d57bca29189c1b36be0419bc01e883d3649e906c8d1f0feef4a472cc412", size = 1348129, upload-time = "2026-03-20T12:47:38.636Z" },
 ]
 
 [[package]]
@@ -1556,6 +1573,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b3/c6/f3b320c27991c46f43ee9d856302c70dc2d0fb2dba4842ff739d5f46b393/rich-14.3.3.tar.gz", hash = "sha256:b8daa0b9e4eef54dd8cf7c86c03713f53241884e814f4e2f5fb342fe520f639b", size = 230582, upload-time = "2026-02-19T17:23:12.474Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/25/b208c5683343959b670dc001595f2f3737e051da617f66c31f7c4fa93abc/rich-14.3.3-py3-none-any.whl", hash = "sha256:793431c1f8619afa7d3b52b2cdec859562b950ea0d4b6b505397612db8d5362d", size = 310458, upload-time = "2026-02-19T17:23:13.732Z" },
+]
+
+[[package]]
+name = "rich-click"
+version = "1.9.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-23-autoware-carla-scenario-carla' and extra == 'extra-23-autoware-carla-scenario-carla-0-9-16')" },
+    { name = "rich" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/27/091e140ea834272188e63f8dd6faac1f5c687582b687197b3e0ec3c78ebf/rich_click-1.9.7.tar.gz", hash = "sha256:022997c1e30731995bdbc8ec2f82819340d42543237f033a003c7b1f843fc5dc", size = 74838, upload-time = "2026-01-31T04:29:27.707Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/e5/d708d262b600a352abe01c2ae360d8ff75b0af819b78e9af293191d928e6/rich_click-1.9.7-py3-none-any.whl", hash = "sha256:2f99120fca78f536e07b114d3b60333bc4bb2a0969053b1250869bcdc1b5351b", size = 71491, upload-time = "2026-01-31T04:29:26.777Z" },
 ]
 
 [[package]]
