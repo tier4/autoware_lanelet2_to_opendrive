@@ -526,6 +526,7 @@ class ScenarioRunner:
             # apply_control method as a post-tick callback so that
             # DDS-received commands are forwarded to CARLA each tick.
             if isinstance(ego, AutowareEntity):
+                ego.setup_dds()
                 scenario.register_post_tick(ego.apply_control)
 
             # Start native CARLA recorder

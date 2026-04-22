@@ -22,11 +22,13 @@ Usage::
 """
 
 from ._spawn import SpawnLocation, SpawnPointIndex, SpawnTransform
+from .autoware_dds_bridge import AutowareDDSBridge
 from .autoware_entity import AutowareEntity
 from .ego import EgoVehicle
 from .vehicle_entity import VehicleEntity, VehicleEntityConfig
 
 __all__ = [
+    "AutowareDDSBridge",
     "AutowareEntity",
     "EgoVehicle",
     "SpawnLocation",
