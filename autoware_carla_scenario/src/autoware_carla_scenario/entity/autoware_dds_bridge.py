@@ -13,12 +13,7 @@ import math
 import time
 from typing import Any, Callable, Optional
 
-from cyclonedds.core import (
-    Listener,
-    ReadCondition,
-    SampleState,
-    WaitSet,
-)
+from cyclonedds.core import Listener
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.pub import DataWriter
 from cyclonedds.sub import DataReader
@@ -86,10 +81,6 @@ _ACCEL_COVARIANCE: list[float] = _diag_covariance(
 # -- Autoware ControlModeCommand constants -----------------------------
 _CONTROL_MODE_AUTONOMOUS: int = 1
 
-#: WaitSet poll interval in nanoseconds (1 second).
-_WAIT_POLL_NS: int = 1_000_000_000
-
-
 # ------------------------------------------------------------------
 # Topic specification
 # ------------------------------------------------------------------
@@ -98,7 +89,7 @@ _WAIT_POLL_NS: int = 1_000_000_000
 class _TopicSpec:
     """Descriptor for a single DDS input topic."""
 
-    __slots__ = ("name", "msg_type", "qos", "per_frame", "attr")
+    __slots__ = ("name", "msg_type", "qos", "attr")
 
     def __init__(
         self,
@@ -106,25 +97,20 @@ class _TopicSpec:
         msg_type: type,
         qos: Any = None,
         *,
-        per_frame: bool = False,
         attr: str | None = None,
     ) -> None:
         self.name = name
         self.msg_type = msg_type
         self.qos = qos
-        self.per_frame = per_frame
         self.attr = attr
 
 
 _INPUT_TOPICS: list[_TopicSpec] = [
-    # ---- Per-frame runtime topics (WaitSet) ----
     _TopicSpec(
         "ackermann_control_command",
         Control,
-        per_frame=True,
         attr="current_ackermann_cmd",
     ),
-    # ---- Event-driven runtime topics (Listener) ----
     _TopicSpec("engage", Engage),
     _TopicSpec(
         "manual_ackermann_control_command",
@@ -202,8 +188,6 @@ class AutowareDDSBridge:
         self._participant: Optional[DomainParticipant] = None
         self._readers: dict[str, DataReader] = {}
         self._writers: dict[str, DataWriter] = {}
-        self._frame_waitset: Optional[WaitSet] = None
-        self._frame_conditions: list[ReadCondition] = []
         self._listeners: list[Listener] = []
 
     # ------------------------------------------------------------------
@@ -225,7 +209,6 @@ class AutowareDDSBridge:
             return
 
         self._participant = DomainParticipant(domain_id=self._domain_id)
-        self._frame_waitset = WaitSet(self._participant)
 
         engage_topic: Optional[Topic] = None
 
@@ -233,19 +216,10 @@ class AutowareDDSBridge:
             qos = spec.qos or DEFAULT_QOS
             dds_name = self._resolve_topic_name(spec.name)
             topic: Topic = Topic(self._participant, dds_name, spec.msg_type, qos=qos)
-
-            if spec.per_frame:
-                reader = DataReader(self._participant, topic, qos=qos)
-                rc = ReadCondition(reader, SampleState.NotRead)
-                self._frame_waitset.attach(rc)
-                self._frame_conditions.append(rc)
-            else:
-                callback = self._make_event_callback(spec)
-                listener = Listener(on_data_available=callback)
-                self._listeners.append(listener)
-                reader = DataReader(
-                    self._participant, topic, qos=qos, listener=listener
-                )
+            callback = self._make_event_callback(spec)
+            listener = Listener(on_data_available=callback)
+            self._listeners.append(listener)
+            reader = DataReader(self._participant, topic, qos=qos, listener=listener)
 
             if spec.name == "engage":
                 engage_topic = topic
@@ -339,24 +313,6 @@ class AutowareDDSBridge:
                         success=True,
                     )
                 )
-
-    # ------------------------------------------------------------------
-    # Per-frame wait
-    # ------------------------------------------------------------------
-
-    def wait_for_frame_data(self, timeout_ns: int = _WAIT_POLL_NS) -> None:
-        """Block until at least one per-frame topic has new data."""
-        if self._frame_waitset is None:
-            raise RuntimeError("Call setup() first.")
-
-        self._frame_waitset.wait(timeout=timeout_ns)
-
-        for spec in _INPUT_TOPICS:
-            if not spec.per_frame or spec.attr is None:
-                continue
-            samples = self._readers[spec.name].take()
-            if samples:
-                setattr(self, spec.attr, samples[-1])
 
     # ------------------------------------------------------------------
     # Publishing
@@ -546,9 +502,7 @@ class AutowareDDSBridge:
 
     def destroy(self) -> None:
         """Tear down all DDS entities."""
-        self._frame_conditions.clear()
         self._listeners.clear()
-        self._frame_waitset = None
         self._writers.clear()
         self._readers.clear()
         self._participant = None

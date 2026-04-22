@@ -56,7 +56,7 @@ class AutowareEntity(EgoVehicle):
         topic_prefix: str = "",
     ) -> None:
         super().__init__()
-        self.dds = AutowareDDSBridge(domain_id=domain_id, topic_prefix=topic_prefix)
+        self._dds = AutowareDDSBridge(domain_id=domain_id, topic_prefix=topic_prefix)
         self._last_light_state: Optional[int] = None
 
     # ------------------------------------------------------------------
@@ -65,11 +65,11 @@ class AutowareEntity(EgoVehicle):
 
     @property
     def is_engaged(self) -> bool:
-        return self.dds.is_engaged
+        return self._dds.is_engaged
 
     @property
     def control_mode(self) -> int:
-        return self.dds.control_mode
+        return self._dds.control_mode
 
     # ------------------------------------------------------------------
     # DDS lifecycle
@@ -77,11 +77,11 @@ class AutowareEntity(EgoVehicle):
 
     def setup_dds(self) -> None:
         """Initialise the DDS bridge."""
-        self.dds.setup()
+        self._dds.setup()
 
     def publish_engage(self, value: bool) -> None:
         """Publish an Engage message via DDS."""
-        self.dds.publish_engage(value)
+        self._dds.publish_engage(value)
 
     # ------------------------------------------------------------------
     # Control application (post-tick callback)
@@ -97,15 +97,15 @@ class AutowareEntity(EgoVehicle):
 
         import carla as _carla
 
-        if not self.dds.is_engaged:
+        if not self._dds.is_engaged:
             self._vehicle.apply_control(
                 _carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True)
             )
         else:
             gear_cmd = (
-                self.dds.current_manual_gear_cmd
-                if self.dds.current_manual_gear_cmd is not None
-                else self.dds.current_gear_cmd
+                self._dds.current_manual_gear_cmd
+                if self._dds.current_manual_gear_cmd is not None
+                else self._dds.current_gear_cmd
             )
             is_reverse = gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS
             self._apply_motion_control(_carla, gear_cmd, is_reverse)
@@ -126,9 +126,9 @@ class AutowareEntity(EgoVehicle):
             return
 
         ackermann_cmd = (
-            self.dds.current_manual_ackermann_cmd
-            if self.dds.current_manual_ackermann_cmd is not None
-            else self.dds.current_ackermann_cmd
+            self._dds.current_manual_ackermann_cmd
+            if self._dds.current_manual_ackermann_cmd is not None
+            else self._dds.current_ackermann_cmd
         )
         if ackermann_cmd is None:
             return
@@ -151,16 +151,16 @@ class AutowareEntity(EgoVehicle):
 
         lights = 0
 
-        if self.dds.current_turn_indicators_cmd is not None:
-            cmd = self.dds.current_turn_indicators_cmd.command
+        if self._dds.current_turn_indicators_cmd is not None:
+            cmd = self._dds.current_turn_indicators_cmd.command
             if cmd == _TURN_LEFT:
                 lights |= int(_carla.VehicleLightState.LeftBlinker)
             elif cmd == _TURN_RIGHT:
                 lights |= int(_carla.VehicleLightState.RightBlinker)
 
         if (
-            self.dds.current_hazard_lights_cmd is not None
-            and self.dds.current_hazard_lights_cmd.command == _HAZARD_ENABLE
+            self._dds.current_hazard_lights_cmd is not None
+            and self._dds.current_hazard_lights_cmd.command == _HAZARD_ENABLE
         ):
             lights |= int(_carla.VehicleLightState.LeftBlinker) | int(
                 _carla.VehicleLightState.RightBlinker
@@ -211,7 +211,7 @@ class AutowareEntity(EgoVehicle):
         ax_body = accel.x * fwd.x + accel.y * fwd.y + accel.z * fwd.z
         ay_body = accel.x * right.x + accel.y * right.y + accel.z * right.z
 
-        self.dds.publish_state(
+        self._dds.publish_state(
             mgrs_x=mgrs_x,
             mgrs_y=mgrs_y,
             mgrs_z=mgrs_z,
@@ -234,5 +234,5 @@ class AutowareEntity(EgoVehicle):
 
     def destroy(self) -> None:
         """Tear down DDS bridge and CARLA actor."""
-        self.dds.destroy()
+        self._dds.destroy()
         super().destroy()
