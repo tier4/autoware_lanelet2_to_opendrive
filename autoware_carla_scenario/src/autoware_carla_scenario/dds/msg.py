@@ -62,6 +62,18 @@ class Header(IdlStruct, typename="std_msgs::msg::dds_::Header_"):
 
 
 # =====================================================================
+# rosgraph_msgs
+# =====================================================================
+
+
+@dataclass
+class Clock(IdlStruct, typename="rosgraph_msgs::msg::dds_::Clock_"):
+    """rosgraph_msgs/msg/Clock."""
+
+    clock: Time
+
+
+# =====================================================================
 # geometry_msgs
 # =====================================================================
 

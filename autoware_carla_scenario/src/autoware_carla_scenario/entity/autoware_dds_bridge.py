@@ -28,6 +28,7 @@ from ..dds.msg import (
     Control,
     ControlModeCommandRequest,
     ControlModeCommandResponse,
+    Clock,
     ControlModeReport,
     Engage,
     GearCommand,
@@ -155,6 +156,7 @@ _OUTPUT_TOPICS: list[tuple[str, str, type]] = [
     ),
     ("actuation_status", "rt/vehicle/status/actuation_status", ActuationStatusStamped),
     ("tf", "rt/tf", TFMessage),
+    ("clock", "rt/clock", Clock),
 ]
 
 
@@ -325,6 +327,16 @@ class AutowareDDSBridge:
             raise RuntimeError("Call setup() first.")
         writer.write(Engage(stamp=self._now_stamp(), engage=value))
         logger.info("Published engage=%s", value)
+
+    def publish_clock(self, sim_time: Time) -> None:
+        """Publish a ``/clock`` message with the given simulation time.
+
+        Args:
+            sim_time: The current CARLA simulation timestamp.
+        """
+        writer = self._writers.get("out/clock")
+        if writer is not None:
+            writer.write(Clock(clock=sim_time))
 
     @staticmethod
     def _now_stamp() -> Time:

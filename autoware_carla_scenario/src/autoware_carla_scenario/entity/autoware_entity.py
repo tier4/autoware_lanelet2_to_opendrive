@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     import carla
 
+from ..dds.msg import Time
 from .autoware_dds_bridge import AutowareDDSBridge
 from .ego import EgoVehicle
 
@@ -112,6 +113,7 @@ class AutowareEntity(EgoVehicle):
             self._apply_lights(_carla, is_reverse)
 
         self._publish_state()
+        self._publish_clock(world)
 
     def _apply_motion_control(
         self,
@@ -226,6 +228,15 @@ class AutowareEntity(EgoVehicle):
             throttle=float(ctrl.throttle),
             brake=float(ctrl.brake),
             steer=float(ctrl.steer),
+        )
+
+    def _publish_clock(self, world: "carla.World") -> None:
+        """Publish CARLA simulation time as ``/clock``."""
+        ts = world.get_snapshot().timestamp
+        self._dds.publish_clock(
+            Time(
+                sec=int(ts.elapsed_seconds), nanosec=int((ts.elapsed_seconds % 1) * 1e9)
+            )
         )
 
     # ------------------------------------------------------------------
