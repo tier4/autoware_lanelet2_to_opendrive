@@ -92,6 +92,8 @@ class BaseScenario(ABC):
         ground_projection: GroundProjectionConfig | None = None,
         random_seed: int = DEFAULT_RANDOM_SEED,
         ego_type: type[EgoVehicle] | None = None,
+        psim_compatible_mode: bool = False,
+        domain_id: int = 0,
     ) -> None:
         """Initialize the scenario with an ego vehicle configuration.
 
@@ -110,11 +112,24 @@ class BaseScenario(ABC):
                 actor.  Pass :class:`AutowareEntity` to disable TrafficManager
                 autopilot on the ego vehicle.  ``None`` (default) uses
                 :class:`EgoVehicle`.
+            psim_compatible_mode: When ``True``, wait for ``initialpose``
+                and ``initialtwist`` topics via DDS before spawning the ego
+                vehicle as an :class:`AutowareEntity`.  The scenario tick
+                loop does not start until the entity is spawned.
+                Defaults to ``False`` for backward compatibility.
+            domain_id: DDS domain ID used when *psim_compatible_mode* is
+                ``True``.  Must match ``ROS_DOMAIN_ID``.
         """
+        from .entity.autoware_entity import AutowareEntity  # noqa: PLC0415
         from .entity.ego import EgoVehicle as _EgoVehicle  # noqa: PLC0415
 
+        self.psim_compatible_mode = psim_compatible_mode
+        self._domain_id = domain_id
+
         self.ego_config = ego_config
-        self.ego_type = ego_type or _EgoVehicle
+        self.ego_type: type[EgoVehicle] = (
+            AutowareEntity if psim_compatible_mode else (ego_type or _EgoVehicle)
+        )
         self._spawn_pose = spawn_pose
         self._ground_projection = ground_projection or GroundProjectionConfig()
         self.random_seed = random_seed
@@ -236,6 +251,119 @@ class BaseScenario(ABC):
         to have been called before this method.
         """
         ...
+
+    def wait_for_autoware_init(self, timeout_sec: float = 30.0) -> None:
+        """Block until ``initialpose`` and ``initialtwist`` arrive via DDS.
+
+        Only used when :attr:`psim_compatible_mode` is ``True``.  Converts
+        the received MGRS pose to a CARLA spawn transform and updates
+        :attr:`ego_config` so the ego vehicle is spawned at the correct
+        location.
+
+        Args:
+            timeout_sec: Maximum seconds to wait.
+
+        Raises:
+            TimeoutError: If required data does not arrive in time.
+        """
+        import math  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+
+        from cyclonedds.core import ReadCondition, SampleState, WaitSet  # noqa: PLC0415
+        from cyclonedds.domain import DomainParticipant  # noqa: PLC0415
+        from cyclonedds.sub import DataReader  # noqa: PLC0415
+        from cyclonedds.topic import Topic  # noqa: PLC0415
+
+        from .coordinate.map_manager import MapManager  # noqa: PLC0415
+        from .dds.msg import PoseWithCovarianceStamped, TwistStamped  # noqa: PLC0415
+        from .dds.qos import DEFAULT_QOS  # noqa: PLC0415
+
+        participant = DomainParticipant(domain_id=self._domain_id)
+
+        pose_topic: Topic = Topic(
+            participant, "rt/initialpose3d", PoseWithCovarianceStamped, qos=DEFAULT_QOS
+        )
+        twist_topic: Topic = Topic(
+            participant, "rt/initialtwist3d", TwistStamped, qos=DEFAULT_QOS
+        )
+        pose_reader = DataReader(participant, pose_topic, qos=DEFAULT_QOS)
+        twist_reader = DataReader(participant, twist_topic, qos=DEFAULT_QOS)
+
+        waitset = WaitSet(participant)
+        waitset.attach(ReadCondition(pose_reader, SampleState.NotRead))
+        waitset.attach(ReadCondition(twist_reader, SampleState.NotRead))
+
+        logger.info("psim_compatible_mode: waiting for initialpose and initialtwist …")
+
+        received_pose: PoseWithCovarianceStamped | None = None
+        received_twist: TwistStamped | None = None
+        deadline = _time.monotonic() + timeout_sec
+        poll_ns = 1_000_000_000
+
+        while received_pose is None or received_twist is None:
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                missing = []
+                if received_pose is None:
+                    missing.append("initialpose")
+                if received_twist is None:
+                    missing.append("initialtwist")
+                raise TimeoutError(
+                    f"psim_compatible_mode init timed out after {timeout_sec:.1f}s. "
+                    f"Missing: {', '.join(missing)}"
+                )
+
+            waitset.wait(timeout=min(int(remaining * 1e9), poll_ns))
+
+            if received_pose is None:
+                samples = pose_reader.take()
+                if samples:
+                    received_pose = samples[-1]
+                    logger.info("Received initialpose")
+
+            if received_pose is not None and received_twist is None:
+                samples = twist_reader.take()
+                if samples:
+                    received_twist = samples[-1]
+                    logger.info("Received initialtwist")
+
+        # -- Convert MGRS pose → CARLA transform --
+        mm = MapManager.get_instance()
+        offset_x, offset_y = mm.mgrs_offset
+
+        p = received_pose.pose.pose
+        carla_x = p.position.x - offset_x
+        carla_y = -(p.position.y - offset_y)
+        carla_z = p.position.z - mm.z_offset
+
+        q = p.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        carla_yaw = -math.degrees(math.atan2(siny_cosp, cosy_cosp))
+
+        spawn_transform = carla.Transform(
+            carla.Location(x=carla_x, y=carla_y, z=carla_z),
+            carla.Rotation(yaw=carla_yaw),
+        )
+        self.ego_config.spawn_location = SpawnTransform(spawn_transform)
+
+        # -- Apply initial speed from twist --
+        tw = received_twist.twist
+        speed_ms = (tw.linear.x**2 + tw.linear.y**2 + tw.linear.z**2) ** 0.5
+        self.ego_config.initial_speed_kmh = speed_ms * 3.6
+
+        logger.info(
+            "psim_compatible_mode: spawn at CARLA(%.1f, %.1f, %.1f) yaw=%.1f° "
+            "speed=%.1f km/h",
+            carla_x,
+            carla_y,
+            carla_z,
+            carla_yaw,
+            self.ego_config.initial_speed_kmh,
+        )
+
+        # Clean up temporary DDS entities
+        del twist_reader, pose_reader, waitset, participant
 
     @abstractmethod
     def is_done(self) -> bool:

@@ -465,6 +465,12 @@ class ScenarioRunner:
         try:
             logger.info("[%s] === Setup start ===", scenario_name)
             scenario.set_client(self._client, tm_port=self._tm_port)
+
+            # In psim_compatible_mode, block until Autoware sends
+            # initialpose/initialtwist via DDS before spawning.
+            if scenario.psim_compatible_mode:
+                scenario.wait_for_autoware_init()
+
             scenario.setup()
             logger.info("[%s] Spawning ego vehicle ...", scenario_name)
             ego_actor = ego.spawn(world, scenario.ego_config)
