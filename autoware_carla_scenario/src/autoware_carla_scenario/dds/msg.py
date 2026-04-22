@@ -20,9 +20,11 @@ from cyclonedds.idl.types import (
     float32,
     float64,
     int32,
+    int64,
     sequence,
     uint8,
     uint32,
+    uint64,
 )
 
 # =====================================================================
@@ -299,3 +301,82 @@ class Trajectory(IdlStruct, typename="autoware_planning_msgs::msg::dds_::Traject
 
     header: Header
     points: sequence[TrajectoryPoint]  # type: ignore[type-arg]
+
+
+# =====================================================================
+# ROS 2 service support (rmw_cyclonedds request/reply header)
+# =====================================================================
+
+
+@dataclass
+class ServiceHeader(IdlStruct, typename="rmw_cyclonedds::ServiceHeader_"):
+    """Header prepended to every ROS 2 service request/reply on DDS."""
+
+    guid: uint64
+    seq: int64
+
+
+# =====================================================================
+# autoware_vehicle_msgs/srv/ControlModeCommand
+# =====================================================================
+
+
+@dataclass
+class ControlModeCommandRequest(
+    IdlStruct,
+    typename="autoware_vehicle_msgs::srv::dds_::ControlModeCommand_Request_",
+):
+    """Request part of ControlModeCommand.srv."""
+
+    header: ServiceHeader
+    stamp: Time
+    mode: uint8
+
+
+@dataclass
+class ControlModeCommandResponse(
+    IdlStruct,
+    typename="autoware_vehicle_msgs::srv::dds_::ControlModeCommand_Response_",
+):
+    """Response part of ControlModeCommand.srv."""
+
+    header: ServiceHeader
+    success: bool
+
+
+# =====================================================================
+# tier4_external_api_msgs/srv/InitializePose
+# =====================================================================
+
+
+@dataclass
+class ResponseStatus(
+    IdlStruct,
+    typename="tier4_external_api_msgs::msg::dds_::ResponseStatus_",
+):
+    """tier4_external_api_msgs/msg/ResponseStatus."""
+
+    code: uint32
+    message: str
+
+
+@dataclass
+class InitializePoseRequest(
+    IdlStruct,
+    typename="tier4_external_api_msgs::srv::dds_::InitializePose_Request_",
+):
+    """Request part of InitializePose.srv."""
+
+    header: ServiceHeader
+    pose: PoseWithCovarianceStamped
+
+
+@dataclass
+class InitializePoseResponse(
+    IdlStruct,
+    typename="tier4_external_api_msgs::srv::dds_::InitializePose_Response_",
+):
+    """Response part of InitializePose.srv."""
+
+    header: ServiceHeader
+    status: ResponseStatus

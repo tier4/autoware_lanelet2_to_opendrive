@@ -15,6 +15,7 @@ sample asynchronously as soon as it is published.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -35,12 +36,18 @@ from cyclonedds.topic import Topic
 
 from ..dds.msg import (
     Control,
+    ControlModeCommandRequest,
+    ControlModeCommandResponse,
     Engage,
     GearCommand,
-    Time,
     HazardLightsCommand,
+    InitializePoseRequest,
+    InitializePoseResponse,
     LaneletMapBin,
     PoseWithCovarianceStamped,
+    ResponseStatus,
+    ServiceHeader,
+    Time,
     TurnIndicatorsCommand,
     TwistStamped,
 )
@@ -61,6 +68,13 @@ _TURN_RIGHT: int = 3
 
 # -- Autoware HazardLightsCommand constants ----------------------------
 _HAZARD_ENABLE: int = 2
+
+# -- Autoware ControlModeCommand constants -----------------------------
+_CONTROL_MODE_AUTONOMOUS: int = 1
+_CONTROL_MODE_MANUAL: int = 4
+
+# -- tier4_external_api_msgs ResponseStatus constants ------------------
+_RESPONSE_SUCCESS: int = 1
 
 #: WaitSet poll interval in nanoseconds (1 second).
 _WAIT_POLL_NS: int = 1_000_000_000
@@ -194,6 +208,8 @@ class AutowareEntity(EgoVehicle):
         self._current_turn_indicators_cmd: Optional[TurnIndicatorsCommand] = None
         self._current_hazard_lights_cmd: Optional[HazardLightsCommand] = None
         self._last_light_state: Optional[int] = None
+        self._control_mode: int = _CONTROL_MODE_AUTONOMOUS
+        self._pending_teleport: Optional[PoseWithCovarianceStamped] = None
 
         # --- DDS entities (created by setup_dds) ---
         self._participant: Optional[DomainParticipant] = None
@@ -339,6 +355,24 @@ class AutowareEntity(EgoVehicle):
             self._participant, engage_topic, qos=DEFAULT_QOS
         )
 
+        # -- Service servers (request reader + response writer) --
+        self._setup_service(
+            "control_mode",
+            "rq/control/control_mode_requestRequest",
+            "rr/control/control_mode_requestReply",
+            ControlModeCommandRequest,
+            ControlModeCommandResponse,
+            self._on_control_mode_request,
+        )
+        self._setup_service(
+            "initialize_pose",
+            "rq/api/simulator/set/poseRequest",
+            "rr/api/simulator/set/poseReply",
+            InitializePoseRequest,
+            InitializePoseResponse,
+            self._on_initialize_pose_request,
+        )
+
         logger.info(
             "DDS setup complete: %d reader(s), %d writer(s) on domain %d",
             len(self._readers),
@@ -354,6 +388,79 @@ class AutowareEntity(EgoVehicle):
             and not spec.per_frame
             and spec.name != "vector_map"
         )
+
+    def _setup_service(
+        self,
+        key: str,
+        request_topic_name: str,
+        reply_topic_name: str,
+        request_type: type,
+        response_type: type,
+        handler: Callable[[DataReader], None],
+    ) -> None:
+        """Create a DDS service server (request reader + response writer).
+
+        ROS 2 services map to a pair of DDS topics:
+        ``rq/<service>Request`` and ``rr/<service>Reply``.
+        A :class:`Listener` on the request reader calls *handler*
+        asynchronously when a request arrives.
+        """
+        assert self._participant is not None
+        req_topic: Topic = Topic(
+            self._participant, request_topic_name, request_type, qos=DEFAULT_QOS
+        )
+        rep_topic: Topic = Topic(
+            self._participant, reply_topic_name, response_type, qos=DEFAULT_QOS
+        )
+        listener = Listener(on_data_available=handler)
+        self._listeners.append(listener)
+        self._readers[f"srv/{key}/request"] = DataReader(
+            self._participant, req_topic, qos=DEFAULT_QOS, listener=listener
+        )
+        self._writers[f"srv/{key}/reply"] = DataWriter(
+            self._participant, rep_topic, qos=DEFAULT_QOS
+        )
+        logger.debug("Service server: %s", key)
+
+    # ------------------------------------------------------------------
+    # Service handlers
+    # ------------------------------------------------------------------
+
+    def _on_control_mode_request(self, reader: DataReader) -> None:
+        """Handle ControlModeCommand service requests."""
+        samples = reader.take()
+        for req in samples:
+            self._control_mode = req.mode
+            logger.info("ControlModeCommand: mode=%d", req.mode)
+            writer = self._writers.get("srv/control_mode/reply")
+            if writer is not None:
+                writer.write(
+                    ControlModeCommandResponse(
+                        header=ServiceHeader(guid=req.header.guid, seq=req.header.seq),
+                        success=True,
+                    )
+                )
+
+    def _on_initialize_pose_request(self, reader: DataReader) -> None:
+        """Handle InitializePose service requests."""
+        samples = reader.take()
+        for req in samples:
+            self._initial_pose = req.pose
+            self._pending_teleport = req.pose
+            logger.info("InitializePose: updated initial pose")
+            writer = self._writers.get("srv/initialize_pose/reply")
+            if writer is not None:
+                writer.write(
+                    InitializePoseResponse(
+                        header=ServiceHeader(guid=req.header.guid, seq=req.header.seq),
+                        status=ResponseStatus(code=_RESPONSE_SUCCESS, message="OK"),
+                    )
+                )
+
+    @property
+    def control_mode(self) -> int:
+        """Current control mode (AUTONOMOUS=1, MANUAL=4, etc.)."""
+        return self._control_mode
 
     # ------------------------------------------------------------------
     # Initialisation – WaitSet gated
@@ -425,6 +532,7 @@ class AutowareEntity(EgoVehicle):
         pose_samples = self._readers["initialpose"].take()
         if pose_samples and self._initial_pose is None:
             self._initial_pose = pose_samples[-1]
+            self._pending_teleport = self._initial_pose
             logger.info("Received initialpose")
 
         twist_samples = self._readers["initialtwist"].take()
@@ -498,6 +606,11 @@ class AutowareEntity(EgoVehicle):
             return
 
         import carla as _carla
+
+        # Process pending teleport (from initialpose topic or InitializePose service)
+        if self._pending_teleport is not None:
+            self._teleport_vehicle(self._pending_teleport)
+            self._pending_teleport = None
 
         if not self._is_engaged:
             self._vehicle.apply_control(
@@ -576,6 +689,52 @@ class AutowareEntity(EgoVehicle):
         if lights != self._last_light_state:
             self._vehicle.set_light_state(_carla.VehicleLightState(lights))
             self._last_light_state = lights
+
+    # ------------------------------------------------------------------
+    # Teleport (MGRS → CARLA coordinate conversion)
+    # ------------------------------------------------------------------
+
+    def _teleport_vehicle(self, pose_msg: PoseWithCovarianceStamped) -> None:
+        """Teleport the CARLA vehicle to the position given in MGRS coordinates.
+
+        Converts the Autoware ``PoseWithCovarianceStamped`` (MGRS frame)
+        to a CARLA world transform using :class:`MapManager`'s MGRS offset,
+        then calls ``set_transform`` on the vehicle actor.
+        """
+        assert self._vehicle is not None
+        import carla as _carla
+
+        from ..coordinate.map_manager import MapManager
+
+        mm = MapManager.get_instance()
+        offset_x, offset_y = mm.mgrs_offset
+
+        p = pose_msg.pose.pose
+        # MGRS → CARLA: subtract offset, flip y
+        carla_x = p.position.x - offset_x
+        carla_y = -(p.position.y - offset_y)
+        carla_z = p.position.z - mm.z_offset
+
+        # Quaternion → yaw (heading around z-axis)
+        q = p.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        yaw_rad = math.atan2(siny_cosp, cosy_cosp)
+        # Right-hand → left-hand
+        carla_yaw = -math.degrees(yaw_rad)
+
+        transform = _carla.Transform(
+            _carla.Location(x=carla_x, y=carla_y, z=carla_z),
+            _carla.Rotation(yaw=carla_yaw),
+        )
+        self._vehicle.set_transform(transform)
+        logger.info(
+            "Teleported vehicle to CARLA(%.1f, %.1f, %.1f) yaw=%.1f°",
+            carla_x,
+            carla_y,
+            carla_z,
+            carla_yaw,
+        )
 
     # ------------------------------------------------------------------
     # Shutdown / cleanup
