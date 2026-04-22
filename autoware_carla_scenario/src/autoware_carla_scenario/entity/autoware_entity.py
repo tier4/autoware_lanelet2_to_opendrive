@@ -35,19 +35,42 @@ from cyclonedds.sub import DataReader
 from cyclonedds.topic import Topic
 
 from ..dds.msg import (
+    Accel,
+    AccelWithCovariance,
+    AccelWithCovarianceStamped,
+    ActuationStatus,
+    ActuationStatusStamped,
     Control,
     ControlModeCommandRequest,
     ControlModeCommandResponse,
+    ControlModeReport,
     Engage,
     GearCommand,
+    GearReport,
     HazardLightsCommand,
+    HazardLightsReport,
+    Header,
     InitializePoseRequest,
     InitializePoseResponse,
+    Odometry,
+    Point,
+    Pose,
+    PoseWithCovariance,
     PoseWithCovarianceStamped,
+    Quaternion,
     ResponseStatus,
     ServiceHeader,
+    SteeringReport,
+    TFMessage,
     Time,
+    Transform,
+    TransformStamped,
     TurnIndicatorsCommand,
+    TurnIndicatorsReport,
+    Twist,
+    TwistWithCovariance,
+    Vector3,
+    VelocityReport,
 )
 from ..dds.qos import DEFAULT_QOS
 from .ego import EgoVehicle
@@ -329,6 +352,50 @@ class AutowareEntity(EgoVehicle):
             self._on_initialize_pose_request,
         )
 
+        # -- Output topic writers --
+        _output_topics: list[tuple[str, str, type]] = [
+            ("velocity", "rt/vehicle/status/velocity_status", VelocityReport),
+            ("odometry", "rt/localization/kinematic_state", Odometry),
+            (
+                "acceleration",
+                "rt/localization/acceleration",
+                AccelWithCovarianceStamped,
+            ),
+            (
+                "pose",
+                "rt/localization/pose_estimator/pose_with_covariance",
+                PoseWithCovarianceStamped,
+            ),
+            ("steering", "rt/vehicle/status/steering_status", SteeringReport),
+            (
+                "control_mode_report",
+                "rt/vehicle/status/control_mode",
+                ControlModeReport,
+            ),
+            ("gear_report", "rt/vehicle/status/gear_status", GearReport),
+            (
+                "turn_indicators_report",
+                "rt/vehicle/status/turn_indicators_status",
+                TurnIndicatorsReport,
+            ),
+            (
+                "hazard_lights_report",
+                "rt/vehicle/status/hazard_lights_status",
+                HazardLightsReport,
+            ),
+            (
+                "actuation_status",
+                "rt/vehicle/status/actuation_status",
+                ActuationStatusStamped,
+            ),
+            ("tf", "rt/tf", TFMessage),
+        ]
+        for key, topic_name, msg_type in _output_topics:
+            t: Topic = Topic(self._participant, topic_name, msg_type, qos=DEFAULT_QOS)
+            self._writers[f"out/{key}"] = DataWriter(
+                self._participant, t, qos=DEFAULT_QOS
+            )
+
         logger.info(
             "DDS setup complete: %d reader(s), %d writer(s) on domain %d",
             len(self._readers),
@@ -467,17 +534,17 @@ class AutowareEntity(EgoVehicle):
             self._vehicle.apply_control(
                 _carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True)
             )
-            return
+        else:
+            gear_cmd = (
+                self._current_manual_gear_cmd
+                if self._current_manual_gear_cmd is not None
+                else self._current_gear_cmd
+            )
+            is_reverse = gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS
+            self._apply_motion_control(_carla, gear_cmd, is_reverse)
+            self._apply_lights(_carla, is_reverse)
 
-        gear_cmd = (
-            self._current_manual_gear_cmd
-            if self._current_manual_gear_cmd is not None
-            else self._current_gear_cmd
-        )
-        is_reverse = gear_cmd is not None and gear_cmd.command in _REVERSE_GEARS
-
-        self._apply_motion_control(_carla, gear_cmd, is_reverse)
-        self._apply_lights(_carla, is_reverse)
+        self._publish_state()
 
     def _apply_motion_control(
         self,
@@ -540,6 +607,231 @@ class AutowareEntity(EgoVehicle):
         if lights != self._last_light_state:
             self._vehicle.set_light_state(_carla.VehicleLightState(lights))
             self._last_light_state = lights
+
+    # ------------------------------------------------------------------
+    # State publishing (every tick)
+    # ------------------------------------------------------------------
+
+    def _now_stamp(self) -> Time:
+        now_ns = time.time_ns()
+        return Time(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
+
+    @staticmethod
+    def _euler_to_quaternion(roll: float, pitch: float, yaw: float) -> Quaternion:
+        """Convert RPY (radians) to a Quaternion."""
+        cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+        cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+        cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+        return Quaternion(
+            x=sr * cp * cy - cr * sp * sy,
+            y=cr * sp * cy + sr * cp * sy,
+            z=cr * cp * sy - sr * sp * cy,
+            w=cr * cp * cy + sr * sp * sy,
+        )
+
+    @staticmethod
+    def _zero_covariance_36() -> list[float]:
+        return [0.0] * 36
+
+    def _publish_state(self) -> None:
+        """Read CARLA vehicle state and publish all output topics."""
+        assert self._vehicle is not None
+
+        from ..coordinate.map_manager import MapManager
+
+        stamp = self._now_stamp()
+        mm = MapManager.get_instance()
+        offset_x, offset_y = mm.mgrs_offset
+        z_off = mm.z_offset
+
+        # -- Read CARLA state --
+        tf = self._vehicle.get_transform()
+        vel = self._vehicle.get_velocity()
+        accel = self._vehicle.get_acceleration()
+        ang_vel = self._vehicle.get_angular_velocity()
+        ctrl = self._vehicle.get_control()
+
+        # -- CARLA → MGRS position --
+        mgrs_x = tf.location.x + offset_x
+        mgrs_y = -(tf.location.y) + offset_y
+        mgrs_z = tf.location.z + z_off
+
+        # -- CARLA → MGRS orientation (right-hand) --
+        yaw_rad = -math.radians(tf.rotation.yaw)
+        pitch_rad = math.radians(tf.rotation.pitch)
+        roll_rad = math.radians(tf.rotation.roll)
+        q = self._euler_to_quaternion(roll_rad, pitch_rad, yaw_rad)
+
+        # -- Body-frame velocity (project world velocity onto vehicle axes) --
+        fwd = tf.get_forward_vector()
+        right = tf.get_right_vector()
+        vx_body = vel.x * fwd.x + vel.y * fwd.y + vel.z * fwd.z
+        vy_body = vel.x * right.x + vel.y * right.y + vel.z * right.z
+        # Heading rate: CARLA angular_velocity.z in deg/s → rad/s, flip sign
+        wz = -math.radians(ang_vel.z)
+
+        # -- Body-frame acceleration --
+        ax_body = accel.x * fwd.x + accel.y * fwd.y + accel.z * fwd.z
+        ay_body = accel.x * right.x + accel.y * right.y + accel.z * right.z
+
+        # -- Shared header --
+        map_header = Header(stamp=stamp, frame_id="map")
+        bl_header = Header(stamp=stamp, frame_id="base_link")
+
+        # -- Build odometry --
+        pose_cov = self._zero_covariance_36()
+        for i in (0, 7, 14):
+            pose_cov[i] = 0.0225  # position covariance
+        for i in (21, 28, 35):
+            pose_cov[i] = 0.000625  # orientation covariance
+
+        twist_cov = self._zero_covariance_36()
+        for i in (0, 7, 14, 21, 28, 35):
+            twist_cov[i] = 0.001
+
+        odom = Odometry(
+            header=map_header,
+            child_frame_id="base_link",
+            pose=PoseWithCovariance(
+                pose=Pose(
+                    position=Point(x=mgrs_x, y=mgrs_y, z=mgrs_z),
+                    orientation=q,
+                ),
+                covariance=pose_cov,  # type: ignore[arg-type]
+            ),
+            twist=TwistWithCovariance(
+                twist=Twist(
+                    linear=Vector3(x=vx_body, y=vy_body, z=0.0),
+                    angular=Vector3(x=0.0, y=0.0, z=wz),
+                ),
+                covariance=twist_cov,  # type: ignore[arg-type]
+            ),
+        )
+
+        w = self._writers
+
+        # 1. Odometry
+        writer = w.get("out/odometry")
+        if writer is not None:
+            writer.write(odom)
+
+        # 2. Pose
+        writer = w.get("out/pose")
+        if writer is not None:
+            writer.write(PoseWithCovarianceStamped(header=map_header, pose=odom.pose))
+
+        # 3. Velocity
+        writer = w.get("out/velocity")
+        if writer is not None:
+            writer.write(
+                VelocityReport(
+                    header=bl_header,
+                    longitudinal_velocity=float(vx_body),
+                    lateral_velocity=float(vy_body),
+                    heading_rate=float(wz),
+                )
+            )
+
+        # 4. Acceleration
+        accel_cov = self._zero_covariance_36()
+        for i in (0, 7, 14, 21, 28, 35):
+            accel_cov[i] = 0.001
+
+        writer = w.get("out/acceleration")
+        if writer is not None:
+            writer.write(
+                AccelWithCovarianceStamped(
+                    header=bl_header,
+                    accel=AccelWithCovariance(
+                        accel=Accel(
+                            linear=Vector3(x=ax_body, y=ay_body, z=0.0),
+                            angular=Vector3(x=0.0, y=0.0, z=0.0),
+                        ),
+                        covariance=accel_cov,  # type: ignore[arg-type]
+                    ),
+                )
+            )
+
+        # 5. Steering
+        steer_angle = 0.0
+        ackermann_cmd = (
+            self._current_manual_ackermann_cmd
+            if self._current_manual_ackermann_cmd is not None
+            else self._current_ackermann_cmd
+        )
+        if ackermann_cmd is not None:
+            steer_angle = float(ackermann_cmd.lateral.steering_tire_angle)
+
+        writer = w.get("out/steering")
+        if writer is not None:
+            writer.write(SteeringReport(stamp=stamp, steering_tire_angle=steer_angle))
+
+        # 6. Control mode report
+        writer = w.get("out/control_mode_report")
+        if writer is not None:
+            writer.write(ControlModeReport(stamp=stamp, mode=self._control_mode))
+
+        # 7. Gear report
+        gear_cmd = (
+            self._current_manual_gear_cmd
+            if self._current_manual_gear_cmd is not None
+            else self._current_gear_cmd
+        )
+        writer = w.get("out/gear_report")
+        if writer is not None:
+            writer.write(
+                GearReport(stamp=stamp, report=gear_cmd.command if gear_cmd else 0)
+            )
+
+        # 8. Turn indicators report (skip if never received)
+        writer = w.get("out/turn_indicators_report")
+        if writer is not None and self._current_turn_indicators_cmd is not None:
+            writer.write(
+                TurnIndicatorsReport(
+                    stamp=stamp, report=self._current_turn_indicators_cmd.command
+                )
+            )
+
+        # 9. Hazard lights report (skip if never received)
+        writer = w.get("out/hazard_lights_report")
+        if writer is not None and self._current_hazard_lights_cmd is not None:
+            writer.write(
+                HazardLightsReport(
+                    stamp=stamp, report=self._current_hazard_lights_cmd.command
+                )
+            )
+
+        # 10. Actuation status
+        writer = w.get("out/actuation_status")
+        if writer is not None:
+            writer.write(
+                ActuationStatusStamped(
+                    header=bl_header,
+                    status=ActuationStatus(
+                        accel_status=float(ctrl.throttle),
+                        brake_status=float(ctrl.brake),
+                        steer_status=float(ctrl.steer),
+                    ),
+                )
+            )
+
+        # 11. TF (map → base_link)
+        writer = w.get("out/tf")
+        if writer is not None:
+            writer.write(
+                TFMessage(
+                    transforms=[  # type: ignore[arg-type]
+                        TransformStamped(
+                            header=map_header,
+                            child_frame_id="base_link",
+                            transform=Transform(
+                                translation=Vector3(x=mgrs_x, y=mgrs_y, z=mgrs_z),
+                                rotation=q,
+                            ),
+                        )
+                    ]
+                )
+            )
 
     # ------------------------------------------------------------------
     # Teleport (MGRS → CARLA coordinate conversion)

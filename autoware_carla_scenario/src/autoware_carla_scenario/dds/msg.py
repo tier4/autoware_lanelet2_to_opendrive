@@ -304,6 +304,190 @@ class Trajectory(IdlStruct, typename="autoware_planning_msgs::msg::dds_::Traject
 
 
 # =====================================================================
+# geometry_msgs (additional types for output)
+# =====================================================================
+
+
+@dataclass
+class TwistWithCovariance(
+    IdlStruct, typename="geometry_msgs::msg::dds_::TwistWithCovariance_"
+):
+    """geometry_msgs/msg/TwistWithCovariance."""
+
+    twist: Twist
+    covariance: array[float64, 36]  # type: ignore[type-arg,valid-type]
+
+
+@dataclass
+class Accel(IdlStruct, typename="geometry_msgs::msg::dds_::Accel_"):
+    """geometry_msgs/msg/Accel."""
+
+    linear: Vector3
+    angular: Vector3
+
+
+@dataclass
+class AccelWithCovariance(
+    IdlStruct, typename="geometry_msgs::msg::dds_::AccelWithCovariance_"
+):
+    """geometry_msgs/msg/AccelWithCovariance."""
+
+    accel: Accel
+    covariance: array[float64, 36]  # type: ignore[type-arg,valid-type]
+
+
+@dataclass
+class AccelWithCovarianceStamped(
+    IdlStruct,
+    typename="geometry_msgs::msg::dds_::AccelWithCovarianceStamped_",
+):
+    """geometry_msgs/msg/AccelWithCovarianceStamped."""
+
+    header: Header
+    accel: AccelWithCovariance
+
+
+@dataclass
+class Transform(IdlStruct, typename="geometry_msgs::msg::dds_::Transform_"):
+    """geometry_msgs/msg/Transform."""
+
+    translation: Vector3
+    rotation: Quaternion
+
+
+@dataclass
+class TransformStamped(
+    IdlStruct, typename="geometry_msgs::msg::dds_::TransformStamped_"
+):
+    """geometry_msgs/msg/TransformStamped."""
+
+    header: Header
+    child_frame_id: str
+    transform: Transform
+
+
+# =====================================================================
+# nav_msgs
+# =====================================================================
+
+
+@dataclass
+class Odometry(IdlStruct, typename="nav_msgs::msg::dds_::Odometry_"):
+    """nav_msgs/msg/Odometry."""
+
+    header: Header
+    child_frame_id: str
+    pose: PoseWithCovariance
+    twist: TwistWithCovariance
+
+
+# =====================================================================
+# tf2_msgs
+# =====================================================================
+
+
+@dataclass
+class TFMessage(IdlStruct, typename="tf2_msgs::msg::dds_::TFMessage_"):
+    """tf2_msgs/msg/TFMessage."""
+
+    transforms: sequence[TransformStamped]  # type: ignore[type-arg]
+
+
+# =====================================================================
+# autoware_vehicle_msgs (output reports)
+# =====================================================================
+
+
+@dataclass
+class VelocityReport(
+    IdlStruct, typename="autoware_vehicle_msgs::msg::dds_::VelocityReport_"
+):
+    """autoware_vehicle_msgs/msg/VelocityReport."""
+
+    header: Header
+    longitudinal_velocity: float32
+    lateral_velocity: float32
+    heading_rate: float32
+
+
+@dataclass
+class SteeringReport(
+    IdlStruct, typename="autoware_vehicle_msgs::msg::dds_::SteeringReport_"
+):
+    """autoware_vehicle_msgs/msg/SteeringReport."""
+
+    stamp: Time
+    steering_tire_angle: float32
+
+
+@dataclass
+class ControlModeReport(
+    IdlStruct, typename="autoware_vehicle_msgs::msg::dds_::ControlModeReport_"
+):
+    """autoware_vehicle_msgs/msg/ControlModeReport."""
+
+    stamp: Time
+    mode: uint8
+
+
+@dataclass
+class GearReport(IdlStruct, typename="autoware_vehicle_msgs::msg::dds_::GearReport_"):
+    """autoware_vehicle_msgs/msg/GearReport."""
+
+    stamp: Time
+    report: uint8
+
+
+@dataclass
+class TurnIndicatorsReport(
+    IdlStruct,
+    typename="autoware_vehicle_msgs::msg::dds_::TurnIndicatorsReport_",
+):
+    """autoware_vehicle_msgs/msg/TurnIndicatorsReport."""
+
+    stamp: Time
+    report: uint8
+
+
+@dataclass
+class HazardLightsReport(
+    IdlStruct,
+    typename="autoware_vehicle_msgs::msg::dds_::HazardLightsReport_",
+):
+    """autoware_vehicle_msgs/msg/HazardLightsReport."""
+
+    stamp: Time
+    report: uint8
+
+
+# =====================================================================
+# tier4_vehicle_msgs (output)
+# =====================================================================
+
+
+@dataclass
+class ActuationStatus(
+    IdlStruct, typename="tier4_vehicle_msgs::msg::dds_::ActuationStatus_"
+):
+    """tier4_vehicle_msgs/msg/ActuationStatus."""
+
+    accel_status: float64
+    brake_status: float64
+    steer_status: float64
+
+
+@dataclass
+class ActuationStatusStamped(
+    IdlStruct,
+    typename="tier4_vehicle_msgs::msg::dds_::ActuationStatusStamped_",
+):
+    """tier4_vehicle_msgs/msg/ActuationStatusStamped."""
+
+    header: Header
+    status: ActuationStatus
+
+
+# =====================================================================
 # ROS 2 service support (rmw_cyclonedds request/reply header)
 # =====================================================================
 
