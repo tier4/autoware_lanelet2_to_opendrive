@@ -50,15 +50,12 @@ from ..dds.msg import (
     HazardLightsCommand,
     HazardLightsReport,
     Header,
-    InitializePoseRequest,
-    InitializePoseResponse,
     Odometry,
     Point,
     Pose,
     PoseWithCovariance,
     PoseWithCovarianceStamped,
     Quaternion,
-    ResponseStatus,
     ServiceHeader,
     SteeringReport,
     TFMessage,
@@ -168,13 +165,15 @@ class AutowareEntity(EgoVehicle):
     Lifecycle
     ---------
     1. ``spawn(world, config)`` – create the CARLA actor (inherited).
-    2. ``setup_dds()``          – create DDS participant & data readers.
-    3. ``wait_for_initialization(timeout_sec)`` – block until
-       ``initialpose`` **and** ``initialtwist`` arrive.
-    4. Per-tick: call ``wait_for_frame_data()`` to block until a
-       per-frame control command arrives, then read the latest samples.
-       Event-driven topics are updated automatically via Listeners.
-    5. ``destroy()`` – tear down DDS entities and the CARLA actor.
+    2. ``setup_dds()``          – create DDS participant, data readers,
+       writers, and service servers.
+    3. Per-tick (registered as post-tick callback by ScenarioRunner):
+       ``apply_control()`` applies received commands and publishes state.
+    4. ``destroy()`` – tear down DDS entities and the CARLA actor.
+
+    Initialisation (``initialpose`` / ``initialtwist``) is handled by
+    :class:`~autoware_carla_scenario.scenario_base.BaseScenario` when
+    ``psim_compatible_mode=True``.
     """
 
     use_autopilot: bool = False
@@ -191,7 +190,7 @@ class AutowareEntity(EgoVehicle):
             topic_prefix: Optional ROS 2 namespace prefix inserted
                 between ``rt/`` and ``input/`` in DDS topic names.
                 For example ``"simulation"`` produces
-                ``rt/simulation/input/initialpose``.
+                ``rt/simulation/input/engage``.
         """
         super().__init__()
         self._domain_id = domain_id
@@ -207,7 +206,6 @@ class AutowareEntity(EgoVehicle):
         self._current_hazard_lights_cmd: Optional[HazardLightsCommand] = None
         self._last_light_state: Optional[int] = None
         self._control_mode: int = _CONTROL_MODE_AUTONOMOUS
-        self._pending_teleport: Optional[PoseWithCovarianceStamped] = None
 
         # --- DDS entities (created by setup_dds) ---
         self._participant: Optional[DomainParticipant] = None
@@ -343,15 +341,6 @@ class AutowareEntity(EgoVehicle):
             ControlModeCommandResponse,
             self._on_control_mode_request,
         )
-        self._setup_service(
-            "initialize_pose",
-            "rq/api/simulator/set/poseRequest",
-            "rr/api/simulator/set/poseReply",
-            InitializePoseRequest,
-            InitializePoseResponse,
-            self._on_initialize_pose_request,
-        )
-
         # -- Output topic writers --
         _output_topics: list[tuple[str, str, type]] = [
             ("velocity", "rt/vehicle/status/velocity_status", VelocityReport),
@@ -455,21 +444,6 @@ class AutowareEntity(EgoVehicle):
                     )
                 )
 
-    def _on_initialize_pose_request(self, reader: DataReader) -> None:
-        """Handle InitializePose service requests."""
-        samples = reader.take()
-        for req in samples:
-            self._pending_teleport = req.pose
-            logger.info("InitializePose: updated initial pose")
-            writer = self._writers.get("srv/initialize_pose/reply")
-            if writer is not None:
-                writer.write(
-                    InitializePoseResponse(
-                        header=ServiceHeader(guid=req.header.guid, seq=req.header.seq),
-                        status=ResponseStatus(code=_RESPONSE_SUCCESS, message="OK"),
-                    )
-                )
-
     @property
     def control_mode(self) -> int:
         """Current control mode (AUTONOMOUS=1, MANUAL=4, etc.)."""
@@ -524,11 +498,6 @@ class AutowareEntity(EgoVehicle):
             return
 
         import carla as _carla
-
-        # Process pending teleport (from initialpose topic or InitializePose service)
-        if self._pending_teleport is not None:
-            self._teleport_vehicle(self._pending_teleport)
-            self._pending_teleport = None
 
         if not self._is_engaged:
             self._vehicle.apply_control(
@@ -832,52 +801,6 @@ class AutowareEntity(EgoVehicle):
                     ]
                 )
             )
-
-    # ------------------------------------------------------------------
-    # Teleport (MGRS → CARLA coordinate conversion)
-    # ------------------------------------------------------------------
-
-    def _teleport_vehicle(self, pose_msg: PoseWithCovarianceStamped) -> None:
-        """Teleport the CARLA vehicle to the position given in MGRS coordinates.
-
-        Converts the Autoware ``PoseWithCovarianceStamped`` (MGRS frame)
-        to a CARLA world transform using :class:`MapManager`'s MGRS offset,
-        then calls ``set_transform`` on the vehicle actor.
-        """
-        assert self._vehicle is not None
-        import carla as _carla
-
-        from ..coordinate.map_manager import MapManager
-
-        mm = MapManager.get_instance()
-        offset_x, offset_y = mm.mgrs_offset
-
-        p = pose_msg.pose.pose
-        # MGRS → CARLA: subtract offset, flip y
-        carla_x = p.position.x - offset_x
-        carla_y = -(p.position.y - offset_y)
-        carla_z = p.position.z - mm.z_offset
-
-        # Quaternion → yaw (heading around z-axis)
-        q = p.orientation
-        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        yaw_rad = math.atan2(siny_cosp, cosy_cosp)
-        # Right-hand → left-hand
-        carla_yaw = -math.degrees(yaw_rad)
-
-        transform = _carla.Transform(
-            _carla.Location(x=carla_x, y=carla_y, z=carla_z),
-            _carla.Rotation(yaw=carla_yaw),
-        )
-        self._vehicle.set_transform(transform)
-        logger.info(
-            "Teleported vehicle to CARLA(%.1f, %.1f, %.1f) yaw=%.1f°",
-            carla_x,
-            carla_y,
-            carla_z,
-            carla_yaw,
-        )
 
     # ------------------------------------------------------------------
     # Shutdown / cleanup
