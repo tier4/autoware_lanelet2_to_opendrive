@@ -92,7 +92,7 @@ class BaseScenario(ABC):
         ground_projection: GroundProjectionConfig | None = None,
         random_seed: int = DEFAULT_RANDOM_SEED,
         ego_type: type[EgoVehicle] | None = None,
-        psim_compatible_mode: bool = False,
+        initialize_with_dds: bool = False,
         domain_id: int = 0,
     ) -> None:
         """Initialize the scenario with an ego vehicle configuration.
@@ -112,23 +112,23 @@ class BaseScenario(ABC):
                 actor.  Pass :class:`AutowareEntity` to disable TrafficManager
                 autopilot on the ego vehicle.  ``None`` (default) uses
                 :class:`EgoVehicle`.
-            psim_compatible_mode: When ``True``, wait for ``initialpose``
+            initialize_with_dds: When ``True``, wait for ``initialpose``
                 and ``initialtwist`` topics via DDS before spawning the ego
                 vehicle as an :class:`AutowareEntity`.  The scenario tick
                 loop does not start until the entity is spawned.
                 Defaults to ``False`` for backward compatibility.
-            domain_id: DDS domain ID used when *psim_compatible_mode* is
+            domain_id: DDS domain ID used when *initialize_with_dds* is
                 ``True``.  Must match ``ROS_DOMAIN_ID``.
         """
         from .entity.autoware_entity import AutowareEntity  # noqa: PLC0415
         from .entity.ego import EgoVehicle as _EgoVehicle  # noqa: PLC0415
 
-        self.psim_compatible_mode = psim_compatible_mode
+        self.initialize_with_dds = initialize_with_dds
         self._domain_id = domain_id
 
         self.ego_config = ego_config
         self.ego_type: type[EgoVehicle] = (
-            AutowareEntity if psim_compatible_mode else (ego_type or _EgoVehicle)
+            AutowareEntity if initialize_with_dds else (ego_type or _EgoVehicle)
         )
         self._spawn_pose = spawn_pose
         self._ground_projection = ground_projection or GroundProjectionConfig()
@@ -253,12 +253,13 @@ class BaseScenario(ABC):
         ...
 
     def wait_for_autoware_init(self, timeout_sec: float = 30.0) -> None:
-        """Block until ``initialpose`` and ``initialtwist`` arrive via DDS.
+        """Block until ``initialpose`` arrives via DDS.
 
-        Only used when :attr:`psim_compatible_mode` is ``True``.  Converts
+        Only used when :attr:`initialize_with_dds` is ``True``.  Converts
         the received MGRS pose to a CARLA spawn transform and updates
-        :attr:`ego_config` so the ego vehicle is spawned at the correct
-        location.
+        :attr:`ego_config`.  ``initialtwist`` is optional — if received
+        before the pose arrives, the initial speed is applied; otherwise
+        the vehicle starts at rest.
 
         Args:
             timeout_sec: Maximum seconds to wait.
@@ -293,24 +294,21 @@ class BaseScenario(ABC):
         waitset.attach(ReadCondition(pose_reader, SampleState.NotRead))
         waitset.attach(ReadCondition(twist_reader, SampleState.NotRead))
 
-        logger.info("psim_compatible_mode: waiting for initialpose and initialtwist …")
+        logger.info(
+            "initialize_with_dds: waiting for initialpose (initialtwist optional) …"
+        )
 
         received_pose: PoseWithCovarianceStamped | None = None
         received_twist: TwistStamped | None = None
         deadline = _time.monotonic() + timeout_sec
         poll_ns = 1_000_000_000
 
-        while received_pose is None or received_twist is None:
+        while received_pose is None:
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
-                missing = []
-                if received_pose is None:
-                    missing.append("initialpose")
-                if received_twist is None:
-                    missing.append("initialtwist")
                 raise TimeoutError(
-                    f"psim_compatible_mode init timed out after {timeout_sec:.1f}s. "
-                    f"Missing: {', '.join(missing)}"
+                    f"initialize_with_dds timed out after {timeout_sec:.1f}s. "
+                    f"Missing: initialpose"
                 )
 
             waitset.wait(timeout=min(int(remaining * 1e9), poll_ns))
@@ -321,7 +319,7 @@ class BaseScenario(ABC):
                     received_pose = samples[-1]
                     logger.info("Received initialpose")
 
-            if received_pose is not None and received_twist is None:
+            if received_twist is None:
                 samples = twist_reader.take()
                 if samples:
                     received_twist = samples[-1]
@@ -347,13 +345,16 @@ class BaseScenario(ABC):
         )
         self.ego_config.spawn_location = SpawnTransform(spawn_transform)
 
-        # -- Apply initial speed from twist --
-        tw = received_twist.twist
-        speed_ms = (tw.linear.x**2 + tw.linear.y**2 + tw.linear.z**2) ** 0.5
-        self.ego_config.initial_speed_kmh = speed_ms * 3.6
+        # -- Apply initial speed from twist (0 if not received) --
+        if received_twist is not None:
+            tw = received_twist.twist
+            speed_ms = (tw.linear.x**2 + tw.linear.y**2 + tw.linear.z**2) ** 0.5
+            self.ego_config.initial_speed_kmh = speed_ms * 3.6
+        else:
+            self.ego_config.initial_speed_kmh = 0.0
 
         logger.info(
-            "psim_compatible_mode: spawn at CARLA(%.1f, %.1f, %.1f) yaw=%.1f° "
+            "initialize_with_dds: spawn at CARLA(%.1f, %.1f, %.1f) yaw=%.1f° "
             "speed=%.1f km/h",
             carla_x,
             carla_y,

@@ -45,7 +45,7 @@ class AutowareEntity(EgoVehicle):
 
     Initialisation (``initialpose`` / ``initialtwist``) is handled by
     :class:`~autoware_carla_scenario.scenario_base.BaseScenario` when
-    ``psim_compatible_mode=True``.
+    ``initialize_with_dds=True``.
     """
 
     use_autopilot: bool = False

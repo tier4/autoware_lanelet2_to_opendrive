@@ -466,9 +466,9 @@ class ScenarioRunner:
             logger.info("[%s] === Setup start ===", scenario_name)
             scenario.set_client(self._client, tm_port=self._tm_port)
 
-            # In psim_compatible_mode, block until Autoware sends
+            # In initialize_with_dds, block until Autoware sends
             # initialpose/initialtwist via DDS before spawning.
-            if scenario.psim_compatible_mode:
+            if scenario.initialize_with_dds:
                 scenario.wait_for_autoware_init()
 
             scenario.setup()
