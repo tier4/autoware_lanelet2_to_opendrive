@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     import carla
 
 from cyclonedds.core import (
-    GuardCondition,
     Listener,
     ReadCondition,
     SampleState,
@@ -73,6 +72,25 @@ from ..dds.qos import DEFAULT_QOS
 from .ego import EgoVehicle
 
 logger = logging.getLogger(__name__)
+
+
+# -- Pre-computed 6×6 covariance diagonals (avoid per-tick allocation) --
+def _diag_covariance(*diag: float) -> list[float]:
+    cov = [0.0] * 36
+    for i, v in enumerate(diag):
+        cov[i * 7] = v
+    return cov
+
+
+_POSE_COVARIANCE: list[float] = _diag_covariance(
+    0.0225, 0.0225, 0.0225, 0.000625, 0.000625, 0.000625
+)
+_TWIST_COVARIANCE: list[float] = _diag_covariance(
+    0.001, 0.001, 0.001, 0.001, 0.001, 0.001
+)
+_ACCEL_COVARIANCE: list[float] = _diag_covariance(
+    0.001, 0.001, 0.001, 0.001, 0.001, 0.001
+)
 
 # -- Autoware GearCommand constants ------------------------------------
 _GEAR_REVERSE: int = 20
@@ -211,7 +229,6 @@ class AutowareEntity(EgoVehicle):
         self._participant: Optional[DomainParticipant] = None
         self._readers: dict[str, DataReader] = {}
         self._writers: dict[str, DataWriter] = {}
-        self._shutdown_guard: Optional[GuardCondition] = None
         self._frame_waitset: Optional[WaitSet] = None
         self._frame_conditions: list[ReadCondition] = []
         self._listeners: list[Listener] = []
@@ -240,9 +257,7 @@ class AutowareEntity(EgoVehicle):
         writer = self._writers.get("engage")
         if writer is None:
             raise RuntimeError("Call setup_dds() before publish_engage().")
-        now_ns = time.time_ns()
-        stamp = Time(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
-        writer.write(Engage(stamp=stamp, engage=value))
+        writer.write(Engage(stamp=self._now_stamp(), engage=value))
         logger.info("Published engage=%s", value)
 
     # ------------------------------------------------------------------
@@ -297,7 +312,6 @@ class AutowareEntity(EgoVehicle):
             return
 
         self._participant = DomainParticipant(domain_id=self._domain_id)
-        self._shutdown_guard = GuardCondition(self._participant)
         self._frame_waitset = WaitSet(self._participant)
 
         engage_topic: Optional[Topic] = None
@@ -598,10 +612,6 @@ class AutowareEntity(EgoVehicle):
             w=cr * cp * cy + sr * sp * sy,
         )
 
-    @staticmethod
-    def _zero_covariance_36() -> list[float]:
-        return [0.0] * 36
-
     def _publish_state(self) -> None:
         """Read CARLA vehicle state and publish all output topics."""
         assert self._vehicle is not None
@@ -648,16 +658,6 @@ class AutowareEntity(EgoVehicle):
         bl_header = Header(stamp=stamp, frame_id="base_link")
 
         # -- Build odometry --
-        pose_cov = self._zero_covariance_36()
-        for i in (0, 7, 14):
-            pose_cov[i] = 0.0225  # position covariance
-        for i in (21, 28, 35):
-            pose_cov[i] = 0.000625  # orientation covariance
-
-        twist_cov = self._zero_covariance_36()
-        for i in (0, 7, 14, 21, 28, 35):
-            twist_cov[i] = 0.001
-
         odom = Odometry(
             header=map_header,
             child_frame_id="base_link",
@@ -666,14 +666,14 @@ class AutowareEntity(EgoVehicle):
                     position=Point(x=mgrs_x, y=mgrs_y, z=mgrs_z),
                     orientation=q,
                 ),
-                covariance=pose_cov,  # type: ignore[arg-type]
+                covariance=_POSE_COVARIANCE,  # type: ignore[arg-type]
             ),
             twist=TwistWithCovariance(
                 twist=Twist(
                     linear=Vector3(x=vx_body, y=vy_body, z=0.0),
                     angular=Vector3(x=0.0, y=0.0, z=wz),
                 ),
-                covariance=twist_cov,  # type: ignore[arg-type]
+                covariance=_TWIST_COVARIANCE,  # type: ignore[arg-type]
             ),
         )
 
@@ -702,10 +702,6 @@ class AutowareEntity(EgoVehicle):
             )
 
         # 4. Acceleration
-        accel_cov = self._zero_covariance_36()
-        for i in (0, 7, 14, 21, 28, 35):
-            accel_cov[i] = 0.001
-
         writer = w.get("out/acceleration")
         if writer is not None:
             writer.write(
@@ -716,7 +712,7 @@ class AutowareEntity(EgoVehicle):
                             linear=Vector3(x=ax_body, y=ay_body, z=0.0),
                             angular=Vector3(x=0.0, y=0.0, z=0.0),
                         ),
-                        covariance=accel_cov,  # type: ignore[arg-type]
+                        covariance=_ACCEL_COVARIANCE,  # type: ignore[arg-type]
                     ),
                 )
             )
@@ -806,11 +802,6 @@ class AutowareEntity(EgoVehicle):
     # Shutdown / cleanup
     # ------------------------------------------------------------------
 
-    def request_shutdown(self) -> None:
-        """Signal the initialisation wait-loop to exit early."""
-        if self._shutdown_guard is not None:
-            self._shutdown_guard.set(True)
-
     def destroy(self) -> None:
         """Tear down DDS entities and destroy the CARLA actor."""
         self._frame_conditions.clear()
@@ -818,6 +809,5 @@ class AutowareEntity(EgoVehicle):
         self._frame_waitset = None
         self._writers.clear()
         self._readers.clear()
-        self._shutdown_guard = None
         self._participant = None
         super().destroy()
