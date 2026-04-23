@@ -201,7 +201,7 @@ class AutowareEntity(EgoVehicle):
         mgrs_z = tf.location.z + z_off
 
         yaw_rad = -math.radians(tf.rotation.yaw)
-        pitch_rad = math.radians(tf.rotation.pitch)
+        pitch_rad = -math.radians(tf.rotation.pitch)
         roll_rad = math.radians(tf.rotation.roll)
 
         # Body-frame projections

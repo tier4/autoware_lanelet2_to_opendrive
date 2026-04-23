@@ -481,6 +481,15 @@ class ScenarioRunner:
                 ego_actor.type_id,
             )
 
+            # Guarantee spectator camera follows the ego vehicle.
+            # _setup_ego_spawn() in scenario.setup() registers this via a
+            # role-name lookup lambda, but that path is optional.  When it
+            # was not called (e.g. AutowareEntity without _setup_ego_spawn),
+            # register the callback here using the concrete actor reference.
+            if scenario._spectator_camera_config is None:
+                _ego_ref = ego_actor  # prevent late-binding surprises
+                scenario.follow_with_spectator(lambda: _ego_ref)
+
             # Register ego existence fail condition so the scenario fails
             # immediately if the ego is destroyed (e.g. falls through map).
             scenario.register_fail_condition(
