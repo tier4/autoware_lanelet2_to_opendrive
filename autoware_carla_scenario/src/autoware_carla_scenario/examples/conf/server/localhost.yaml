@@ -4,3 +4,4 @@ server:
   port: 2000
   cooldown_seconds: 2.0
   cooldown_max_retries: 0
+  timeout_seconds: 60.0

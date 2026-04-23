@@ -201,6 +201,7 @@ def run_scenario_with_queue(
     map_name: str | None = None,
     cooldown_seconds: float = 0.0,
     cooldown_max_retries: int = 0,
+    timeout_seconds: float = 60.0,
     output_dir: Path = Path("scenario_outputs"),
 ) -> ScenarioResult:
     """Run a single pre-built scenario using :class:`ScenarioQueue`.
@@ -224,6 +225,7 @@ def run_scenario_with_queue(
         map_name=map_name,
         cooldown_seconds=cooldown_seconds,
         cooldown_max_retries=cooldown_max_retries,
+        timeout_seconds=timeout_seconds,
         output_dir=output_dir,
     )
     queue.add(scenario)
@@ -452,6 +454,7 @@ def run_batch(
 
     cooldown = float(first_cfg.server.get("cooldown_seconds", 0.0))
     cooldown_max_retries = int(first_cfg.server.get("cooldown_max_retries", 0))
+    timeout_seconds = float(first_cfg.server.get("timeout_seconds", 60.0))
 
     # Batch mode bypasses @hydra.main, so we create the output directory
     # ourselves following Hydra's timestamped convention.
@@ -466,6 +469,7 @@ def run_batch(
         map_name=first_cfg.map.name,
         cooldown_seconds=cooldown,
         cooldown_max_retries=cooldown_max_retries,
+        timeout_seconds=timeout_seconds,
         output_dir=output_dir,
     )
 
@@ -549,6 +553,7 @@ def run_scenario(
     )
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
     cooldown_max_retries = int(cfg.server.get("cooldown_max_retries", 0))
+    timeout_seconds = float(cfg.server.get("timeout_seconds", 60.0))
 
     # Retrieve the Hydra output directory (works regardless of
     # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
@@ -564,6 +569,7 @@ def run_scenario(
         map_name=cfg.map.name,
         cooldown_seconds=cooldown,
         cooldown_max_retries=cooldown_max_retries,
+        timeout_seconds=timeout_seconds,
         output_dir=output_dir,
     )
 
