@@ -181,6 +181,7 @@ def build_ego_and_spawn(
         spawn_retry_max_count=int(cfg.entity.spawn_retry_max_count),
         spawn_retry_t_step=float(cfg.entity.spawn_retry_t_step),
         spawn_retry_z_step=float(cfg.entity.spawn_retry_z_step),
+        is_autoware=bool(cfg.ego.get("is_autoware", False)),
     )
     spawn_pose = Lanelet2Pose(
         lanelet_id=cfg.ego.spawn_lanelet_id,

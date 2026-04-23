@@ -47,6 +47,12 @@ class EgoConfig(VehicleEntityConfig):
     Inherits all fields from :class:`VehicleEntityConfig` (``vehicle_type``,
     ``initial_speed_kmh``, etc.).  The ``role_name`` is automatically set to
     :data:`~autoware_carla_scenario.constants.EGO_ROLE_NAME`.
+
+    When *is_autoware* is ``True``, :class:`BaseScenario` spawns the ego as
+    an :class:`~autoware_carla_scenario.entity.AutowareEntity` (DDS-controlled)
+    instead of the default :class:`~autoware_carla_scenario.entity.EgoVehicle`
+    (TrafficManager autopilot).  Defaults to ``False`` for backward
+    compatibility.
     """
 
     def __init__(
@@ -57,6 +63,7 @@ class EgoConfig(VehicleEntityConfig):
         spawn_retry_max_count: int = 0,
         spawn_retry_t_step: float = 0.1,
         spawn_retry_z_step: float = 0.5,
+        is_autoware: bool = False,
     ) -> None:
         super().__init__(
             role_name=EGO_ROLE_NAME,
@@ -67,6 +74,7 @@ class EgoConfig(VehicleEntityConfig):
             spawn_retry_t_step=spawn_retry_t_step,
             spawn_retry_z_step=spawn_retry_z_step,
         )
+        self.is_autoware = is_autoware
 
 
 class BaseScenario(ABC):
@@ -98,7 +106,9 @@ class BaseScenario(ABC):
         """Initialize the scenario with an ego vehicle configuration.
 
         Args:
-            ego_config: Spawn configuration for the ego vehicle.
+            ego_config: Spawn configuration for the ego vehicle.  When
+                ``ego_config.is_autoware`` is ``True``, the ego is spawned
+                as :class:`AutowareEntity` regardless of *ego_type*.
             spawn_pose: Optional Lanelet2 pose for the ego spawn point.
                 When provided, :meth:`_setup_ego_spawn` can convert it to a
                 CARLA-snapped spawn location.
@@ -128,7 +138,9 @@ class BaseScenario(ABC):
 
         self.ego_config = ego_config
         self.ego_type: type[EgoVehicle] = (
-            AutowareEntity if initialize_with_dds else (ego_type or _EgoVehicle)
+            AutowareEntity
+            if initialize_with_dds or ego_config.is_autoware
+            else (ego_type or _EgoVehicle)
         )
         self._spawn_pose = spawn_pose
         self._ground_projection = ground_projection or GroundProjectionConfig()

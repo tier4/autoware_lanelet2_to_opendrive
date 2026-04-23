@@ -87,6 +87,11 @@ class EgoVehicleConfig:
     #: Longitudinal offset along the lanelet centerline.
     spawn_s: float = 25.0
 
+    #: When ``True``, the ego is spawned as an
+    #: :class:`~autoware_carla_scenario.entity.AutowareEntity`
+    #: (DDS-controlled) instead of the default TrafficManager autopilot.
+    is_autoware: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Scenario-specific configs
