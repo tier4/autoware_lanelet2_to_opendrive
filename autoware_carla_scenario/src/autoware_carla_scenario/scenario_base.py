@@ -156,6 +156,11 @@ class BaseScenario(ABC):
         self._fail_conditions: List[BaseCondition] = []
         self._spectator_camera_config: Optional[SpectatorCameraConfig] = None
 
+    @property
+    def spectator_camera_config(self) -> Optional[SpectatorCameraConfig]:
+        """Return the spectator camera config, or ``None`` if not set."""
+        return self._spectator_camera_config
+
     # ------------------------------------------------------------------
     # Client injection
     # ------------------------------------------------------------------

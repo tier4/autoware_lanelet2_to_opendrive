@@ -481,14 +481,9 @@ class ScenarioRunner:
                 ego_actor.type_id,
             )
 
-            # Guarantee spectator camera follows the ego vehicle.
-            # _setup_ego_spawn() in scenario.setup() registers this via a
-            # role-name lookup lambda, but that path is optional.  When it
-            # was not called (e.g. AutowareEntity without _setup_ego_spawn),
-            # register the callback here using the concrete actor reference.
-            if scenario._spectator_camera_config is None:
-                _ego_ref = ego_actor  # prevent late-binding surprises
-                scenario.follow_with_spectator(lambda: _ego_ref)
+            # Ensure spectator follows ego if not already configured.
+            if scenario.spectator_camera_config is None:
+                scenario.follow_with_spectator(lambda: ego_actor)
 
             # Register ego existence fail condition so the scenario fails
             # immediately if the ego is destroyed (e.g. falls through map).
@@ -692,14 +687,14 @@ class ScenarioRunner:
         if (
             recording_started
             and tick_count > 0
-            and scenario._spectator_camera_config is not None
+            and scenario.spectator_camera_config is not None
         ):
             log_path = self.output_dir / f"{scenario_name}.log"
             mp4_path = _unique_path(self.output_dir / f"{scenario_name}.mp4")
             self._render_video_from_recording(
                 log_path=log_path,
                 mp4_path=mp4_path,
-                spectator_config=scenario._spectator_camera_config,
+                spectator_config=scenario.spectator_camera_config,
                 tick_count=tick_count,
                 scenario_name=scenario_name,
             )
