@@ -496,29 +496,30 @@ class ScenarioRunner:
             for _ in range(scenario.STABILIZE_TICKS):
                 world.tick()
 
-            # Enable autopilot on vehicles managed by TrafficManager.
-            # When the ego opts out (e.g. AutowareEntity), its actor is
-            # excluded so external control can drive it instead.
-            skip_ids: set[int] = set()
-            if not ego.use_autopilot and ego_actor is not None:
-                skip_ids.add(ego_actor.id)
+            # Set autopilot based on ego.use_autopilot.
+            # AutowareEntity sets use_autopilot=False so TrafficManager
+            # is explicitly disabled; EgoVehicle defaults to True.
+            if ego_actor is not None:
+                ego_actor.set_autopilot(ego.use_autopilot, self._tm_port)
+                logger.info(
+                    "Ego (id=%d) autopilot=%s",
+                    ego_actor.id,
+                    ego.use_autopilot,
+                )
 
+            # Enable autopilot on NPC vehicles managed by TrafficManager.
             n_autopilot = 0
+            ego_id = ego_actor.id if ego_actor is not None else None
             for actor in world.get_actors().filter("vehicle.*"):
-                if actor.id in skip_ids:
+                if actor.id == ego_id:
                     continue
                 actor.set_autopilot(True, self._tm_port)
                 n_autopilot += 1
             if n_autopilot:
                 logger.info(
-                    "Autopilot enabled on %d vehicle(s) after %d warm-up ticks",
+                    "Autopilot enabled on %d NPC vehicle(s) after %d warm-up ticks",
                     n_autopilot,
                     scenario.STABILIZE_TICKS,
-                )
-            if skip_ids:
-                logger.info(
-                    "Autopilot skipped for ego (id=%s) — external control expected",
-                    ", ".join(str(i) for i in skip_ids),
                 )
 
             # Apply initial speeds after warm-up stabilisation
