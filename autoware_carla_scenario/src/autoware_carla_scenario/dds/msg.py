@@ -10,8 +10,6 @@ the corresponding ``.msg`` definition exactly.
 Verified against msg files in pilot-auto.xx1/src (2026-04-21).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from cyclonedds.idl import IdlStruct
