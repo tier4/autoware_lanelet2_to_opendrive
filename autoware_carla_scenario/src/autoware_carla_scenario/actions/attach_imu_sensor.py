@@ -1,15 +1,16 @@
 """Action that attaches a CARLA IMU sensor to an actor.
 
-The IMU data is published by CARLA's Unreal-side native ROS 2 bridge,
-so no Python-side ``sensor.listen()`` is needed.  This action simply
-spawns the ``sensor.other.imu`` blueprint attached to the target actor.
+Spawns a ``sensor.other.imu`` blueprint attached to the target actor and
+registers a Python-side ``sensor.listen()`` callback.  When an optional
+*imu_pub* publisher is supplied, every measurement is forwarded to it;
+otherwise data is only logged.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Protocol, Union
 
 from ..conditions import BaseCondition
 from ..conditions.base import find_actor_by_role_name
@@ -20,6 +21,17 @@ if TYPE_CHECKING:
     import carla
 
 logger = logging.getLogger(__name__)
+
+
+class ImuPublisher(Protocol):
+    """Minimal publish interface expected by :class:`AttachIMUSensorAction`."""
+
+    def publish(
+        self,
+        *,
+        accelerometer: tuple[float, float, float],
+        gyroscope: tuple[float, float, float],
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -100,16 +112,18 @@ class AttachIMUSensorAction(BaseAction):
     """Attach a CARLA ``sensor.other.imu`` to a scenario actor.
 
     When the trigger condition is met the action spawns the IMU sensor
-    blueprint and attaches it to the actor identified by *entity_name*.
-    The sensor data is published to the ROS 2 graph by CARLA's native
-    Unreal-side ROS 2 bridge — no Python-side ``listen()`` callback is
-    registered.
+    blueprint, attaches it to the actor identified by *entity_name*, and
+    registers a ``sensor.listen()`` callback.  If *imu_pub* is provided,
+    each measurement is forwarded to it; errors in the callback are
+    caught and logged via ``logger.exception``.
 
     Args:
         entity_name: ``role_name`` of the actor to attach the sensor to.
         sensor_config: IMU sensor configuration.
         condition: Trigger condition (see :class:`BaseCondition`).
         timing: Tick phase (``PRE_TICK`` or ``POST_TICK``).
+        imu_pub: Optional publisher that receives accelerometer/gyroscope
+            tuples on every tick.
         label: Human-readable label for logging.
         once: If ``True`` (default) the action fires at most once.
     """
@@ -121,12 +135,14 @@ class AttachIMUSensorAction(BaseAction):
         condition: Optional[BaseCondition] = None,
         timing: TickTiming = TickTiming.POST_TICK,
         *,
+        imu_pub: Optional[ImuPublisher] = None,
         label: str = "attach_imu_sensor",
         once: bool = True,
     ) -> None:
         super().__init__(label=label, condition=condition, timing=timing, once=once)
         self._entity_name = entity_name
         self._config = sensor_config or IMUSensorConfig()
+        self._imu_pub = imu_pub
         self._sensor: Optional[carla.Actor] = None
 
     @property
@@ -170,6 +186,7 @@ class AttachIMUSensorAction(BaseAction):
         )
 
         self._sensor = world.spawn_actor(imu_bp, transform, attach_to=actor)
+        self._sensor.listen(self._on_imu_data)
 
         logger.info(
             "%s: IMU sensor attached to '%s' (tick=%.3fs)",
@@ -177,6 +194,20 @@ class AttachIMUSensorAction(BaseAction):
             self._entity_name,
             cfg.sensor_tick,
         )
+
+    def _on_imu_data(self, imu_measurement: "carla.IMUMeasurement") -> None:
+        """Callback invoked by CARLA for each IMU measurement."""
+        try:
+            acc = imu_measurement.accelerometer
+            gyro = imu_measurement.gyroscope
+            logger.info("IMU callback: acc=(%s,%s,%s)", acc.x, acc.y, acc.z)
+            if self._imu_pub is not None:
+                self._imu_pub.publish(
+                    accelerometer=(acc.x, acc.y, acc.z),
+                    gyroscope=(gyro.x, gyro.y, gyro.z),
+                )
+        except Exception:
+            logger.exception("IMU callback failed")
 
     def destroy(self) -> None:
         """Destroy the IMU sensor actor."""
