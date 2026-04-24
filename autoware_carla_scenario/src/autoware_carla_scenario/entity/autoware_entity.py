@@ -54,10 +54,9 @@ class AutowareEntity(EgoVehicle):
     def __init__(
         self,
         domain_id: int = 0,
-        topic_prefix: str = "",
     ) -> None:
         super().__init__()
-        self._dds = AutowareDDSBridge(domain_id=domain_id, topic_prefix=topic_prefix)
+        self._dds = AutowareDDSBridge(domain_id=domain_id)
         self._last_light_state: Optional[int] = None
 
     # ------------------------------------------------------------------

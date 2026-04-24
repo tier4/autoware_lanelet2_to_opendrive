@@ -90,17 +90,19 @@ _CONTROL_MODE_AUTONOMOUS: int = 1
 class _TopicSpec:
     """Descriptor for a single DDS input topic."""
 
-    __slots__ = ("name", "msg_type", "qos", "attr")
+    __slots__ = ("name", "dds_name", "msg_type", "qos", "attr")
 
     def __init__(
         self,
         name: str,
         msg_type: type,
+        dds_name: str,
         qos: Any = None,
         *,
         attr: str | None = None,
     ) -> None:
         self.name = name
+        self.dds_name = dds_name
         self.msg_type = msg_type
         self.qos = qos
         self.attr = attr
@@ -110,24 +112,42 @@ _INPUT_TOPICS: list[_TopicSpec] = [
     _TopicSpec(
         "ackermann_control_command",
         Control,
+        dds_name="rt/control/command/control_cmd",
         attr="current_ackermann_cmd",
     ),
-    _TopicSpec("engage", Engage),
+    _TopicSpec(
+        "engage",
+        Engage,
+        dds_name="rt/vehicle/engage",
+    ),
     _TopicSpec(
         "manual_ackermann_control_command",
         Control,
+        dds_name="rt/vehicle/command/manual_control_cmd",
         attr="current_manual_ackermann_cmd",
     ),
-    _TopicSpec("gear_command", GearCommand, attr="current_gear_cmd"),
-    _TopicSpec("manual_gear_command", GearCommand, attr="current_manual_gear_cmd"),
+    _TopicSpec(
+        "gear_command",
+        GearCommand,
+        dds_name="rt/control/command/gear_cmd",
+        attr="current_gear_cmd",
+    ),
+    _TopicSpec(
+        "manual_gear_command",
+        GearCommand,
+        dds_name="rt/vehicle/command/manual_gear_command",
+        attr="current_manual_gear_cmd",
+    ),
     _TopicSpec(
         "turn_indicators_command",
         TurnIndicatorsCommand,
+        dds_name="rt/control/command/turn_indicators_cmd",
         attr="current_turn_indicators_cmd",
     ),
     _TopicSpec(
         "hazard_lights_command",
         HazardLightsCommand,
+        dds_name="rt/control/command/hazard_lights_cmd",
         attr="current_hazard_lights_cmd",
     ),
 ]
@@ -172,9 +192,8 @@ class AutowareDDSBridge:
     command state.  The bridge is owned by :class:`AutowareEntity`.
     """
 
-    def __init__(self, domain_id: int = 0, topic_prefix: str = "") -> None:
+    def __init__(self, domain_id: int = 0) -> None:
         self._domain_id = domain_id
-        self._topic_prefix = topic_prefix
 
         # --- Received command state (written by DDS callbacks) ---
         self.is_engaged: bool = False
@@ -196,11 +215,6 @@ class AutowareDDSBridge:
     # Setup
     # ------------------------------------------------------------------
 
-    def _resolve_topic_name(self, short_name: str) -> str:
-        if self._topic_prefix:
-            return f"rt/{self._topic_prefix}/input/{short_name}"
-        return f"rt/input/{short_name}"
-
     def setup(self) -> None:
         """Create DDS participant, readers, writers, and service servers.
 
@@ -216,7 +230,7 @@ class AutowareDDSBridge:
 
         for spec in _INPUT_TOPICS:
             qos = spec.qos or DEFAULT_QOS
-            dds_name = self._resolve_topic_name(spec.name)
+            dds_name = spec.dds_name
             topic: Topic = Topic(self._participant, dds_name, spec.msg_type, qos=qos)
             callback = self._make_event_callback(spec)
             listener = Listener(on_data_available=callback)
