@@ -198,14 +198,17 @@ class AttachIMUSensorAction(BaseAction):
     def _on_imu_data(self, imu_measurement: "carla.IMUMeasurement") -> None:
         """Callback invoked by CARLA for each IMU measurement."""
         try:
+            logger.info("IMU callback fired (frame=%s)", imu_measurement.frame)
             acc = imu_measurement.accelerometer
+            logger.info("IMU accelerometer accessed: (%s,%s,%s)", acc.x, acc.y, acc.z)
             gyro = imu_measurement.gyroscope
-            logger.info("IMU callback: acc=(%s,%s,%s)", acc.x, acc.y, acc.z)
-            if self._imu_pub is not None:
-                self._imu_pub.publish(
-                    accelerometer=(acc.x, acc.y, acc.z),
-                    gyroscope=(gyro.x, gyro.y, gyro.z),
-                )
+            logger.info("IMU gyroscope accessed: (%s,%s,%s)", gyro.x, gyro.y, gyro.z)
+            # NOTE: publish disabled for SIGSEGV debugging
+            # if self._imu_pub is not None:
+            #     self._imu_pub.publish(
+            #         accelerometer=(acc.x, acc.y, acc.z),
+            #         gyroscope=(gyro.x, gyro.y, gyro.z),
+            #     )
         except Exception:
             logger.exception("IMU callback failed")
 
