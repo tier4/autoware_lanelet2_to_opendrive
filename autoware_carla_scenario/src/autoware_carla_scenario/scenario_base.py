@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 if TYPE_CHECKING:
+    from cyclonedds.domain import DomainParticipant
+
     from .entity.ego import EgoVehicle
 
 import carla
@@ -155,6 +157,7 @@ class BaseScenario(ABC):
         self._pass_conditions: List[BaseCondition] = []
         self._fail_conditions: List[BaseCondition] = []
         self._spectator_camera_config: Optional[SpectatorCameraConfig] = None
+        self._dds_participant: Optional[DomainParticipant] = None
 
     @property
     def spectator_camera_config(self) -> Optional[SpectatorCameraConfig]:
@@ -206,6 +209,28 @@ class BaseScenario(ABC):
             RuntimeError: If :meth:`set_client` has not been called yet.
         """
         return self.client.get_world()
+
+    # ------------------------------------------------------------------
+    # DDS participant (lazy, scenario-lifetime)
+    # ------------------------------------------------------------------
+
+    @property
+    def dds_participant(self) -> "DomainParticipant":
+        """Return a :class:`DomainParticipant` tied to this scenario's lifetime.
+
+        The participant is created lazily on first access using
+        :attr:`_domain_id` and kept alive until the scenario object is
+        garbage-collected.  This prevents the CycloneDDS ``Bad file
+        descriptor`` crash that occurs when a participant created as a
+        local variable is collected while DDS entities still reference
+        its internal sockets.
+        """
+        if self._dds_participant is None:
+            from cyclonedds.domain import DomainParticipant  # noqa: PLC0415
+
+            self._dds_participant = DomainParticipant(domain_id=self._domain_id)
+            logger.info("DomainParticipant created (domain_id=%d)", self._domain_id)
+        return self._dds_participant
 
     # ------------------------------------------------------------------
     # Abstract interface – must be implemented by subclasses
@@ -288,7 +313,6 @@ class BaseScenario(ABC):
         import time as _time  # noqa: PLC0415
 
         from cyclonedds.core import ReadCondition, SampleState, WaitSet  # noqa: PLC0415
-        from cyclonedds.domain import DomainParticipant  # noqa: PLC0415
         from cyclonedds.sub import DataReader  # noqa: PLC0415
         from cyclonedds.topic import Topic  # noqa: PLC0415
 
@@ -296,7 +320,7 @@ class BaseScenario(ABC):
         from .dds.msg import PoseWithCovarianceStamped, TwistStamped  # noqa: PLC0415
         from .dds.qos import DEFAULT_QOS  # noqa: PLC0415
 
-        participant = DomainParticipant(domain_id=self._domain_id)
+        participant = self.dds_participant
 
         pose_topic: Topic = Topic(
             participant, "rt/initialpose3d", PoseWithCovarianceStamped, qos=DEFAULT_QOS
@@ -380,8 +404,8 @@ class BaseScenario(ABC):
             self.ego_config.initial_speed_kmh,
         )
 
-        # Clean up temporary DDS entities
-        del twist_reader, pose_reader, waitset, participant
+        # Clean up temporary DDS entities (participant is kept on self)
+        del twist_reader, pose_reader, waitset
 
     @abstractmethod
     def is_done(self) -> bool:

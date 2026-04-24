@@ -2,15 +2,14 @@
 
 Spawns a ``sensor.other.imu`` blueprint attached to the target actor and
 registers a Python-side ``sensor.listen()`` callback.  When an optional
-*imu_pub* publisher is supplied, every measurement is forwarded to it;
-otherwise data is only logged.
+*dds_participant* is supplied, every measurement is published as a
+``sensor_msgs/Imu`` message via CycloneDDS; otherwise data is only logged.
 """
 
-from __future__ import annotations
-
 import logging
+import time as _time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from ..conditions import BaseCondition
 from ..conditions.base import find_actor_by_role_name
@@ -19,19 +18,10 @@ from .base import BaseAction, TickTiming
 
 if TYPE_CHECKING:
     import carla
+    from cyclonedds.domain import DomainParticipant
+    from cyclonedds.pub import DataWriter
 
 logger = logging.getLogger(__name__)
-
-
-class ImuPublisher(Protocol):
-    """Minimal publish interface expected by :class:`AttachIMUSensorAction`."""
-
-    def publish(
-        self,
-        *,
-        accelerometer: tuple[float, float, float],
-        gyroscope: tuple[float, float, float],
-    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -113,17 +103,22 @@ class AttachIMUSensorAction(BaseAction):
 
     When the trigger condition is met the action spawns the IMU sensor
     blueprint, attaches it to the actor identified by *entity_name*, and
-    registers a ``sensor.listen()`` callback.  If *imu_pub* is provided,
-    each measurement is forwarded to it; errors in the callback are
-    caught and logged via ``logger.exception``.
+    registers a ``sensor.listen()`` callback.
+
+    If *dds_participant* is provided, each measurement is published as a
+    ``sensor_msgs/Imu`` message via CycloneDDS.  Otherwise data is only
+    logged (backward-compatible behaviour).
 
     Args:
         entity_name: ``role_name`` of the actor to attach the sensor to.
         sensor_config: IMU sensor configuration.
         condition: Trigger condition (see :class:`BaseCondition`).
         timing: Tick phase (``PRE_TICK`` or ``POST_TICK``).
-        imu_pub: Optional publisher that receives accelerometer/gyroscope
-            tuples on every tick.
+        dds_participant: Optional CycloneDDS ``DomainParticipant``.
+            When supplied, a ``DataWriter`` is created for the IMU topic
+            and measurements are published automatically.
+        imu_topic: DDS topic name for the IMU messages.
+        frame_id: ``frame_id`` value written into the message header.
         label: Human-readable label for logging.
         once: If ``True`` (default) the action fires at most once.
     """
@@ -135,15 +130,20 @@ class AttachIMUSensorAction(BaseAction):
         condition: Optional[BaseCondition] = None,
         timing: TickTiming = TickTiming.POST_TICK,
         *,
-        imu_pub: Optional[ImuPublisher] = None,
+        dds_participant: Optional["DomainParticipant"] = None,
+        imu_topic: str = "/sensing/imu/imu_data",
+        frame_id: str = "base_link",
         label: str = "attach_imu_sensor",
         once: bool = True,
     ) -> None:
         super().__init__(label=label, condition=condition, timing=timing, once=once)
         self._entity_name = entity_name
         self._config = sensor_config or IMUSensorConfig()
-        self._imu_pub = imu_pub
+        self._dds_participant = dds_participant
+        self._imu_topic = imu_topic
+        self._frame_id = frame_id
         self._sensor: Optional[carla.Actor] = None
+        self._writer: Optional[DataWriter] = None
 
     @property
     def sensor_actor(self) -> Optional["carla.Actor"]:
@@ -151,7 +151,7 @@ class AttachIMUSensorAction(BaseAction):
         return self._sensor
 
     def execute(self, world: "carla.World") -> None:
-        """Locate the target actor and attach the IMU sensor."""
+        """Locate the target actor, attach the IMU sensor, and start publishing."""
         actor = find_actor_by_role_name(world, self._entity_name)
         if actor is None:
             logger.warning(
@@ -186,36 +186,81 @@ class AttachIMUSensorAction(BaseAction):
         )
 
         self._sensor = world.spawn_actor(imu_bp, transform, attach_to=actor)
+
+        # Set up DDS DataWriter if a participant was supplied
+        if self._dds_participant is not None:
+            from cyclonedds.pub import DataWriter as _DataWriter
+            from cyclonedds.topic import Topic
+
+            from ..dds.msg import Imu
+            from ..dds.qos import DEFAULT_QOS
+
+            topic: Topic = Topic(
+                self._dds_participant,
+                f"rt{self._imu_topic}",
+                Imu,
+                qos=DEFAULT_QOS,
+            )
+            self._writer = _DataWriter(self._dds_participant, topic, qos=DEFAULT_QOS)
+            logger.info(
+                "%s: DDS DataWriter created for topic 'rt%s'",
+                type(self).__name__,
+                self._imu_topic,
+            )
+
         self._sensor.listen(self._on_imu_data)
 
         logger.info(
-            "%s: IMU sensor attached to '%s' (tick=%.3fs)",
+            "%s: IMU sensor attached to '%s' (tick=%.3fs, dds=%s)",
             type(self).__name__,
             self._entity_name,
             cfg.sensor_tick,
+            self._writer is not None,
         )
 
     def _on_imu_data(self, imu_measurement: "carla.IMUMeasurement") -> None:
         """Callback invoked by CARLA for each IMU measurement."""
         try:
-            logger.info("IMU callback fired (frame=%s)", imu_measurement.frame)
             acc = imu_measurement.accelerometer
-            logger.info("IMU accelerometer accessed: (%s,%s,%s)", acc.x, acc.y, acc.z)
             gyro = imu_measurement.gyroscope
-            logger.info("IMU gyroscope accessed: (%s,%s,%s)", gyro.x, gyro.y, gyro.z)
-            # NOTE: publish disabled for SIGSEGV debugging
-            # if self._imu_pub is not None:
-            #     self._imu_pub.publish(
-            #         accelerometer=(acc.x, acc.y, acc.z),
-            #         gyroscope=(gyro.x, gyro.y, gyro.z),
-            #     )
+
+            if self._writer is not None:
+                from ..dds.msg import Header, Imu, Quaternion, Time, Vector3
+
+                now_ns = _time.time_ns()
+                stamp = Time(
+                    sec=now_ns // 1_000_000_000,
+                    nanosec=now_ns % 1_000_000_000,
+                )
+                msg = Imu(
+                    header=Header(stamp=stamp, frame_id=self._frame_id),
+                    orientation=Quaternion(x=0.0, y=0.0, z=0.0, w=1.0),
+                    orientation_covariance=[0.0] * 9,  # type: ignore[arg-type]
+                    angular_velocity=Vector3(x=gyro.x, y=gyro.y, z=gyro.z),
+                    angular_velocity_covariance=[0.0] * 9,  # type: ignore[arg-type]
+                    linear_acceleration=Vector3(x=acc.x, y=acc.y, z=acc.z),
+                    linear_acceleration_covariance=[0.0] * 9,  # type: ignore[arg-type]
+                )
+                self._writer.write(msg)
+            else:
+                logger.debug(
+                    "IMU data (frame=%s): accel=(%.3f,%.3f,%.3f) gyro=(%.3f,%.3f,%.3f)",
+                    imu_measurement.frame,
+                    acc.x,
+                    acc.y,
+                    acc.z,
+                    gyro.x,
+                    gyro.y,
+                    gyro.z,
+                )
         except Exception:
             logger.exception("IMU callback failed")
 
     def destroy(self) -> None:
-        """Destroy the IMU sensor actor."""
+        """Stop listening and destroy the IMU sensor actor."""
         if self._sensor is not None:
             self._sensor.stop()
             self._sensor.destroy()
             self._sensor = None
-            logger.info("IMU sensor destroyed")
+        self._writer = None
+        logger.info("IMU sensor destroyed")

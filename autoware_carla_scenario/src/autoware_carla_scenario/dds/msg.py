@@ -404,6 +404,24 @@ class TFMessage(IdlStruct, typename="tf2_msgs::msg::dds_::TFMessage_"):
 
 
 # =====================================================================
+# sensor_msgs
+# =====================================================================
+
+
+@dataclass
+class Imu(IdlStruct, typename="sensor_msgs::msg::dds_::Imu_"):
+    """sensor_msgs/msg/Imu."""
+
+    header: Header
+    orientation: Quaternion
+    orientation_covariance: array[float64, 9]  # type: ignore[type-arg,valid-type]
+    angular_velocity: Vector3
+    angular_velocity_covariance: array[float64, 9]  # type: ignore[type-arg,valid-type]
+    linear_acceleration: Vector3
+    linear_acceleration_covariance: array[float64, 9]  # type: ignore[type-arg,valid-type]
+
+
+# =====================================================================
 # autoware_vehicle_msgs (output reports)
 # =====================================================================
 
