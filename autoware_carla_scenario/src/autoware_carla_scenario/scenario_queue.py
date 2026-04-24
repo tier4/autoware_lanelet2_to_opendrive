@@ -65,6 +65,7 @@ class ScenarioQueue:
         server_extra_args: Optional[List[str]] = None,
         cooldown_seconds: float = 0.0,
         cooldown_max_retries: int = 0,
+        fixed_delta_seconds: float = 0.05,
     ) -> None:
         """Create a scenario queue.
 
@@ -95,6 +96,8 @@ class ScenarioQueue:
                 fails (e.g. due to CARLA communication errors).  After each
                 failed attempt a cooldown wait is inserted before the next
                 retry.  0 means no retries.
+            fixed_delta_seconds: Fixed time step (seconds) for CARLA
+                synchronous mode (e.g. 0.05 = 20 Hz).
         """
         if server is not None:
             self._server = server
@@ -117,6 +120,7 @@ class ScenarioQueue:
         self._output_dir = output_dir
         self._cooldown_seconds = cooldown_seconds
         self._cooldown_max_retries = cooldown_max_retries
+        self._fixed_delta_seconds = fixed_delta_seconds
 
         self._scenarios: List[BaseScenario] = []
         self._results: List[ScenarioResult] = []
@@ -241,6 +245,7 @@ class ScenarioQueue:
             tm_port=self._tm_port,
             timeout_seconds=self._timeout_seconds,
             output_dir=self._output_dir,
+            fixed_delta_seconds=self._fixed_delta_seconds,
         )
         if self._xodr_path is not None and self._map_name is None:
             raise ValueError(

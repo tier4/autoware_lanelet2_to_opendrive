@@ -1,0 +1,5 @@
+# @package _global_
+simulation:
+  # Fixed time step (seconds) for CARLA synchronous mode.
+  # Controls the simulation tick rate: 0.05 = 20 Hz, 0.02 = 50 Hz, etc.
+  fixed_delta_seconds: 0.05

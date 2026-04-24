@@ -75,6 +75,15 @@ class EntityConfig:
 
 
 @dataclass
+class SimulationConfig:
+    """CARLA simulation parameters."""
+
+    #: Fixed time step (seconds) for synchronous mode.
+    #: Controls the simulation tick rate: 0.05 = 20 Hz, 0.02 = 50 Hz, etc.
+    fixed_delta_seconds: float = 0.05
+
+
+@dataclass
 class EgoVehicleConfig:
     """Ego vehicle parameters."""
 
@@ -256,6 +265,7 @@ class ScenarioRunConfig:
     """
 
     server: ServerConfig = field(default_factory=ServerConfig)
+    simulation: SimulationConfig = field(default_factory=SimulationConfig)
     map: MapConfig = field(default_factory=MapConfig)
     ego: EgoVehicleConfig = field(default_factory=EgoVehicleConfig)
     entity: EntityConfig = field(default_factory=EntityConfig)

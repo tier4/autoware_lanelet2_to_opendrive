@@ -7,6 +7,7 @@ from .configs import (
     MapConfig,
     ScenarioRunConfig,
     ServerConfig,
+    SimulationConfig,
     TrafficLightComplianceConfig,
 )
 from .run import (
@@ -26,6 +27,7 @@ __all__ = [
     "MapConfig",
     "ScenarioRunConfig",
     "ServerConfig",
+    "SimulationConfig",
     "TrafficLightComplianceConfig",
     # Scenario registry (Issue #420)
     "build_ego_and_spawn",

@@ -229,6 +229,7 @@ class ScenarioRunner:
         tm_port: int = DEFAULT_TM_PORT,
         timeout_seconds: float = 60.0,
         output_dir: Path = Path("scenario_outputs"),
+        fixed_delta_seconds: float = 0.05,
     ) -> None:
         """Initialize the scenario runner.
 
@@ -239,10 +240,13 @@ class ScenarioRunner:
             tm_port: CARLA TrafficManager port.
             timeout_seconds: Default timeout applied to every scenario.
             output_dir: Directory where CARLA recording logs are saved.
+            fixed_delta_seconds: Fixed time step (seconds) for synchronous
+                mode.  Controls the simulation tick rate (e.g. 0.05 = 20 Hz).
         """
         self.timeout_seconds = timeout_seconds
         self.output_dir = output_dir
         self._tm_port = tm_port
+        self._fixed_delta_seconds = fixed_delta_seconds
 
         self._client = carla.Client(host, port)
         self._client.set_timeout(10.0)
@@ -349,7 +353,7 @@ class ScenarioRunner:
         # Enable synchronous mode for controlled replay
         settings = world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = 0.05  # 20 Hz – same as scenario execution
+        settings.fixed_delta_seconds = self._fixed_delta_seconds
         world.apply_settings(settings)
 
         camera_recorder: Optional[CameraRecorder] = None
@@ -447,7 +451,7 @@ class ScenarioRunner:
         # end of this method resets everything to defaults.
         settings = world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = 0.05  # 20 Hz
+        settings.fixed_delta_seconds = self._fixed_delta_seconds
         world.apply_settings(settings)
 
         # Configure TrafficManager for deterministic behaviour.

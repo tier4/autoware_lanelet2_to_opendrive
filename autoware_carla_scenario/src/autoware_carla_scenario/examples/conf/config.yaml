@@ -1,6 +1,7 @@
 defaults:
   - _self_
   - server: localhost
+  - simulation: default
   - ego: default
   - entity: default
   - traffic_manager: default
@@ -10,6 +11,9 @@ defaults:
 server:
   host: localhost
   port: 2000
+
+simulation:
+  fixed_delta_seconds: 0.05
 
 traffic_manager:
   port: 8100

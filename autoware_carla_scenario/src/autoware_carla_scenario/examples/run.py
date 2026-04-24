@@ -203,6 +203,7 @@ def run_scenario_with_queue(
     cooldown_max_retries: int = 0,
     timeout_seconds: float = 60.0,
     output_dir: Path = Path("scenario_outputs"),
+    fixed_delta_seconds: float = 0.05,
 ) -> ScenarioResult:
     """Run a single pre-built scenario using :class:`ScenarioQueue`.
 
@@ -227,6 +228,7 @@ def run_scenario_with_queue(
         cooldown_max_retries=cooldown_max_retries,
         timeout_seconds=timeout_seconds,
         output_dir=output_dir,
+        fixed_delta_seconds=fixed_delta_seconds,
     )
     queue.add(scenario)
     with queue:
@@ -554,6 +556,7 @@ def run_scenario(
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
     cooldown_max_retries = int(cfg.server.get("cooldown_max_retries", 0))
     timeout_seconds = float(cfg.server.get("timeout_seconds", 60.0))
+    fixed_delta_seconds = float(cfg.simulation.get("fixed_delta_seconds", 0.05))
 
     # Retrieve the Hydra output directory (works regardless of
     # ``hydra.job.chdir`` which defaults to False since Hydra 1.2).
@@ -571,6 +574,7 @@ def run_scenario(
         cooldown_max_retries=cooldown_max_retries,
         timeout_seconds=timeout_seconds,
         output_dir=output_dir,
+        fixed_delta_seconds=fixed_delta_seconds,
     )
 
     status = "PASSED" if result.passed else "FAILED"
