@@ -1,5 +1,5 @@
-import glob
 import sys
+import tempfile
 from unittest.mock import MagicMock
 
 import pytest
@@ -89,11 +89,15 @@ def test_validate_cleans_up_temp_file_on_exception(monkeypatch, tmp_path):
         raise RuntimeError("run_checks exploded")
 
     monkeypatch.setattr(qc_validate, "run_checks", _boom)
+    # Redirect tempfile to ``tmp_path`` so the .xqar lands somewhere we
+    # control and check, regardless of platform tempdir conventions
+    # (e.g. ``/var/folders/...`` on macOS vs ``/tmp`` on Linux).
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
 
-    before = set(glob.glob("/tmp/tmp*.xqar"))
+    before = set(tmp_path.glob("tmp*.xqar"))
     with pytest.raises(RuntimeError, match="run_checks exploded"):
         validate(tmp_path / "does_not_need_to_exist.xodr", ignore_patterns=[])
-    after = set(glob.glob("/tmp/tmp*.xqar"))
+    after = set(tmp_path.glob("tmp*.xqar"))
 
     leaked = after - before
     assert leaked == set(), f"validate() leaked temp files: {leaked}"
