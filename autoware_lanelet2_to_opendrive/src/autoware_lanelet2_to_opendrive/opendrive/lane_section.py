@@ -194,9 +194,13 @@ class LaneSection:
                 can_change = routing_graph.right(lanelet_here) is not None
                 inner_bound = lanelet_here.leftBound
 
+            # ``AttributeMap`` supports __contains__ and __getitem__ but not
+            # ``.get``; convert to dict once and reuse for both the helper
+            # call and the subtype lookup below.
+            inner_attrs = dict(inner_bound.attributes)
             rm = road_mark_from_linestring_attrs(
                 s_offset=0.0,
-                attrs=dict(inner_bound.attributes),
+                attrs=inner_attrs,
                 is_lht=is_lht,
             )
 
@@ -211,9 +215,6 @@ class LaneSection:
             # If the LineString did not specify a type (fallback solid) but
             # the routing graph says a lane change is permitted, relax the
             # mark to BROKEN to remain visually consistent with behaviour.
-            # ``AttributeMap`` supports __contains__ and __getitem__ but not
-            # ``.get``; convert to dict for safe lookups.
-            inner_attrs = dict(inner_bound.attributes)
             if (
                 rm.type == RoadMarkType.SOLID
                 and not inner_attrs.get("subtype")

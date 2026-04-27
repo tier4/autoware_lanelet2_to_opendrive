@@ -70,6 +70,20 @@ def test_roadmark_to_xml_includes_weight():
     assert elem.get("weight") == "bold"
 
 
+def test_roadmark_to_xml_omits_standard_weight():
+    """STANDARD is the OpenDRIVE default for ``<roadMark weight>`` — it
+    should not be emitted, to keep the output free of redundant attributes.
+    """
+    rm = RoadMark(
+        s_offset=0.0,
+        type=RoadMarkType.SOLID,
+        color=RoadMarkColor.WHITE,
+        weight=RoadMarkWeight.STANDARD,
+    )
+    elem = rm.to_xml()
+    assert elem.get("weight") is None
+
+
 def test_lane_change_left_right_rht_vs_lht():
     """World-relative Lanelet2 values must be flipped by handedness.
 

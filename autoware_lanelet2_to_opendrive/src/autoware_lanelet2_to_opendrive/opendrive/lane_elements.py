@@ -1,7 +1,7 @@
 """OpenDRIVE lane element definitions."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Mapping, Optional
 import lxml.etree as ET
 
 from .enums import (
@@ -50,7 +50,9 @@ class RoadMark:
         elem.set("sOffset", str(self.s_offset))
         elem.set("type", self.type.value)
         elem.set("color", self.color.value)
-        if self.weight is not None:
+        # OpenDRIVE spec defaults <roadMark weight> to "standard"; only emit when
+        # we have something non-default to record (e.g. BOLD for line_thick).
+        if self.weight is not None and self.weight is not RoadMarkWeight.STANDARD:
             elem.set("weight", self.weight.value)
         if self.lane_change is not None:
             elem.set("laneChange", self.lane_change.value)
@@ -115,7 +117,7 @@ _COLOR_TABLE: dict[str, RoadMarkColor] = {
 
 def road_mark_from_linestring_attrs(
     s_offset: float,
-    attrs: dict,
+    attrs: Mapping[str, str],
     is_lht: bool = False,
 ) -> RoadMark:
     """Map Lanelet2 LineString attributes to an OpenDRIVE RoadMark.

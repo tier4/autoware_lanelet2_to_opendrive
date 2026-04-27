@@ -257,7 +257,7 @@ class ReferenceLine:
         # available.
         try:
             boundary_attrs = dict(boundary.attributes)
-        except Exception:  # pragma: no cover - defensive
+        except (AttributeError, TypeError):  # pragma: no cover - defensive
             boundary_attrs = {}
         rm = road_mark_from_linestring_attrs(
             s_offset=0.0,
