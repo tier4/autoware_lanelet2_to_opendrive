@@ -60,7 +60,7 @@ def test_lane_speed_changes_along_s(tmp_path: Path) -> None:
     out = _run_convert(tmp_path)
     root = ET.parse(str(out)).getroot()
     speeds = root.findall(".//lane/speed")
-    maxes = sorted({int(float(s.get("max"))) for s in speeds})
+    maxes = sorted({int(round(float(s.get("max")))) for s in speeds})
     assert (
         40 in maxes and 60 in maxes
     ), f"expected both 40 and 60 in lane speeds along s; got {maxes}"
