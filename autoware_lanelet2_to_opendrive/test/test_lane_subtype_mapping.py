@@ -2,9 +2,9 @@
 
 These tests exercise ``Lane.construct_from_lanelet`` directly with minimal
 in-memory lanelets (no ``.osm`` round-trip, no MGRS projection) to lock in
-the subtype -> ``LaneType`` mapping. They close the coverage gap introduced
-when commit b6edad5 silently extended the subtype filter in
-``opendrive/road.py`` to include ``highway`` (and now ``road_shoulder``) in
+the subtype -> ``LaneType`` mapping. They close the coverage gap left by
+PR #427 (and PR #424 lineage), which extended the subtype filter in
+``opendrive/road.py`` to include ``highway`` and ``road_shoulder`` in
 addition to ``road`` and ``walkway``.
 
 If a future refactor drops or changes a branch in the subtype mapping, these
@@ -71,10 +71,12 @@ def test_subtype_maps_to_expected_lane_type(
 
 
 def test_highway_subtype_maps_to_driving() -> None:
-    """Dedicated regression guard for the ``highway`` mapping added in b6edad5.
+    """Dedicated regression guard for the ``highway`` mapping.
 
-    The commit extended the subtype filter in ``opendrive/road.py`` to
-    include ``highway`` but added no test for it; this test fills that gap.
+    Prior to PR #427 (and PR #424 lineage) the subtype filter in
+    ``opendrive/road.py`` accepted only ``road`` and ``walkway``; this PR
+    extends it to include ``highway``. No test previously exercised that
+    branch end-to-end, so this test fills the gap.
     """
     lanelet_map, lanelet = _make_straight_lanelet("highway")
 
@@ -86,10 +88,10 @@ def test_highway_subtype_maps_to_driving() -> None:
 def test_road_shoulder_subtype_maps_to_shoulder() -> None:
     """``road_shoulder`` must produce ``LaneType.SHOULDER``.
 
-    Prior to this commit ``road_shoulder`` was handled in
-    ``Lane.construct_from_lanelet`` but was not in the subtype filter in
-    ``opendrive/road.py``, making the branch unreachable end-to-end. The
-    filter has since been extended; this test locks the mapping in.
+    Prior to PR #427 ``road_shoulder`` was handled in
+    ``Lane.construct_from_lanelet`` but was absent from the subtype filter
+    in ``opendrive/road.py``, making the branch unreachable end-to-end.
+    This PR extends the filter; this test locks the mapping in.
     """
     lanelet_map, lanelet = _make_straight_lanelet("road_shoulder")
 
