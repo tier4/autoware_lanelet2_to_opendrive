@@ -11,6 +11,7 @@ reconstructing the planView + elevationProfile from XML and compares it with
 the endpoint of the linked road.  A tolerance of 5 cm is used.
 """
 
+import subprocess
 from pathlib import Path
 
 import lxml.etree as ET
@@ -25,15 +26,42 @@ NISHISHINJUKU_XODR = Path("/tmp/nishishinjuku_carla.xodr")
 
 
 def _build_nishishinjuku_xodr() -> Path:
-    """Produce the Nishishinjuku XODR if it is not already on disk."""
+    """Produce the Nishishinjuku XODR if it is not already on disk.
+
+    The fix in P0-2 shifts connecting-road endpoints; only an
+    end-to-end conversion exercises it. We build the file on demand via
+    ``uv run convert`` so the regression test actually runs in CI rather
+    than silently skipping.
+    """
     if NISHISHINJUKU_XODR.exists():
         return NISHISHINJUKU_XODR
 
-    # The converter has a heavy external dependency (hydra/autoware ext), so we
-    # do not try to rebuild it here.  Tests that need this fixture should be
-    # skipped when it is not present.
-    pytest.skip(f"{NISHISHINJUKU_XODR} not available; run the converter first")
-    return NISHISHINJUKU_XODR  # pragma: no cover
+    fixture = Path(
+        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
+    ).resolve()
+    if not fixture.is_file():
+        pytest.skip(f"{fixture} not available; cannot build XODR")
+
+    try:
+        subprocess.run(
+            [
+                "uv",
+                "run",
+                "convert",
+                "map=nishishinjuku",
+                "target=carla",
+                f"input_map_path={fixture}",
+                f"output_map_path={NISHISHINJUKU_XODR}",
+            ],
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        pytest.skip(f"converter unavailable or failed: {exc}")
+
+    if not NISHISHINJUKU_XODR.exists():
+        pytest.skip(f"{NISHISHINJUKU_XODR} not produced by converter")
+
+    return NISHISHINJUKU_XODR
 
 
 def _distance3(a, b) -> float:
