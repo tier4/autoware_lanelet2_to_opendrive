@@ -18,13 +18,65 @@ from ..conversion_config import (
 from ..util import LaneletInput, filter_lanelets_by_subtype, to_lanelet_list
 from .elevation import ElevationProfile
 from .enums import ContactPoint, ElementType, RoadType, TrafficRule
-from .geometry import GeometryBase, ParamPoly3, PlanView
+from .geometry import GeometryBase, ParamPoly3, PlanView, evaluate_plan_view_world
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
 from .road_links import Predecessor, RoadLink, Successor
 
 logger = logging.getLogger(__name__)
+
+
+def _evaluate_plan_view_world(
+    plan_view: PlanView, at_start: bool
+) -> Optional[Tuple[float, float]]:
+    """Evaluate the planView's reference-line XY position at its s=0 or
+    s=length endpoint.
+
+    This returns the coordinate that the rendered OpenDRIVE paramPoly3 +
+    planView actually resolves to, which can differ slightly from the raw
+    OSM boundary endpoint because of spline-fit approximation.
+
+    Note: only ``<paramPoly3>`` and ``<line>`` geometries are expected
+    here today; arc/spiral would require extending both this wrapper and
+    the shared :func:`evaluate_plan_view_world` kernel in ``geometry.py``.
+    """
+    if plan_view is None or not plan_view.geometries:
+        return None
+
+    geom = plan_view.geometries[0] if at_start else plan_view.geometries[-1]
+    p = 0.0 if at_start else geom.length
+
+    coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
+        None
+    )
+    if isinstance(geom, ParamPoly3):
+        coeffs = (
+            geom.aU,
+            geom.bU,
+            geom.cU,
+            geom.dU,
+            geom.aV,
+            geom.bV,
+            geom.cV,
+            geom.dV,
+        )
+
+    return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs)
+
+
+def _evaluate_elevation_profile(elevation_profile: ElevationProfile, s: float) -> float:
+    """Evaluate the piecewise-cubic elevation profile at arc length ``s``."""
+    if elevation_profile is None or not elevation_profile.elevations:
+        return 0.0
+    z = 0.0
+    for elev in elevation_profile.elevations:
+        if elev.s > s:
+            break
+        ds = s - elev.s
+        z = elev.a + elev.b * ds + elev.c * ds * ds + elev.d * ds * ds * ds
+    return z
+
 
 if TYPE_CHECKING:
     from .signal import Signal
@@ -50,6 +102,11 @@ class Road:
     elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
     road_types: Optional[List[RoadTypeDefinition]] = None
     objects: Optional[List[Union["CrosswalkObject", "StopLineObject"]]] = None
+    # World-frame 3D endpoints of the reference line (s=0 and s=length).
+    # Populated by ``construct_from_lanelet_groups`` so the junction phase
+    # can propagate these as overrides into connecting roads (P0-2).
+    reference_start_xyz: Optional[Tuple[float, float, float]] = None
+    reference_end_xyz: Optional[Tuple[float, float, float]] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -601,6 +658,8 @@ class Road:
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         routing_graph: Optional[RoutingGraph] = None,
+        start_xyz_override: Optional[Tuple[float, float, float]] = None,
+        end_xyz_override: Optional[Tuple[float, float, float]] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -613,6 +672,13 @@ class Road:
             width_config: Configuration for width spline sampling
             routing_graph: Optional pre-built routing graph for lane-change detection.
                 If None, creates a new one internally.
+            start_xyz_override: Optional world-frame (x, y, z) coordinate that
+                pins the reference-line start (s=0) exactly.  Used by the
+                junction phase to eliminate gaps between connecting roads and
+                their linked incoming road.
+            end_xyz_override: Optional world-frame (x, y, z) coordinate that
+                pins the reference-line end (s=length) exactly.  Used by the
+                junction phase to align with the linked outgoing road.
 
         Returns:
             Road object constructed from the lanelet group
@@ -627,7 +693,11 @@ class Road:
         lanelet_list = to_lanelet_list(lanelet_group)
 
         reference_line = ReferenceLine.construct_from_lanelet_groups(
-            lanelet_map, lanelet_list, traffic_rule=traffic_rule
+            lanelet_map,
+            lanelet_list,
+            traffic_rule=traffic_rule,
+            start_xyz_override=start_xyz_override,
+            end_xyz_override=end_xyz_override,
         )
         centerline_2d = reference_line.centerline_2d
 
@@ -685,6 +755,29 @@ class Road:
         # A complete implementation would also need to:
         # - Create proper lane sections from the lanelets
         # - Set appropriate road ID and other attributes
+        # Compute the world-frame 3D endpoints that the rendered paramPoly3
+        # planView + elevationProfile will actually land on.  These — not the
+        # raw OSM boundary endpoints — are what downstream roads must align
+        # to, because a connecting road pinned to the OSM endpoint would
+        # still show a gap against the regular road's rendered endpoint if
+        # the spline fit shifted it slightly.
+        rendered_start_xyz = _evaluate_plan_view_world(plan_view, at_start=True)
+        rendered_end_xyz = _evaluate_plan_view_world(plan_view, at_start=False)
+        if elevation_profile is not None and rendered_start_xyz is not None:
+            z_start = _evaluate_elevation_profile(elevation_profile, 0.0)
+            rendered_start_xyz = (
+                rendered_start_xyz[0],
+                rendered_start_xyz[1],
+                z_start,
+            )
+        if elevation_profile is not None and rendered_end_xyz is not None:
+            z_end = _evaluate_elevation_profile(elevation_profile, road_length)
+            rendered_end_xyz = (
+                rendered_end_xyz[0],
+                rendered_end_xyz[1],
+                z_end,
+            )
+
         road = Road(
             id=road_id,
             name=f"Road_{road_id}",
@@ -696,6 +789,8 @@ class Road:
             lanes=get_lanes(),
             elevation_offset=reference_line.elevation_offset,
             road_types=road_types_list,
+            reference_start_xyz=rendered_start_xyz,
+            reference_end_xyz=rendered_end_xyz,
         )
 
         return road
@@ -918,11 +1013,29 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        regular_roads: Optional[List["Road"]] = None,
+        lanelet_to_road_id: Optional[Dict[int, int]] = None,
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> Tuple[List["Road"], Dict[int, List[int]], Dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
         Creates roads from lanelets inside junctions. These roads have their
         junction field set to the appropriate junction ID.
+
+        When ``regular_roads`` and ``lanelet_to_road_id`` are provided, the
+        junction phase pins each connecting road's reference-line endpoints
+        to the world-frame endpoints of the linked incoming/outgoing regular
+        roads (P0-2 junction endpoint fidelity).  Without the overrides the
+        connecting road's reference line is fitted from a potentially
+        different OSM LineString than its neighbours, leaving gaps of up to
+        several metres at the junction boundary.
+
+        The incoming side is always overridden when a unique incoming
+        regular road can be identified.  The outgoing side is overridden
+        only when exactly one outgoing regular road exists — multi-successor
+        connecting roads have a single "end" that cannot be pinned to more
+        than one downstream road, so we leave them asymmetric and rely on
+        the incoming-side alignment to dominate.
 
         Args:
             lanelet_map: The lanelet2 map containing all lanelets
@@ -933,26 +1046,73 @@ class Road:
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
             width_config: Configuration for width spline sampling
+            regular_roads: Already-built non-junction roads used to source
+                world-frame endpoints for connecting-road overrides.
+            lanelet_to_road_id: Mapping ``lanelet_id -> road_id`` for regular
+                roads.  Used together with ``regular_roads`` to resolve which
+                regular road a connecting lanelet enters / leaves.
+            routing_graph: Pre-built routing graph (reused when available).
 
         Returns:
             Tuple of:
             - List of Road objects (connecting roads with junction field set)
             - Dict mapping junction_id -> list of road IDs in that junction
             - Dict mapping lanelet_id -> road_id for all junction lanelets
-
-        Example:
-            >>> from autoware_lanelet2_to_opendrive.junction import find_junction_groups, _filter_lanelets_inside_junction
-            >>> junction_lanelets = _filter_lanelets_inside_junction(lanelet_map.laneletLayer)
-            >>> junction_groups = find_junction_groups(junction_lanelets)
-            >>> roads, junction_to_roads, lanelet_to_road = Road.construct_connecting_roads_from_junctions(
-            ...     lanelet_map, junction_groups, starting_road_id=1000, junction_id_offset=1000
-            ... )
         """
         from ..util import find_adjacent_groups
 
         connecting_roads = []
         junction_to_roads: dict[int, List[int]] = {}
         lanelet_to_road: dict[int, int] = {}
+
+        # Build the infrastructure for endpoint overrides.
+        regular_road_by_id: Dict[int, "Road"] = {r.id: r for r in (regular_roads or [])}
+        ll_to_regular_road: Dict[int, int] = lanelet_to_road_id or {}
+
+        if regular_road_by_id and routing_graph is None:
+            traffic_rules = lanelet2.traffic_rules.create(
+                lanelet2.traffic_rules.Locations.Germany,
+                lanelet2.traffic_rules.Participants.Vehicle,
+            )
+            routing_graph = RoutingGraph(
+                lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+            )
+
+        def _unique_regular_endpoint(
+            group: Set[lanelet2.core.Lanelet],
+            direction: str,
+        ) -> Optional[Tuple[float, float, float]]:
+            """Resolve a connecting group's incoming/outgoing regular endpoint.
+
+            Walks the routing graph in the requested direction to find the
+            regular roads adjacent to this junction group.  Returns the
+            endpoint world-frame position if exactly one such regular road
+            exists — otherwise ``None`` (asymmetric / multi-successor case).
+            """
+            if not regular_road_by_id or routing_graph is None:
+                return None
+            neighbour_road_ids: Set[int] = set()
+            for ll in group:
+                if direction == "previous":
+                    neighbours = routing_graph.previous(ll)
+                else:
+                    neighbours = routing_graph.following(ll)
+                for n in neighbours:
+                    r_id = ll_to_regular_road.get(n.id)
+                    if r_id is not None and r_id in regular_road_by_id:
+                        neighbour_road_ids.add(r_id)
+            if len(neighbour_road_ids) != 1:
+                return None
+            (r_id,) = neighbour_road_ids
+            neighbour_road = regular_road_by_id[r_id]
+            if direction == "previous":
+                # Incoming road: use its reference-line END (flows into
+                # the connecting road).
+                return neighbour_road.reference_end_xyz
+            else:
+                # Outgoing road: use its reference-line START (connecting
+                # road flows into it).
+                return neighbour_road.reference_start_xyz
 
         current_road_id = starting_road_id
 
@@ -976,6 +1136,14 @@ class Road:
 
             # Create one road per adjacent group within the junction
             for adjacent_group in adjacent_groups_in_junction:
+                # Resolve endpoint overrides from linked regular roads.
+                # - Incoming side is always overridden when unique.
+                # - Outgoing side is only overridden when a single outgoing
+                #   regular road exists; multi-successor cases leave the
+                #   end alone (see docstring note above).
+                start_override = _unique_regular_endpoint(adjacent_group, "previous")
+                end_override = _unique_regular_endpoint(adjacent_group, "following")
+
                 try:
                     road = Road.construct_from_lanelet_groups(
                         lanelet_map=lanelet_map,
@@ -985,6 +1153,9 @@ class Road:
                         traffic_rule=traffic_rule,
                         parampoly3_config=parampoly3_config,
                         width_config=width_config,
+                        routing_graph=routing_graph,
+                        start_xyz_override=start_override,
+                        end_xyz_override=end_override,
                     )
 
                     # Set the junction field to mark this as a connecting road
