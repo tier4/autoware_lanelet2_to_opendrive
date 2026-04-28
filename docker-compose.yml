@@ -1,0 +1,83 @@
+x-dev-base: &dev-base
+  build:
+    context: .
+    target: dev
+    secrets:
+      - gh_pat
+  image: l2o-dev:local
+  volumes:
+    - .:/workspace
+    # Isolate the container's .venv from the host so the host-side
+    # interpreter path doesn't pollute the bind-mounted source tree.
+    - venv-cache:/workspace/.venv
+    - uv-cache:/root/.cache/uv
+  working_dir: /workspace
+
+services:
+  dev:
+    <<: *dev-base
+    command: bash
+    profiles: ["dev"]
+
+  # CI-equivalent jobs invoke entrypoints directly from the venv (PATH already
+  # contains /workspace/.venv/bin via the image ENV). We deliberately avoid
+  # `uv run` here: it triggers an implicit sync against the bind-mounted
+  # source on every invocation, which can rebuild workspace packages and
+  # destabilize the carefully-built native dependencies in the image.
+  pytest:
+    <<: *dev-base
+    command: pytest -v --tb=short -n auto
+    profiles: ["test"]
+
+  qc-validate:
+    <<: *dev-base
+    command:
+      - bash
+      - -lc
+      - >-
+        convert
+        map=nishishinjuku target=carla
+        input_map_path=autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm
+        output_map_path=/tmp/nishishinjuku_carla.xodr
+        && qc-validate /tmp/nishishinjuku_carla.xodr
+    profiles: ["qc"]
+
+  carla-import-test:
+    <<: *dev-base
+    command:
+      - bash
+      - -lc
+      - >-
+        convert
+        map=nishishinjuku target=carla
+        input_map_path=autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm
+        output_map_path=/tmp/nishishinjuku_carla.xodr
+        && carla-import-test /tmp/nishishinjuku_carla.xodr --map-name nishishinjuku
+        && analyze /tmp/nishishinjuku_carla.xodr
+        autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm
+        --output /tmp/nishishinjuku_carla_qc_report.xqar
+    profiles: ["carla"]
+
+  lint:
+    <<: *dev-base
+    command: pre-commit run --all-files
+    profiles: ["lint"]
+
+  convert:
+    build:
+      context: .
+      target: convert
+      secrets:
+        - gh_pat
+    image: l2o-convert:local
+    volumes:
+      - ./io:/io
+    profiles: ["convert"]
+
+secrets:
+  gh_pat:
+    environment: GH_PAT
+
+volumes:
+  uv-cache:
+  venv-cache:
