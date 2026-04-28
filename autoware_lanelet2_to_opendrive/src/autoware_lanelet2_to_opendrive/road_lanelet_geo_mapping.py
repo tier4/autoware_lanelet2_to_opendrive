@@ -25,6 +25,7 @@ import numpy as np
 from tqdm import tqdm
 
 from .opendrive.enums import TrafficRule
+from .opendrive.geometry import ParamPoly3
 
 if TYPE_CHECKING:
     from .opendrive.road import Road as ConverterRoad
@@ -312,10 +313,15 @@ def _sample_reference_line_from_road(
         sin_hdg = np.sin(geom.hdg)
         for i in range(num_samples_per_segment):
             p = geom.length * i / num_samples_per_segment
-            u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
-            v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
-            x = geom.x + cos_hdg * u - sin_hdg * v
-            y = geom.y + sin_hdg * u + cos_hdg * v
+            if isinstance(geom, ParamPoly3):
+                u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
+                v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
+                x = geom.x + cos_hdg * u - sin_hdg * v
+                y = geom.y + sin_hdg * u + cos_hdg * v
+            else:
+                # Line (or other simple straight) geometry: u = p, v = 0.
+                x = geom.x + cos_hdg * p
+                y = geom.y + sin_hdg * p
             points.append([x, y])
 
     # Add endpoint of last segment
@@ -324,10 +330,14 @@ def _sample_reference_line_from_road(
         p = last.length
         cos_hdg = np.cos(last.hdg)
         sin_hdg = np.sin(last.hdg)
-        u = last.aU + last.bU * p + last.cU * p**2 + last.dU * p**3
-        v = last.aV + last.bV * p + last.cV * p**2 + last.dV * p**3
-        x = last.x + cos_hdg * u - sin_hdg * v
-        y = last.y + sin_hdg * u + cos_hdg * v
+        if isinstance(last, ParamPoly3):
+            u = last.aU + last.bU * p + last.cU * p**2 + last.dU * p**3
+            v = last.aV + last.bV * p + last.cV * p**2 + last.dV * p**3
+            x = last.x + cos_hdg * u - sin_hdg * v
+            y = last.y + sin_hdg * u + cos_hdg * v
+        else:
+            x = last.x + cos_hdg * p
+            y = last.y + sin_hdg * p
         points.append([x, y])
 
     return np.array(points)

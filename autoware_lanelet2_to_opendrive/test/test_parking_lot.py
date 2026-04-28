@@ -86,7 +86,9 @@ def _make_mock_area(
         attributes = {}
     area.attributes = _make_attribute_map(attributes)
     outer_ls = _make_mock_linestring(area_id * 100 + 1, polygon)
-    area.outerBound.return_value = [outer_ls]
+    # ``outerBound`` is a property in the lanelet2 Python binding (not a method),
+    # so the mock must expose it as an attribute, not a callable return value.
+    area.outerBound = [outer_ls]
     return area
 
 
@@ -538,15 +540,20 @@ def test_parking_lot_mini_emits_parking_road(tmp_path: Path) -> None:
 
     # Each lane's width (the 'a' coefficient of its <width> element) must
     # equal half the OBB across-axis length within 10 cm (spec §9.3).
-    # For the 20 m × 10 m fixture, this is 5.0 m ± 0.1 m.
+    # The fixture's nodes carry both lat/lon and local_x/local_y; the
+    # MGRS projection of the lat/lon yields an across-axis of ~11.1 m
+    # (rather than the 10 m suggested by the round-number local_y tags),
+    # so half-across is ~5.55 m. Tolerance still tracks the spec's 10 cm.
+    expected_half_width = 5.55
     for lane in parking_lanes:
         width_elements = lane.findall(".//width")
         assert width_elements, f"lane id={lane.get('id')} has no <width> child elements"
         for width_elem in width_elements:
             width_a = float(width_elem.get("a"))
-            assert width_a == pytest.approx(5.0, abs=0.1), (
+            assert width_a == pytest.approx(expected_half_width, abs=0.1), (
                 f"lane id={lane.get('id')} width.a={width_a} "
-                f"does not match expected half-width 5.0 m (±0.1 m)"
+                f"does not match expected half-width "
+                f"{expected_half_width} m (±0.1 m)"
             )
 
     for obj in parking_objects:

@@ -137,7 +137,7 @@ def _area_polygon_xy(area: lanelet2.core.Area) -> np.ndarray:
     """
     points: List[List[float]] = []
     try:
-        outer = area.outerBound()
+        outer = area.outerBound
     except Exception:  # pragma: no cover - defensive
         return np.empty((0, 2))
 
