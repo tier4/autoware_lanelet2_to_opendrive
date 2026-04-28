@@ -13,7 +13,7 @@ from ..spline import Splines
 # Import enums directly to avoid circular import
 from .elevation import Elevation, ElevationProfile
 from .enums import LaneType
-from .lane_elements import LaneWidth
+from .lane_elements import LaneWidth, road_mark_from_linestring_attrs
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +250,21 @@ class ReferenceLine:
             elevation_offset=elevation_offset,
         )
 
-        # TODO: Add road marks based on lanelet line types
+        # Derive the center-lane road mark from the boundary LineString used
+        # for this reference line. For RHT the reference is the leftmost
+        # lanelet's leftBound; for LHT it is the rightmost lanelet's
+        # rightBound. Fall back to solid/white when no attributes are
+        # available.
+        try:
+            boundary_attrs = dict(boundary.attributes)
+        except (AttributeError, TypeError):  # pragma: no cover - defensive
+            boundary_attrs = {}
+        rm = road_mark_from_linestring_attrs(
+            s_offset=0.0,
+            attrs=boundary_attrs,
+            is_lht=(traffic_rule_normalized == "LHT"),
+        )
+        reference_line._lane._add_road_mark(rm)
 
         return reference_line
 

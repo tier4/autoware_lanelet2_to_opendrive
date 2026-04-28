@@ -1,10 +1,17 @@
 """OpenDRIVE lane element definitions."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Mapping, Optional
 import lxml.etree as ET
 
-from .enums import RoadMarkType, RoadMarkColor, RoadMarkLaneChange, SpeedUnit, RoadType
+from .enums import (
+    RoadMarkType,
+    RoadMarkColor,
+    RoadMarkLaneChange,
+    RoadMarkWeight,
+    SpeedUnit,
+    RoadType,
+)
 from .xml_utils import replace_subnormal
 
 
@@ -35,6 +42,7 @@ class RoadMark:
     type: RoadMarkType
     color: RoadMarkColor
     lane_change: Optional[RoadMarkLaneChange] = None
+    weight: Optional[RoadMarkWeight] = None
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -42,9 +50,129 @@ class RoadMark:
         elem.set("sOffset", str(self.s_offset))
         elem.set("type", self.type.value)
         elem.set("color", self.color.value)
+        # OpenDRIVE spec defaults <roadMark weight> to "standard"; only emit when
+        # we have something non-default to record (e.g. BOLD for line_thick).
+        if self.weight is not None and self.weight is not RoadMarkWeight.STANDARD:
+            elem.set("weight", self.weight.value)
         if self.lane_change is not None:
             elem.set("laneChange", self.lane_change.value)
         return elem
+
+
+# ---------------------------------------------------------------------------
+# LineString → RoadMark mapping
+# ---------------------------------------------------------------------------
+#
+# Mapping tables for converting Lanelet2 LineString boundary attributes
+# (type/subtype/color/lane_change) into OpenDRIVE RoadMark fields.
+#
+# References:
+#   - docs/spec-mapping/lanelet2-autoware-profile.md §"Boundary marking types"
+#   - docs/spec-mapping/opendrive-14-carla-profile.md §"Road marks"
+#
+# Notes:
+#   - OpenDRIVE's `laneChange` attribute is lane-id-direction-relative
+#     (``increase`` = toward more-positive lane IDs, ``decrease`` = toward
+#     more-negative lane IDs). Lanelet2's ``lane_change`` attribute is
+#     world-relative (``left``/``right``). The mapping depends on the
+#     handedness of the road:
+#       * RHT: right-side lanes have negative IDs, left-side lanes have
+#         positive IDs → lane_change=left → INCREASE, right → DECREASE.
+#       * LHT: right-side lanes have positive IDs, left-side lanes have
+#         negative IDs → lane_change=left → DECREASE, right → INCREASE.
+#     Callers must pass ``is_lht`` when the mapping should respect
+#     handedness; it defaults to False (RHT).
+
+_TYPE_TABLE: dict[tuple[str, str], tuple[RoadMarkType, RoadMarkWeight]] = {
+    ("line_thin", "solid"): (RoadMarkType.SOLID, RoadMarkWeight.STANDARD),
+    ("line_thin", "dashed"): (RoadMarkType.BROKEN, RoadMarkWeight.STANDARD),
+    ("line_thin", "solid_solid"): (RoadMarkType.SOLID_SOLID, RoadMarkWeight.STANDARD),
+    ("line_thin", "solid_dashed"): (RoadMarkType.SOLID_BROKEN, RoadMarkWeight.STANDARD),
+    ("line_thin", "dashed_solid"): (RoadMarkType.BROKEN_SOLID, RoadMarkWeight.STANDARD),
+    ("line_thin", "dashed_dashed"): (
+        RoadMarkType.BROKEN_BROKEN,
+        RoadMarkWeight.STANDARD,
+    ),
+    ("line_thick", "solid"): (RoadMarkType.SOLID, RoadMarkWeight.BOLD),
+    ("line_thick", "dashed"): (RoadMarkType.BROKEN, RoadMarkWeight.BOLD),
+    ("line_thick", "solid_solid"): (RoadMarkType.SOLID_SOLID, RoadMarkWeight.BOLD),
+    ("line_thick", "solid_dashed"): (RoadMarkType.SOLID_BROKEN, RoadMarkWeight.BOLD),
+    ("line_thick", "dashed_solid"): (RoadMarkType.BROKEN_SOLID, RoadMarkWeight.BOLD),
+    ("line_thick", "dashed_dashed"): (RoadMarkType.BROKEN_BROKEN, RoadMarkWeight.BOLD),
+    ("road_border", ""): (RoadMarkType.CURB, RoadMarkWeight.STANDARD),
+    ("curbstone", ""): (RoadMarkType.CURB, RoadMarkWeight.STANDARD),
+    ("virtual", ""): (RoadMarkType.NONE, RoadMarkWeight.STANDARD),
+    ("guard_rail", ""): (RoadMarkType.EDGE, RoadMarkWeight.STANDARD),
+}
+
+_COLOR_TABLE: dict[str, RoadMarkColor] = {
+    "white": RoadMarkColor.WHITE,
+    "yellow": RoadMarkColor.YELLOW,
+    "red": RoadMarkColor.RED,
+    "blue": RoadMarkColor.BLUE,
+    "green": RoadMarkColor.GREEN,
+    "orange": RoadMarkColor.ORANGE,
+}
+
+
+def road_mark_from_linestring_attrs(
+    s_offset: float,
+    attrs: Mapping[str, str],
+    is_lht: bool = False,
+) -> RoadMark:
+    """Map Lanelet2 LineString attributes to an OpenDRIVE RoadMark.
+
+    Args:
+        s_offset: s-coordinate at which this road mark begins.
+        attrs: Dict of Lanelet2 LineString attributes. Typically
+            ``dict(linestring.attributes)``. Recognised keys:
+            ``type``, ``subtype``, ``color``, ``lane_change``.
+        is_lht: Whether the parent map uses left-hand traffic. Affects
+            the ``lane_change`` world-relative → lane-id-relative
+            mapping (see module docstring).
+
+    Returns:
+        A :class:`RoadMark` whose fields are populated from the mapping
+        tables. Unknown combinations fall back to ``solid`` / ``white`` /
+        ``standard`` and no ``laneChange``.
+
+    References:
+        - docs/spec-mapping/lanelet2-autoware-profile.md §"Boundary marking types"
+        - docs/spec-mapping/opendrive-14-carla-profile.md §"Road marks"
+    """
+    ls_type = attrs.get("type", "") or ""
+    ls_sub = attrs.get("subtype", "") or ""
+    ls_col = (attrs.get("color", "") or "").lower()
+    ls_lc = (attrs.get("lane_change", "") or "").lower()
+
+    rm_type, rm_weight = _TYPE_TABLE.get(
+        (ls_type, ls_sub),
+        (RoadMarkType.SOLID, RoadMarkWeight.STANDARD),  # fallback
+    )
+
+    rm_color = _COLOR_TABLE.get(ls_col, RoadMarkColor.WHITE)
+
+    # lane_change: map world-relative Lanelet2 value to lane-id-relative
+    # OpenDRIVE value, flipping for LHT handedness.
+    rm_lc: Optional[RoadMarkLaneChange]
+    if ls_lc in ("yes", "both"):
+        rm_lc = RoadMarkLaneChange.BOTH
+    elif ls_lc == "no":
+        rm_lc = RoadMarkLaneChange.NONE
+    elif ls_lc == "left":
+        rm_lc = RoadMarkLaneChange.DECREASE if is_lht else RoadMarkLaneChange.INCREASE
+    elif ls_lc == "right":
+        rm_lc = RoadMarkLaneChange.INCREASE if is_lht else RoadMarkLaneChange.DECREASE
+    else:
+        rm_lc = None
+
+    return RoadMark(
+        s_offset=s_offset,
+        type=rm_type,
+        color=rm_color,
+        lane_change=rm_lc,
+        weight=rm_weight,
+    )
 
 
 @dataclass

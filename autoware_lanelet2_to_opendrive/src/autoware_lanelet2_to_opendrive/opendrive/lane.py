@@ -226,7 +226,12 @@ class Lane:
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)
-        # TODO: Add road marks based on lanelet line types
+
+        # Road marks are assigned by LaneSection.construct_from_lanelet_groups
+        # so that the routing-graph-derived laneChange permission can be
+        # combined with the LineString attributes of the actual inner
+        # boundary between neighbouring lanes. See
+        # ``opendrive/lane_section.py`` for the emission site.
 
         # Extract speed limit from lanelet attributes
         if "speed_limit" in lanelet.attributes:

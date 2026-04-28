@@ -33,11 +33,25 @@ class LaneType(Enum):
 class RoadMarkType(Enum):
     """Road mark types according to OpenDRIVE standard."""
 
+    NONE = "none"
     SOLID = "solid"
     BROKEN = "broken"
     SOLID_SOLID = "solid_solid"
     SOLID_BROKEN = "solid_broken"
     BROKEN_SOLID = "broken_solid"
+    BROKEN_BROKEN = "broken_broken"
+    BOTTS_DOTS = "botts dots"  # space per OpenDRIVE spec
+    GRASS = "grass"
+    CURB = "curb"
+    CUSTOM = "custom"
+    EDGE = "edge"
+
+
+class RoadMarkWeight(Enum):
+    """Road mark weights according to OpenDRIVE standard."""
+
+    STANDARD = "standard"
+    BOLD = "bold"
 
 
 class RoadMarkColor(Enum):
