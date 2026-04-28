@@ -733,8 +733,16 @@ class Road:
         # Filter out lanelets inside junctions
         from ..junction import _filter_lanelets_outside_junction
 
+        # Include non-road subtypes (highway, walkway, road_shoulder) so they can
+        # be emitted with the correct OpenDRIVE lane type
+        # (see Lane.construct_from_lanelet for the subtype -> LaneType mapping).
+        # Different subtypes form separate adjacent groups because the routing
+        # graph treats them as different participant classes, so e.g. walkways
+        # will not be grouped together with road lanelets here.
         road_lanelets = _filter_lanelets_outside_junction(
-            filter_lanelets_by_subtype(all_lanelets, ["road"])
+            filter_lanelets_by_subtype(
+                all_lanelets, ["road", "highway", "walkway", "road_shoulder"]
+            )
         )
 
         if not road_lanelets:
