@@ -204,18 +204,11 @@ class _Lanelet2ToOpenDRIVEConverter:
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
             width_config=self.config.width_estimation,
-            # P0-2: plumb already-built regular roads so that each
-            # connecting road's endpoints are pinned to the linked
-            # incoming/outgoing regular road endpoints.  Gated behind
-            # ``pin_junction_endpoints`` because the override currently
-            # breaks the conversion-vs-geometric mapping cross-check on
-            # some maps (issue #431).
-            regular_roads=(
-                regular_roads if self.config.pin_junction_endpoints else None
-            ),
-            lanelet_to_road_id=(
-                lanelet_to_road_id if self.config.pin_junction_endpoints else None
-            ),
+            # P0-2 (#437): always pin connecting-road endpoints to linked
+            # regular roads' rendered endpoints; lane width is captured
+            # by <lane><border> with endpoint constraints.
+            regular_roads=regular_roads,
+            lanelet_to_road_id=lanelet_to_road_id,
         )
 
         # Merge lanelet-to-road mappings
@@ -1341,19 +1334,6 @@ def preprocess_and_convert_with_hydra(
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
     # Priority: map config > target config > default (RHT)
     traffic_rule = cfg.map.get("traffic_rule") or cfg.target.get("traffic_rule", "RHT")
-    # Junction endpoint pinning (P0-2).  Default off because of issue #431.
-    # Resolve the flag with a true precedence chain (root > target > False)
-    # rather than a short-circuit ``or`` so an explicit ``false`` at one
-    # level can override a ``true`` set at a lower-priority level.
-    root_pin = cfg.get("pin_junction_endpoints")
-    target_pin = cfg.target.get("pin_junction_endpoints")
-    if root_pin is not None:
-        pin_junction_endpoints = bool(root_pin)
-    elif target_pin is not None:
-        pin_junction_endpoints = bool(target_pin)
-    else:
-        pin_junction_endpoints = False
-
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
 
@@ -1493,7 +1473,6 @@ def preprocess_and_convert_with_hydra(
         width_estimation=width_config,
         stopline=stopline_config,
         traffic_light=tl_config,
-        pin_junction_endpoints=pin_junction_endpoints,
     )
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;
