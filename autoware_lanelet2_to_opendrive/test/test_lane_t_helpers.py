@@ -91,3 +91,82 @@ def test_get_reference_line_tangent_diagonal() -> None:
     )
     theta = get_reference_line_tangent_at_s(road, s=spline.total_length / 2)
     assert theta == pytest.approx(math.pi / 4, abs=1e-3)
+
+
+import lanelet2  # noqa: E402
+from lanelet2.core import (  # noqa: E402
+    Lanelet,
+    LineString3d,
+    Point3d,
+    getId,
+)
+
+
+def _make_lanelet_for_road(
+    map_obj: lanelet2.core.LaneletMap,
+    x_start: float,
+    x_end: float,
+    left_y: float,
+    right_y: float,
+    n: int = 5,
+) -> Lanelet:
+    left_pts = [
+        Point3d(getId(), x_start + i * (x_end - x_start) / (n - 1), left_y, 0.0)
+        for i in range(n)
+    ]
+    right_pts = [
+        Point3d(getId(), x_start + i * (x_end - x_start) / (n - 1), right_y, 0.0)
+        for i in range(n)
+    ]
+    left_ls = LineString3d(getId(), left_pts)
+    right_ls = LineString3d(getId(), right_pts)
+    lanelet = Lanelet(getId(), left_ls, right_ls)
+    lanelet.attributes["subtype"] = "road"
+    map_obj.add(lanelet)
+    return lanelet
+
+
+def test_road_construct_with_regular_at_start_uses_border() -> None:
+    """When regular_road_at_start is supplied, the road emits <border> lanes."""
+    lanelet_map = lanelet2.core.LaneletMap()
+    upstream_lanelet = _make_lanelet_for_road(
+        lanelet_map, 0.0, 10.0, left_y=0.0, right_y=-3.0
+    )
+    connecting_lanelet = _make_lanelet_for_road(
+        lanelet_map, 10.0, 20.0, left_y=0.0, right_y=-3.0
+    )
+
+    upstream_road = Road.construct_from_lanelet_groups(
+        lanelet_map=lanelet_map,
+        lanelet_group=[upstream_lanelet],
+        road_id=0,
+        traffic_rule="RHT",
+    )
+
+    connecting_road = Road.construct_from_lanelet_groups(
+        lanelet_map=lanelet_map,
+        lanelet_group=[connecting_lanelet],
+        road_id=1,
+        traffic_rule="RHT",
+        regular_road_at_start=upstream_road,
+    )
+
+    lane = connecting_road.lanes.lane_sections[0].right_lanes[-1]
+    assert len(lane.borders) >= 1, "BORDER mode should populate borders"
+    assert lane.widths == [], "BORDER mode should leave widths empty"
+
+
+def test_road_construct_without_regular_road_uses_width() -> None:
+    """When neither regular_road_at_start nor _at_end is supplied, WIDTH mode is used."""
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelet = _make_lanelet_for_road(lanelet_map, 0.0, 10.0, left_y=0.0, right_y=-3.0)
+
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map=lanelet_map,
+        lanelet_group=[lanelet],
+        road_id=0,
+        traffic_rule="RHT",
+    )
+    lane = road.lanes.lane_sections[0].right_lanes[-1]
+    assert len(lane.widths) >= 1
+    assert lane.borders == []

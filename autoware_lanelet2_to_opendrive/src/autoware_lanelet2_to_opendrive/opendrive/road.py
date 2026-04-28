@@ -727,6 +727,8 @@ class Road:
         routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
         end_xyz_override: Optional[Tuple[float, float, float]] = None,
+        regular_road_at_start: Optional["Road"] = None,
+        regular_road_at_end: Optional["Road"] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -746,6 +748,12 @@ class Road:
             end_xyz_override: Optional world-frame (x, y, z) coordinate that
                 pins the reference-line end (s=length) exactly.  Used by the
                 junction phase to align with the linked outgoing road.
+            regular_road_at_start: Optional linked upstream regular Road. When
+                supplied, the road switches to BORDER mode and the lane t at
+                s=0 is constrained to the upstream lane edge (issue #437).
+            regular_road_at_end: Optional linked downstream regular Road. When
+                supplied, the road switches to BORDER mode and the lane t at
+                s=length is constrained to the downstream lane edge.
 
         Returns:
             Road object constructed from the lanelet group
@@ -767,6 +775,74 @@ class Road:
             end_xyz_override=end_xyz_override,
         )
         centerline_2d = reference_line.centerline_2d
+
+        # P0-2 root cause (#437): when this connecting road is pinned to
+        # linked regular roads' endpoints, emit <lane><border> with hard
+        # endpoint constraints so the lane edges line up with the linked
+        # roads' lane edges. WIDTH mode (default) keeps existing behavior.
+        from .enums import LaneMode
+        from ..util import create_routing_graph
+
+        use_border = (
+            regular_road_at_start is not None or regular_road_at_end is not None
+        )
+        lane_mode = LaneMode.BORDER if use_border else LaneMode.WIDTH
+
+        t_start_per_lanelet: Dict[int, Optional[float]] = {}
+        t_end_per_lanelet: Dict[int, Optional[float]] = {}
+
+        if use_border:
+            if routing_graph is None:
+                routing_graph = create_routing_graph(lanelet_map)
+
+            d_start = centerline_2d.evaluate(0.0, derivative=1)
+            theta_connecting_start = math.atan2(d_start[1], d_start[0])
+
+            if regular_road_at_start is not None:
+                upstream = regular_road_at_start
+                theta_upstream = get_reference_line_tangent_at_s(
+                    upstream, upstream.length
+                )
+                upstream_lane_mapping = upstream.get_lanelet_to_lane_mapping()
+                cos_correction_start = math.cos(theta_connecting_start - theta_upstream)
+                for lanelet in lanelet_list:
+                    candidates = []
+                    for prev in routing_graph.previous(lanelet):
+                        upstream_lane_id = upstream_lane_mapping.get(prev.id)
+                        if upstream_lane_id is not None:
+                            candidates.append((upstream_lane_id, prev))
+                    if not candidates:
+                        t_start_per_lanelet[lanelet.id] = None
+                        continue
+                    upstream_lane_id, _ = min(candidates, key=lambda c: abs(c[0]))
+                    t_upstream = get_lane_outer_edge_t_at_s(
+                        upstream, upstream_lane_id, upstream.length
+                    )
+                    t_start_per_lanelet[lanelet.id] = t_upstream * cos_correction_start
+
+            if regular_road_at_end is not None:
+                deriv_end = centerline_2d.evaluate(
+                    centerline_2d.total_length, derivative=1
+                )
+                theta_connecting_end = math.atan2(deriv_end[1], deriv_end[0])
+                downstream = regular_road_at_end
+                theta_downstream = get_reference_line_tangent_at_s(downstream, 0.0)
+                downstream_lane_mapping = downstream.get_lanelet_to_lane_mapping()
+                cos_correction_end = math.cos(theta_connecting_end - theta_downstream)
+                for lanelet in lanelet_list:
+                    candidates = []
+                    for nxt in routing_graph.following(lanelet):
+                        downstream_lane_id = downstream_lane_mapping.get(nxt.id)
+                        if downstream_lane_id is not None:
+                            candidates.append((downstream_lane_id, nxt))
+                    if not candidates:
+                        t_end_per_lanelet[lanelet.id] = None
+                        continue
+                    downstream_lane_id, _ = min(candidates, key=lambda c: abs(c[0]))
+                    t_downstream = get_lane_outer_edge_t_at_s(
+                        downstream, downstream_lane_id, 0.0
+                    )
+                    t_end_per_lanelet[lanelet.id] = t_downstream * cos_correction_end
 
         # Create paramPoly3 geometries from 2D spline using from_spline method
         # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate
@@ -794,6 +870,9 @@ class Road:
                 traffic_rule=traffic_rule,
                 width_config=width_config,
                 routing_graph=routing_graph,
+                mode=lane_mode,
+                t_start_per_lanelet=t_start_per_lanelet,
+                t_end_per_lanelet=t_end_per_lanelet,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
