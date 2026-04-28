@@ -1,0 +1,12 @@
+# Regex patterns for qc-framework issues to ignore.
+# One pattern per line. Lines starting with '#' and blank lines are ignored.
+# Patterns are searched (re.search) against issue description + location description.
+#
+# CARLA targets OpenDRIVE 1.4 syntax but supports the 'rule' attribute
+# introduced in 1.7. The ASAM QC checker validates against the declared
+# schema version, so `rule` on <road> triggers a false positive.
+attribute 'rule'
+
+# <positionInertial> was deprecated in 1.8; qc-framework flags it as invalid
+# on our 1.4-declared output. CARLA ue5-dev requires it.
+Element 'positionInertial'
