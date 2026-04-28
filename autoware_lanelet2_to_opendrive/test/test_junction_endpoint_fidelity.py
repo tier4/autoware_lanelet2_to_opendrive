@@ -2,13 +2,13 @@
 
 Ensures that each connecting road (junction != -1) in the output OpenDRIVE map
 lands exactly on its linked incoming and outgoing roads at its start and end
-points.  Prior to the fix, the connecting road's reference line came from a
-different OSM LineString than the incoming/outgoing road's reference line,
-which caused gaps of up to ~11.6 m at junction entry/exit.
+points. Prior to issue #437 / PR #425 the connecting road's reference line
+came from a different OSM LineString than the incoming/outgoing road's
+reference line, which caused gaps of up to ~11.6 m at junction entry/exit.
 
 The test evaluates the 3D endpoint (x, y, z) of every connection by
-reconstructing the planView + elevationProfile from XML and compares it with
-the endpoint of the linked road.  A tolerance of 5 cm is used.
+reconstructing the planView + elevationProfile from XML and compares it
+with the endpoint of the linked road. A tolerance of 5 cm is used.
 """
 
 import os
@@ -55,11 +55,6 @@ def _build_nishishinjuku_xodr() -> Path:
     if not fixture.is_file():
         pytest.skip(f"{fixture} not available; cannot build XODR")
 
-    # ``pin_junction_endpoints=true`` opts into the P0-2 override path this
-    # test exists to validate.  It is off by default in the converter
-    # because it currently breaks the mapping cross-check on some maps
-    # (issue #431); when that is resolved this flag and the corresponding
-    # ConversionConfig field can both go away.
     cmd = [
         "uv",
         "run",
@@ -68,24 +63,15 @@ def _build_nishishinjuku_xodr() -> Path:
         "target=carla",
         f"input_map_path={fixture}",
         f"output_map_path={xodr_path}",
-        "pin_junction_endpoints=true",
     ]
     try:
         subprocess.run(cmd, check=True)
     except FileNotFoundError as exc:
         # Tooling missing — environmental, not a regression.
         pytest.skip(f"converter unavailable: {exc}")
-    except subprocess.CalledProcessError as exc:
-        # Convert exits non-zero today on nishishinjuku with the override
-        # active because the lane-width side of the override is missing
-        # (issue #431).  Mark the test xfail rather than a hard failure
-        # so a real green run produces an XPASS that prompts cleanup
-        # once #431 lands; any *other* convert failure mode would still
-        # surface here as an xfail with the underlying error attached.
-        pytest.xfail(f"convert failed (likely #431): {exc}")
 
     if not xodr_path.exists():
-        pytest.xfail(f"{xodr_path} not produced by converter (likely #431)")
+        raise RuntimeError(f"{xodr_path} not produced by converter")
 
     return xodr_path
 
