@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional, Tuple, cast
+from typing import List, Optional, Tuple, cast
 
 import lanelet2
 import lxml.etree as ET
@@ -30,9 +30,6 @@ from .lane_section import LaneSection
 from .lane_sections import Lanes
 from .objects import _project_point_onto_road
 from .road import Road
-
-if TYPE_CHECKING:
-    from .reference_line import ReferenceLine
 
 logger = logging.getLogger(__name__)
 
@@ -346,9 +343,13 @@ class ParkingSpaceObject:
         stall_angle = math.atan2(float(direction[1]), float(direction[0]))
         hdg = (stall_angle - road_hdg + math.pi) % (2 * math.pi) - math.pi
 
+        # The OpenDRIVE object id is caller-controlled (sequential per
+        # road) while the stall lanelet id is preserved in ``name`` for
+        # traceability back to the source map.  Mirrors the convention
+        # used by CrosswalkObject and StopLineObject.
         return ParkingSpaceObject(
             id=object_id,
-            name=f"parking_space_{object_id}",
+            name=f"parking_space_{ls_id}",
             s=float(s),
             t=float(t),
             z_offset=0.0,
@@ -469,18 +470,17 @@ class ParkingLot:
             return None, []
 
         # Project each stall onto the synthetic road to derive (s, t, hdg).
+        # OpenDRIVE 1.7 §3.6.1 requires ``<object id>`` to be unique within a
+        # road, so we assign sequential IDs (1, 2, 3, ...) per lot rather
+        # than reusing the stall lanelet ID — that keeps the road valid
+        # even if other object kinds are attached to the same Road later.
+        # The lanelet ID is preserved in the object ``name`` for traceability.
         objects_out: List[ParkingSpaceObject] = []
-        # Use a deterministic per-lot object ID by combining the road
-        # ID with a per-stall index.  The pipeline is responsible for
-        # promoting these to a globally unique ID if needed.
-        for index, stall in enumerate(self.stalls):
-            stall_id = getattr(stall, "id", None)
-            if stall_id is None:
-                stall_id = index
+        for object_id, stall in enumerate(self.stalls, start=1):
             obj = ParkingSpaceObject.construct_from_stall_linestring(
                 stall=stall,
                 road=road,
-                object_id=int(stall_id),
+                object_id=object_id,
                 default_width=float(config.default_stall_width),
             )
             if obj is not None:
@@ -548,12 +548,11 @@ def _build_synthetic_road(
 
     # Centre lane (id=0, type=NONE).  We bypass the ReferenceLine
     # wrapper because building a Splines fit for a synthetic straight
-    # line would be overkill; the LaneSection.to_xml only needs an
-    # object with a ``to_xml`` method.
+    # line would be overkill; ``LaneSection.center_lane`` is typed
+    # ``Optional[Union[ReferenceLine, Lane]]`` precisely to support
+    # this case, and ``get_all_lanes`` unwraps either form.
     center_lane = Lane(lane_id=0, lane_type=LaneType.NONE)
-    # ``LaneSection.center_lane`` is typed Optional[ReferenceLine];
-    # the runtime contract is just ``.to_xml()``.  Cast for mypy.
-    lane_section.center_lane = cast("ReferenceLine", center_lane)
+    lane_section.center_lane = center_lane
 
     if half_width > 0.0:
         right = Lane(lane_id=-1, lane_type=LaneType.PARKING)

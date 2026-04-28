@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from autoware_lanelet2_to_opendrive.conversion_config import ParkingLotConfig
+from autoware_lanelet2_to_opendrive.opendrive.enums import LaneType
 from autoware_lanelet2_to_opendrive.opendrive.parking import (
     ParkingLot,
     ParkingSpaceObject,
@@ -314,9 +315,7 @@ def test_to_road_and_objects_happy_path_lane_widths_and_length():
         (5.0, 2.0),
         (-5.0, 2.0),
     ]
-    lot_area = _make_mock_area(
-        1, polygon, attributes={"type": "parking_lot"}
-    )
+    lot_area = _make_mock_area(1, polygon, attributes={"type": "parking_lot"})
     lot = ParkingLot(area=lot_area, stalls=[])
 
     road, objects = lot.to_road_and_objects(road_id=42, config=ParkingLotConfig())
@@ -345,9 +344,7 @@ def test_to_road_and_objects_happy_path_lane_widths_and_length():
 def test_to_road_and_objects_skips_degenerate_area(caplog):
     """An area below ``min_area_polygon_m2`` returns ``(None, [])`` + warning."""
     polygon = [(0.0, 0.0), (0.1, 0.0), (0.1, 0.1), (0.0, 0.1)]
-    lot_area = _make_mock_area(
-        2, polygon, attributes={"type": "parking_lot"}
-    )
+    lot_area = _make_mock_area(2, polygon, attributes={"type": "parking_lot"})
     lot = ParkingLot(area=lot_area, stalls=[])
 
     config = ParkingLotConfig(min_area_polygon_m2=1.0)
@@ -379,7 +376,9 @@ def test_construct_from_stall_linestring_relative_heading():
         7, [(x, y) for x, y in polygon], attributes={"type": "parking_lot"}
     )
     lot = ParkingLot(area=lot_area, stalls=[])
-    road = _build_synthetic_road(lot, road_id=0, config=ParkingLotConfig(), polygon_xy=polygon)
+    road = _build_synthetic_road(
+        lot, road_id=0, config=ParkingLotConfig(), polygon_xy=polygon
+    )
     assert road is not None
 
     # A perpendicular stall (along world-y at the centre) should
@@ -405,3 +404,47 @@ def test_construct_from_stall_linestring_relative_heading():
     assert abs(obj.hdg) == pytest.approx(math.pi / 2, abs=1e-3)
     assert obj.length == pytest.approx(2.0)
     assert obj.width == pytest.approx(2.5)
+
+
+# ---------------------------------------------------------------------------
+# LaneSection.get_all_lanes works on synthetic parking-lot roads
+# ---------------------------------------------------------------------------
+
+
+def test_synthetic_road_lane_section_get_all_lanes():
+    """``get_all_lanes`` must unwrap the bare-Lane centre on parking roads.
+
+    The lanelet-driven path stores a ``ReferenceLine`` (which wraps a
+    ``Lane`` in ``_lane``) as the centre slot, while the parking-lot
+    synthetic road stores a bare ``Lane`` directly.  ``get_all_lanes``
+    must handle both forms without raising ``AttributeError``.
+    """
+    polygon = np.array(
+        [
+            [-5.0, -2.0],
+            [5.0, -2.0],
+            [5.0, 2.0],
+            [-5.0, 2.0],
+        ]
+    )
+    lot_area = _make_mock_area(
+        9, [(x, y) for x, y in polygon], attributes={"type": "parking_lot"}
+    )
+    lot = ParkingLot(area=lot_area, stalls=[])
+    road = _build_synthetic_road(
+        lot, road_id=0, config=ParkingLotConfig(), polygon_xy=polygon
+    )
+    assert road is not None
+
+    lane_section = road.lanes.lane_sections[0]
+    all_lanes = lane_section.get_all_lanes()
+
+    # Expect exactly three lanes: left +1, centre 0, right -1.
+    assert len(all_lanes) == 3
+    ids = {lane.lane_id for lane in all_lanes}
+    assert ids == {-1, 0, 1}
+
+    by_id = {lane.lane_id: lane for lane in all_lanes}
+    assert by_id[0].lane_type == LaneType.NONE
+    assert by_id[-1].lane_type == LaneType.PARKING
+    assert by_id[1].lane_type == LaneType.PARKING
