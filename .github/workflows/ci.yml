@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubicloud-standard-8-ubuntu-2204
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -37,7 +37,7 @@ jobs:
         uv build --package autoware-carla-scenario
 
   lint-and-format:
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubicloud-standard-8-ubuntu-2204
     steps:
     - uses: actions/checkout@v4
 
@@ -139,7 +139,7 @@ jobs:
         retention-days: 7
 
   check-src-changes:
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubicloud-standard-8-ubuntu-2204
     outputs:
       src-changed: ${{ steps.filter.outputs.src }}
     steps:
@@ -154,7 +154,7 @@ jobs:
   carla-import-test:
     needs: check-src-changes
     if: needs.check-src-changes.outputs.src-changed == 'true'
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubicloud-standard-8-ubuntu-2204
     steps:
     - uses: actions/checkout@v4
 
@@ -203,7 +203,7 @@ jobs:
         retention-days: 7
 
   qc-validate:
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubicloud-standard-8-ubuntu-2204
     steps:
     - uses: actions/checkout@v4
     - name: Setup environment
