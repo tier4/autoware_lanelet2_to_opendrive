@@ -28,9 +28,17 @@ def load_ignore_patterns(path: Path = DEFAULT_IGNORE_FILE) -> list[str]:
 
     Strips blank and `#`-prefixed lines. Does NOT compile the patterns;
     caller decides when to compile.
+
+    Returns an empty list if ``path`` does not exist so that importing
+    callers (e.g. ``analyze_xodr.DEFAULT_IGNORE_PATTERNS``) do not fail
+    at import time when the data file is absent from the install tree.
     """
     patterns: list[str] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return patterns
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
