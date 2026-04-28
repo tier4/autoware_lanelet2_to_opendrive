@@ -43,6 +43,11 @@ def _build_nishishinjuku_xodr() -> Path:
         pytest.skip(f"{fixture} not available; cannot build XODR")
 
     try:
+        # `pin_junction_endpoints=true` opts into the P0-2 override path
+        # this test exists to validate.  It is off by default in the
+        # converter because it currently breaks the mapping cross-check on
+        # some maps (issue #431); when that is resolved this flag and the
+        # corresponding ConversionConfig field can both go away.
         subprocess.run(
             [
                 "uv",
@@ -52,6 +57,7 @@ def _build_nishishinjuku_xodr() -> Path:
                 "target=carla",
                 f"input_map_path={fixture}",
                 f"output_map_path={NISHISHINJUKU_XODR}",
+                "pin_junction_endpoints=true",
             ],
             check=True,
         )
