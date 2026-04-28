@@ -1,10 +1,9 @@
 """End-to-end check that connecting-road <border> endpoints land on
 linked regular roads' lane edges within tolerance.
 
-Runs the full converter on nishishinjuku.osm with
-pin_junction_endpoints=true, then walks every connecting road's first
-right lane and verifies the BORDER polynomial value at s=0 / s=length
-matches the linked regular road's lane edge.
+Runs the full converter on nishishinjuku.osm, then walks every
+connecting road's first right lane and verifies the BORDER polynomial
+value at s=0 / s=length matches the linked regular road's lane edge.
 """
 
 from __future__ import annotations
@@ -48,7 +47,6 @@ def _build_xodr() -> Path:
         "target=carla",
         f"input_map_path={fixture}",
         f"output_map_path={xodr_path}",
-        "pin_junction_endpoints=true",
     ]
     try:
         subprocess.run(cmd, check=True)
@@ -106,10 +104,9 @@ def test_connecting_road_borders_emit_when_pinned() -> None:
         if has_border:
             break
 
-    assert has_border, (
-        "No connecting road emits <lane><border>. BORDER mode is not active "
-        "even though pin_junction_endpoints=true was supplied."
-    )
+    assert (
+        has_border
+    ), "No connecting road emits <lane><border>. BORDER mode is not active."
 
 
 def test_connecting_road_inner_lane_starts_at_zero() -> None:
