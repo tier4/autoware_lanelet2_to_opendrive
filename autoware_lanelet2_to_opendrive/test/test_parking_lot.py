@@ -1,0 +1,407 @@
+"""Unit tests for ``opendrive/parking.py`` (P2-1 Task 2).
+
+These tests cover the pure-Python helpers (OBB derivation, attribute
+filters, polygon area, ParkingSpaceObject XML rendering) plus the
+``ParkingLot`` association logic using mocks.  End-to-end pipeline
+tests using a real OSM fixture are covered separately in Task 3.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from typing import List, Tuple
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
+from autoware_lanelet2_to_opendrive.conversion_config import ParkingLotConfig
+from autoware_lanelet2_to_opendrive.opendrive.parking import (
+    ParkingLot,
+    ParkingSpaceObject,
+    _build_synthetic_road,
+    _compute_obb,
+    _filter_parking_lot_areas,
+    _filter_parking_space_linestrings,
+    _polygon_area,
+)
+
+
+# ---------------------------------------------------------------------------
+# Mock helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_attribute_map(values: dict) -> MagicMock:
+    """Mock that mimics the parts of ``AttributeMap`` we use.
+
+    Supports ``"key" in attrs`` and ``attrs["key"]`` only.
+    """
+    attrs = MagicMock()
+    attrs.__contains__.side_effect = lambda key: key in values
+    attrs.__getitem__.side_effect = lambda key: values[key]
+    return attrs
+
+
+def _make_mock_linestring(
+    ls_id: int,
+    points_2d: List[Tuple[float, float]],
+    attributes: dict | None = None,
+) -> MagicMock:
+    """Build a minimal mock ``LineString3d`` with ``id`` + ``attributes``."""
+    ls = MagicMock()
+    ls.id = ls_id
+    if attributes is None:
+        attributes = {}
+    ls.attributes = _make_attribute_map(attributes)
+    # ``extract_points`` calls ``[[p.x, p.y] for p in boundary]`` so the
+    # iterator must yield objects with ``x``/``y`` (and ``z``) members.
+    pts = []
+    for x, y in points_2d:
+        pt = MagicMock()
+        pt.x = float(x)
+        pt.y = float(y)
+        pt.z = 0.0
+        pts.append(pt)
+
+    def _iter():
+        return iter(pts)
+
+    ls.__iter__.side_effect = _iter
+    ls.__len__.return_value = len(pts)
+    return ls
+
+
+def _make_mock_area(
+    area_id: int,
+    polygon: List[Tuple[float, float]],
+    attributes: dict | None = None,
+) -> MagicMock:
+    """Build a minimal mock ``Area`` with one outer LineString."""
+    area = MagicMock()
+    area.id = area_id
+    if attributes is None:
+        attributes = {}
+    area.attributes = _make_attribute_map(attributes)
+    outer_ls = _make_mock_linestring(area_id * 100 + 1, polygon)
+    area.outerBound.return_value = [outer_ls]
+    return area
+
+
+# ---------------------------------------------------------------------------
+# _compute_obb
+# ---------------------------------------------------------------------------
+
+
+def test_compute_obb_axis_aligned_rectangle_along_x():
+    """A wide thin rectangle along x has long axis collinear with x."""
+    pts = np.array(
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 1.0],
+            [0.0, 1.0],
+        ]
+    )
+    centre, long_axis, along, across = _compute_obb(pts)
+    assert centre == pytest.approx(np.array([5.0, 0.5]))
+    # Long axis can come back as either (1, 0) or (-1, 0); both are
+    # valid PCA outputs.  Check magnitude alignment.
+    assert abs(long_axis[0]) == pytest.approx(1.0, abs=1e-6)
+    assert abs(long_axis[1]) == pytest.approx(0.0, abs=1e-6)
+    assert along == pytest.approx(10.0)
+    assert across == pytest.approx(1.0)
+
+
+def test_compute_obb_axis_aligned_rectangle_along_y():
+    """A tall thin rectangle along y has long axis collinear with y."""
+    pts = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 8.0],
+            [0.0, 8.0],
+        ]
+    )
+    _, long_axis, along, across = _compute_obb(pts)
+    assert abs(long_axis[1]) == pytest.approx(1.0, abs=1e-6)
+    assert abs(long_axis[0]) == pytest.approx(0.0, abs=1e-6)
+    assert along == pytest.approx(8.0)
+    assert across == pytest.approx(1.0)
+
+
+def test_compute_obb_square_falls_back_to_world_x():
+    """A perfect square has no preferred long axis; fall back to (1, 0)."""
+    pts = np.array(
+        [
+            [0.0, 0.0],
+            [4.0, 0.0],
+            [4.0, 4.0],
+            [0.0, 4.0],
+        ]
+    )
+    _, long_axis, along, across = _compute_obb(pts)
+    np.testing.assert_allclose(long_axis, np.array([1.0, 0.0]))
+    assert along == pytest.approx(4.0)
+    assert across == pytest.approx(4.0)
+
+
+def test_compute_obb_axes_are_orthogonal_for_sliver():
+    """Sliver-thin rectangles still have orthogonal long/short axes."""
+    pts = np.array(
+        [
+            [0.0, 0.0],
+            [20.0, 0.001],
+            [20.0, 0.002],
+            [0.0, 0.001],
+        ]
+    )
+    _, long_axis, along, across = _compute_obb(pts)
+    # short axis is constructed by 90° rotation, so by definition
+    # orthogonal — check the long axis is unit length.
+    assert np.linalg.norm(long_axis) == pytest.approx(1.0, abs=1e-6)
+    # along should be much greater than across for a sliver
+    assert along > across * 100
+
+
+# ---------------------------------------------------------------------------
+# _polygon_area
+# ---------------------------------------------------------------------------
+
+
+def test_polygon_area_unit_square():
+    pts = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+    assert _polygon_area(pts) == pytest.approx(1.0)
+
+
+def test_polygon_area_handles_degenerate_input():
+    assert _polygon_area(np.array([[0.0, 0.0]])) == 0.0
+    assert _polygon_area(np.empty((0, 2))) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Filters – type / subtype aliases
+# ---------------------------------------------------------------------------
+
+
+def test_filter_parking_lot_areas_accepts_type_alias():
+    a = _make_mock_area(1, [(0, 0), (1, 0), (1, 1)], attributes={"type": "parking_lot"})
+    b = _make_mock_area(
+        2, [(0, 0), (1, 0), (1, 1)], attributes={"subtype": "parking_lot"}
+    )
+    other = _make_mock_area(3, [(0, 0), (1, 0), (1, 1)], attributes={"type": "other"})
+    result = _filter_parking_lot_areas([a, b, other])
+    assert a in result
+    assert b in result
+    assert other not in result
+
+
+def test_filter_parking_space_linestrings_accepts_subtype_alias():
+    a = _make_mock_linestring(
+        1, [(0.0, 0.0), (5.0, 0.0)], attributes={"type": "parking_space"}
+    )
+    b = _make_mock_linestring(
+        2, [(0.0, 0.0), (5.0, 0.0)], attributes={"subtype": "parking_space"}
+    )
+    other = _make_mock_linestring(
+        3, [(0.0, 0.0), (5.0, 0.0)], attributes={"type": "stop_line"}
+    )
+    result = _filter_parking_space_linestrings([a, b, other])
+    assert a in result
+    assert b in result
+    assert other not in result
+
+
+# ---------------------------------------------------------------------------
+# ParkingSpaceObject – dataclass + XML serialisation
+# ---------------------------------------------------------------------------
+
+
+def test_parking_space_object_to_xml_attributes():
+    obj = ParkingSpaceObject(
+        id=42,
+        name="parking_space_42",
+        s=10.0,
+        t=-2.5,
+        z_offset=0.05,
+        hdg=math.pi / 2,
+        length=5.0,
+        width=2.5,
+    )
+    elem = obj.to_xml()
+    assert elem.tag == "object"
+    assert elem.get("type") == "parkingSpace"
+    assert elem.get("id") == "42"
+    assert elem.get("name") == "parking_space_42"
+    assert float(elem.get("s")) == pytest.approx(10.0)
+    assert float(elem.get("t")) == pytest.approx(-2.5)
+    assert float(elem.get("zOffset")) == pytest.approx(0.05)
+    assert float(elem.get("hdg")) == pytest.approx(math.pi / 2)
+    assert float(elem.get("width")) == pytest.approx(2.5)
+    assert float(elem.get("length")) == pytest.approx(5.0)
+    assert elem.get("orientation") == "none"
+
+
+# ---------------------------------------------------------------------------
+# ParkingLot.construct_all_from_lanelet_map – stall ↔ area assignment
+# ---------------------------------------------------------------------------
+
+
+def test_construct_all_from_lanelet_map_orphan_stall_filtered():
+    """A stall outside threshold of every parking lot is dropped."""
+    # Lot at the origin with extent [-5, 5] × [-5, 5].
+    lot = _make_mock_area(
+        1,
+        [(-5.0, -5.0), (5.0, -5.0), (5.0, 5.0), (-5.0, 5.0)],
+        attributes={"type": "parking_lot"},
+    )
+    nearby_stall = _make_mock_linestring(
+        100,
+        [(0.0, 0.0), (3.0, 0.0)],
+        attributes={"type": "parking_space"},
+    )
+    # Far away (1000m) — well outside the default 30 m threshold.
+    far_stall = _make_mock_linestring(
+        101,
+        [(1000.0, 1000.0), (1003.0, 1000.0)],
+        attributes={"type": "parking_space"},
+    )
+
+    lanelet_map = MagicMock()
+    lanelet_map.areaLayer = [lot]
+    lanelet_map.lineStringLayer = [nearby_stall, far_stall]
+
+    result = ParkingLot.construct_all_from_lanelet_map(lanelet_map, ParkingLotConfig())
+    assert len(result) == 1
+    assert nearby_stall in result[0].stalls
+    assert far_stall not in result[0].stalls
+
+
+def test_construct_all_from_lanelet_map_disabled_returns_empty():
+    """With ``enabled=False`` no parking lots are returned."""
+    lot = _make_mock_area(
+        1, [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)], attributes={"type": "parking_lot"}
+    )
+    lanelet_map = MagicMock()
+    lanelet_map.areaLayer = [lot]
+    lanelet_map.lineStringLayer = []
+    result = ParkingLot.construct_all_from_lanelet_map(
+        lanelet_map, ParkingLotConfig(enabled=False)
+    )
+    assert result == []
+
+
+def test_construct_all_from_lanelet_map_no_areas():
+    """Empty area layer is a silent no-op."""
+    lanelet_map = MagicMock()
+    lanelet_map.areaLayer = []
+    lanelet_map.lineStringLayer = []
+    result = ParkingLot.construct_all_from_lanelet_map(lanelet_map, ParkingLotConfig())
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# ParkingLot.to_road_and_objects – synthetic road shape
+# ---------------------------------------------------------------------------
+
+
+def test_to_road_and_objects_happy_path_lane_widths_and_length():
+    """A 10×4 m parking lot yields a 10 m straight road with two PARKING lanes."""
+    polygon = [
+        (-5.0, -2.0),
+        (5.0, -2.0),
+        (5.0, 2.0),
+        (-5.0, 2.0),
+    ]
+    lot_area = _make_mock_area(
+        1, polygon, attributes={"type": "parking_lot"}
+    )
+    lot = ParkingLot(area=lot_area, stalls=[])
+
+    road, objects = lot.to_road_and_objects(road_id=42, config=ParkingLotConfig())
+    assert road is not None
+    assert objects == []
+    assert road.id == 42
+    assert road.junction == -1
+    assert road.length == pytest.approx(10.0)
+    assert road.plan_view is not None
+    assert len(road.plan_view.geometries) == 1
+    geom = road.plan_view.geometries[0]
+    assert geom.length == pytest.approx(10.0)
+
+    assert road.lanes is not None
+    assert len(road.lanes.lane_sections) == 1
+    lane_section = road.lanes.lane_sections[0]
+    # Right lane id=-1 and left lane id=+1, each width = across_length / 2
+    assert -1 in lane_section.right_lanes
+    assert 1 in lane_section.left_lanes
+    right = lane_section.right_lanes[-1]
+    left = lane_section.left_lanes[1]
+    assert right.widths[0].a == pytest.approx(2.0)  # 4 m / 2
+    assert left.widths[0].a == pytest.approx(2.0)
+
+
+def test_to_road_and_objects_skips_degenerate_area(caplog):
+    """An area below ``min_area_polygon_m2`` returns ``(None, [])`` + warning."""
+    polygon = [(0.0, 0.0), (0.1, 0.0), (0.1, 0.1), (0.0, 0.1)]
+    lot_area = _make_mock_area(
+        2, polygon, attributes={"type": "parking_lot"}
+    )
+    lot = ParkingLot(area=lot_area, stalls=[])
+
+    config = ParkingLotConfig(min_area_polygon_m2=1.0)
+    with caplog.at_level(logging.WARNING):
+        road, objects = lot.to_road_and_objects(road_id=0, config=config)
+    assert road is None
+    assert objects == []
+    assert any("polygon area" in rec.message for rec in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# ParkingSpaceObject.construct_from_stall_linestring – relative heading
+# ---------------------------------------------------------------------------
+
+
+def test_construct_from_stall_linestring_relative_heading():
+    """Stall heading is reported relative to the road tangent."""
+    # Build a synthetic road via _build_synthetic_road so we have a
+    # real PlanView that ``_project_point_onto_road`` can sample.
+    polygon = np.array(
+        [
+            [-5.0, -2.0],
+            [5.0, -2.0],
+            [5.0, 2.0],
+            [-5.0, 2.0],
+        ]
+    )
+    lot_area = _make_mock_area(
+        7, [(x, y) for x, y in polygon], attributes={"type": "parking_lot"}
+    )
+    lot = ParkingLot(area=lot_area, stalls=[])
+    road = _build_synthetic_road(lot, road_id=0, config=ParkingLotConfig(), polygon_xy=polygon)
+    assert road is not None
+
+    # A perpendicular stall (along world-y at the centre) should
+    # come out with hdg ≈ ±π/2 relative to the road's world-x tangent.
+    stall = _make_mock_linestring(50, [(0.0, -1.0), (0.0, 1.0)])
+
+    # The road's reference line runs along world-x — patch
+    # extract_points to return our stall coordinates without involving
+    # the real lanelet2 module.
+    pts_2d = np.array([[0.0, -1.0], [0.0, 1.0]])
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.parking.extract_points",
+        return_value=pts_2d,
+    ):
+        obj = ParkingSpaceObject.construct_from_stall_linestring(
+            stall=stall,
+            road=road,
+            object_id=50,
+            default_width=2.5,
+        )
+    assert obj is not None
+    # Stall direction is +y in world frame; road tangent is +x → hdg ≈ +π/2
+    assert abs(obj.hdg) == pytest.approx(math.pi / 2, abs=1e-3)
+    assert obj.length == pytest.approx(2.0)
+    assert obj.width == pytest.approx(2.5)
