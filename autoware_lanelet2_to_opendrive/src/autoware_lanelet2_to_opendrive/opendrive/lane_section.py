@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .lane import Lane
 from .reference_line import ReferenceLine
 from ..conversion_config import WidthEstimationConfig
-from .enums import RoadMarkType, RoadMarkLaneChange
+from .enums import LaneMode, RoadMarkType, RoadMarkLaneChange
 from .lane_elements import road_mark_from_linestring_attrs
 from .xml_utils import replace_subnormal
 
@@ -74,6 +74,9 @@ class LaneSection:
         traffic_rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         routing_graph: Optional[RoutingGraph] = None,
+        mode: LaneMode = LaneMode.WIDTH,
+        t_start_per_lanelet: Optional[Dict[int, Optional[float]]] = None,
+        t_end_per_lanelet: Optional[Dict[int, Optional[float]]] = None,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -86,6 +89,13 @@ class LaneSection:
             width_config: Configuration for width spline sampling
             routing_graph: Optional pre-built routing graph for lane-change detection.
                 If None, creates a new one.
+            mode: Selects between <width> and <border> emission for each
+                lane in the section. Default ``LaneMode.WIDTH``.
+            t_start_per_lanelet: BORDER mode only. Maps lanelet_id to the
+                hard endpoint t-target at s=0 for that lanelet's lane.
+                ``None`` value (or absent key) leaves that endpoint
+                unconstrained.
+            t_end_per_lanelet: Same as above, for s=total_length.
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -149,6 +159,9 @@ class LaneSection:
             list(reversed(sorted_lanelets)) if is_lht else sorted_lanelets
         )
 
+        t_start_lookup = t_start_per_lanelet or {}
+        t_end_lookup = t_end_per_lanelet or {}
+
         for i, lanelet in enumerate(lanelets_ordered):
             lane_id = (i + 1) if is_lht else -(i + 1)
             lane = Lane.construct_from_lanelet(
@@ -157,6 +170,9 @@ class LaneSection:
                 rule=traffic_rule_normalized,
                 width_config=width_config,
                 reference_line_spline=reference_line_spline,
+                mode=mode,
+                t_start_constraint=t_start_lookup.get(lanelet.id),
+                t_end_constraint=t_end_lookup.get(lanelet.id),
             )
             lane.lane_id = lane_id
             if is_lht:

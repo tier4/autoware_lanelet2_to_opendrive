@@ -145,3 +145,27 @@ def test_lane_construct_in_width_mode_keeps_widths() -> None:
 
     assert len(lane.widths) >= 1
     assert lane.borders == []
+
+
+from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection  # noqa: E402
+
+
+def test_lane_section_passes_border_params_to_lane() -> None:
+    """LaneSection in BORDER mode produces lanes whose borders are populated."""
+    lanelet, lanelet_map = _make_synthetic_lanelet()
+    section = LaneSection.construct_from_lanelet_groups(
+        lanelet_map=lanelet_map,
+        lanelet_group=[lanelet],
+        s_offset=0.0,
+        traffic_rule="RHT",
+        mode=LaneMode.BORDER,
+        t_start_per_lanelet={lanelet.id: -3.0},
+        t_end_per_lanelet={lanelet.id: -3.0},
+    )
+
+    # Lane id -1 is the single lane (RHT convention).
+    lane = section.right_lanes[-1]
+    assert len(lane.borders) >= 1
+    assert lane.widths == []
+    # First segment a-coefficient should equal the start constraint.
+    assert lane.borders[0].a == pytest.approx(-3.0, abs=1e-9)
