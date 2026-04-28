@@ -53,7 +53,7 @@ jobs:
 
   auto-format:
     name: Auto-fix formatting
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubuntu-22.04
     needs: lint-and-format
     if: |
       failure() &&
@@ -93,7 +93,7 @@ jobs:
           git push
 
   docs:
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
       with:

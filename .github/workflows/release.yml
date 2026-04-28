@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubuntu-22.04
     outputs:
       bump_type: ${{ steps.pr-labels.outputs.bump_type }}
       new_version: ${{ steps.bump-version.outputs.new_version }}
@@ -285,7 +285,7 @@ jobs:
           echo "No version bump label found. Skipping release."
 
   attach-sample-xodr:
-    runs-on: ubicloud-standard-2-ubuntu-2204
+    runs-on: ubuntu-22.04
     needs: release
     if: needs.release.outputs.bump_type != 'none'
     steps:
