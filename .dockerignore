@@ -1,0 +1,36 @@
+# VCS & worktree pointers
+.git
+.git/**
+
+# Python virtualenvs (must be rebuilt inside the image)
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+
+# Editor / OS junk
+.vscode
+.idea
+.DS_Store
+
+# Test / build outputs
+.pytest_cache
+.testmondata
+**/site/
+**/build/
+**/dist/
+
+# uv cache
+.uv-cache
+
+# Local Docker scratch
+io/
+
+# Plans / specs (local-only documents)
+docs/superpowers/
+
+# Claude / IDE worktree machinery
+.claude/
+
+# CI-only artifacts
+.github/workflows/*.yml.bak

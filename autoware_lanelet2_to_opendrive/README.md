@@ -12,6 +12,14 @@ uv pip install -e .
 
 This project uses Spec Driven Development workflow powered by [@pimzino/spec-workflow-mcp](https://www.npmjs.com/package/@pimzino/spec-workflow-mcp). This MCP (Model Context Protocol) server helps manage the specification-driven development process, ensuring systematic feature development from requirements through implementation.
 
+## Docker
+
+A multi-stage `Dockerfile` and `docker-compose.yml` are provided at the
+repository root. They reproduce the CI `qc-validate`, `carla-import-test`,
+`pytest`, and lint jobs locally and ship a slim `convert` runtime image.
+
+See [`docs/docker.md`](../docs/docker.md) for prerequisites and usage.
+
 ## How to use
 
 This tool uses [Hydra](https://hydra.cc/) for configuration management, allowing you to compose configurations from multiple YAML files.
