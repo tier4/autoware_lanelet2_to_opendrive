@@ -1,6 +1,7 @@
 """OpenDRIVE road definitions."""
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, cast
 
@@ -19,7 +20,13 @@ from ..util import LaneletInput, filter_lanelets_by_subtype, to_lanelet_list
 from .elevation import ElevationProfile
 from .enums import ContactPoint, ElementType, RoadType, TrafficRule
 from .geometry import GeometryBase, ParamPoly3, PlanView, evaluate_plan_view_world
-from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
+from .lane_elements import (
+    LaneLink,
+    LaneWidth,
+    RoadTypeDefinition,
+    RoadTypeSpeed,
+    SpeedUnit,
+)
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
 from .road_links import Predecessor, RoadLink, Successor
@@ -63,6 +70,66 @@ def _evaluate_plan_view_world(
         )
 
     return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs)
+
+
+def _evaluate_widths_at(widths: List["LaneWidth"], s: float) -> float:
+    """Evaluate the LaneWidth segment covering ``s`` and return its value.
+
+    Returns 0.0 if the lane has no width segments (defensive).
+    """
+    candidates = [w for w in widths if w.s_offset <= s]
+    if not candidates:
+        return 0.0
+    chosen = max(candidates, key=lambda w: w.s_offset)
+    ds = s - chosen.s_offset
+    return chosen.a + chosen.b * ds + chosen.c * ds * ds + chosen.d * ds * ds * ds
+
+
+def get_lane_outer_edge_t_at_s(road: "Road", lane_id: int, s: float) -> float:
+    """Compute the t-coordinate of ``lane_id``'s outer edge at parameter ``s``.
+
+    Walks the lane stack from the reference line outward, summing
+    ``<lane><width>`` polynomial values. RHT lanes (negative IDs) yield
+    negative t (right of the reference line); LHT lanes (positive IDs)
+    yield positive t (left of the reference line).
+    """
+    if road.lanes is None or not road.lanes.lane_sections:
+        raise ValueError(f"Road {road.id} has no lane sections")
+    lane_section = road.lanes.lane_sections[0]
+    if lane_id == 0:
+        return 0.0
+    abs_target = abs(lane_id)
+    accum = 0.0
+    if lane_id < 0:
+        for j in range(1, abs_target + 1):
+            lane = lane_section.right_lanes.get(-j)
+            if lane is None:
+                raise KeyError(
+                    f"Road {road.id} has no right lane -{j} (target {lane_id})"
+                )
+            accum += _evaluate_widths_at(lane.widths, s)
+        return -accum
+    for j in range(1, abs_target + 1):
+        lane = lane_section.left_lanes.get(+j)
+        if lane is None:
+            raise KeyError(f"Road {road.id} has no left lane +{j} (target {lane_id})")
+        accum += _evaluate_widths_at(lane.widths, s)
+    return accum
+
+
+def get_reference_line_tangent_at_s(road: "Road", s: float) -> float:
+    """Return the heading angle (radians) of the road's reference line at ``s``.
+
+    Computed via ``atan2`` on the first derivative of the underlying
+    centerline_2d spline.
+    """
+    if road.lanes is None or not road.lanes.lane_sections:
+        raise ValueError(f"Road {road.id} has no lane sections")
+    centerline = road.lanes.lane_sections[0].center_lane
+    if centerline is None or centerline.centerline_2d is None:
+        raise ValueError(f"Road {road.id} has no centerline_2d")
+    deriv = centerline.centerline_2d.evaluate(float(s), derivative=1)
+    return float(math.atan2(deriv[1], deriv[0]))
 
 
 def _evaluate_elevation_profile(elevation_profile: ElevationProfile, s: float) -> float:
