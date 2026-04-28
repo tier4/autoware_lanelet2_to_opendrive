@@ -1145,6 +1145,7 @@ class Road:
                         traffic_rule=traffic_rule,
                         parampoly3_config=parampoly3_config,
                         width_config=width_config,
+                        routing_graph=routing_graph,
                         start_xyz_override=start_override,
                         end_xyz_override=end_override,
                     )

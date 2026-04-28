@@ -1342,12 +1342,17 @@ def preprocess_and_convert_with_hydra(
     # Priority: map config > target config > default (RHT)
     traffic_rule = cfg.map.get("traffic_rule") or cfg.target.get("traffic_rule", "RHT")
     # Junction endpoint pinning (P0-2).  Default off because of issue #431.
-    # Root override `pin_junction_endpoints=true` takes precedence over the
-    # target-level setting.
-    pin_junction_endpoints = bool(
-        cfg.get("pin_junction_endpoints")
-        or cfg.target.get("pin_junction_endpoints", False)
-    )
+    # Resolve the flag with a true precedence chain (root > target > False)
+    # rather than a short-circuit ``or`` so an explicit ``false`` at one
+    # level can override a ``true`` set at a lower-priority level.
+    root_pin = cfg.get("pin_junction_endpoints")
+    target_pin = cfg.target.get("pin_junction_endpoints")
+    if root_pin is not None:
+        pin_junction_endpoints = bool(root_pin)
+    elif target_pin is not None:
+        pin_junction_endpoints = bool(target_pin)
+    else:
+        pin_junction_endpoints = False
 
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)

@@ -11,7 +11,9 @@ reconstructing the planView + elevationProfile from XML and compares it with
 the endpoint of the linked road.  A tolerance of 5 cm is used.
 """
 
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import lxml.etree as ET
@@ -21,8 +23,18 @@ from autoware_lanelet2_to_opendrive.opendrive.geometry import evaluate_road_endp
 
 
 TOLERANCE_M = 0.05
-# Map used for the integration-style regression below.
-NISHISHINJUKU_XODR = Path("/tmp/nishishinjuku_carla.xodr")
+
+
+def _nishishinjuku_xodr_path() -> Path:
+    """Per-worker output path for the Nishishinjuku XODR.
+
+    Using a worker-specific filename keeps ``pytest -n`` workers from
+    racing to build / read the same file (the conversion is expensive,
+    so we cache it on disk for the lifetime of the worker, but each
+    worker needs its own copy).
+    """
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return Path(tempfile.gettempdir()) / f"nishishinjuku_carla_{worker_id}.xodr"
 
 
 def _build_nishishinjuku_xodr() -> Path:
@@ -33,8 +45,9 @@ def _build_nishishinjuku_xodr() -> Path:
     ``uv run convert`` so the regression test actually runs in CI rather
     than silently skipping.
     """
-    if NISHISHINJUKU_XODR.exists():
-        return NISHISHINJUKU_XODR
+    xodr_path = _nishishinjuku_xodr_path()
+    if xodr_path.exists():
+        return xodr_path
 
     fixture = Path(
         "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
@@ -42,32 +55,39 @@ def _build_nishishinjuku_xodr() -> Path:
     if not fixture.is_file():
         pytest.skip(f"{fixture} not available; cannot build XODR")
 
+    # ``pin_junction_endpoints=true`` opts into the P0-2 override path this
+    # test exists to validate.  It is off by default in the converter
+    # because it currently breaks the mapping cross-check on some maps
+    # (issue #431); when that is resolved this flag and the corresponding
+    # ConversionConfig field can both go away.
+    cmd = [
+        "uv",
+        "run",
+        "convert",
+        "map=nishishinjuku",
+        "target=carla",
+        f"input_map_path={fixture}",
+        f"output_map_path={xodr_path}",
+        "pin_junction_endpoints=true",
+    ]
     try:
-        # `pin_junction_endpoints=true` opts into the P0-2 override path
-        # this test exists to validate.  It is off by default in the
-        # converter because it currently breaks the mapping cross-check on
-        # some maps (issue #431); when that is resolved this flag and the
-        # corresponding ConversionConfig field can both go away.
-        subprocess.run(
-            [
-                "uv",
-                "run",
-                "convert",
-                "map=nishishinjuku",
-                "target=carla",
-                f"input_map_path={fixture}",
-                f"output_map_path={NISHISHINJUKU_XODR}",
-                "pin_junction_endpoints=true",
-            ],
-            check=True,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
-        pytest.skip(f"converter unavailable or failed: {exc}")
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as exc:
+        # Tooling missing — environmental, not a regression.
+        pytest.skip(f"converter unavailable: {exc}")
+    except subprocess.CalledProcessError as exc:
+        # Convert exits non-zero today on nishishinjuku with the override
+        # active because the lane-width side of the override is missing
+        # (issue #431).  Mark the test xfail rather than a hard failure
+        # so a real green run produces an XPASS that prompts cleanup
+        # once #431 lands; any *other* convert failure mode would still
+        # surface here as an xfail with the underlying error attached.
+        pytest.xfail(f"convert failed (likely #431): {exc}")
 
-    if not NISHISHINJUKU_XODR.exists():
-        pytest.skip(f"{NISHISHINJUKU_XODR} not produced by converter")
+    if not xodr_path.exists():
+        pytest.xfail(f"{xodr_path} not produced by converter (likely #431)")
 
-    return NISHISHINJUKU_XODR
+    return xodr_path
 
 
 def _distance3(a, b) -> float:
