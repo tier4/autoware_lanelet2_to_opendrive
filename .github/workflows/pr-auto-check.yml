@@ -8,7 +8,7 @@ on:
 jobs:
   workflow-yaml-check:
     name: Workflow YAML Syntax Check
-    runs-on: ubicloud-standard-2
+    runs-on: ubicloud-standard-2-ubuntu-2204
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
 
   end-of-file-fixer:
     name: Auto-fix End of File
-    runs-on: ubicloud-standard-2
+    runs-on: ubicloud-standard-2-ubuntu-2204
     if: github.actor != 'github-actions[bot]'
     permissions:
       contents: write
@@ -112,7 +112,7 @@ jobs:
 
   check-version-bump-label:
     name: Check Version Bump Label
-    runs-on: ubicloud-standard-2
+    runs-on: ubicloud-standard-2-ubuntu-2204
     if: github.event_name == 'pull_request'
     steps:
       - name: Check for version bump label
