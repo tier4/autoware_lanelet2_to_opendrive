@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.python-version }}, ${{ matrix.carla-extra }})
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
