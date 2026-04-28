@@ -206,9 +206,16 @@ class _Lanelet2ToOpenDRIVEConverter:
             width_config=self.config.width_estimation,
             # P0-2: plumb already-built regular roads so that each
             # connecting road's endpoints are pinned to the linked
-            # incoming/outgoing regular road endpoints.
-            regular_roads=regular_roads,
-            lanelet_to_road_id=lanelet_to_road_id,
+            # incoming/outgoing regular road endpoints.  Gated behind
+            # ``pin_junction_endpoints`` because the override currently
+            # breaks the conversion-vs-geometric mapping cross-check on
+            # some maps (issue #431).
+            regular_roads=(
+                regular_roads if self.config.pin_junction_endpoints else None
+            ),
+            lanelet_to_road_id=(
+                lanelet_to_road_id if self.config.pin_junction_endpoints else None
+            ),
         )
 
         # Merge lanelet-to-road mappings
@@ -1334,6 +1341,13 @@ def preprocess_and_convert_with_hydra(
     exclude_non_junction_signals = cfg.target.get("exclude_non_junction_signals", False)
     # Priority: map config > target config > default (RHT)
     traffic_rule = cfg.map.get("traffic_rule") or cfg.target.get("traffic_rule", "RHT")
+    # Junction endpoint pinning (P0-2).  Default off because of issue #431.
+    # Root override `pin_junction_endpoints=true` takes precedence over the
+    # target-level setting.
+    pin_junction_endpoints = bool(
+        cfg.get("pin_junction_endpoints")
+        or cfg.target.get("pin_junction_endpoints", False)
+    )
 
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
@@ -1474,6 +1488,7 @@ def preprocess_and_convert_with_hydra(
         width_estimation=width_config,
         stopline=stopline_config,
         traffic_light=tl_config,
+        pin_junction_endpoints=pin_junction_endpoints,
     )
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;
