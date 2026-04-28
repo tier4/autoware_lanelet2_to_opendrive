@@ -144,6 +144,7 @@ class Splines:
         end_vel: Optional[np.ndarray] = None,
         num_control_points: Optional[int] = None,
         k: int = 3,
+        hard_constraint_weight: Optional[float] = None,
     ):
         """
         Initialize a B-spline with constrained fitting.
@@ -155,6 +156,20 @@ class Splines:
             num_control_points: Number of control points (higher = closer fit, lower = smoother).
                                If None, automatically computed based on input geometry.
             k: Degree of the spline (usually 3 for cubic)
+            hard_constraint_weight: Override for the weight applied to the
+                boundary position and velocity constraints when solving the
+                least-squares problem.  When the caller needs the fit to
+                land on the first/last input point to higher precision than
+                the default mix allows (e.g. for junction endpoint fidelity
+                where the first/last point has been overridden to the
+                neighbour road's endpoint), pass a larger value such as
+                ``1e4`` (sub-millimetre endpoint accuracy while keeping the
+                interior fit close to the default).  Avoid extremely large
+                values such as ``1e6``: they distort the interior enough
+                that the rendered reference line can drift outside the
+                corridor of the source lanelets and confuse the
+                lanelet-to-road geometric matcher.  If ``None``, the
+                configured default is used.
 
         Raises:
             ValueError: If too few control points or invalid input
@@ -244,6 +259,11 @@ class Splines:
             self.start_vel = np.append(self.start_vel, 0.0)
         if self.end_vel.shape[0] == 2:
             self.end_vel = np.append(self.end_vel, 0.0)
+
+        # Allow callers (e.g. junction endpoint override path) to raise the
+        # hard-constraint weight so boundary conditions are honoured to
+        # near machine precision.
+        self._hard_constraint_weight: Optional[float] = hard_constraint_weight
 
         # Perform constrained spline fitting
         self._fit_constrained_spline()
@@ -427,8 +447,13 @@ class Splines:
         A_vel_start = self._get_basis_matrix([0.0], deriv=1)
         A_vel_end = self._get_basis_matrix([1.0], deriv=1)
 
-        # Get weights from config
-        w_hard = DEFAULT_CONFIG.spline.hard_constraint_weight
+        # Get weights from config (or per-instance override for callers that
+        # need boundary constraints enforced to near machine precision).
+        w_hard = (
+            self._hard_constraint_weight
+            if self._hard_constraint_weight is not None
+            else DEFAULT_CONFIG.spline.hard_constraint_weight
+        )
         w_soft = DEFAULT_CONFIG.spline.soft_constraint_weight
 
         # Package everything into DesignMatrices dataclass

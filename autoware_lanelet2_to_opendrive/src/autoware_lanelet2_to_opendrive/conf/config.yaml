@@ -13,3 +13,10 @@ output_map_path: null  # Optional: output file path
 # Global settings
 dry_run: false    # If true, only validate without saving output
 verbose: false    # Enable detailed logging
+
+# Pin connecting-road reference-line endpoints to the rendered endpoints of
+# the linked incoming/outgoing regular roads (P0-2 junction endpoint
+# fidelity).  Disabled by default; the override currently breaks the
+# conversion-vs-geometric mapping cross-check on some maps (issue #431).
+# Re-enable with `pin_junction_endpoints=true` once the root cause lands.
+pin_junction_endpoints: false

@@ -179,6 +179,12 @@ class ConversionConfig:
         traffic_light: Configuration for traffic light actor spawn offset.
             The offsets are rotated by hdg and subtracted from positionInertial
             coordinates to adjust signal placement in CARLA.
+        pin_junction_endpoints: When True, pin connecting-road reference-line
+            endpoints to the rendered endpoints of the linked incoming /
+            outgoing regular roads (P0-2 junction endpoint fidelity).
+            Disabled by default because the override currently shifts lane
+            widths relative to the lanelet centroids on some maps, breaking
+            the conversion-vs-geometric mapping cross-check (see issue #431).
     """
 
     output_path: Optional[Path] = None
@@ -192,6 +198,7 @@ class ConversionConfig:
     )
     stopline: StopLineConfig = field(default_factory=StopLineConfig)
     traffic_light: TrafficLightConfig = field(default_factory=TrafficLightConfig)
+    pin_junction_endpoints: bool = False
 
     def __post_init__(self):
         """Validate configuration after initialization."""
