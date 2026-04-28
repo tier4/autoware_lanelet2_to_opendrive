@@ -201,3 +201,31 @@ jobs:
           nishishinjuku_carla_qc_report.xqar
           analyze_result.txt
         retention-days: 7
+
+  qc-validate:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup environment
+      uses: ./.github/actions/setup-env
+      with:
+        gh-pat: ${{ secrets.GH_PAT }}
+        install-system-deps: "true"
+        install-dev-deps: "true"
+        run-precommit: "false"
+        carla-extra: "carla"
+    - name: Convert fixture map
+      run: |
+        uv run convert \
+          map=nishishinjuku target=carla \
+          input_map_path=autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm \
+          output_map_path=nishishinjuku_carla.xodr
+    - name: Run qc-framework validation
+      run: uv run qc-validate nishishinjuku_carla.xodr
+    - name: Upload artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: qc-validate-artifacts
+        path: nishishinjuku_carla.xodr
+        retention-days: 7

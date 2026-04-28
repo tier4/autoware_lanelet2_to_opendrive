@@ -34,20 +34,18 @@ from qc_baselib import Configuration, IssueSeverity, Result
 from qc_opendrive import constants
 from qc_opendrive.main import run_checks
 
+from .qc_validate import load_ignore_patterns
+
 # Silence verbose library logging (overridden by --verbose)
 logging.getLogger().setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
 # Default ignore patterns for known false positives.
-# The converter targets CARLA which uses OpenDRIVE 1.4 syntax but supports
-# the rule attribute introduced in 1.7. The ASAM QC checker validates against
-# the declared schema version (1.4), so rule on <road> triggers a false positive.
+# Loaded from the commit-tracked conf/qc_ignore_patterns.txt so that adding /
+# removing patterns is a reviewable change to a data file rather than a code edit.
 # Use --no-default-ignores to disable these defaults.
-DEFAULT_IGNORE_PATTERNS: list[str] = [
-    r"attribute 'rule'",  # <road rule="RHT/LHT"> valid in 1.7, false positive on 1.4
-    r"Element 'positionInertial'",  # <positionInertial> deprecated in 1.8, false positive on 1.4
-]
+DEFAULT_IGNORE_PATTERNS: list[str] = load_ignore_patterns()
 
 SEVERITY_LABEL = {
     IssueSeverity.ERROR: "ERROR",
