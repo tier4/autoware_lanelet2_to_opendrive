@@ -257,10 +257,18 @@ class ReferenceLine:
         # or second-to-last input point.  With the default weight mix
         # (hard=80, soft=20) the LSQ solver trades ~10-20 cm of boundary
         # error for better data fit, which re-introduces the gap we are
-        # trying to close.  Force near-exact boundary enforcement by
-        # boosting the hard-constraint weight in that case.
+        # trying to close.  Boost the hard-constraint weight enough to
+        # land well inside the 5 cm test tolerance without distorting the
+        # interior fit so much that the resulting reference line strays
+        # outside the corridor of the source lanelets — the geometric
+        # lanelet→road matcher (road_lanelet_geo_mapping) compares lanelet
+        # boundaries against the rendered road geometry and a too-aggressive
+        # weight (e.g. 1e6) shifts neighbouring lanelets to a different
+        # road in the matching, breaking conversion-vs-geo cross-validation.
+        # 1e4 gives sub-millimetre endpoint accuracy while keeping the
+        # interior within ~1 cm of the default-weight fit.
         has_override = start_xyz_override is not None or end_xyz_override is not None
-        spline_hard_weight: Optional[float] = 1e6 if has_override else None
+        spline_hard_weight: Optional[float] = 1e4 if has_override else None
         centerline_2d = Splines(
             points_3d[:, :2],  # Use corrected XY points
             start_vel=start_vel,

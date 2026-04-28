@@ -159,10 +159,16 @@ class Splines:
             hard_constraint_weight: Override for the weight applied to the
                 boundary position and velocity constraints when solving the
                 least-squares problem.  When the caller needs the fit to
-                land on the first/last input point to near machine precision
-                (e.g. for junction endpoint fidelity where the first/last
-                point has been overridden to the neighbour road's endpoint),
-                pass a large value such as ``1e6``.  If ``None``, the
+                land on the first/last input point to higher precision than
+                the default mix allows (e.g. for junction endpoint fidelity
+                where the first/last point has been overridden to the
+                neighbour road's endpoint), pass a larger value such as
+                ``1e4`` (sub-millimetre endpoint accuracy while keeping the
+                interior fit close to the default).  Avoid extremely large
+                values such as ``1e6``: they distort the interior enough
+                that the rendered reference line can drift outside the
+                corridor of the source lanelets and confuse the
+                lanelet-to-road geometric matcher.  If ``None``, the
                 configured default is used.
 
         Raises:
