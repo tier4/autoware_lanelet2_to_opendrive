@@ -242,3 +242,35 @@ def test_issue_291_diverging_roads_emit_synthetic_junctions():
     assert (
         source_road_id not in targets
     ), f"junction {junction_id} loops connecting roads back to source {source_road_id}"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end conversion tests (CLI)
+# ---------------------------------------------------------------------------
+
+
+def test_convert_map_with_parking_lot_emits_parking_road(tmp_path: Path) -> None:
+    """Converting a Lanelet2 map containing a parking lot must succeed
+    and produce at least one road with a parking lane (P2-1)."""
+    fixture = (Path(__file__).parent / "data" / "parking_lot_mini.osm").resolve()
+    out = tmp_path / "parking_lot_mini.xodr"
+
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "convert",
+            "map=example_mgrs_offset",
+            "target=carla",
+            f"input_map_path={fixture}",
+            f"output_map_path={out}",
+        ],
+        check=True,
+    )
+
+    root = ET.parse(out).getroot()
+    parking_lanes = root.findall(".//lane[@type='parking']")
+    assert parking_lanes, (
+        "conversion of a map with a parking lot should emit at least "
+        "one lane[type='parking']"
+    )

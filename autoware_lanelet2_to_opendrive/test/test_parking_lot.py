@@ -448,3 +448,111 @@ def test_synthetic_road_lane_section_get_all_lanes():
     assert by_id[0].lane_type == LaneType.NONE
     assert by_id[-1].lane_type == LaneType.PARKING
     assert by_id[1].lane_type == LaneType.PARKING
+
+
+# ---------------------------------------------------------------------------
+# Integration tests (end-to-end)
+# ---------------------------------------------------------------------------
+#
+# The unit tests above exercise the helpers directly with mocks.  The
+# tests below run the full ``convert`` CLI on a small OSM fixture and
+# inspect the emitted OpenDRIVE XML.
+
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import lxml.etree as ET  # noqa: E402
+
+_FIXTURE_PARKING_LOT = (
+    Path(__file__).parent / "data" / "parking_lot_mini.osm"
+).resolve()
+
+
+def _run_convert_parking_lot(tmp_path: Path) -> Path:
+    """Run the ``convert`` CLI on the parking-lot fixture and return path."""
+    out = tmp_path / "parking_lot_mini.xodr"
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "convert",
+            "map=example_mgrs_offset",
+            "target=carla",
+            f"input_map_path={_FIXTURE_PARKING_LOT}",
+            f"output_map_path={out}",
+        ],
+        check=True,
+    )
+    return out
+
+
+def test_parking_lot_mini_emits_parking_road(tmp_path: Path) -> None:
+    """The fixture must produce one parking road with two parking lanes
+    and four parkingSpace objects.
+
+    Asserts:
+      * At least one ``<road>`` containing exactly two
+        ``<lane type="parking">`` elements (id=-1 and id=+1).
+      * That road has four ``<object type="parkingSpace">`` children.
+      * Each stall has 0 <= s <= road length and |t| <= half across-axis.
+      * Each stall ``hdg`` is approximately ±π/2 from the road
+        reference-line tangent (the stalls are perpendicular to the
+        long axis of the lot).
+    """
+    out = _run_convert_parking_lot(tmp_path)
+    root = ET.parse(out).getroot()
+
+    # Find roads that contain at least one lane[type='parking'].
+    candidate_roads = [
+        road
+        for road in root.findall(".//road")
+        if road.findall(".//lane[@type='parking']")
+    ]
+    assert candidate_roads, (
+        "parking_lot_mini fixture should produce at least one road "
+        "with lane[type='parking']"
+    )
+
+    # Pick the first parking road and verify its layout.
+    parking_road = candidate_roads[0]
+    parking_lanes = parking_road.findall(".//lane[@type='parking']")
+    parking_lane_ids = sorted(int(lane.get("id")) for lane in parking_lanes)
+    assert parking_lane_ids == [-1, 1], (
+        "parking road should have two parking lanes (id=-1, id=+1); "
+        f"got {parking_lane_ids}"
+    )
+
+    # Four <object type='parkingSpace'> children attached to this road.
+    parking_objects = parking_road.findall(".//object[@type='parkingSpace']")
+    assert len(parking_objects) == 4, (
+        f"expected 4 parkingSpace objects on the parking road, "
+        f"got {len(parking_objects)}"
+    )
+
+    road_length = float(parking_road.get("length"))
+    # Half across-axis = max half-width of the parking lanes.
+    half_widths = [
+        float(w.get("a")) for lane in parking_lanes for w in lane.findall(".//width")
+    ]
+    half_across = max(half_widths) if half_widths else 0.0
+
+    for obj in parking_objects:
+        s = float(obj.get("s"))
+        t = float(obj.get("t"))
+        hdg = float(obj.get("hdg"))
+        assert (
+            0.0 <= s <= road_length
+        ), f"parking space s={s} out of road [0, {road_length}]"
+        # ``t`` is signed; allow a small tolerance for the half-width
+        # (stalls are at lot centre but the centroid sampling is exact
+        # for a 2-node stall).
+        assert (
+            abs(t) <= half_across + 1e-6
+        ), f"parking space t={t} exceeds half across-axis {half_across}"
+        # Stalls run perpendicular to the lot long axis, so the
+        # relative heading should be ~±π/2.  Allow ±0.1 rad slack.
+        deviation = abs(abs(hdg) - math.pi / 2.0)
+        assert deviation < 0.1, (
+            f"parking space hdg={hdg} is not approximately perpendicular "
+            f"(±π/2) to the road reference line"
+        )

@@ -59,9 +59,13 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     ConversionConfig,
     OriginSpec,
     ParamPoly3Config,
+    ParkingLotConfig,
     StopLineConfig,
     TrafficLightConfig,
     WidthEstimationConfig,
+)
+from autoware_lanelet2_to_opendrive.opendrive.parking import (
+    construct_parking_roads,
 )
 
 # Set up logging
@@ -1189,6 +1193,22 @@ class _Lanelet2ToOpenDRIVEConverter:
         if not dup_result.is_valid:
             print(f"\nWARNING: {dup_result.get_error_summary()}")
 
+        # Step 6.9: Build parking lots (P2-1)
+        # Runs AFTER crosswalk/stop-line extraction so the nearest-road
+        # heuristics in those steps cannot accidentally bind to a synthetic
+        # parking road, and AFTER the duplicate-road-id validation so the
+        # starting ID is computed from the final set of real roads.
+        if self.config.parking_lot.enabled:
+            print("\n=== Building parking lots ===")
+            starting_id = (max(road.id for road in all_roads) + 1) if all_roads else 0
+            parking_roads = construct_parking_roads(
+                self.lanelet_map,
+                starting_id,
+                self.config.parking_lot,
+            )
+            all_roads.extend(parking_roads)
+            print(f"Built {len(parking_roads)} parking roads")
+
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(
             all_roads, junctions, signals_and_controllers
@@ -1536,6 +1556,27 @@ def preprocess_and_convert_with_hydra(
         f"hdg_offset={tl_config.hdg_offset}"
     )
 
+    # Build ParkingLotConfig from Hydra config (P2-1)
+    # Priority: map config > target config > default
+    parking_dict = cfg.map.get("parking_lot") or cfg.target.get("parking_lot", {})
+    parking_config = ParkingLotConfig(
+        enabled=parking_dict.get("enabled", True) if parking_dict else True,
+        default_stall_width=(
+            parking_dict.get("default_stall_width", 2.5) if parking_dict else 2.5
+        ),
+        nearest_area_threshold_m=(
+            parking_dict.get("nearest_area_threshold_m", 30.0) if parking_dict else 30.0
+        ),
+        min_area_polygon_m2=(
+            parking_dict.get("min_area_polygon_m2", 1.0) if parking_dict else 1.0
+        ),
+    )
+    logger.info(
+        f"Parking-lot config: enabled={parking_config.enabled}, "
+        f"default_stall_width={parking_config.default_stall_width}m, "
+        f"nearest_area_threshold={parking_config.nearest_area_threshold_m}m"
+    )
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -1550,6 +1591,7 @@ def preprocess_and_convert_with_hydra(
         width_estimation=width_config,
         stopline=stopline_config,
         traffic_light=tl_config,
+        parking_lot=parking_config,
     )
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;
