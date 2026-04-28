@@ -702,7 +702,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** `all_roads` extended with synthetic parking roads, each carrying its associated `ParkingSpaceObject` list.
 
-**Code Location:** [`opendrive/parking.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/parking.py), [`main.py` – Step 6.9 `_build_parking_lots()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+**Code Location:** [`opendrive/parking.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/parking.py), [`main.py` – Step 6.9 in `_Lanelet2ToOpenDRIVEConverter.convert()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
 
 **Scope notes:** Per spec §2.2, the following are intentionally out of scope for this stage: curved geometry along the road reference line (only straight-line OBB axis is used), multi-row decomposition within a single parking-lot area, multi-level or stacked parking structures, predecessor/successor road linkage connecting synthetic parking roads to adjacent traffic roads, and export of the parking-lot polygon outline as an OpenDRIVE outline element.
 
