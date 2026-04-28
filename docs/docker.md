@@ -65,10 +65,21 @@ volumes isolate state from the host:
   across runs.
 
 If you switch base images or the lock file changes substantially, delete
-`venv-cache` to force a clean reinstall:
+`venv-cache` to force a clean reinstall. The simplest option is to let
+Compose remove its own volumes:
 
 ```bash
-docker volume rm $(basename "$PWD")_venv-cache
+docker compose --profile dev down -v
+```
+
+If you prefer to remove the volume directly, quote the name (the directory
+may contain spaces) and resolve the actual volume — Compose prefixes volume
+names with the project name, which defaults to the working directory but
+can be overridden with `-p <name>` or `COMPOSE_PROJECT_NAME`:
+
+```bash
+docker volume ls --filter name=venv-cache
+docker volume rm "$(basename "$PWD")_venv-cache"
 ```
 
 The compose services invoke entrypoints directly (e.g. `convert`, `pytest`)
@@ -124,7 +135,7 @@ Your `venv-cache` named volume contains a `.venv` from an earlier image build
 whose native bindings were broken. Delete the volume and re-run:
 
 ```bash
-docker volume rm $(basename "$PWD")_venv-cache
+docker volume rm "$(basename "$PWD")_venv-cache"
 docker compose --profile <whatever> run --rm <service>
 ```
 

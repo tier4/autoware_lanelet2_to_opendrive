@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
-ARG PYTHON_VERSION=3.10
-
+# Python 3.10 is hardcoded throughout this Dockerfile because the prebuilt
+# lanelet2 wheel published by tier4/lanelet2_python_api_for_autoware is
+# CPython-3.10 ABI-tagged; bumping requires rebuilding that wheel upstream
+# and updating the apt package, the venv path, and LD_LIBRARY_PATH below.
 FROM ubuntu:22.04 AS base
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -34,11 +36,15 @@ COPY pyproject.toml uv.lock .python-version ./
 COPY autoware_lanelet2_to_opendrive/ autoware_lanelet2_to_opendrive/
 COPY autoware_carla_scenario/ autoware_carla_scenario/
 COPY carla_wheels/ carla_wheels/
+# The git config containing the PAT is written and removed inside the same
+# RUN layer so the token is never committed to the image filesystem. Do not
+# split this into separate RUN commands.
 RUN --mount=type=secret,id=gh_pat,required=false \
     if [ -s /run/secrets/gh_pat ]; then \
       git config --global url."https://$(cat /run/secrets/gh_pat)@github.com/".insteadOf "https://github.com/"; \
     fi && \
-    uv sync --frozen --dev --extra carla
+    uv sync --frozen --dev --extra carla && \
+    rm -f /root/.gitconfig
 
 FROM deps AS dev
 ENV PATH="/workspace/.venv/bin:${PATH}"
