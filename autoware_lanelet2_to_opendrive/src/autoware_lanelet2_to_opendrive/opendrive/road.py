@@ -1227,16 +1227,20 @@ class Road:
         def _unique_regular_endpoint(
             group: Set[lanelet2.core.Lanelet],
             direction: str,
-        ) -> Optional[Tuple[float, float, float]]:
+        ) -> Tuple[
+            Optional[Tuple[float, float, float]],
+            Optional["Road"],
+        ]:
             """Resolve a connecting group's incoming/outgoing regular endpoint.
 
-            Walks the routing graph in the requested direction to find the
-            regular roads adjacent to this junction group.  Returns the
-            endpoint world-frame position if exactly one such regular road
-            exists — otherwise ``None`` (asymmetric / multi-successor case).
+            Returns:
+                Tuple ``(xyz, road)`` where ``xyz`` is the linked regular
+                road's rendered endpoint and ``road`` is the Road object.
+                Both are ``None`` when no unique adjacent regular road
+                exists.
             """
             if not regular_road_by_id or routing_graph is None:
-                return None
+                return None, None
             neighbour_road_ids: Set[int] = set()
             for ll in group:
                 if direction == "previous":
@@ -1248,17 +1252,16 @@ class Road:
                     if r_id is not None and r_id in regular_road_by_id:
                         neighbour_road_ids.add(r_id)
             if len(neighbour_road_ids) != 1:
-                return None
+                return None, None
             (r_id,) = neighbour_road_ids
             neighbour_road = regular_road_by_id[r_id]
             if direction == "previous":
                 # Incoming road: use its reference-line END (flows into
                 # the connecting road).
-                return neighbour_road.reference_end_xyz
-            else:
-                # Outgoing road: use its reference-line START (connecting
-                # road flows into it).
-                return neighbour_road.reference_start_xyz
+                return neighbour_road.reference_end_xyz, neighbour_road
+            # Outgoing road: use its reference-line START (connecting
+            # road flows into it).
+            return neighbour_road.reference_start_xyz, neighbour_road
 
         current_road_id = starting_road_id
 
@@ -1287,8 +1290,12 @@ class Road:
                 # - Outgoing side is only overridden when a single outgoing
                 #   regular road exists; multi-successor cases leave the
                 #   end alone (see docstring note above).
-                start_override = _unique_regular_endpoint(adjacent_group, "previous")
-                end_override = _unique_regular_endpoint(adjacent_group, "following")
+                start_override, regular_road_at_start = _unique_regular_endpoint(
+                    adjacent_group, "previous"
+                )
+                end_override, regular_road_at_end = _unique_regular_endpoint(
+                    adjacent_group, "following"
+                )
 
                 try:
                     road = Road.construct_from_lanelet_groups(
@@ -1302,6 +1309,8 @@ class Road:
                         routing_graph=routing_graph,
                         start_xyz_override=start_override,
                         end_xyz_override=end_override,
+                        regular_road_at_start=regular_road_at_start,
+                        regular_road_at_end=regular_road_at_end,
                     )
 
                     # Set the junction field to mark this as a connecting road
