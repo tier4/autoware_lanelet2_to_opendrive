@@ -536,6 +536,19 @@ def test_parking_lot_mini_emits_parking_road(tmp_path: Path) -> None:
     ]
     half_across = max(half_widths) if half_widths else 0.0
 
+    # Each lane's width (the 'a' coefficient of its <width> element) must
+    # equal half the OBB across-axis length within 10 cm (spec §9.3).
+    # For the 20 m × 10 m fixture, this is 5.0 m ± 0.1 m.
+    for lane in parking_lanes:
+        width_elements = lane.findall(".//width")
+        assert width_elements, f"lane id={lane.get('id')} has no <width> child elements"
+        for width_elem in width_elements:
+            width_a = float(width_elem.get("a"))
+            assert width_a == pytest.approx(5.0, abs=0.1), (
+                f"lane id={lane.get('id')} width.a={width_a} "
+                f"does not match expected half-width 5.0 m (±0.1 m)"
+            )
+
     for obj in parking_objects:
         s = float(obj.get("s"))
         t = float(obj.get("t"))
