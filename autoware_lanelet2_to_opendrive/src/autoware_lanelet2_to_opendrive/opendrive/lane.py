@@ -4,10 +4,13 @@ from typing import Any, Dict, List, Optional, Union
 import lanelet2
 import lxml.etree as ET
 
+from ..border_fit import fit_lane_border_polynomials
 from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
 from ..spline import Splines
 from ..conversion_config import WidthEstimationConfig, WidthReference
+from ..util import extract_points_3d
 
+from .enums import LaneMode
 from .opendrive_dataclass import (
     LaneType,
     LaneWidth,
@@ -142,6 +145,9 @@ class Lane:
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         reference_line_spline: Optional["Splines"] = None,
+        mode: LaneMode = LaneMode.WIDTH,
+        t_start_constraint: Optional[float] = None,
+        t_end_constraint: Optional[float] = None,
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -150,10 +156,17 @@ class Lane:
             lanelet_map: The Lanelet2 map containing the lanelet
             lanelet: The lanelet to convert to Lane
             rule: Traffic rule for the lane (RHT or LHT)
-            width_config: Configuration for width spline sampling
+            width_config: Configuration for width spline sampling (WIDTH mode only)
             reference_line_spline: Road reference line spline for s-coordinate alignment.
                                   If provided, width s-coordinates will be aligned to
                                   the road reference line instead of lanelet boundaries.
+                                  Required for BORDER mode.
+            mode: Selects between <width> and <border> emission. Default
+                ``LaneMode.WIDTH`` preserves existing behavior.
+            t_start_constraint: BORDER mode only. If set, pins the lane's
+                outer-edge t at s=0 to this value.
+            t_end_constraint: BORDER mode only. If set, pins the lane's
+                outer-edge t at s=total_length to this value.
 
         Returns:
             Lane instance constructed from the lanelet
@@ -193,41 +206,62 @@ class Lane:
             rule=rule,
         )
 
-        # Choose the anchor boundary for width calculation based on traffic rule.
-        # RHT: reference line is at the left edge → anchor = LEFT_BOUND
-        #       Width is measured from the left (inner) boundary outward to the right.
-        # LHT: reference line is at the right edge → anchor = RIGHT_BOUND
-        #       Width is measured from the right (inner) boundary outward to the left.
         is_lht = (rule or "RHT").upper() == "LHT"
-        width_reference = (
-            WidthReference.RIGHT_BOUND if is_lht else WidthReference.LEFT_BOUND
-        )
 
-        if width_config is None:
-            config = WidthEstimationConfig(reference=width_reference)
+        if mode == LaneMode.BORDER:
+            # BORDER mode (issue #437): emit <lane><border> with optional
+            # endpoint constraints derived from linked regular roads' lane
+            # geometry. The lane's outer boundary (right for RHT, left for
+            # LHT) is projected onto the (already-pinned) reference line
+            # and fitted with a piecewise-cubic t(s).
+            if reference_line_spline is None:
+                raise ValueError("BORDER mode requires a reference_line_spline")
+            outer_bound = lanelet.leftBound if is_lht else lanelet.rightBound
+            boundary_points = extract_points_3d(outer_bound)
+            borders = fit_lane_border_polynomials(
+                boundary_points,
+                reference_line_spline,
+                t_start_constraint=t_start_constraint,
+                t_end_constraint=t_end_constraint,
+            )
+            for border in borders:
+                lane._add_border(border)
         else:
-            config = WidthEstimationConfig(
-                num_samples=width_config.num_samples,
-                reference=width_reference,
-                adaptive_sampling=width_config.adaptive_sampling,
-                min_samples=width_config.min_samples,
-                max_samples=width_config.max_samples,
-                default_sample_interval=width_config.default_sample_interval,
+            # WIDTH mode (default): existing behavior unchanged.
+            # Choose the anchor boundary for width calculation based on traffic rule.
+            # RHT: reference line is at the left edge → anchor = LEFT_BOUND
+            #       Width is measured from the left (inner) boundary outward to the right.
+            # LHT: reference line is at the right edge → anchor = RIGHT_BOUND
+            #       Width is measured from the right (inner) boundary outward to the left.
+            width_reference = (
+                WidthReference.RIGHT_BOUND if is_lht else WidthReference.LEFT_BOUND
             )
 
-        # Use reference line-based width calculation if reference line is provided
-        if reference_line_spline is not None:
-            from ..centerline import estimate_lanelet_width_with_reference_line
+            if width_config is None:
+                config = WidthEstimationConfig(reference=width_reference)
+            else:
+                config = WidthEstimationConfig(
+                    num_samples=width_config.num_samples,
+                    reference=width_reference,
+                    adaptive_sampling=width_config.adaptive_sampling,
+                    min_samples=width_config.min_samples,
+                    max_samples=width_config.max_samples,
+                    default_sample_interval=width_config.default_sample_interval,
+                )
 
-            width_spline = estimate_lanelet_width_with_reference_line(
-                lanelet, reference_line_spline, config
-            )
-        else:
-            # Fallback to old behavior (for backward compatibility)
-            width_spline = estimate_lanelet_width_as_spline(lanelet, config)
+            # Use reference line-based width calculation if reference line is provided
+            if reference_line_spline is not None:
+                from ..centerline import estimate_lanelet_width_with_reference_line
 
-        # Sample the spline at multiple points to create width definitions
-        lane._add_width_from_spline(width_spline)
+                width_spline = estimate_lanelet_width_with_reference_line(
+                    lanelet, reference_line_spline, config
+                )
+            else:
+                # Fallback to old behavior (for backward compatibility)
+                width_spline = estimate_lanelet_width_as_spline(lanelet, config)
+
+            # Sample the spline at multiple points to create width definitions
+            lane._add_width_from_spline(width_spline)
 
         # Road marks are assigned by LaneSection.construct_from_lanelet_groups
         # so that the routing-graph-derived laneChange permission can be

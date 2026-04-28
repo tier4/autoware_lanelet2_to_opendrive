@@ -124,3 +124,19 @@ class TrafficRule(Enum):
 
     RHT = "RHT"  # Right-hand traffic
     LHT = "LHT"  # Left-hand traffic
+
+
+class LaneMode(Enum):
+    """Selects between <lane><width> and <lane><border> emission paths.
+
+    WIDTH: Existing default. The lane is described by a <width> polynomial
+        whose value is the lateral distance from the previous lane outward.
+    BORDER: Used by connecting roads when their reference-line endpoints
+        are pinned to linked regular roads (issue #437). The lane is
+        described by an absolute <border> polynomial t(s) so endpoint
+        constraints can pin the lane edge to match the linked road's lane
+        edge exactly.
+    """
+
+    WIDTH = "width"
+    BORDER = "border"

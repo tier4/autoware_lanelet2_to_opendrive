@@ -77,3 +77,71 @@ def test_minimum_two_points() -> None:
     boundary_3d = np.array([[0.0, -3.0, 0.0], [10.0, -3.0, 0.0]])
     borders = fit_lane_border_polynomials(boundary_3d, ref)
     assert len(borders) >= 1
+
+
+import lanelet2  # noqa: E402
+from lanelet2.core import (  # noqa: E402
+    Lanelet,
+    LineString3d,
+    Point3d,
+    getId,
+)
+
+from autoware_lanelet2_to_opendrive.opendrive.enums import LaneMode  # noqa: E402
+from autoware_lanelet2_to_opendrive.opendrive.lane import Lane  # noqa: E402
+
+
+def _make_synthetic_lanelet(
+    left_offset: float = 0.0,
+    right_offset: float = -3.0,
+    length: float = 10.0,
+    n: int = 5,
+) -> tuple[Lanelet, lanelet2.core.LaneletMap]:
+    """Build a tiny lanelet straight along the +x direction with constant width."""
+    lanelet_map = lanelet2.core.LaneletMap()
+    left_pts = [
+        Point3d(getId(), i * length / (n - 1), left_offset, 0.0) for i in range(n)
+    ]
+    right_pts = [
+        Point3d(getId(), i * length / (n - 1), right_offset, 0.0) for i in range(n)
+    ]
+    left_ls = LineString3d(getId(), left_pts)
+    right_ls = LineString3d(getId(), right_pts)
+    lanelet = Lanelet(getId(), left_ls, right_ls)
+    lanelet.attributes["subtype"] = "road"
+    lanelet_map.add(lanelet)
+    return lanelet, lanelet_map
+
+
+def test_lane_construct_in_border_mode_populates_borders() -> None:
+    """BORDER mode populates lane.borders (and leaves lane.widths empty)."""
+    lanelet, lanelet_map = _make_synthetic_lanelet()
+    ref = _straight_reference(10.0)
+
+    lane = Lane.construct_from_lanelet(
+        lanelet_map=lanelet_map,
+        lanelet=lanelet,
+        rule="RHT",
+        reference_line_spline=ref,
+        mode=LaneMode.BORDER,
+    )
+
+    assert len(lane.borders) >= 1
+    assert lane.widths == []
+
+
+def test_lane_construct_in_width_mode_keeps_widths() -> None:
+    """WIDTH mode (default) preserves the existing width-based behavior."""
+    lanelet, lanelet_map = _make_synthetic_lanelet()
+    ref = _straight_reference(10.0)
+
+    lane = Lane.construct_from_lanelet(
+        lanelet_map=lanelet_map,
+        lanelet=lanelet,
+        rule="RHT",
+        reference_line_spline=ref,
+        mode=LaneMode.WIDTH,
+    )
+
+    assert len(lane.widths) >= 1
+    assert lane.borders == []
