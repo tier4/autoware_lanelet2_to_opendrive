@@ -20,7 +20,7 @@
   Lanelet2 area encoding: a relation with type=multipolygon and
   subtype=parking_lot.  Outer-bound members are <way>s with role=outer.
   The parking-lot Area is split into four outer ways (one per side of
-  the rectangle) so the resulting Area.outerBound() is a closed loop
+  the rectangle) so the resulting Area.outerBound is a closed loop
   of LineString3d segments.  parking.py's _attr_matches helper accepts
   subtype=parking_lot, so this matches the production code path.
 

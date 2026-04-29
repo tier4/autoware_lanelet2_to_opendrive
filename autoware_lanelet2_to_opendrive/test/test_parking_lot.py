@@ -25,6 +25,8 @@ from autoware_lanelet2_to_opendrive.opendrive.parking import (
     _compute_obb,
     _filter_parking_lot_areas,
     _filter_parking_space_linestrings,
+    _min_distance_to_polygon,
+    _point_in_polygon,
     _polygon_area,
 )
 
@@ -109,10 +111,10 @@ def test_compute_obb_axis_aligned_rectangle_along_x():
     )
     centre, long_axis, along, across = _compute_obb(pts)
     assert centre == pytest.approx(np.array([5.0, 0.5]))
-    # Long axis can come back as either (1, 0) or (-1, 0); both are
-    # valid PCA outputs.  Check magnitude alignment.
-    assert abs(long_axis[0]) == pytest.approx(1.0, abs=1e-6)
-    assert abs(long_axis[1]) == pytest.approx(0.0, abs=1e-6)
+    # Eigenvectors are sign-canonicalised so that ``long_axis[0] >= 0``;
+    # for a rectangle along world-x this pins the result to exactly +x.
+    assert long_axis[0] == pytest.approx(1.0, abs=1e-6)
+    assert long_axis[1] == pytest.approx(0.0, abs=1e-6)
     assert along == pytest.approx(10.0)
     assert across == pytest.approx(1.0)
 
@@ -128,10 +130,31 @@ def test_compute_obb_axis_aligned_rectangle_along_y():
         ]
     )
     _, long_axis, along, across = _compute_obb(pts)
-    assert abs(long_axis[1]) == pytest.approx(1.0, abs=1e-6)
-    assert abs(long_axis[0]) == pytest.approx(0.0, abs=1e-6)
+    # When x is numerically zero, the canonicalisation prefers +y, so
+    # the long axis is pinned to exactly (0, 1) rather than (0, -1).
+    assert long_axis[0] == pytest.approx(0.0, abs=1e-6)
+    assert long_axis[1] == pytest.approx(1.0, abs=1e-6)
     assert along == pytest.approx(8.0)
     assert across == pytest.approx(1.0)
+
+
+def test_compute_obb_canonical_sign_invariant_under_vertex_reversal():
+    """Reversing vertex order must not flip the long-axis sign."""
+    pts = np.array(
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 1.0],
+            [0.0, 1.0],
+        ]
+    )
+    _, long_axis_a, _, _ = _compute_obb(pts)
+    _, long_axis_b, _, _ = _compute_obb(pts[::-1])
+    # Whichever sign numpy picks, the canonicalisation forces both
+    # results onto the same side, so the synthetic-road frame is stable
+    # regardless of vertex order.
+    np.testing.assert_allclose(long_axis_a, long_axis_b, atol=1e-6)
+    assert long_axis_a[0] >= -1e-6
 
 
 def test_compute_obb_square_falls_back_to_world_x():
@@ -171,6 +194,61 @@ def test_compute_obb_axes_are_orthogonal_for_sliver():
 # ---------------------------------------------------------------------------
 # _polygon_area
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _point_in_polygon / _min_distance_to_polygon
+# ---------------------------------------------------------------------------
+
+
+def test_point_in_polygon_inside_outside():
+    square = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+    assert _point_in_polygon(np.array([5.0, 5.0]), square) is True
+    assert _point_in_polygon(np.array([15.0, 5.0]), square) is False
+    assert _point_in_polygon(np.array([-1.0, 5.0]), square) is False
+
+
+def test_min_distance_to_polygon_returns_zero_when_inside():
+    """Centroid inside the polygon must yield distance 0, not the
+    distance to the nearest *vertex* (which used to break association
+    on large lots whose interior centroids sat tens of metres from the
+    nearest corner)."""
+    big_square = np.array([[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]])
+    centroid = np.array([50.0, 50.0])
+    assert _min_distance_to_polygon(centroid, big_square) == pytest.approx(0.0)
+
+
+def test_min_distance_to_polygon_uses_edge_distance_outside():
+    """Outside-the-polygon distance is the perpendicular distance to
+    the nearest edge, not the distance to the nearest vertex."""
+    square = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+    # Point sitting 5 m above the middle of the top edge: the nearest
+    # vertex is at (0, 10) or (10, 10) — sqrt(5^2 + 5^2) ≈ 7.07 m away —
+    # but the nearest *edge* point is (5, 10), exactly 5 m away.
+    point = np.array([5.0, 15.0])
+    assert _min_distance_to_polygon(point, square) == pytest.approx(5.0)
+
+
+def test_construct_all_from_lanelet_map_centroid_inside_large_lot():
+    """A stall centroid inside a 100m × 100m lot must associate with
+    that lot even though every vertex is well past the 30 m default
+    threshold (regression for the vertex-only distance bug)."""
+    lot = _make_mock_area(
+        1,
+        [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)],
+        attributes={"type": "parking_lot"},
+    )
+    inner_stall = _make_mock_linestring(
+        100,
+        [(50.0, 50.0), (53.0, 50.0)],
+        attributes={"type": "parking_space"},
+    )
+    lanelet_map = MagicMock()
+    lanelet_map.areaLayer = [lot]
+    lanelet_map.lineStringLayer = [inner_stall]
+    result = ParkingLot.construct_all_from_lanelet_map(lanelet_map, ParkingLotConfig())
+    assert len(result) == 1
+    assert inner_stall in result[0].stalls
 
 
 def test_polygon_area_unit_square():

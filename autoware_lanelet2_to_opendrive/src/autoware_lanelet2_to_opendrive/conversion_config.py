@@ -170,7 +170,7 @@ class ParkingLotConfig:
             LineString centroid and the closest parking_lot area
             for the stall to be associated with that area. Stalls
             beyond this distance are dropped with a warning.
-        min_area_polygon_m2: Minimum signed area of a parking-lot
+        min_area_polygon_m2: Minimum polygon area of a parking-lot
             polygon (m²). Areas smaller than this are skipped with a
             warning.
     """

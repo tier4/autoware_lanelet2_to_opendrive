@@ -99,6 +99,15 @@ def _compute_obb(
         long_axis = np.array([1.0, 0.0])
     else:
         long_axis = eigvecs[:, -1]
+        # ``np.linalg.eigh`` eigenvectors are only defined up to sign;
+        # canonicalise the principal-axis direction so the synthetic-road
+        # frame (start point, hdg, sign of projected ``t``) stays
+        # deterministic across runs / numpy backends.  Prefer +x; if x is
+        # numerically zero, prefer +y.
+        if long_axis[0] < -_GEOMETRY_EPSILON or (
+            abs(long_axis[0]) <= _GEOMETRY_EPSILON and long_axis[1] < 0.0
+        ):
+            long_axis = -long_axis
 
     short_axis = np.array([-long_axis[1], long_axis[0]])
 
@@ -178,16 +187,59 @@ def _stall_centroid_and_length(
     return centroid, length, pts[0], pts[-1]
 
 
-def _min_distance_to_polygon(point: np.ndarray, polygon_xy: np.ndarray) -> float:
-    """Minimum distance from ``point`` to any vertex of ``polygon_xy``.
+def _point_in_polygon(point: np.ndarray, polygon_xy: np.ndarray) -> bool:
+    """Ray-cast point-in-polygon test.
 
-    Uses vertex-only distance (matches the crosswalk-to-road heuristic
-    in ``opendrive/objects.py``); the OBB-based association is robust
-    to that approximation in practice.
+    The polygon is treated as a closed ring formed by ``polygon_xy``
+    in order; vertex order (CW vs. CCW) is irrelevant.  Edge / vertex
+    coincidence is treated as "inside" (the test returns ``True``)
+    because the ambiguity does not matter for the
+    threshold-against-zero comparison in the caller.
+    """
+    n = polygon_xy.shape[0]
+    if n < 3:
+        return False
+    px = float(point[0])
+    py = float(point[1])
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = float(polygon_xy[i, 0]), float(polygon_xy[i, 1])
+        xj, yj = float(polygon_xy[j, 0]), float(polygon_xy[j, 1])
+        if (yi > py) != (yj > py):
+            x_intersect = (xj - xi) * (py - yi) / (yj - yi) + xi
+            if px < x_intersect:
+                inside = not inside
+        j = i
+    return inside
+
+
+def _min_distance_to_polygon(point: np.ndarray, polygon_xy: np.ndarray) -> float:
+    """Minimum 2D distance from ``point`` to ``polygon_xy``.
+
+    Returns 0 when ``point`` lies inside the polygon and otherwise the
+    minimum distance from ``point`` to any *edge* (point-to-segment) of
+    the polygon.  This is more robust than vertex-only distance for
+    large lots: a stall centroid inside a 100 m × 100 m parking_lot
+    polygon is still within the default 30 m threshold even though the
+    nearest vertex is ~70 m away.
     """
     if polygon_xy.size == 0:
         return float("inf")
-    diffs = polygon_xy - point
+    if _point_in_polygon(point, polygon_xy):
+        return 0.0
+
+    # Vectorised point-to-segment distance against every edge.
+    a = polygon_xy
+    b = np.roll(polygon_xy, -1, axis=0)
+    ab = b - a
+    ab_len_sq = (ab**2).sum(axis=1)
+    # Avoid division by zero on degenerate (zero-length) edges.
+    safe_len_sq = np.where(ab_len_sq > 0.0, ab_len_sq, 1.0)
+    ap = point - a
+    t = np.clip((ap * ab).sum(axis=1) / safe_len_sq, 0.0, 1.0)
+    closest = a + (t[:, None] * ab)
+    diffs = closest - point
     return float(np.sqrt((diffs**2).sum(axis=1)).min())
 
 
@@ -416,7 +468,8 @@ class ParkingLot:
                 continue
             centroid = info[0]
 
-            # Find nearest lot by minimum distance to any vertex.
+            # Find nearest lot by minimum distance to the polygon (0 if
+            # the centroid lies inside, otherwise distance to nearest edge).
             best_idx = -1
             best_dist = float("inf")
             for idx, poly in enumerate(polygons):
