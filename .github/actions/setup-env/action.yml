@@ -32,6 +32,13 @@ inputs:
     description: "uv extra for CARLA version selection (e.g. 'carla' for 0.10.0, 'carla-0-9-16' for 0.9.16)"
     required: false
     default: ""
+  cache-suffix:
+    description: >
+      Suffix appended to the uv cache key. Use this to isolate caches between
+      runner backends (e.g. ubicloud-* vs ubuntu-*) so prebuilt wheels with a
+      different libstdc++/boost-python ABI don't get reused on the wrong host.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -47,6 +54,7 @@ runs:
         version: "latest"
         enable-cache: true
         cache-dependency-glob: "**/uv.lock"
+        cache-suffix: ${{ inputs.cache-suffix }}
 
     - name: Install system dependencies
       if: inputs.install-system-deps == 'true'
