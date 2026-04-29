@@ -792,14 +792,20 @@ class Splines:
                     return s, True
             return s, False
 
+        seed_counts: list[int] = []
         for num in (n_seeds, 2 * n_seeds, 4 * n_seeds):
+            capped = min(num, 128)
+            if capped not in seed_counts:
+                seed_counts.append(capped)
+
+        last_seed = 0.0
+        for num in seed_counts:
             seed = _seed_search(num)
+            last_seed = seed
             refined, converged = _newton(seed)
             if converged:
                 return refined
-            if num >= 128:
-                return seed
-        return _seed_search(128)
+        return last_seed
 
     def _evaluate_normalized(self, t: float, derivative: int = 0) -> np.ndarray:
         """

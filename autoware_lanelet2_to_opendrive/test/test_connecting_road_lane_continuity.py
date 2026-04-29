@@ -1,9 +1,16 @@
-"""End-to-end check that connecting-road <border> endpoints land on
-linked regular roads' lane edges within tolerance.
+"""End-to-end smoke checks for connecting-road <border> emission.
 
-Runs the full converter on nishishinjuku.osm, then walks every
-connecting road's first right lane and verifies the BORDER polynomial
-value at s=0 / s=length matches the linked regular road's lane edge.
+Runs the full converter on nishishinjuku.osm and verifies that:
+  1. At least one connecting road actually emits <lane><border>
+     polynomials (i.e. BORDER mode is reached on a real map), and
+  2. For each connecting-road outermost right lane that has a <border>,
+     the polynomial value at s=0 falls in a plausible negative range
+     for an outer right edge.
+
+These are coarser than the conversion-vs-geometric mapping cross-check
+the converter itself runs at the end of the pipeline, but they
+exercise the wiring of the BORDER pinning path end-to-end without
+re-implementing geometric reverse-mapping in the test.
 """
 
 from __future__ import annotations
@@ -52,6 +59,10 @@ def _build_xodr() -> Path:
         subprocess.run(cmd, check=True)
     except FileNotFoundError as exc:
         pytest.skip(f"converter unavailable: {exc}")
+    if not xodr_path.exists():
+        pytest.fail(
+            f"converter exited 0 but did not produce expected output {xodr_path}"
+        )
     return xodr_path
 
 
@@ -61,30 +72,32 @@ def _eval_poly(s_off: float, a: float, b: float, c: float, d: float, s: float) -
 
 
 def _lane_t_at_s(lane_elem: ET.Element, s: float) -> float | None:
-    """Evaluate the lane's <border> (preferred) or <width> at parameter s.
+    """Evaluate the lane's <border> polynomial at parameter s.
 
-    Returns the absolute t-coordinate, or None if neither is present.
-    Note: <width> evaluation here only considers the single lane's own
-    polynomial, so this helper is reliable for outermost lanes only.
+    Returns the absolute t-coordinate of the <border> active at s, or
+    None if the lane has no <border> at all (e.g. WIDTH-mode lanes).
+    Width-mode evaluation is intentionally not implemented here: it
+    requires summing inner lanes' widths, and the tests in this file
+    only need to inspect BORDER-mode connecting-road lanes.
     """
     borders = lane_elem.findall("border")
-    if borders:
-        chosen = max(
-            (b for b in borders if float(b.get("sOffset", "0")) <= s),
-            key=lambda b: float(b.get("sOffset", "0")),
-            default=None,
-        )
-        if chosen is None:
-            return None
-        return _eval_poly(
-            float(chosen.get("sOffset")),
-            float(chosen.get("a")),
-            float(chosen.get("b")),
-            float(chosen.get("c")),
-            float(chosen.get("d")),
-            s,
-        )
-    return None
+    if not borders:
+        return None
+    chosen = max(
+        (b for b in borders if float(b.get("sOffset", "0")) <= s),
+        key=lambda b: float(b.get("sOffset", "0")),
+        default=None,
+    )
+    if chosen is None:
+        return None
+    return _eval_poly(
+        float(chosen.get("sOffset")),
+        float(chosen.get("a")),
+        float(chosen.get("b")),
+        float(chosen.get("c")),
+        float(chosen.get("d")),
+        s,
+    )
 
 
 def test_connecting_road_borders_emit_when_pinned() -> None:

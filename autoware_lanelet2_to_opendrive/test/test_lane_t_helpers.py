@@ -151,6 +151,7 @@ def test_road_construct_with_regular_at_start_uses_border() -> None:
         regular_road_at_start=upstream_road,
     )
 
+    assert connecting_road.lanes is not None
     lane = connecting_road.lanes.lane_sections[0].right_lanes[-1]
     assert len(lane.borders) >= 1, "BORDER mode should populate borders"
     assert lane.widths == [], "BORDER mode should leave widths empty"
@@ -167,6 +168,7 @@ def test_road_construct_without_regular_road_uses_width() -> None:
         road_id=0,
         traffic_rule="RHT",
     )
+    assert road.lanes is not None
     lane = road.lanes.lane_sections[0].right_lanes[-1]
     assert len(lane.widths) >= 1
     assert lane.borders == []
