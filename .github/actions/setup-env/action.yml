@@ -21,7 +21,7 @@ inputs:
     required: false
     default: "true"
   run-precommit:
-    description: Run 'pre-commit install && pre-commit run --all-files'
+    description: Run 'pre-commit run --all-files' (no 'install' — CI never commits)
     required: false
     default: "false"
   precommit-continue-on-error:
@@ -95,13 +95,9 @@ runs:
     - name: Run pre-commit hooks
       if: inputs.run-precommit == 'true' && inputs.precommit-continue-on-error == 'false'
       shell: bash
-      run: |
-        uv run pre-commit install
-        uv run pre-commit run --all-files
+      run: uv run pre-commit run --all-files
 
     - name: Run pre-commit hooks (continue on error)
       if: inputs.run-precommit == 'true' && inputs.precommit-continue-on-error == 'true'
       shell: bash
-      run: |
-        uv run pre-commit install
-        uv run pre-commit run --all-files || true
+      run: uv run pre-commit run --all-files || true
