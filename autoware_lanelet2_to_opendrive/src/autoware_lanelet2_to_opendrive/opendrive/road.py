@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, cast
 
 import lanelet2
 import lxml.etree as ET
+import numpy as np
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from tqdm import tqdm
 
@@ -727,6 +728,8 @@ class Road:
                 traffic_rule=traffic_rule,
                 width_config=width_config,
                 routing_graph=routing_graph,
+                start_xyz_override=start_xyz_override,
+                end_xyz_override=end_xyz_override,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -1078,6 +1081,89 @@ class Road:
                 lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
             )
 
+        # Maximum lateral displacement (metres) that the override may
+        # introduce relative to the connecting road's natural reference
+        # endpoint.  An override that moves the rendered endpoint laterally
+        # by more than this is almost certainly pinning to a *parallel*
+        # regular road that happens to share a junction-boundary XY with
+        # the correct neighbour (different physical lane), and applying it
+        # collapses the connecting road onto the wrong rendered geometry —
+        # which then trips the conversion-vs-geo mapping cross-check on
+        # nishishinjuku (lanelets 3013150 / 3012677 / 3012500 / 3012728 /
+        # 3012711).  Legitimate longitudinal gap-closing overrides (the
+        # original P0-2 motivation, up to 11.6 m end-to-end) project
+        # mostly along the road tangent, so a small lateral budget is
+        # enough to reject the wrong-pin cases without losing the fix.
+        # Roughly half a typical lane width.
+        _MAX_OVERRIDE_LATERAL_M = 1.5
+
+        def _outermost_anchor_endpoint(
+            group: Set[lanelet2.core.Lanelet],
+            at_start: bool,
+        ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+            """Return ``(anchor_xy, tangent_xy)`` for this connecting group.
+
+            ``anchor_xy`` is the OUTERMOST connecting lanelet's anchor
+            boundary endpoint XY — the natural (un-pinned) reference-line
+            endpoint of the rendered road.  ``tangent_xy`` is a unit vector
+            pointing along the road at that endpoint, used to decompose
+            the override displacement into longitudinal vs lateral parts.
+            """
+            from ..util import sort_adjacent_groups, extract_points_3d
+
+            try:
+                sorted_lls = sort_adjacent_groups(lanelet_map, group)
+            except Exception:
+                return None
+            if not sorted_lls:
+                return None
+
+            is_lht = (traffic_rule or "RHT").upper() == "LHT"
+            outer = sorted_lls[-1] if is_lht else sorted_lls[0]
+            boundary = outer.rightBound if is_lht else outer.leftBound
+            try:
+                pts = extract_points_3d(boundary)
+            except Exception:
+                return None
+            if len(pts) < 2:
+                return None
+
+            anchor_xy = np.asarray(pts[0 if at_start else -1, :2], dtype=float)
+            if at_start:
+                tangent = np.asarray(pts[1, :2], dtype=float) - anchor_xy
+            else:
+                tangent = anchor_xy - np.asarray(pts[-2, :2], dtype=float)
+            n = float(np.linalg.norm(tangent))
+            if n < 1e-9:
+                return None
+            return anchor_xy, tangent / n
+
+        def _gate_override(
+            override_xyz: Optional[Tuple[float, float, float]],
+            group: Set[lanelet2.core.Lanelet],
+            at_start: bool,
+        ) -> Optional[Tuple[float, float, float]]:
+            """Reject overrides whose lateral component is too large.
+
+            Returns the override unchanged when the displacement from the
+            natural anchor endpoint projects mostly along the road tangent
+            (legitimate longitudinal gap closure); returns ``None`` when
+            the lateral component exceeds ``_MAX_OVERRIDE_LATERAL_M``
+            (wrong-pin to a parallel road).
+            """
+            if override_xyz is None:
+                return None
+            info = _outermost_anchor_endpoint(group, at_start)
+            if info is None:
+                return override_xyz  # cannot decompose → leave decision to caller
+            anchor_xy, tangent = info
+            disp = np.asarray(override_xyz, dtype=float)[:2] - anchor_xy
+            normal = np.array([-tangent[1], tangent[0]])
+            lateral = abs(float(np.dot(disp, normal)))
+            if lateral > _MAX_OVERRIDE_LATERAL_M:
+                return None
+            return override_xyz
+
         def _unique_regular_endpoint(
             group: Set[lanelet2.core.Lanelet],
             direction: str,
@@ -1088,6 +1174,10 @@ class Road:
             regular roads adjacent to this junction group.  Returns the
             endpoint world-frame position if exactly one such regular road
             exists — otherwise ``None`` (asymmetric / multi-successor case).
+
+            The candidate is gated by :func:`_gate_override` to skip cases
+            where the override would shift the connecting road laterally
+            onto a parallel regular road (see the lateral-budget comment).
             """
             if not regular_road_by_id or routing_graph is None:
                 return None
@@ -1108,11 +1198,13 @@ class Road:
             if direction == "previous":
                 # Incoming road: use its reference-line END (flows into
                 # the connecting road).
-                return neighbour_road.reference_end_xyz
+                candidate = neighbour_road.reference_end_xyz
+                return _gate_override(candidate, group, at_start=True)
             else:
                 # Outgoing road: use its reference-line START (connecting
                 # road flows into it).
-                return neighbour_road.reference_start_xyz
+                candidate = neighbour_road.reference_start_xyz
+                return _gate_override(candidate, group, at_start=False)
 
         current_road_id = starting_road_id
 

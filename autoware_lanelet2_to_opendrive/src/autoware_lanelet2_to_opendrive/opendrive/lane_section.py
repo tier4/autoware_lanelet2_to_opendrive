@@ -1,6 +1,6 @@
 """LaneSection implementation for OpenDRIVE conversion."""
 
-from typing import List, Optional, Dict, Union, Set, TYPE_CHECKING
+from typing import List, Optional, Dict, Tuple, Union, Set, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
 from lanelet2.routing import RoutingGraph
@@ -74,6 +74,8 @@ class LaneSection:
         traffic_rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         routing_graph: Optional[RoutingGraph] = None,
+        start_xyz_override: Optional[Tuple[float, float, float]] = None,
+        end_xyz_override: Optional[Tuple[float, float, float]] = None,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -86,6 +88,12 @@ class LaneSection:
             width_config: Configuration for width spline sampling
             routing_graph: Optional pre-built routing graph for lane-change detection.
                 If None, creates a new one.
+            start_xyz_override: Optional world-frame (x, y, z) coordinate that
+                pins the reference line start.  Mirrors the override on
+                ``Road.construct_from_lanelet_groups`` and is also forwarded
+                to the OUTERMOST lane's width calculation (P0-2 junction
+                endpoint fidelity, lane-width side).
+            end_xyz_override: Optional analogous override for the s=length end.
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -118,9 +126,16 @@ class LaneSection:
 
         sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_set, routing_graph)
 
-        # Create and set the reference line
+        # Create and set the reference line.  When the caller supplies
+        # endpoint overrides (junction endpoint pinning, P0-2) the centre
+        # lane must use the SAME pinned spline as the road's planView so
+        # width s-coordinates and total length agree.
         reference_line = ReferenceLine.construct_from_lanelet_groups(
-            lanelet_map, lanelet_group, traffic_rule=traffic_rule
+            lanelet_map,
+            lanelet_group,
+            traffic_rule=traffic_rule,
+            start_xyz_override=start_xyz_override,
+            end_xyz_override=end_xyz_override,
         )
         lane_section._set_center_lane(reference_line)
 
@@ -149,14 +164,25 @@ class LaneSection:
             list(reversed(sorted_lanelets)) if is_lht else sorted_lanelets
         )
 
+        # The OUTERMOST lanelet is the one whose anchor boundary became the
+        # reference line.  For RHT that is sorted_lanelets[0] (leftmost) and
+        # in lanelets_ordered it is at index 0.  For LHT the rightmost
+        # lanelet is the reference; lanelets_ordered is reversed, so it is
+        # also at index 0.  Only this lanelet's anchor boundary endpoints
+        # are pinned to the regular-road overrides — inner lanelets share
+        # boundaries with neighbours and must keep their original positions
+        # so cumulative widths still close on the outer side.
         for i, lanelet in enumerate(lanelets_ordered):
             lane_id = (i + 1) if is_lht else -(i + 1)
+            is_outermost = i == 0
             lane = Lane.construct_from_lanelet(
                 lanelet_map,
                 lanelet,
                 rule=traffic_rule_normalized,
                 width_config=width_config,
                 reference_line_spline=reference_line_spline,
+                anchor_start_override=(start_xyz_override if is_outermost else None),
+                anchor_end_override=(end_xyz_override if is_outermost else None),
             )
             lane.lane_id = lane_id
             if is_lht:
