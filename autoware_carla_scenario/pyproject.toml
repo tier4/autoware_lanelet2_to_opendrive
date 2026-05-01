@@ -12,7 +12,9 @@ dependencies = [
     "numpy>=1.21",
     "pytest>=9.0.1",
     "python-dotenv>=1.2.2",
-    "lanelet2>=1.2.2",
+    # See note in autoware_lanelet2_to_opendrive/pyproject.toml: the lanelet2
+    # Python package is provided by lanelet2-python-api-for-autoware. Adding
+    # the PyPI lanelet2 wheel here causes a Boost ABI conflict (refs #449).
     "lanelet2-python-api-for-autoware",
     "tqdm>=4.67.1",
     "hydra-core>=1.3.2",

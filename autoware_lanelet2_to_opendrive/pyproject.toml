@@ -8,7 +8,12 @@ authors = [
 ]
 requires-python = ">=3.10,<3.11"
 dependencies = [
-    "lanelet2>=1.2.2",
+    # The lanelet2 Python package is provided by lanelet2-python-api-for-autoware,
+    # which builds it from source against the system libboost-python. Pulling
+    # lanelet2 from PyPI in addition introduces an auditwheel-bundled Boost 1.81
+    # that conflicts ABI-wise with the system Boost 1.74 used by the autoware
+    # extension wheels, and the install-order race that decides which lanelet2
+    # wins is what surfaces as a SystemError on import (refs #449).
     "lanelet2-python-api-for-autoware",
     "scipy>=1.9.0",
     "lxml>=5.2.2",
