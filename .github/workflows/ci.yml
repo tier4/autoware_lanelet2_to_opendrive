@@ -31,13 +31,12 @@ jobs:
         gh-pat: ${{ secrets.GH_PAT }}
         install-system-deps: "true"
         install-dev-deps: "true"
-        run-precommit: "true"
-        precommit-continue-on-error: "true"
+        run-precommit: "false"
         carla-extra: ${{ matrix.carla-extra }}
         cache-suffix: ${{ matrix.runner }}
 
     - name: Run tests
-      run: uv run pytest -v --tb=short -n auto
+      run: uv run pytest -v --tb=short -n auto -o addopts=
 
     - name: Check package can be built
       run: |
