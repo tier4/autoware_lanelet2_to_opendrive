@@ -736,6 +736,77 @@ class Splines:
                     f"Derivative order {derivative} not supported"
                 )
 
+    def find_closest_s(
+        self,
+        point_xy: np.ndarray,
+        n_seeds: int = 32,
+        max_iter: int = 12,
+        tol: float = 1e-9,
+    ) -> float:
+        """Return the arc-length parameter s minimising ||evaluate(s)[:2] - point_xy||.
+
+        Strategy: dense grid seed → Newton-Raphson refinement starting from
+        the best seed. On non-convergence after max_iter iterations,
+        escalate the grid to ``2 * n_seeds`` (up to 128) and retry. Falls
+        back to the best grid seed if Newton diverges at the largest grid.
+
+        Args:
+            point_xy: 2-D point in world frame.
+            n_seeds: Initial number of grid seeds across [0, total_length].
+            max_iter: Maximum Newton iterations per seed.
+            tol: Convergence tolerance on |Δs|.
+
+        Returns:
+            s ∈ [0, total_length] minimising the squared distance.
+        """
+        target = np.asarray(point_xy, dtype=float)
+        if target.shape != (2,):
+            raise ValueError(f"point_xy must have shape (2,), got {target.shape}")
+
+        L = self.total_length
+
+        def _seed_search(num: int) -> float:
+            seeds = np.linspace(0.0, L, num)
+            best_s = seeds[0]
+            best_d2 = np.inf
+            for s in seeds:
+                pt = self.evaluate(float(s))[:2]
+                d2 = float(np.sum((pt - target) ** 2))
+                if d2 < best_d2:
+                    best_d2 = d2
+                    best_s = float(s)
+            return best_s
+
+        def _newton(start_s: float) -> tuple[float, bool]:
+            s = start_s
+            for _ in range(max_iter):
+                pt = self.evaluate(s)[:2]
+                d_pt = self.evaluate(s, derivative=1)[:2]
+                residual = pt - target
+                denom = float(np.dot(d_pt, d_pt))
+                if denom < 1e-12:
+                    return s, True
+                ds = -float(np.dot(residual, d_pt)) / denom
+                s = float(np.clip(s + ds, 0.0, L))
+                if abs(ds) < tol:
+                    return s, True
+            return s, False
+
+        seed_counts: list[int] = []
+        for num in (n_seeds, 2 * n_seeds, 4 * n_seeds):
+            capped = min(num, 128)
+            if capped not in seed_counts:
+                seed_counts.append(capped)
+
+        last_seed = 0.0
+        for num in seed_counts:
+            seed = _seed_search(num)
+            last_seed = seed
+            refined, converged = _newton(seed)
+            if converged:
+                return refined
+        return last_seed
+
     def _evaluate_normalized(self, t: float, derivative: int = 0) -> np.ndarray:
         """
         Evaluate the spline at a given normalized parameter value.
