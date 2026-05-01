@@ -1155,7 +1155,19 @@ class Road:
                 return None
             info = _outermost_anchor_endpoint(group, at_start)
             if info is None:
-                return override_xyz  # cannot decompose → leave decision to caller
+                # Cannot decompose the displacement (sorting failed, boundary
+                # too short, degenerate tangent, ...).  Be conservative: skip
+                # the override rather than apply an unchecked pin, which is
+                # exactly the scenario the gate exists to prevent.
+                lanelet_ids = sorted(ll.id for ll in group)
+                logger.warning(
+                    "Skipping junction endpoint override (at_start=%s) for "
+                    "lanelet group %s: could not extract outermost anchor "
+                    "endpoint to apply lateral-displacement gate.",
+                    at_start,
+                    lanelet_ids,
+                )
+                return None
             anchor_xy, tangent = info
             disp = np.asarray(override_xyz, dtype=float)[:2] - anchor_xy
             normal = np.array([-tangent[1], tangent[0]])

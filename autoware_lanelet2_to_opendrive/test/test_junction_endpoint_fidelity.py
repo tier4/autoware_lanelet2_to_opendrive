@@ -85,6 +85,15 @@ def _build_nishishinjuku_xodr() -> Path:
         # Tooling missing — environmental, not a regression.
         pytest.skip(f"converter unavailable: {exc}")
 
+    if not xodr_path.is_file():
+        # The converter reported success (exit 0) but the expected file
+        # is missing — fail with a clear, actionable message instead of
+        # leaking out as an opaque XML parse error in the next step.
+        pytest.fail(
+            f"converter exited successfully but {xodr_path} was not "
+            "produced; check that ``output_map_path`` is honoured."
+        )
+
     return xodr_path
 
 
@@ -178,7 +187,26 @@ def test_junction_connection_endpoints_match_linked_roads():
             conn_road_junction[connecting_road_id] = junction_id
             conn_road_contact[connecting_road_id] = contact_point
 
-    offenders = []
+    # ``offenders``: mismatches in ``(TOLERANCE_M, GATED_GAP_M)`` — strict
+    # regression band, always a test failure.
+    # ``gated_offenders``: mismatches ``>= GATED_GAP_M`` — assumed to be the
+    # intentionally gated wrong-pin cases (see ``GATED_GAP_M`` comment).
+    # We report them separately so a regression that creates new large gaps
+    # is still visible in test output rather than silently ignored.
+    offenders: list[tuple[int, int, str, int, float]] = []
+    gated_offenders: list[tuple[int, int, str, int, float]] = []
+
+    def _classify(
+        record: tuple[int, int, str, int, float],
+    ) -> None:
+        d = record[4]
+        if d <= TOLERANCE_M:
+            return
+        if d < GATED_GAP_M:
+            offenders.append(record)
+        else:
+            gated_offenders.append(record)
+
     for connecting_road_id, incoming_ids in conn_road_incomings.items():
         junction_id = conn_road_junction[connecting_road_id]
         contact_point = conn_road_contact[connecting_road_id]
@@ -203,16 +231,15 @@ def test_junction_connection_endpoints_match_linked_roads():
                     expected_in = inc_start
                     actual_in = conn_end
                 d_in = _distance3(expected_in, actual_in)
-                if TOLERANCE_M < d_in < GATED_GAP_M:
-                    offenders.append(
-                        (
-                            junction_id,
-                            connecting_road_id,
-                            "incoming",
-                            incoming_road_id,
-                            d_in,
-                        )
+                _classify(
+                    (
+                        junction_id,
+                        connecting_road_id,
+                        "incoming",
+                        incoming_road_id,
+                        d_in,
                     )
+                )
 
         # Outgoing side: the connecting road's link references the
         # outgoing road.  Check only when it resolves to a single regular
@@ -240,16 +267,31 @@ def test_junction_connection_endpoints_match_linked_roads():
         link_start, link_end = endpoints[link_id]
         expected_out = link_start if link_contact == "start" else link_end
         d_out = _distance3(expected_out, out_side)
-        if TOLERANCE_M < d_out < GATED_GAP_M:
-            offenders.append(
-                (
-                    junction_id,
-                    connecting_road_id,
-                    out_contact_label,
-                    link_id,
-                    d_out,
-                )
+        _classify(
+            (
+                junction_id,
+                connecting_road_id,
+                out_contact_label,
+                link_id,
+                d_out,
             )
+        )
+
+    # Surface gated (``d >= GATED_GAP_M``) cases on stdout so a regression
+    # that adds new large gaps is visible during ``pytest -s`` / CI logs,
+    # even when the strict-band assertion below passes.
+    if gated_offenders:
+        gated_offenders.sort(key=lambda o: -o[4])
+        gated_sample = "\n".join(
+            f"  junction={j} conn_road={cr} side={side} linked_road={lr} d={d:.3f}"
+            for j, cr, side, lr, d in gated_offenders[:10]
+        )
+        print(
+            f"\n[junction-endpoint-fidelity] {len(gated_offenders)} gated "
+            f"endpoint gap(s) >= {GATED_GAP_M} m (intentional fallback to "
+            f"natural lanelet boundary; tracked separately so regressions "
+            f"that grow this set are visible):\n{gated_sample}"
+        )
 
     if offenders:
         offenders.sort(key=lambda o: -o[4])
