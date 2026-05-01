@@ -46,7 +46,7 @@ testpaths = [
     "autoware_lanelet2_to_opendrive/test",
     "autoware_carla_scenario/test",
 ]
-addopts = "--testmon"
+addopts = "-n auto --testmon"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring a running CARLA server",
