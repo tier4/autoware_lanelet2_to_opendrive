@@ -1,6 +1,6 @@
 """Lane implementation for OpenDRIVE conversion."""
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import lanelet2
 import lxml.etree as ET
 
@@ -142,6 +142,8 @@ class Lane:
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         reference_line_spline: Optional["Splines"] = None,
+        anchor_start_override: Optional[Tuple[float, float, float]] = None,
+        anchor_end_override: Optional[Tuple[float, float, float]] = None,
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -154,6 +156,13 @@ class Lane:
             reference_line_spline: Road reference line spline for s-coordinate alignment.
                                   If provided, width s-coordinates will be aligned to
                                   the road reference line instead of lanelet boundaries.
+            anchor_start_override: Optional (x, y, z) override for the anchor
+                boundary's first point.  Set by the junction phase only for
+                the OUTERMOST lanelet (whose anchor IS the road reference
+                line) so width(0) matches the linked regular road's outer
+                lane edge. P0-2 junction endpoint fidelity, lane-width side.
+            anchor_end_override: Optional (x, y, z) override for the anchor
+                boundary's last point, used analogously for the s=length end.
 
         Returns:
             Lane instance constructed from the lanelet
@@ -220,7 +229,11 @@ class Lane:
             from ..centerline import estimate_lanelet_width_with_reference_line
 
             width_spline = estimate_lanelet_width_with_reference_line(
-                lanelet, reference_line_spline, config
+                lanelet,
+                reference_line_spline,
+                config,
+                anchor_start_override=anchor_start_override,
+                anchor_end_override=anchor_end_override,
             )
         else:
             # Fallback to old behavior (for backward compatibility)

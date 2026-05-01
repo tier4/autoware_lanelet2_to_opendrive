@@ -409,6 +409,8 @@ def estimate_lanelet_width_with_reference_line(
     lanelet: lanelet2.core.Lanelet,
     reference_line_spline: "Splines",
     config: WidthEstimationConfig,
+    anchor_start_override: Optional[Tuple[float, float, float]] = None,
+    anchor_end_override: Optional[Tuple[float, float, float]] = None,
 ) -> Width1DSplineAdapter:
     """
     Estimate lanelet width as a spline using road reference line s-coordinates.
@@ -421,6 +423,14 @@ def estimate_lanelet_width_with_reference_line(
         lanelet: The lanelet to calculate width for
         reference_line_spline: Road reference line spline for s-coordinate alignment
         config: Width estimation configuration
+        anchor_start_override: Optional (x, y, z) coordinate that replaces the
+            first sample of the anchor boundary before width measurement.  Set
+            by the junction phase for the OUTERMOST lanelet of a connecting
+            road so the lane width at s=0 matches the linked regular road's
+            outer lane edge (P0-2 lane-width side of the override).  Only the
+            XY components are used; Z is ignored.
+        anchor_end_override: Optional (x, y, z) coordinate that replaces the
+            last sample of the anchor boundary, used for the s=length side.
 
     Returns:
         Width1DSplineAdapter with s-coordinates aligned to road reference line
@@ -449,6 +459,22 @@ def estimate_lanelet_width_with_reference_line(
         other_points = left_points
     else:
         raise ValueError(f"Unsupported width reference: {config.reference}")
+
+    # Apply anchor-boundary endpoint overrides for the OUTERMOST lanelet of a
+    # connecting road (P0-2 junction endpoint fidelity, lane-width side).
+    # The reference line's s=0 / s=length is pinned to the linked regular
+    # road's endpoint XY; without this override the width at those s would
+    # still be |original anchor - other| and lane corridors would drift
+    # laterally relative to the regular road.  Replacing anchor[0] / [-1]
+    # with the override keeps lane -1 / lane +1 inner edge on the reference
+    # line and outer edge near the lanelet's other-side boundary, which is
+    # what the regular road's matching lane edge resolves to in practice.
+    if anchor_start_override is not None or anchor_end_override is not None:
+        anchor_points = anchor_points.copy()
+        if anchor_start_override is not None:
+            anchor_points[0, :2] = np.asarray(anchor_start_override, dtype=float)[:2]
+        if anchor_end_override is not None:
+            anchor_points[-1, :2] = np.asarray(anchor_end_override, dtype=float)[:2]
 
     # Get road reference line total length
     road_length = reference_line_spline.total_length
