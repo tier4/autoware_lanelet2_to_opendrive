@@ -46,3 +46,47 @@ def test_find_closest_s_curved_spline() -> None:
 
     s = spline.find_closest_s(p)
     assert 0.4 * spline.total_length <= s <= 0.6 * spline.total_length
+
+
+def test_find_closest_s_multimodal_returns_valid_minimum() -> None:
+    """A point equidistant from two arms of a U-shaped spline projects to a valid local minimum.
+
+    The U has its apex at the origin facing +y; a target on the y-axis above the apex is
+    equidistant from the two symmetric arms, so the grid+Newton solver may settle on either
+    arm. The contract is only that the returned s yields a distance no worse than the apex.
+    """
+    xs = np.linspace(-5.0, 5.0, 21)
+    points = np.array([[x, x * x / 5.0] for x in xs])
+    spline = Splines(points, num_control_points=21)
+
+    target = np.array([0.0, 4.0])
+    s = spline.find_closest_s(target)
+
+    pt = spline.evaluate(s)[:2]
+    d_returned = float(np.linalg.norm(pt - target))
+    apex_pt = spline.evaluate(spline.total_length / 2.0)[:2]
+    d_apex = float(np.linalg.norm(apex_pt - target))
+    assert d_returned <= d_apex + 1e-6
+
+
+def test_find_closest_s_degenerate_short_spline() -> None:
+    """A spline that is essentially a single point still yields a valid s in [0, L]."""
+    base_x, base_y = 1.0, 2.0
+    points = np.array([[base_x + i * 1e-9, base_y] for i in range(4)])
+    spline = Splines(points, num_control_points=4)
+
+    s = spline.find_closest_s(np.array([5.0, 5.0]))
+    assert 0.0 <= s <= spline.total_length
+
+
+def test_find_closest_s_validates_inputs() -> None:
+    """Invalid n_seeds, max_iter, tol, or point_xy shape raise ValueError."""
+    spline = _straight_spline()
+    with pytest.raises(ValueError, match="n_seeds"):
+        spline.find_closest_s(np.array([0.0, 0.0]), n_seeds=1)
+    with pytest.raises(ValueError, match="max_iter"):
+        spline.find_closest_s(np.array([0.0, 0.0]), max_iter=0)
+    with pytest.raises(ValueError, match="tol"):
+        spline.find_closest_s(np.array([0.0, 0.0]), tol=0.0)
+    with pytest.raises(ValueError, match="point_xy"):
+        spline.find_closest_s(np.array([0.0, 0.0, 0.0]))

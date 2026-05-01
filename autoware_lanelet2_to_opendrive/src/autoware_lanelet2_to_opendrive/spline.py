@@ -747,31 +747,42 @@ class Splines:
 
         Strategy: dense grid seed → Newton-Raphson refinement starting from
         the best seed. On non-convergence after max_iter iterations,
-        escalate the grid to ``2 * n_seeds`` (up to 128) and retry. Falls
-        back to the best grid seed if Newton diverges at the largest grid.
+        escalate the grid to ``2 * n_seeds`` (up to 128) and retry. On full
+        non-convergence at the largest grid, return the best candidate
+        observed across all seeds and refined values (by squared distance).
 
         Args:
             point_xy: 2-D point in world frame.
-            n_seeds: Initial number of grid seeds across [0, total_length].
-            max_iter: Maximum Newton iterations per seed.
-            tol: Convergence tolerance on |Δs|.
+            n_seeds: Initial number of grid seeds across [0, total_length]. Must be >= 2.
+            max_iter: Maximum Newton iterations per seed. Must be >= 1.
+            tol: Convergence tolerance on |Δs| after boundary clipping. Must be > 0.
 
         Returns:
             s ∈ [0, total_length] minimising the squared distance.
         """
+        if n_seeds < 2:
+            raise ValueError(f"n_seeds must be >= 2, got {n_seeds}")
+        if max_iter < 1:
+            raise ValueError(f"max_iter must be >= 1, got {max_iter}")
+        if tol <= 0:
+            raise ValueError(f"tol must be > 0, got {tol}")
+
         target = np.asarray(point_xy, dtype=float)
         if target.shape != (2,):
             raise ValueError(f"point_xy must have shape (2,), got {target.shape}")
 
         L = self.total_length
 
+        def _d2(s: float) -> float:
+            pt = self.evaluate(s)[:2]
+            return float(np.sum((pt - target) ** 2))
+
         def _seed_search(num: int) -> float:
             seeds = np.linspace(0.0, L, num)
-            best_s = seeds[0]
+            best_s = float(seeds[0])
             best_d2 = np.inf
             for s in seeds:
-                pt = self.evaluate(float(s))[:2]
-                d2 = float(np.sum((pt - target) ** 2))
+                d2 = _d2(float(s))
                 if d2 < best_d2:
                     best_d2 = d2
                     best_s = float(s)
@@ -787,9 +798,13 @@ class Splines:
                 if denom < 1e-12:
                     return s, True
                 ds = -float(np.dot(residual, d_pt)) / denom
-                s = float(np.clip(s + ds, 0.0, L))
-                if abs(ds) < tol:
-                    return s, True
+                s_new = float(np.clip(s + ds, 0.0, L))
+                # Convergence check uses the post-clip step so a boundary
+                # optimum is detected once Newton's iterate fixates there;
+                # the raw ds can stay large while s itself stops moving.
+                if abs(s_new - s) < tol:
+                    return s_new, True
+                s = s_new
             return s, False
 
         seed_counts: list[int] = []
@@ -798,14 +813,19 @@ class Splines:
             if capped not in seed_counts:
                 seed_counts.append(capped)
 
-        last_seed = 0.0
+        best_s = 0.0
+        best_d2 = float("inf")
         for num in seed_counts:
             seed = _seed_search(num)
-            last_seed = seed
             refined, converged = _newton(seed)
             if converged:
                 return refined
-        return last_seed
+            for cand in (seed, refined):
+                d2 = _d2(cand)
+                if d2 < best_d2:
+                    best_d2 = d2
+                    best_s = cand
+        return best_s
 
     def _evaluate_normalized(self, t: float, derivative: int = 0) -> np.ndarray:
         """
