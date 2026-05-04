@@ -7,6 +7,7 @@ from autoware_lanelet2_to_opendrive.centerline import (
     _fit_signed_t_spline,
     _max_relative_asymmetry,
     _max_width_fit_residual,
+    compute_lane_outer_polynomial,
     estimate_lanelet_width_as_spline,
 )
 from autoware_lanelet2_to_opendrive.config import (
@@ -173,3 +174,65 @@ def test_fit_signed_t_spline_returns_segments():
     s, a, b, c, d = segments[0]
     assert s == 0.0
     assert abs(a - (-1.0)) < 1e-3  # y intercept = t value at s=0
+
+
+def test_compute_lane_outer_polynomial_symmetric_is_width():
+    """Symmetric lanelet returns kind='width' and segments equal to the
+    existing width-only path's output (numerical regression guard)."""
+    lanelet = _symmetric_lanelet()
+    ref_line = _make_straight_xy_spline()
+    config = WidthEstimationConfig(num_samples=11, reference=WidthReference.LEFT_BOUND)
+    poly = compute_lane_outer_polynomial(lanelet, ref_line, config, rule="RHT")
+    assert poly.kind == "width"
+    # Compare against the legacy adapter directly - bytes-identical
+    # for symmetric input.
+    legacy = estimate_lanelet_width_as_spline(lanelet, config)
+    assert poly.segments == legacy.get_polynomial_segments()
+    assert poly.total_length == legacy.total_length
+
+
+def test_compute_lane_outer_polynomial_bulged_is_border():
+    """Right-bulged lanelet trips the asymmetry threshold -> kind='border'."""
+    lanelet = _bulged_right_lanelet()
+    ref_line = _make_straight_xy_spline()
+    config = WidthEstimationConfig(num_samples=11, reference=WidthReference.LEFT_BOUND)
+    poly = compute_lane_outer_polynomial(lanelet, ref_line, config, rule="RHT")
+    assert poly.kind == "border"
+    assert len(poly.segments) >= 1
+    # First segment a-coefficient is signed t at s=0; right side -> negative.
+    s0, a0, _, _, _ = poly.segments[0]
+    assert s0 == 0.0
+    assert a0 < 0.0
+
+
+def test_compute_lane_outer_polynomial_lht_uses_left_bound_for_border():
+    """For LHT rule, the outer bound is leftBound -> positive t at s=0."""
+    # Use the bulged lanelet but interpret LHT (outer = leftBound).
+    # Mirror the bulge so the LEFT bound bulges and right is straight.
+    left_y = [1.0, 1.2, 1.5, 1.8, 2.0, 2.0, 2.0, 1.8, 1.5, 1.2, 1.0]
+    left = [_MockPoint(x, y) for x, y in zip(np.linspace(0, 10, 11), left_y)]
+    right = [_MockPoint(x, -1.0) for x in np.linspace(0, 10, 11)]
+    lanelet = _MockLanelet(left, right, lanelet_id=3)
+    ref_line = _make_straight_xy_spline()
+    config = WidthEstimationConfig(num_samples=11, reference=WidthReference.RIGHT_BOUND)
+    poly = compute_lane_outer_polynomial(lanelet, ref_line, config, rule="LHT")
+    assert poly.kind == "border"
+    s0, a0, _, _, _ = poly.segments[0]
+    assert s0 == 0.0
+    assert a0 > 0.0  # left side -> positive t
+
+
+def test_compute_lane_outer_polynomial_threshold_disable():
+    """With both tolerances raised high, even an asymmetric lanelet stays width."""
+    lanelet = _bulged_right_lanelet()
+    ref_line = _make_straight_xy_spline()
+    config = WidthEstimationConfig(num_samples=11, reference=WidthReference.LEFT_BOUND)
+    poly = compute_lane_outer_polynomial(
+        lanelet,
+        ref_line,
+        config,
+        rule="RHT",
+        asymmetry_tolerance=10.0,  # effectively disabled
+        width_residual_tolerance=100.0,  # effectively disabled
+    )
+    assert poly.kind == "width"

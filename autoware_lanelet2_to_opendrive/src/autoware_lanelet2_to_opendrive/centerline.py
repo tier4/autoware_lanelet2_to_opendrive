@@ -7,6 +7,7 @@ from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
 from .conversion_config import WidthEstimationConfig, WidthReference
+from .opendrive.lane_elements import LanePolynomial
 
 logger = logging.getLogger(__name__)
 
@@ -603,6 +604,91 @@ def _fit_signed_t_spline(
         np.asarray(deduped_s),
         np.asarray(deduped_t),
         bc_type="not-a-knot",
+    )
+
+
+def compute_lane_outer_polynomial(
+    lanelet,
+    reference_line_spline: "Splines",
+    config: WidthEstimationConfig,
+    *,
+    rule: str,
+    anchor_start_override: Optional[Tuple[float, float, float]] = None,
+    anchor_end_override: Optional[Tuple[float, float, float]] = None,
+    asymmetry_tolerance: Optional[float] = None,
+    width_residual_tolerance: Optional[float] = None,
+) -> LanePolynomial:
+    """Decide whether this lanelet emits as <lane><width> or <lane><border>.
+
+    Symmetric path (default):
+      - Calls estimate_lanelet_width_with_reference_line (unchanged math).
+      - Returns LanePolynomial(kind="width", segments=...).
+
+    Asymmetric path (hybrid trigger - either condition fires):
+      - max relative left/right asymmetry > asymmetry_tolerance, OR
+      - max single-sample width-fit residual > width_residual_tolerance.
+      - Projects the outer bound onto the reference-line frame and fits a
+        signed-t cubic.
+      - Returns LanePolynomial(kind="border", segments=...).
+
+    Args:
+        lanelet: The Lanelet2 lanelet (or mock with leftBound/rightBound/id).
+        reference_line_spline: Road reference line.
+        config: WidthEstimationConfig used by the width estimator.
+        rule: "RHT" or "LHT". Selects outer bound (rightBound or leftBound).
+        anchor_start_override: Optional (x,y,z) override forwarded to the
+            width estimator (P0-2 junction endpoint pinning, lane-width side).
+        anchor_end_override: Optional (x,y,z) override at the s=length end.
+        asymmetry_tolerance: Override DEFAULT_CONFIG.lane_border value.
+        width_residual_tolerance: Override DEFAULT_CONFIG.lane_border value.
+
+    Returns:
+        LanePolynomial with kind="width" or "border".
+    """
+    rule_upper = (rule or "RHT").upper()
+    if rule_upper not in ("RHT", "LHT"):
+        raise ValueError(f"rule must be 'RHT' or 'LHT', got {rule!r}")
+
+    asym_tol = (
+        asymmetry_tolerance
+        if asymmetry_tolerance is not None
+        else DEFAULT_CONFIG.lane_border.asymmetry_tolerance
+    )
+    resid_tol = (
+        width_residual_tolerance
+        if width_residual_tolerance is not None
+        else DEFAULT_CONFIG.lane_border.width_residual_tolerance
+    )
+
+    width_adapter = estimate_lanelet_width_with_reference_line(
+        lanelet,
+        reference_line_spline,
+        config,
+        anchor_start_override=anchor_start_override,
+        anchor_end_override=anchor_end_override,
+    )
+
+    asym_ratio = _max_relative_asymmetry(lanelet, config)
+    fit_residual = _max_width_fit_residual(lanelet, width_adapter, config)
+
+    if asym_ratio <= asym_tol and fit_residual <= resid_tol:
+        return LanePolynomial(
+            kind="width",
+            segments=width_adapter.get_polynomial_segments(),
+            total_length=width_adapter.total_length,
+        )
+
+    outer_bound = lanelet.rightBound if rule_upper == "RHT" else lanelet.leftBound
+    bound_points = extract_points_3d(outer_bound)
+    border_adapter = _fit_signed_t_spline(bound_points, reference_line_spline)
+    logger.info(
+        f"Lanelet {getattr(lanelet, 'id', '?')}: emitting <border> "
+        f"(asym={asym_ratio:.3f}, resid={fit_residual:.3f}m)"
+    )
+    return LanePolynomial(
+        kind="border",
+        segments=border_adapter.get_segments(),
+        total_length=float(border_adapter.total_arc_length),
     )
 
 
