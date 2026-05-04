@@ -629,11 +629,14 @@ def compute_lane_outer_polynomial(
       - Returns LanePolynomial(kind="width", segments=...).
 
     Asymmetric path (hybrid trigger - either condition fires):
-      - max relative left/right asymmetry > asymmetry_tolerance, OR
+      - max relative width variation > asymmetry_tolerance, OR
       - max single-sample width-fit residual > width_residual_tolerance.
       - Projects the outer bound onto the reference-line frame and fits a
         signed-t cubic.
       - Returns LanePolynomial(kind="border", segments=...).
+
+    Detection cost: when the cheaper width-variation check trips, the more
+    expensive width spline + residual check is skipped.
 
     Args:
         lanelet: The Lanelet2 lanelet (or mock with leftBound/rightBound/id).
@@ -664,30 +667,35 @@ def compute_lane_outer_polynomial(
         else DEFAULT_CONFIG.lane_border.width_residual_tolerance
     )
 
-    width_adapter = estimate_lanelet_width_with_reference_line(
-        lanelet,
-        reference_line_spline,
-        config,
-        anchor_start_override=anchor_start_override,
-        anchor_end_override=anchor_end_override,
-    )
-
     asym_ratio = _max_relative_asymmetry(lanelet, config)
-    fit_residual = _max_width_fit_residual(lanelet, width_adapter, config)
+    fit_residual: Optional[float] = None
+    width_adapter = None
 
-    if asym_ratio <= asym_tol and fit_residual <= resid_tol:
-        return LanePolynomial(
-            kind="width",
-            segments=width_adapter.get_polynomial_segments(),
-            total_length=width_adapter.total_length,
+    if asym_ratio <= asym_tol:
+        # Cheaper trigger didn't fire — build the width spline so we can
+        # check the residual AND have it ready for the width-emission path.
+        width_adapter = estimate_lanelet_width_with_reference_line(
+            lanelet,
+            reference_line_spline,
+            config,
+            anchor_start_override=anchor_start_override,
+            anchor_end_override=anchor_end_override,
         )
+        fit_residual = _max_width_fit_residual(lanelet, width_adapter, config)
+        if fit_residual <= resid_tol:
+            return LanePolynomial(
+                kind="width",
+                segments=width_adapter.get_polynomial_segments(),
+                total_length=width_adapter.total_length,
+            )
 
     outer_bound = lanelet.rightBound if rule_upper == "RHT" else lanelet.leftBound
     bound_points = extract_points_3d(outer_bound)
     border_adapter = _fit_signed_t_spline(bound_points, reference_line_spline)
-    logger.info(
+    resid_str = "n/a" if fit_residual is None else f"{fit_residual:.3f}m"
+    logger.debug(
         f"Lanelet {getattr(lanelet, 'id', '?')}: emitting <border> "
-        f"(asym={asym_ratio:.3f}, resid={fit_residual:.3f}m)"
+        f"(asym={asym_ratio:.3f}, resid={resid_str})"
     )
     return LanePolynomial(
         kind="border",

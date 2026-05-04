@@ -97,20 +97,24 @@ class LaneBorderConstants:
     """Tolerances controlling <lane><border> emission for asymmetric lanelets.
 
     Hybrid trigger — emit <border> when EITHER condition holds:
-      - asymmetry_tolerance: max |left_dist - right_dist| / width across
-        sampled s positions exceeds this fraction.
+      - asymmetry_tolerance: relative width variation
+        ``(max_width - min_width) / max_width`` across sampled s positions
+        exceeds this fraction. For the cases the issue targets (one bound
+        bulging relative to the other), asymmetry manifests as
+        non-constant cross-section width, so this proxy reliably trips.
       - width_residual_tolerance: max |actual_width - fitted_cubic_width|
         in metres exceeds this value.
 
     Defaults rationale:
-      - 0.10 (10%): for a 3.5 m lane this is +/- 35 cm, well above survey
-        noise (~5-10 cm), well below the asymmetries the issue calls out.
+      - 0.10 (10%): for a 3.5 m lane this corresponds to a ~35 cm width
+        swing, well above survey noise (~5-10 cm) and well below the
+        asymmetries the issue calls out.
       - 0.30 m: small enough to catch S-shape / discontinuous-curvature
         cases the cubic <width> cannot represent; large enough that typical
         clean-data residuals do not trip.
 
     Attributes:
-        asymmetry_tolerance: Relative left/right distance diff threshold.
+        asymmetry_tolerance: Relative width-variation threshold.
         width_residual_tolerance: Max single-sample fit error in metres.
     """
 
