@@ -30,6 +30,24 @@ class LaneLink:
         return elem
 
 
+@dataclass(frozen=True)
+class Priority:
+    """OpenDRIVE <junction><priority high low/> element.
+
+    `high` and `low` are connecting road IDs inside the junction.
+    Frozen so the type is hashable and can be set-deduplicated.
+    """
+
+    high: int
+    low: int
+
+    def to_xml(self) -> ET.Element:
+        elem = ET.Element("priority")
+        elem.set("high", str(self.high))
+        elem.set("low", str(self.low))
+        return elem
+
+
 @dataclass
 class Connection:
     """Connection within a junction.
