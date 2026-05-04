@@ -1,7 +1,7 @@
 """OpenDRIVE lane element definitions."""
 
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import List, Literal, Mapping, Optional, Tuple
 import lxml.etree as ET
 
 from .enums import (
@@ -205,6 +205,30 @@ class LaneBorder:
         for attr in ("a", "b", "c", "d"):
             elem.set(attr, str(replace_subnormal(getattr(self, attr))))
         return elem
+
+
+@dataclass(frozen=True)
+class LanePolynomial:
+    """Tagged result of the width-or-border decision for one lane (Issue #440).
+
+    ``kind="width"``  — ``segments`` are ``(s_offset, a, b, c, d)`` of the
+    LOCAL width(s) cubic; emitted as ``<lane><width>``.
+
+    ``kind="border"`` — ``segments`` are ``(s_offset, a, b, c, d)`` of the
+    SIGNED outer-bound t(s) cubic relative to the road reference line;
+    emitted as ``<lane><border>``. Mutually exclusive with width per the
+    OpenDRIVE 1.4 spec.
+    """
+
+    kind: Literal["width", "border"]
+    segments: List[Tuple[float, float, float, float, float]]
+    total_length: float
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("width", "border"):
+            raise ValueError(
+                f"LanePolynomial.kind must be 'width' or 'border', got {self.kind!r}"
+            )
 
 
 @dataclass

@@ -143,6 +143,30 @@ class ParamPoly3Constants:
 
 
 @dataclass(frozen=True)
+class LaneBorderConstants:
+    """Tolerance controlling ``<lane><border>`` emission for asymmetric lanelets.
+
+    A single perpendicular-projection deviation metric drives the trigger:
+    at uniformly-sampled positions across the lanelet, predict the outer
+    edge as ``anchor(s) + width(s) * n_outer(s)`` and measure the distance
+    to the closest point on the actual outer-bound polyline. When that max
+    distance exceeds the tolerance, the lanelet is emitted as
+    ``<border>`` (mutually exclusive with ``<width>`` per OpenDRIVE 1.4).
+
+    Attributes:
+        outer_bound_deviation_tolerance: Maximum allowed perpendicular
+            distance, in metres, between the cubic-``<width>``-predicted
+            outer edge and the actual outer-bound polyline. Default
+            ``0.30`` m: small enough to catch ``30`` cm+ outer-edge
+            misplacement (S-shapes, one-sided bulges, sharp asymmetries),
+            large enough that typical clean-data residuals (a few cm on
+            well-surveyed roads) do not trip.
+    """
+
+    outer_bound_deviation_tolerance: float = 0.30
+
+
+@dataclass(frozen=True)
 class ConversionConstants:
     """Main container for all internal constants used in the conversion process.
 
@@ -181,6 +205,8 @@ class ConversionConstants:
         centerline: Centerline extraction constants
         preprocessing: Preprocessing operation constants
         opendrive: OpenDRIVE format constants
+        parampoly3: ParamPoly3 segmentation constants
+        lane_border: Tolerance for ``<lane><border>`` emission (Issue #440)
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -189,6 +215,7 @@ class ConversionConstants:
     preprocessing: PreprocessingConstants = PreprocessingConstants()
     opendrive: OpenDriveConstants = OpenDriveConstants()
     parampoly3: ParamPoly3Constants = ParamPoly3Constants()
+    lane_border: LaneBorderConstants = LaneBorderConstants()
 
 
 @dataclass

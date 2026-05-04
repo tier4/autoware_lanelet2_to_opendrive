@@ -14,6 +14,7 @@ from .opendrive_dataclass import (
     RoadMark,
     LaneLink,
     LaneBorder,
+    LanePolynomial,
     LaneHeight,
     LaneSpeed,
     SpeedUnit,
@@ -84,6 +85,21 @@ class Lane:
     def _add_speed(self, speed: LaneSpeed) -> None:
         """Add a speed limit to the lane."""
         self.speeds.append(speed)
+
+    def _add_polynomial(self, poly: LanePolynomial) -> None:
+        """Route a ``LanePolynomial`` to ``<width>`` or ``<border>`` emission.
+
+        Mirrors the ``s_offset < total_length`` filter used by
+        :meth:`_add_width_from_spline` so trailing-segment artefacts beyond
+        the curve's parameterised range are not emitted.
+        """
+        for s_offset, a, b, c, d in poly.segments:
+            if s_offset >= poly.total_length:
+                continue
+            if poly.kind == "width":
+                self._add_width(LaneWidth(s_offset=s_offset, a=a, b=b, c=c, d=d))
+            else:  # "border"
+                self._add_border(LaneBorder(s_offset=s_offset, a=a, b=b, c=c, d=d))
 
     def _add_width_from_spline(
         self,
@@ -224,23 +240,27 @@ class Lane:
                 default_sample_interval=width_config.default_sample_interval,
             )
 
-        # Use reference line-based width calculation if reference line is provided
+        # When a reference line is available, route through
+        # ``compute_lane_outer_polynomial`` (Issue #440): symmetric / well-fit
+        # lanelets emit ``<width>`` exactly as before; lanelets whose cubic
+        # ``<width>`` mis-locates the outer edge emit ``<border>`` instead.
         if reference_line_spline is not None:
-            from ..centerline import estimate_lanelet_width_with_reference_line
+            from ..centerline import compute_lane_outer_polynomial
 
-            width_spline = estimate_lanelet_width_with_reference_line(
+            poly = compute_lane_outer_polynomial(
                 lanelet,
                 reference_line_spline,
                 config,
+                rule=(rule or "RHT").upper(),
                 anchor_start_override=anchor_start_override,
                 anchor_end_override=anchor_end_override,
             )
+            lane._add_polynomial(poly)
         else:
-            # Fallback to old behavior (for backward compatibility)
+            # Reference-line-less callers (legacy / tests): keep ``<width>``-only
+            # output via the original sampling adapter.
             width_spline = estimate_lanelet_width_as_spline(lanelet, config)
-
-        # Sample the spline at multiple points to create width definitions
-        lane._add_width_from_spline(width_spline)
+            lane._add_width_from_spline(width_spline)
 
         # Road marks are assigned by LaneSection.construct_from_lanelet_groups
         # so that the routing-graph-derived laneChange permission can be

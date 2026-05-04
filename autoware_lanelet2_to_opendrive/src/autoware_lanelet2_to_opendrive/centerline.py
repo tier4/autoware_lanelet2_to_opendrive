@@ -1,20 +1,21 @@
 import logging
 import numpy as np
 import lanelet2
-from typing import List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 from .config import DEFAULT_CONFIG
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
 from .conversion_config import WidthEstimationConfig, WidthReference
 
+if TYPE_CHECKING:
+    # Avoid runtime circular import (opendrive package's __init__ chains back
+    # into this module via opendrive_dataclass → road → centerline). The
+    # actual ``LanePolynomial`` import happens inside
+    # ``compute_lane_outer_polynomial`` at call time.
+    from .opendrive.lane_elements import LanePolynomial
+
 logger = logging.getLogger(__name__)
-
-
-class AsymmetryLaneletException(Exception):
-    """Exception raised when a lanelet has asymmetric left and right widths."""
-
-    pass
 
 
 class Width1DSplineAdapter:
@@ -848,4 +849,333 @@ def extract_centerline_as_spline_from_two_lanelets(
         start_vel=_get_start_vel(left_lanelet),
         end_vel=_get_end_vel(left_lanelet),
         num_control_points=num_control_points,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Issue #440: <lane><border> emission for asymmetric lanelets
+# ---------------------------------------------------------------------------
+#
+# The cubic <width> emission interpolates a few sample widths exactly; for
+# many real-world lanelets (curved, mostly symmetric) that is faithful. For
+# the tail (one-sided bulges, S-shapes, sharp asymmetries) the cubic places
+# the outer edge somewhere the actual rightBound / leftBound is not. The
+# perpendicular-projection trigger below detects that mis-fit and routes
+# the lanelet through ``<lane><border>`` instead, which lets us state the
+# outer edge as a signed-t cubic against the road reference line directly.
+
+
+def _closest_point_on_polyline_2d(p: np.ndarray, polyline_xy: np.ndarray) -> np.ndarray:
+    """Return the 2D point on ``polyline_xy`` closest to ``p``.
+
+    Args:
+        p: 2D query point with shape (2,).
+        polyline_xy: Polyline vertices with shape (N, 2), N >= 2.
+
+    Returns:
+        2D point on the polyline (interior of a segment or a vertex).
+    """
+    eps = DEFAULT_CONFIG.geometry.epsilon
+    best_pt = polyline_xy[0].astype(float, copy=True)
+    best_d2 = float("inf")
+    for i in range(len(polyline_xy) - 1):
+        a = polyline_xy[i]
+        b = polyline_xy[i + 1]
+        ab = b - a
+        ab_norm2 = float(np.dot(ab, ab))
+        if ab_norm2 < eps:
+            cand = a.astype(float, copy=True)
+        else:
+            t = float(np.dot(p - a, ab) / ab_norm2)
+            t_clamped = max(0.0, min(1.0, t))
+            cand = a + t_clamped * ab
+        d2 = float(np.sum((p - cand) ** 2))
+        if d2 < best_d2:
+            best_d2 = d2
+            best_pt = cand
+    return best_pt
+
+
+def _polyline_tangent_2d(
+    points_xy: np.ndarray, cumulative: np.ndarray, s: float
+) -> np.ndarray:
+    """Return the 2D tangent direction of a polyline at arc length ``s``.
+
+    Returned vector is the unnormalised segment direction (caller normalises).
+    """
+    s = float(np.clip(s, 0.0, cumulative[-1]))
+    seg_idx = int(np.searchsorted(cumulative, s) - 1)
+    seg_idx = int(np.clip(seg_idx, 0, len(points_xy) - 2))
+    return points_xy[seg_idx + 1] - points_xy[seg_idx]
+
+
+def _max_outer_bound_deviation(
+    lanelet,
+    reference_line_spline: "Splines",
+    width_adapter: Width1DSplineAdapter,
+    config: WidthEstimationConfig,
+    rule: str,
+) -> float:
+    """Maximum perpendicular distance between the cubic-``<width>``-predicted
+    outer edge and the actual outer-bound polyline of a lanelet.
+
+    For each sample at uniform ``t_norm`` ∈ [0, 1] across the lanelet:
+
+    1. Locate the anchor point ``p_anchor`` on the lanelet's anchor-bound
+       polyline at arc length ``t_norm * anchor_total_length``.
+    2. Compute the 2D unit normal to the anchor tangent, signed toward the
+       outer side (right-hand for RHT, left-hand for LHT).
+    3. Predict the outer edge:
+       ``p_pred = p_anchor + width(s_road) * n_outer``,
+       where ``s_road = t_norm * road_length`` is the road-reference-line
+       arc length passed to ``width_adapter``.
+    4. Find the closest 2D point ``q`` on the actual outer-bound polyline
+       to ``p_pred``.
+    5. ``deviation_i = ||p_pred - q||``.
+
+    The maximum across samples is returned. A perfectly-fit symmetric
+    lanelet returns ≈ 0; a lanelet whose cubic ``<width>`` mis-locates the
+    outer edge (S-shape, one-sided bulge) returns a value at least as
+    large as the worst mis-location in metres.
+
+    For ``WidthReference.CENTER_LINE`` (no perpendicular concept tied to a
+    specific bound) this returns 0.0 unconditionally — those lanelets
+    keep the existing ``<width>`` path.
+
+    Args:
+        lanelet: lanelet-like object with ``leftBound`` / ``rightBound``
+            iterables of points exposing ``.x .y .z``.
+        reference_line_spline: Road reference line.
+        width_adapter: Adapter returned by
+            ``estimate_lanelet_width_with_reference_line``.
+        config: ``WidthEstimationConfig`` (only ``num_samples`` is used).
+        rule: ``"RHT"`` or ``"LHT"``. Selects the lanelet's anchor /
+            outer bounds to match
+            ``estimate_lanelet_width_with_reference_line``.
+
+    Returns:
+        Maximum perpendicular deviation in metres, or ``0.0`` if the
+        lanelet is too short to sample.
+    """
+    if config.reference == WidthReference.CENTER_LINE:
+        return 0.0
+
+    rule_upper = (rule or "RHT").upper()
+    if rule_upper == "RHT":
+        anchor_points = extract_points_3d(lanelet.leftBound)
+        outer_points = extract_points_3d(lanelet.rightBound)
+        # Outer (rightBound) is to the RIGHT of the anchor tangent.
+        # Right-hand 2D normal: rotate tangent -90° CCW → (+τ_y, -τ_x).
+        normal_sign = -1.0
+    else:  # "LHT"
+        anchor_points = extract_points_3d(lanelet.rightBound)
+        outer_points = extract_points_3d(lanelet.leftBound)
+        normal_sign = +1.0
+
+    if len(anchor_points) < 2 or len(outer_points) < 2:
+        return 0.0
+
+    eps = DEFAULT_CONFIG.geometry.epsilon
+    anchor_xy = anchor_points[:, :2]
+    outer_xy = outer_points[:, :2]
+
+    anchor_dists = np.linalg.norm(np.diff(anchor_xy, axis=0), axis=1)
+    anchor_cum = np.concatenate(([0.0], np.cumsum(anchor_dists)))
+    anchor_total = float(anchor_cum[-1])
+    if anchor_total < eps:
+        return 0.0
+
+    road_length = float(reference_line_spline.total_length)
+    if road_length < eps:
+        return 0.0
+
+    num_samples = max(_calculate_optimal_num_samples(road_length, config), 4)
+    normalized = np.linspace(0.0, 1.0, num_samples)
+
+    max_dev = 0.0
+    for t_norm in normalized:
+        s_anchor = float(t_norm) * anchor_total
+        p_anchor = _interpolate_on_line_segments(anchor_xy, anchor_cum, s_anchor)
+        tau = _polyline_tangent_2d(anchor_xy, anchor_cum, s_anchor)
+        tau_norm = float(np.linalg.norm(tau))
+        if tau_norm < eps:
+            continue
+        tau_unit = tau / tau_norm
+        n_left = np.array([-tau_unit[1], tau_unit[0]])
+        n_outer = normal_sign * n_left
+
+        s_road = float(t_norm) * road_length
+        width = float(width_adapter.get_width_at_arc_length(s_road))
+        p_pred = p_anchor + width * n_outer
+
+        q = _closest_point_on_polyline_2d(p_pred, outer_xy)
+        d = float(np.linalg.norm(p_pred - q))
+        if d > max_dev:
+            max_dev = d
+
+    return max_dev
+
+
+def _fit_signed_t_spline(
+    bound_points: np.ndarray,
+    reference_line_spline: "Splines",
+    config: WidthEstimationConfig,
+) -> CubicSpline1D:
+    """Fit a cubic spline of signed t(s) for an outer-bound polyline against
+    the road reference line.
+
+    Sampling strategy: uniform reference-line arc length ``s ∈ [0, L_ref]``.
+    At each ``s``:
+
+    1. ``p_ref(s)`` = reference line position.
+    2. ``τ(s)`` = reference line tangent.
+    3. ``n_left(s)`` = unit ``+90°`` CCW rotation of ``τ`` (OpenDRIVE
+       convention: t > 0 is left of the reference line).
+    4. ``q(s)`` = closest 2D point on ``bound_points[:, :2]`` to
+       ``p_ref(s)``.
+    5. ``t_signed(s) = (q(s) - p_ref(s)) · n_left(s)``.
+
+    Sign by construction:
+      - RHT outer = rightBound (right of ref line)  → ``t_signed < 0``.
+      - LHT outer = leftBound  (left of ref line)   → ``t_signed > 0``.
+
+    Sampling at uniform ``s`` guarantees the first segment has
+    ``sOffset = 0.0`` and the curve covers the full road s range, matching
+    the existing ``<width>`` emission convention.
+
+    Args:
+        bound_points: Outer-bound polyline (N, 3) in world frame.
+        reference_line_spline: Road reference line.
+        config: ``WidthEstimationConfig`` (only ``num_samples`` is used).
+
+    Returns:
+        ``CubicSpline1D`` mapping reference-line ``s`` to signed t with
+        ``bc_type="not-a-knot"``.
+
+    Raises:
+        ValueError: if fewer than two boundary points are supplied or the
+            reference line has zero length.
+    """
+    if bound_points.shape[0] < 2:
+        raise ValueError(
+            f"Need at least 2 boundary points for signed-t fit, "
+            f"got {bound_points.shape[0]}"
+        )
+
+    L = float(reference_line_spline.total_length)
+    eps = DEFAULT_CONFIG.geometry.epsilon
+    if L < eps:
+        raise ValueError("Reference line has zero length; cannot fit signed t(s).")
+
+    bound_xy = bound_points[:, :2]
+    num_samples = max(_calculate_optimal_num_samples(L, config), 4)
+    s_values = np.linspace(0.0, L, num_samples)
+    t_values: List[float] = []
+
+    last_t: float = 0.0
+    for s in s_values:
+        p_ref = reference_line_spline.evaluate(float(s), derivative=0)[:2]
+        tau = reference_line_spline.evaluate(float(s), derivative=1)[:2]
+        tau_norm = float(np.linalg.norm(tau))
+        if tau_norm < eps:
+            t_values.append(last_t)
+            continue
+        n_left = np.array([-tau[1], tau[0]]) / tau_norm
+        q = _closest_point_on_polyline_2d(p_ref, bound_xy)
+        t_signed = float(np.dot(q - p_ref, n_left))
+        t_values.append(t_signed)
+        last_t = t_signed
+
+    return CubicSpline1D(
+        np.asarray(s_values, dtype=float),
+        np.asarray(t_values, dtype=float),
+        bc_type="not-a-knot",
+    )
+
+
+def compute_lane_outer_polynomial(
+    lanelet,
+    reference_line_spline: "Splines",
+    config: WidthEstimationConfig,
+    *,
+    rule: str,
+    anchor_start_override: Optional[Tuple[float, float, float]] = None,
+    anchor_end_override: Optional[Tuple[float, float, float]] = None,
+    deviation_tolerance: Optional[float] = None,
+) -> "LanePolynomial":
+    """Decide whether a lanelet emits as ``<lane><width>`` or ``<lane><border>``.
+
+    Default path: run ``estimate_lanelet_width_with_reference_line`` and
+    return the result wrapped in ``LanePolynomial(kind="width", ...)`` —
+    numerically identical to today's output.
+
+    Trigger: the cubic-``<width>``-predicted outer edge mis-locates the
+    actual outer-bound polyline by more than
+    ``deviation_tolerance`` metres
+    (default ``DEFAULT_CONFIG.lane_border.outer_bound_deviation_tolerance``,
+    0.30 m). On trigger, fits a signed-t cubic of the outer-bound polyline
+    against the road reference line and returns
+    ``LanePolynomial(kind="border", ...)``.
+
+    Args:
+        lanelet: Lanelet2 lanelet (or mock with ``leftBound`` / ``rightBound``
+            / ``id``).
+        reference_line_spline: Road reference line.
+        config: ``WidthEstimationConfig`` used by the width estimator and
+            sample-count helpers.
+        rule: ``"RHT"`` or ``"LHT"``. Selects the outer bound for both
+            the trigger metric and the border fit.
+        anchor_start_override: Optional ``(x, y, z)`` override forwarded
+            to the width estimator (junction endpoint pinning).
+        anchor_end_override: Optional ``(x, y, z)`` override at the
+            ``s = length`` end of the anchor.
+        deviation_tolerance: Optional override of the
+            ``DEFAULT_CONFIG.lane_border.outer_bound_deviation_tolerance``
+            value, in metres.
+
+    Returns:
+        ``LanePolynomial`` with ``kind == "width"`` or ``kind == "border"``.
+    """
+    from .opendrive.lane_elements import LanePolynomial
+
+    rule_upper = (rule or "RHT").upper()
+    if rule_upper not in ("RHT", "LHT"):
+        raise ValueError(f"rule must be 'RHT' or 'LHT', got {rule!r}")
+
+    tol = (
+        deviation_tolerance
+        if deviation_tolerance is not None
+        else DEFAULT_CONFIG.lane_border.outer_bound_deviation_tolerance
+    )
+
+    width_adapter = estimate_lanelet_width_with_reference_line(
+        lanelet,
+        reference_line_spline,
+        config,
+        anchor_start_override=anchor_start_override,
+        anchor_end_override=anchor_end_override,
+    )
+
+    deviation = _max_outer_bound_deviation(
+        lanelet, reference_line_spline, width_adapter, config, rule_upper
+    )
+
+    if deviation <= tol:
+        return LanePolynomial(
+            kind="width",
+            segments=width_adapter.get_polynomial_segments(),
+            total_length=float(width_adapter.total_length),
+        )
+
+    outer_bound = lanelet.rightBound if rule_upper == "RHT" else lanelet.leftBound
+    bound_points = extract_points_3d(outer_bound)
+    border_spline = _fit_signed_t_spline(bound_points, reference_line_spline, config)
+    logger.info(
+        f"Lanelet {getattr(lanelet, 'id', '?')}: emitting <border> "
+        f"(outer-bound deviation={deviation:.3f}m > tol={tol:.3f}m)"
+    )
+    return LanePolynomial(
+        kind="border",
+        segments=border_spline.get_segments(),
+        total_length=float(border_spline.total_arc_length),
     )

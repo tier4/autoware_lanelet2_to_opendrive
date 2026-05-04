@@ -2,6 +2,8 @@
 
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LanePolynomial
+from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneType
 from autoware_lanelet2_to_opendrive.opendrive.reference_line import ReferenceLine
 
 
@@ -190,3 +192,59 @@ def test_lane_section_invalid_traffic_rule(lanelet_map):
         LaneSection.construct_from_lanelet_groups(
             lanelet_map, lanelet_group, s_offset=0.0, traffic_rule="INVALID"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #440: Lane._add_polynomial XML emission
+# ---------------------------------------------------------------------------
+
+
+def test_lane_add_polynomial_width_emits_width_only():
+    """``LanePolynomial(kind="width", ...)`` produces ``<width>``, no ``<border>``."""
+    lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    lane._add_polynomial(
+        LanePolynomial(
+            kind="width",
+            segments=[(0.0, 3.5, 0.0, 0.0, 0.0)],
+            total_length=10.0,
+        )
+    )
+    xml = lane.to_xml()
+    assert len(xml.findall("width")) == 1
+    assert len(xml.findall("border")) == 0
+
+
+def test_lane_add_polynomial_border_emits_border_only():
+    """``LanePolynomial(kind="border", ...)`` produces ``<border>``, no ``<width>``."""
+    lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    lane._add_polynomial(
+        LanePolynomial(
+            kind="border",
+            segments=[(0.0, -3.5, 0.1, 0.01, 0.0)],
+            total_length=10.0,
+        )
+    )
+    xml = lane.to_xml()
+    border_elems = xml.findall("border")
+    assert len(border_elems) == 1
+    assert len(xml.findall("width")) == 0
+    assert float(border_elems[0].get("a")) == -3.5
+
+
+def test_lane_add_polynomial_drops_segments_past_total_length():
+    """Segments at or beyond ``total_length`` are filtered (matches ``<width>`` path)."""
+    lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    lane._add_polynomial(
+        LanePolynomial(
+            kind="width",
+            segments=[
+                (0.0, 3.5, 0.0, 0.0, 0.0),
+                (5.0, 3.6, 0.0, 0.0, 0.0),
+                (10.0, 3.7, 0.0, 0.0, 0.0),  # at total_length → dropped
+                (12.0, 3.8, 0.0, 0.0, 0.0),  # past total_length → dropped
+            ],
+            total_length=10.0,
+        )
+    )
+    xml = lane.to_xml()
+    assert len(xml.findall("width")) == 2
