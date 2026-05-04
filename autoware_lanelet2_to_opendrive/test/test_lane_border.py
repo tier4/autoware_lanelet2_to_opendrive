@@ -130,15 +130,19 @@ def _bulged_left_lanelet() -> _MockLanelet:
 
 
 def test_lane_border_constants_default():
-    """``LaneBorderConstants`` exposes the documented default tolerance."""
+    """``LaneBorderConstants`` exposes the documented default tolerance.
+
+    The default is intentionally HIGH (50 m) so production conversion is
+    a no-op out of the box; see the class docstring for the rationale.
+    """
     cfg = LaneBorderConstants()
-    assert cfg.outer_bound_deviation_tolerance == 0.30
+    assert cfg.outer_bound_deviation_tolerance == 50.0
 
 
 def test_default_config_exposes_lane_border():
     """``DEFAULT_CONFIG.lane_border`` is wired into ``ConversionConstants``."""
     assert isinstance(DEFAULT_CONFIG.lane_border, LaneBorderConstants)
-    assert DEFAULT_CONFIG.lane_border.outer_bound_deviation_tolerance == 0.30
+    assert DEFAULT_CONFIG.lane_border.outer_bound_deviation_tolerance == 50.0
 
 
 # ---------------------------------------------------------------------------

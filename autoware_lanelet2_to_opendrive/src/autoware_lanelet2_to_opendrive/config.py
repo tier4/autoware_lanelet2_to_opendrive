@@ -153,17 +153,27 @@ class LaneBorderConstants:
     distance exceeds the tolerance, the lanelet is emitted as
     ``<border>`` (mutually exclusive with ``<width>`` per OpenDRIVE 1.4).
 
+    The default is intentionally set HIGH (50 m) so the trigger is a no-op
+    on real data out of the box. This PR lands the routing architecture
+    (``LanePolynomial``, ``Lane._add_polynomial``, ``compute_lane_outer_polynomial``,
+    border fit) without changing emission behaviour: every lanelet keeps
+    going through the existing ``<width>`` path. Tuning the threshold to
+    catch the asymmetric tail Issue #440 targets needs real-data
+    calibration on a wider corpus than nishishinjuku alone — that's
+    follow-up work. Callers that want to opt in earlier can pass
+    ``deviation_tolerance=`` to ``compute_lane_outer_polynomial`` (or
+    override this constant in their own ``Config`` instance).
+
     Attributes:
         outer_bound_deviation_tolerance: Maximum allowed perpendicular
             distance, in metres, between the cubic-``<width>``-predicted
             outer edge and the actual outer-bound polyline. Default
-            ``0.30`` m: small enough to catch ``30`` cm+ outer-edge
-            misplacement (S-shapes, one-sided bulges, sharp asymmetries),
-            large enough that typical clean-data residuals (a few cm on
-            well-surveyed roads) do not trip.
+            ``50.0`` m (effectively disabled — see class docstring);
+            tune downwards (e.g. to ``0.30`` m) once the metric and
+            real-world deviations are characterised.
     """
 
-    outer_bound_deviation_tolerance: float = 0.30
+    outer_bound_deviation_tolerance: float = 50.0
 
 
 @dataclass(frozen=True)
