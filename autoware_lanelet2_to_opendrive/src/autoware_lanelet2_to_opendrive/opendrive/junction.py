@@ -184,6 +184,47 @@ def _warn_on_conflicts(
             )
 
 
+def _extract_right_of_way_records(
+    lanelet_map: lanelet2.core.LaneletMap,
+) -> List[_RightOfWayRecord]:
+    """Walk regulatoryElementLayer, filter by subtype, extract id sets.
+
+    Skips REs missing a `right_of_way` or `yield` parameter list (logged
+    at DEBUG). Per-RE exceptions are caught and logged at WARNING so a
+    single malformed RE does not abort conversion.
+    """
+    records: List[_RightOfWayRecord] = []
+    for re in lanelet_map.regulatoryElementLayer:
+        try:
+            if dict(re.attributes).get("subtype") != "right_of_way":
+                continue
+            params = re.parameters
+            row_lanelets = list(params.get("right_of_way", []))
+            yield_lanelets = list(params.get("yield", []))
+            if not row_lanelets or not yield_lanelets:
+                log.debug(
+                    "RE %d: incomplete right_of_way (row=%d, yield=%d); skipped",
+                    re.id,
+                    len(row_lanelets),
+                    len(yield_lanelets),
+                )
+                continue
+            records.append(
+                _RightOfWayRecord(
+                    re_id=re.id,
+                    row_lanelet_ids=tuple(ll.id for ll in row_lanelets),
+                    yield_lanelet_ids=tuple(ll.id for ll in yield_lanelets),
+                )
+            )
+        except Exception:
+            log.warning(
+                "Failed to parse regulatory element %d; skipped",
+                getattr(re, "id", -1),
+                exc_info=True,
+            )
+    return records
+
+
 @dataclass
 class Connection:
     """Connection within a junction.

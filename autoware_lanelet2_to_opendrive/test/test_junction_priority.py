@@ -292,3 +292,26 @@ def test_build_priorities_conflict_both_emitted(caplog):
     msg = conflict_warnings[0].message
     assert "junction 9" in msg
     assert "REs [1] vs [2]" in msg or "REs [2] vs [1]" in msg
+
+
+def test_extract_right_of_way_records_from_nishishinjuku(lanelet_map):
+    """Confirm the lanelet2 walk yields exactly 85 right_of_way records.
+
+    Uses the shared `lanelet_map` fixture from conftest.py
+    (loads nishishinjuku.osm).
+    """
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _extract_right_of_way_records,
+    )
+
+    records = list(_extract_right_of_way_records(lanelet_map))
+
+    # nishishinjuku.osm carries 85 right_of_way REs (verified by grep).
+    assert len(records) == 85
+
+    # Every record has at least one lanelet on each side, otherwise the
+    # extractor should have skipped it.
+    for r in records:
+        assert r.row_lanelet_ids
+        assert r.yield_lanelet_ids
+        assert isinstance(r.re_id, int)
