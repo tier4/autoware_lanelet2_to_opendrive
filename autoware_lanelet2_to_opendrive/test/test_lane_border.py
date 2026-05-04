@@ -3,7 +3,11 @@
 import numpy as np
 import pytest
 
-from autoware_lanelet2_to_opendrive.centerline import _max_relative_asymmetry
+from autoware_lanelet2_to_opendrive.centerline import (
+    _max_relative_asymmetry,
+    _max_width_fit_residual,
+    estimate_lanelet_width_as_spline,
+)
 from autoware_lanelet2_to_opendrive.config import (
     DEFAULT_CONFIG,
     LaneBorderConstants,
@@ -101,3 +105,30 @@ def test_max_relative_asymmetry_bulged_right_trips_threshold():
     config = WidthEstimationConfig(num_samples=11, reference=WidthReference.LEFT_BOUND)
     ratio = _max_relative_asymmetry(lanelet, config)
     assert ratio > 0.10  # well above DEFAULT_CONFIG.lane_border.asymmetry_tolerance
+
+
+def test_max_width_fit_residual_symmetric_is_small():
+    """A symmetric straight lanelet has residual far below 1 cm."""
+    lanelet = _symmetric_lanelet()
+    config = WidthEstimationConfig(num_samples=11, reference=WidthReference.LEFT_BOUND)
+    width_adapter = estimate_lanelet_width_as_spline(lanelet, config)
+    residual = _max_width_fit_residual(lanelet, width_adapter, config)
+    assert residual < 0.01
+
+
+def test_max_width_fit_residual_s_shape_is_large():
+    """S-shape width (non-monotonic) trips the residual threshold."""
+    # Width oscillates: 2.0 -> 3.5 -> 2.0 -> 3.5 -> 2.0 in 5 stations.
+    # A single cubic cannot fit two interior extrema, so residual > 0.30 m.
+    left = [_MockPoint(x, 1.75) for x in np.linspace(0, 10, 21)]
+    right_y = []
+    for x in np.linspace(0, 10, 21):
+        # 4 extrema profile: -0.25, -1.75, -0.25, -1.75, -0.25
+        phase = (x / 10.0) * 4.0 * np.pi
+        right_y.append(-1.0 + 0.75 * np.cos(phase))  # right_y in [-1.75, -0.25]
+    right = [_MockPoint(x, y) for x, y in zip(np.linspace(0, 10, 21), right_y)]
+    lanelet = _MockLanelet(left, right, lanelet_id=2)
+    config = WidthEstimationConfig(num_samples=21, reference=WidthReference.LEFT_BOUND)
+    width_adapter = estimate_lanelet_width_as_spline(lanelet, config)
+    residual = _max_width_fit_residual(lanelet, width_adapter, config)
+    assert residual > 0.30

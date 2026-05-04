@@ -467,6 +467,70 @@ def _max_relative_asymmetry(
     return max_ratio
 
 
+def _max_width_fit_residual(
+    lanelet,
+    width_adapter,
+    config: WidthEstimationConfig,
+) -> float:
+    """Return max_i |actual_width_i - fitted_width_i| across the same sample s.
+
+    Re-samples actual widths from the lanelet's bounds at the normalized
+    positions used by the width estimator (cheap; no spline rebuild) and
+    compares them to ``width_adapter.get_width_at_arc_length(s)``.
+
+    Args:
+        lanelet: lanelet-like object with leftBound and rightBound iterables.
+        width_adapter: Width1DSplineAdapter returned by
+            ``estimate_lanelet_width_as_spline`` or
+            ``estimate_lanelet_width_with_reference_line``.
+        config: WidthEstimationConfig (only ``num_samples`` is used).
+
+    Returns:
+        Maximum absolute fitting error in metres, or 0.0 if the lanelet is
+        too short to sample.
+    """
+    left_points = extract_points_3d(lanelet.leftBound)
+    right_points = extract_points_3d(lanelet.rightBound)
+
+    if len(left_points) < 2 or len(right_points) < 2:
+        return 0.0
+
+    left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
+    left_cumulative = np.concatenate(([0], np.cumsum(left_dists)))
+    right_dists = np.linalg.norm(np.diff(right_points, axis=0), axis=1)
+    right_cumulative = np.concatenate(([0], np.cumsum(right_dists)))
+
+    left_total = float(left_cumulative[-1])
+    right_total = float(right_cumulative[-1])
+    if (
+        left_total < DEFAULT_CONFIG.geometry.epsilon
+        or right_total < DEFAULT_CONFIG.geometry.epsilon
+    ):
+        return 0.0
+
+    num_samples = max(config.num_samples, 2)
+    normalized = np.linspace(0.0, 1.0, num_samples)
+    total_arc = float(width_adapter.total_length)
+
+    max_residual = 0.0
+    for t in normalized:
+        s_left = t * left_total
+        s_right = t * right_total
+        left_pos = _interpolate_on_line_segments(left_points, left_cumulative, s_left)
+        right_pos = _interpolate_on_line_segments(
+            right_points, right_cumulative, s_right
+        )
+        actual_width = float(np.linalg.norm(left_pos - right_pos))
+        # Adapter is parameterised by its own arc length [0, total_length];
+        # use the same normalized position to evaluate the fitted curve.
+        s_adapter = t * total_arc
+        fitted_width = float(width_adapter.get_width_at_arc_length(s_adapter))
+        residual = abs(actual_width - fitted_width)
+        if residual > max_residual:
+            max_residual = residual
+    return max_residual
+
+
 def estimate_lanelet_width_with_reference_line(
     lanelet: lanelet2.core.Lanelet,
     reference_line_spline: "Splines",
