@@ -308,7 +308,17 @@ def test_junction_connection_endpoints_match_linked_roads():
 
 
 def test_nishishinjuku_emits_junction_priorities() -> None:
-    """End-to-end: 85 right_of_way REs in nishishinjuku produce > 0 <priority> nodes."""
+    """End-to-end: 85 right_of_way REs in nishishinjuku produce > 0 <priority> nodes.
+
+    Also runs qc-framework against the produced .xodr so a malformed
+    `<priority>` shape (wrong attribute order, schema-illegal placement, etc.)
+    surfaces here rather than only via downstream consumers.
+    """
+    from autoware_lanelet2_to_opendrive.qc_validate import (
+        load_ignore_patterns,
+        validate,
+    )
+
     xodr_path = _build_nishishinjuku_xodr()
     tree = ET.parse(str(xodr_path))
 
@@ -328,3 +338,7 @@ def test_nishishinjuku_emits_junction_priorities() -> None:
     for p in priorities:
         assert p.get("high") in road_ids, p.attrib
         assert p.get("low") in road_ids, p.attrib
+
+    # qc-framework must also accept the emitted XML.
+    errors = validate(xodr_path, load_ignore_patterns())
+    assert errors == 0, f"qc-framework reported {errors} ERROR(s) on {xodr_path}"

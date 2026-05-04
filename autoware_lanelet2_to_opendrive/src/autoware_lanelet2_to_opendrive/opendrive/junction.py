@@ -83,10 +83,10 @@ def _build_priorities_from_records(
     )
 
     for record in records:
-        row_roads, row_jid = _resolve_lanelet_ids(
+        row_roads, row_jid, row_unmapped = _resolve_lanelet_ids(
             record.row_lanelet_ids, lanelet_to_road_id, lanelet_to_junction_id
         )
-        yield_roads, yield_jid = _resolve_lanelet_ids(
+        yield_roads, yield_jid, yield_unmapped = _resolve_lanelet_ids(
             record.yield_lanelet_ids, lanelet_to_road_id, lanelet_to_junction_id
         )
 
@@ -102,6 +102,17 @@ def _build_priorities_from_records(
                 record.re_id,
                 row_jid,
                 yield_jid,
+            )
+            continue
+        if row_unmapped or yield_unmapped:
+            # Reject the whole RE rather than emit a partial Cartesian product
+            # built from the lanelets that happened to resolve. A partial
+            # priority set is harder to detect downstream than a missing one.
+            log.warning(
+                "RE %d: lanelets without road mapping (row=%s, yield=%s); skipped",
+                record.re_id,
+                row_unmapped,
+                yield_unmapped,
             )
             continue
         if not row_roads or not yield_roads:
@@ -137,25 +148,29 @@ def _resolve_lanelet_ids(
     lanelet_ids: Sequence[int],
     lanelet_to_road_id: Dict[int, int],
     lanelet_to_junction_id: Dict[int, int],
-) -> tuple[Set[int], Optional[int]]:
-    """Return (set of resolved road IDs, owning junction ID or None).
+) -> tuple[Set[int], Optional[int], List[int]]:
+    """Return (resolved road IDs, owning junction ID or None, unmapped lanelets).
 
     Returns junction None when zero lanelets or multiple distinct junctions
-    are referenced. Lanelets without a road mapping are silently dropped
-    (DEBUG-logged at the call site if needed).
+    are referenced. The third return value lists lanelet IDs with no road
+    mapping so the caller can reject the RE rather than emit a partial
+    Cartesian product.
     """
     road_ids: Set[int] = set()
     junction_ids: Set[int] = set()
+    unmapped: List[int] = []
     for lid in lanelet_ids:
         rid = lanelet_to_road_id.get(lid)
         jid = lanelet_to_junction_id.get(lid)
-        if rid is not None:
+        if rid is None:
+            unmapped.append(lid)
+        else:
             road_ids.add(rid)
         if jid is not None:
             junction_ids.add(jid)
     if len(junction_ids) != 1:
-        return road_ids, None
-    return road_ids, next(iter(junction_ids))
+        return road_ids, None, unmapped
+    return road_ids, next(iter(junction_ids)), unmapped
 
 
 def _warn_on_conflicts(
@@ -190,17 +205,22 @@ def _extract_right_of_way_records(
     """Walk regulatoryElementLayer, filter by subtype, extract id sets.
 
     Skips REs missing a `right_of_way` or `yield` parameter list (logged
-    at DEBUG). Per-RE exceptions are caught and logged at WARNING so a
-    single malformed RE does not abort conversion.
+    at DEBUG). Map-data exceptions on individual REs are caught and logged
+    at WARNING so a single malformed RE does not abort conversion;
+    programming errors (AttributeError, TypeError) are not caught — they
+    indicate a code-level bug that must surface, not be hidden.
     """
     records: List[_RightOfWayRecord] = []
     for re in lanelet_map.regulatoryElementLayer:
+        attrs = re.attributes
+        if "subtype" not in attrs or attrs["subtype"] != "right_of_way":
+            continue
         try:
-            if dict(re.attributes).get("subtype") != "right_of_way":
-                continue
             params = re.parameters
-            row_lanelets = list(params.get("right_of_way", []))
-            yield_lanelets = list(params.get("yield", []))
+            row_lanelets = (
+                list(params["right_of_way"]) if "right_of_way" in params else []
+            )
+            yield_lanelets = list(params["yield"]) if "yield" in params else []
             if not row_lanelets or not yield_lanelets:
                 log.debug(
                     "RE %d: incomplete right_of_way (row=%d, yield=%d); skipped",
@@ -216,11 +236,11 @@ def _extract_right_of_way_records(
                     yield_lanelet_ids=tuple(ll.id for ll in yield_lanelets),
                 )
             )
-        except Exception:
+        except (RuntimeError, ValueError, KeyError) as exc:
             log.warning(
-                "Failed to parse regulatory element %d; skipped",
+                "Failed to parse regulatory element %d (%s); skipped",
                 getattr(re, "id", -1),
-                exc_info=True,
+                exc,
             )
     return records
 
@@ -273,8 +293,8 @@ class Junction:
     id: int
     name: Optional[str] = None
     connections: List[Connection] = field(default_factory=list)
-    priorities: List[Priority] = field(default_factory=list)
     controller_ids: List[int] = field(default_factory=list)
+    priorities: List[Priority] = field(default_factory=list)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""

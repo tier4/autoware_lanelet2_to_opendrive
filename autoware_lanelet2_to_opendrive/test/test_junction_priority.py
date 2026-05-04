@@ -294,6 +294,37 @@ def test_build_priorities_conflict_both_emitted(caplog):
     assert "REs [1] vs [2]" in msg or "REs [2] vs [1]" in msg
 
 
+def test_build_priorities_partial_road_mapping_rejects_re(caplog):
+    """If any lanelet on a side has no road mapping, the whole RE is rejected."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(
+            re_id=42,
+            row_lanelet_ids=(101, 999),  # 999 has no road mapping
+            yield_lanelet_ids=(103,),
+        )
+    ]
+    lanelet_to_road_id = {101: 11, 103: 13}  # 999 deliberately missing
+    lanelet_to_junction_id = {101: 9, 999: 9, 103: 9}
+
+    with caplog.at_level(
+        logging.WARNING, logger="autoware_lanelet2_to_opendrive.opendrive.junction"
+    ):
+        result = _build_priorities_from_records(
+            records, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+    assert result == {}, (
+        "RE with partial road mapping must be rejected entirely, not produce a "
+        "Cartesian product over the lanelets that happened to resolve."
+    )
+    assert any("lanelets without road mapping" in rec.message for rec in caplog.records)
+
+
 def test_extract_right_of_way_records_from_nishishinjuku(lanelet_map):
     """Confirm the lanelet2 walk yields exactly 85 right_of_way records.
 
