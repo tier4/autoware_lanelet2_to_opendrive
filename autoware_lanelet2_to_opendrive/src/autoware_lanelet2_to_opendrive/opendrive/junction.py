@@ -204,23 +204,37 @@ def _extract_right_of_way_records(
 ) -> List[_RightOfWayRecord]:
     """Walk regulatoryElementLayer, filter by subtype, extract id sets.
 
-    Skips REs missing a `right_of_way` or `yield` parameter list (logged
-    at DEBUG). Map-data exceptions on individual REs are caught and logged
-    at WARNING so a single malformed RE does not abort conversion;
-    programming errors (AttributeError, TypeError) are not caught — they
-    indicate a code-level bug that must surface, not be hidden.
+    Uses ``RightOfWay.rightOfWayLanelets()`` / ``yieldLanelets()`` to obtain
+    strong-ref ``Lanelet`` lists. The generic ``RegulatoryElement.parameters``
+    map exposes ``ConstWeakLanelet`` items for which lanelet2's Python
+    bindings have no by-value to-Python converter, so iterating it raises
+    ``TypeError`` — the typed accessors avoid that path.
+
+    Skips REs missing either side (logged at DEBUG). Map-data exceptions
+    on individual REs are caught and logged at WARNING so a single
+    malformed RE does not abort conversion; programming errors
+    (AttributeError, TypeError) are not caught — they indicate a code-level
+    bug that must surface, not be hidden.
     """
     records: List[_RightOfWayRecord] = []
     for re in lanelet_map.regulatoryElementLayer:
         attrs = re.attributes
         if "subtype" not in attrs or attrs["subtype"] != "right_of_way":
             continue
-        try:
-            params = re.parameters
-            row_lanelets = (
-                list(params["right_of_way"]) if "right_of_way" in params else []
+        if not isinstance(re, lanelet2.core.RightOfWay):
+            # Subtype says right_of_way but the lanelet2 factory did not
+            # construct a typed RightOfWay (e.g. malformed parameters at
+            # load time). The generic .parameters map cannot be read for
+            # lanelet roles, so there is nothing further we can extract.
+            log.warning(
+                "RE %d: subtype=right_of_way but not RightOfWay-typed (%s); " "skipped",
+                re.id,
+                type(re).__name__,
             )
-            yield_lanelets = list(params["yield"]) if "yield" in params else []
+            continue
+        try:
+            row_lanelets = list(re.rightOfWayLanelets())
+            yield_lanelets = list(re.yieldLanelets())
             if not row_lanelets or not yield_lanelets:
                 log.debug(
                     "RE %d: incomplete right_of_way (row=%d, yield=%d); skipped",
