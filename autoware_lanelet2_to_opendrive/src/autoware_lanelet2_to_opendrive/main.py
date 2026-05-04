@@ -249,8 +249,21 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction.connections = connections
             junctions.append(junction)
 
+        # Phase B P1-1 (#438): emit <junction><priority/> from right_of_way REs.
+        priority_map = Junction.build_priorities_from_regulatory_elements(
+            lanelet_map=self.lanelet_map,
+            junctions=junctions,
+            junction_lanelet_groups=junction_groups,
+            lanelet_to_road_id=lanelet_to_road_id,
+        )
+        for junction in junctions:
+            junction.priorities = priority_map.get(junction.id, [])
+
+        total_priorities = sum(len(j.priorities) for j in junctions)
         print(
-            f"Built {len(junctions)} junctions with {sum(len(j.connections) for j in junctions)} total connections"
+            f"Built {len(junctions)} junctions with "
+            f"{sum(len(j.connections) for j in junctions)} total connections, "
+            f"{total_priorities} total priorities"
         )
 
         return (
