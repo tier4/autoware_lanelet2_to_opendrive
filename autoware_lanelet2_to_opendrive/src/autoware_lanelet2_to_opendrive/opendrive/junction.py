@@ -1,7 +1,9 @@
 """OpenDRIVE junction definitions."""
 
+import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional
+
 import lxml.etree as ET
 import lanelet2
 
@@ -9,6 +11,8 @@ from .enums import ContactPoint
 
 if TYPE_CHECKING:
     from .road import Road
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -47,6 +51,31 @@ class Priority:
         elem.set("high", str(self.high))
         elem.set("low", str(self.low))
         return elem
+
+
+@dataclass(frozen=True)
+class _RightOfWayRecord:
+    """One right_of_way RE reduced to plain integers.
+
+    Used by the pure helper `_build_priorities_from_records` so the
+    algorithm can be unit-tested without constructing native lanelet2 REs.
+    """
+
+    re_id: int
+    row_lanelet_ids: tuple[int, ...]
+    yield_lanelet_ids: tuple[int, ...]
+
+
+def _build_priorities_from_records(
+    records: Iterable[_RightOfWayRecord],
+    lanelet_to_road_id: Dict[int, int],
+    lanelet_to_junction_id: Dict[int, int],
+) -> Dict[int, List["Priority"]]:
+    """Pure: expand ROW x yield, dedup, conflict-warn, sort.
+
+    Implementation lands in subsequent tasks (TDD).
+    """
+    raise NotImplementedError
 
 
 @dataclass
