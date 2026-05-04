@@ -100,3 +100,34 @@ def test_build_priorities_simple_n_to_1():
     assert result == {
         9: [Priority(high=1001, low=1003), Priority(high=1002, low=1003)],
     }
+
+
+def test_build_priorities_n_to_m_cartesian():
+    """ROW={l1,l2}, yield={l3,l4} -> 4 priorities."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(
+            re_id=1,
+            row_lanelet_ids=(101, 102),
+            yield_lanelet_ids=(103, 104),
+        )
+    ]
+    lanelet_to_road_id = {101: 11, 102: 12, 103: 13, 104: 14}
+    lanelet_to_junction_id = {101: 9, 102: 9, 103: 9, 104: 9}
+
+    result = _build_priorities_from_records(
+        records, lanelet_to_road_id, lanelet_to_junction_id
+    )
+
+    assert result == {
+        9: [
+            Priority(high=11, low=13),
+            Priority(high=11, low=14),
+            Priority(high=12, low=13),
+            Priority(high=12, low=14),
+        ],
+    }
