@@ -315,3 +315,45 @@ def test_extract_right_of_way_records_from_nishishinjuku(lanelet_map):
         assert r.row_lanelet_ids
         assert r.yield_lanelet_ids
         assert isinstance(r.re_id, int)
+
+
+def test_junction_build_priorities_end_to_end_on_nishishinjuku(lanelet_map):
+    """End-to-end: real lanelet2 map -> dict[junction_id -> List[Priority]]."""
+    from autoware_lanelet2_to_opendrive.junction import (
+        _filter_lanelets_inside_junction,
+        find_junction_groups,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+
+    junction_lanelets = _filter_lanelets_inside_junction(list(lanelet_map.laneletLayer))
+    junction_groups = find_junction_groups(junction_lanelets)
+    junctions = [
+        Junction.construct_from_lanelet_groups(
+            junction_id=1000 + i, lanelet_group=group
+        )
+        for i, group in enumerate(junction_groups)
+    ]
+
+    # Build a (lanelet_id -> road_id) map where each junction lanelet maps
+    # to a synthetic road id derived from its lanelet id, so every lanelet
+    # resolves and we exercise the algorithm against real RE data.
+    lanelet_to_road_id = {ll.id: ll.id for ll in junction_lanelets}
+
+    result = Junction.build_priorities_from_regulatory_elements(
+        lanelet_map=lanelet_map,
+        junctions=junctions,
+        junction_lanelet_groups=junction_groups,
+        lanelet_to_road_id=lanelet_to_road_id,
+    )
+
+    # At least one junction must produce at least one priority pair.
+    total = sum(len(v) for v in result.values())
+    assert total > 0, "expected priorities from 85 right_of_way REs"
+
+    # Every emitted priority must reference high != low and known road IDs.
+    known_roads = set(lanelet_to_road_id.values())
+    for prios in result.values():
+        for p in prios:
+            assert p.high != p.low
+            assert p.high in known_roads
+            assert p.low in known_roads

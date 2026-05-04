@@ -619,6 +619,46 @@ class Junction:
         return list(connection_map.values())
 
     @staticmethod
+    def build_priorities_from_regulatory_elements(
+        lanelet_map: lanelet2.core.LaneletMap,
+        junctions: List["Junction"],
+        junction_lanelet_groups: List[List[lanelet2.core.Lanelet]],
+        lanelet_to_road_id: Dict[int, int],
+    ) -> Dict[int, List[Priority]]:
+        """Walk right_of_way REs and emit per-junction <priority> pairs.
+
+        Args:
+            lanelet_map: Source lanelet2 map.
+            junctions: All junctions (parallel to junction_lanelet_groups).
+            junction_lanelet_groups: Lanelet groups for each junction
+                (same index = same junction).
+            lanelet_to_road_id: Existing lanelet -> road ID mapping
+                (covers regular and connecting roads).
+
+        Returns:
+            dict[junction_id -> List[Priority]] (sorted, deduplicated).
+        """
+        if len(junctions) != len(junction_lanelet_groups):
+            raise ValueError(
+                "junctions and junction_lanelet_groups must have equal length "
+                f"(got {len(junctions)} vs {len(junction_lanelet_groups)})"
+            )
+
+        lanelet_to_junction_id: Dict[int, int] = {}
+        for junction, group in zip(junctions, junction_lanelet_groups):
+            for ll in group:
+                lanelet_to_junction_id[ll.id] = junction.id
+
+        records = _extract_right_of_way_records(lanelet_map)
+        result = _build_priorities_from_records(
+            records, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+        if not result:
+            log.info("No <priority> emitted (no valid right_of_way REs)")
+        return result
+
+    @staticmethod
     def _find_closest_lane(incoming_lane: int, connecting_lanes: list[int]) -> int:
         """Find the closest lane in connecting road for a given incoming lane.
 
