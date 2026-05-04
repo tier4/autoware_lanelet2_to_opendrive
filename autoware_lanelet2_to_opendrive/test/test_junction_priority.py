@@ -24,3 +24,53 @@ def test_priority_is_hashable_and_equal_by_value():
     assert hash(a) == hash(b)
     assert a != c
     assert {a, b, c} == {a, c}  # set deduplicates a vs b
+
+
+def test_junction_to_xml_emits_priority_between_connection_and_controller():
+    """OpenDRIVE 1.4 t_junction XSD requires connection* -> priority* -> controller*."""
+    from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        Connection,
+        Junction,
+    )
+
+    junction = Junction(id=1000, name="J")
+    junction.connections.append(
+        Connection(
+            id=0,
+            incoming_road=1,
+            connecting_road=10,
+            contact_point=ContactPoint.START,
+        )
+    )
+    junction.priorities.append(Priority(high=10, low=20))
+    junction.controller_ids.append(99)
+
+    elem = junction.to_xml()
+    child_tags = [child.tag for child in elem]
+
+    assert child_tags == ["connection", "priority", "controller"]
+
+
+def test_junction_to_xml_with_no_priorities_unchanged():
+    from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        Connection,
+        Junction,
+    )
+
+    junction = Junction(id=1000)
+    junction.connections.append(
+        Connection(
+            id=0,
+            incoming_road=1,
+            connecting_road=10,
+            contact_point=ContactPoint.START,
+        )
+    )
+    junction.controller_ids.append(99)
+
+    elem = junction.to_xml()
+    child_tags = [child.tag for child in elem]
+
+    assert child_tags == ["connection", "controller"]  # no priority slot

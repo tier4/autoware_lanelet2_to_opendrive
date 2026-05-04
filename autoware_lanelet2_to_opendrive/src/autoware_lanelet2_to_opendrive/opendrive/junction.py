@@ -42,6 +42,7 @@ class Priority:
     low: int
 
     def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
         elem = ET.Element("priority")
         elem.set("high", str(self.high))
         elem.set("low", str(self.low))
@@ -96,6 +97,7 @@ class Junction:
     id: int
     name: Optional[str] = None
     connections: List[Connection] = field(default_factory=list)
+    priorities: List[Priority] = field(default_factory=list)
     controller_ids: List[int] = field(default_factory=list)
 
     def to_xml(self) -> ET.Element:
@@ -109,8 +111,11 @@ class Junction:
         for connection in self.connections:
             elem.append(connection.to_xml())
 
-        # Add controller references after connections (OpenDRIVE XSD requires
-        # connection elements to precede controller elements within junction)
+        # OpenDRIVE 1.4 t_junction XSD requires connection* -> priority*
+        # -> controller* ordering.
+        for priority in self.priorities:
+            elem.append(priority.to_xml())
+
         for controller_id in self.controller_ids:
             controller_elem = ET.SubElement(elem, "controller")
             controller_elem.set("id", str(controller_id))
