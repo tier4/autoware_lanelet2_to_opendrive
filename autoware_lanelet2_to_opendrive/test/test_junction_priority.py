@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from autoware_lanelet2_to_opendrive.opendrive.junction import Priority
 
 
@@ -173,3 +175,28 @@ def test_build_priorities_dedup_via_road_merge():
     )
 
     assert result == {9: [Priority(high=11, low=13)]}
+
+
+def test_build_priorities_self_priority_skipped(caplog):
+    """ROW and yield both resolve to the same road -> no priority emitted."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=42, row_lanelet_ids=(101,), yield_lanelet_ids=(102,))
+    ]
+    lanelet_to_road_id = {101: 11, 102: 11}  # both lanelets on road 11
+    lanelet_to_junction_id = {101: 9, 102: 9}
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="autoware_lanelet2_to_opendrive.opendrive.junction",
+    ):
+        result = _build_priorities_from_records(
+            records, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+    assert result == {}
+    assert any("self-priority on road 11" in rec.message for rec in caplog.records)
