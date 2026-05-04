@@ -259,6 +259,64 @@ def _extract_right_of_way_records(
     return records
 
 
+def _enumerate_lane_pairs(
+    junction_to_predecessors: Dict[int, List[int]],
+    junction_lanelet_ids: Set[int],
+    lanelet_to_road_id: Dict[int, int],
+    road_id_to_lanelet_to_lane: Dict[int, Dict[int, int]],
+) -> Dict[tuple[int, int], List[tuple[int, int]]]:
+    """Enumerate lane-id pairs for each (incoming_road, connecting_road) pair.
+
+    Pure helper for #439: drops the 1:1 lane-pair assumption and returns
+    one ``(incoming_lane_id, connecting_lane_id)`` entry per direct
+    lane-level predecessor edge implied by ``junction_to_predecessors``.
+
+    Args:
+        junction_to_predecessors: ``junction_lanelet_id -> [predecessor
+            lanelet ids]`` from the routing graph (direct longitudinal
+            predecessors only, lane changes excluded).
+        junction_lanelet_ids: All lanelet ids inside the junction; used
+            to drop predecessors that are themselves connecting lanelets.
+        lanelet_to_road_id: Global ``lanelet_id -> road_id`` mapping.
+        road_id_to_lanelet_to_lane: ``road_id -> (lanelet_id -> lane_id)``.
+
+    Returns:
+        ``(incoming_road_id, connecting_road_id) -> [(incoming_lane_id,
+        connecting_lane_id), ...]``. Pairs are deduplicated and sorted
+        by ``(incoming_lane_id, connecting_lane_id)`` so the emitted XML
+        is deterministic.
+    """
+    pairs: Dict[tuple[int, int], Set[tuple[int, int]]] = defaultdict(set)
+
+    for connecting_lanelet_id, predecessor_ids in junction_to_predecessors.items():
+        connecting_road_id = lanelet_to_road_id.get(connecting_lanelet_id)
+        if connecting_road_id is None:
+            continue
+        connecting_lane_id = road_id_to_lanelet_to_lane.get(connecting_road_id, {}).get(
+            connecting_lanelet_id
+        )
+        if connecting_lane_id is None:
+            continue
+
+        for prev_id in predecessor_ids:
+            if prev_id in junction_lanelet_ids:
+                continue
+            incoming_road_id = lanelet_to_road_id.get(prev_id)
+            if incoming_road_id is None:
+                continue
+            incoming_lane_id = road_id_to_lanelet_to_lane.get(incoming_road_id, {}).get(
+                prev_id
+            )
+            if incoming_lane_id is None:
+                continue
+
+            pairs[(incoming_road_id, connecting_road_id)].add(
+                (incoming_lane_id, connecting_lane_id)
+            )
+
+    return {key: sorted(value) for key, value in pairs.items()}
+
+
 @dataclass
 class Connection:
     """Connection within a junction.
@@ -479,15 +537,14 @@ class Junction:
             lanelet_to_road_id: Mapping from lanelet ID to road ID for ALL lanelets
             connecting_road_ids: List of road IDs that are inside this junction
             roads: Optional list of all Road objects for lane ID lookup.
-                   If provided, lane links will be created for all driving lanes.
+                   Required to emit ``<laneLink>`` elements; when omitted
+                   no connections are returned.
 
         Returns:
-            List of Connection objects for this junction
-
-        Note:
-            This method uses the routing graph to find predecessor lanelets
-            for each junction lanelet, determines which roads they belong to,
-            and creates connections with appropriate lane links.
+            List of Connection objects for this junction. Each Connection
+            carries one ``<laneLink>`` per direct lane-level
+            predecessor edge implied by the routing graph (#439: N:M
+            lane links for multi-lane merges/splits).
         """
         from lanelet2.routing import RoutingGraph, RoutingCostDistance
         import lanelet2
@@ -506,151 +563,59 @@ class Junction:
         if roads is not None:
             road_id_to_road = {road.id: road for road in roads}
 
-        # Track connections: (incoming_road_id, connecting_road_id) -> Connection
-        connection_map: dict[tuple[int, int], Connection] = {}
-        connection_id_counter = 0
-
-        # Track actual lane connections from routing graph
-        # Issue #132 fix: Store actual lanelet connections to create correct lane links
-        connection_lane_links: dict[tuple[int, int], List[tuple[int, int]]] = {}
-
         junction_lanelet_ids = {ll.id for ll in junction_lanelet_group}
 
-        # For each lanelet in this junction
+        # Walk the routing graph once and collect direct longitudinal
+        # predecessor lanelet ids per connecting (junction) lanelet.  The
+        # tuple-of-int view feeds the pure ``_enumerate_lane_pairs`` helper
+        # so the N:M aggregation logic stays unit-testable without lanelet2
+        # fixtures (#439 regression coverage).
+        junction_to_predecessors: Dict[int, List[int]] = {}
         for junction_lanelet in junction_lanelet_group:
-            # Get the connecting road ID for this junction lanelet
-            if junction_lanelet.id not in lanelet_to_road_id:
-                continue
+            junction_to_predecessors[junction_lanelet.id] = [
+                prev.id for prev in routing_graph.previous(junction_lanelet)
+            ]
 
-            connecting_road_id = lanelet_to_road_id[junction_lanelet.id]
+        # Per-road lanelet->lane lookup (cached; the per-Road call walks
+        # every lane section, and the same connecting/incoming road is
+        # hit once per lanelet otherwise).
+        road_id_to_lanelet_to_lane: Dict[int, Dict[int, int]] = {
+            road_id: road.get_lanelet_to_lane_mapping()
+            for road_id, road in road_id_to_road.items()
+        }
 
-            # Get the connecting road and its lanelet-to-lane mapping
-            connecting_road = road_id_to_road.get(connecting_road_id)
-            if connecting_road is None:
-                continue
+        # #439: enumerate every (incoming_lane, connecting_lane) pair the
+        # lane-level routing graph implies for each (incoming_road,
+        # connecting_road) — multi-lane merges/splits no longer collapse to
+        # a single laneLink.
+        lane_pairs_per_connection = _enumerate_lane_pairs(
+            junction_to_predecessors=junction_to_predecessors,
+            junction_lanelet_ids=junction_lanelet_ids,
+            lanelet_to_road_id=lanelet_to_road_id,
+            road_id_to_lanelet_to_lane=road_id_to_lanelet_to_lane,
+        )
 
-            connecting_lane_mapping = connecting_road.get_lanelet_to_lane_mapping()
-            connecting_lane_id = connecting_lane_mapping.get(junction_lanelet.id)
-
-            if connecting_lane_id is None:
-                continue
-
-            # Find predecessor lanelets (incoming to junction)
-            previous_lanelets = routing_graph.previous(junction_lanelet)
-
-            for prev_lanelet in previous_lanelets:
-                # Skip if predecessor is also in the junction
-                if prev_lanelet.id in junction_lanelet_ids:
-                    continue
-
-                # Get the incoming road ID
-                if prev_lanelet.id not in lanelet_to_road_id:
-                    continue
-
-                incoming_road_id = lanelet_to_road_id[prev_lanelet.id]
-
-                # Get the incoming road and its lanelet-to-lane mapping
-                incoming_road = road_id_to_road.get(incoming_road_id)
-                if incoming_road is None:
-                    continue
-
-                incoming_lane_mapping = incoming_road.get_lanelet_to_lane_mapping()
-                incoming_lane_id = incoming_lane_mapping.get(prev_lanelet.id)
-
-                if incoming_lane_id is None:
-                    continue
-
-                # Create or get connection for this (incoming, connecting) pair
-                connection_key = (incoming_road_id, connecting_road_id)
-
-                if connection_key not in connection_map:
-                    # Create new connection
-                    # ContactPoint determination: we connect to the START of the connecting road
-                    # This is a simplification - proper implementation would check geometry
-                    connection = Connection(
-                        id=connection_id_counter,
-                        incoming_road=incoming_road_id,
-                        connecting_road=connecting_road_id,
-                        contact_point=ContactPoint.START,
-                        lane_links=[],
-                    )
-                    connection_map[connection_key] = connection
-                    connection_id_counter += 1
-                    connection_lane_links[connection_key] = []
-
-                # Store the actual lane connection from routing graph
-                lane_link = (incoming_lane_id, connecting_lane_id)
-                if lane_link not in connection_lane_links[connection_key]:
-                    connection_lane_links[connection_key].append(lane_link)
-
-        # After building all connections, add lane links based on actual routing graph
-        for connection_key, connection in connection_map.items():
+        connections: List[Connection] = []
+        # Sort connection keys for deterministic IDs and XML output.
+        for connection_id_counter, connection_key in enumerate(
+            sorted(lane_pairs_per_connection.keys())
+        ):
             incoming_road_id, connecting_road_id = connection_key
+            # ContactPoint determination: we connect to the START of the
+            # connecting road. Geometry-aware contact-point selection is
+            # tracked separately and out of scope for #439.
+            connection = Connection(
+                id=connection_id_counter,
+                incoming_road=incoming_road_id,
+                connecting_road=connecting_road_id,
+                contact_point=ContactPoint.START,
+                lane_links=[],
+            )
+            for from_lane, to_lane in lane_pairs_per_connection[connection_key]:
+                connection.add_lane_link(from_lane=from_lane, to_lane=to_lane)
+            connections.append(connection)
 
-            # Issue #132 fix: Use actual lane connections from routing graph
-            actual_lane_links = connection_lane_links.get(connection_key, [])
-
-            if actual_lane_links:
-                # Add lane links based on actual routing graph connections
-                for from_lane, to_lane in actual_lane_links:
-                    # Check if this lane link already exists
-                    lane_link_exists = any(
-                        ll.from_lane == from_lane and ll.to_lane == to_lane
-                        for ll in connection.lane_links
-                    )
-                    if not lane_link_exists:
-                        connection.add_lane_link(from_lane=from_lane, to_lane=to_lane)
-            else:
-                # Fallback: If no actual connections were found, use old logic
-                # This preserves backward compatibility for edge cases
-
-                # Get driving lane IDs from both roads
-                incoming_lane_ids = Junction._get_driving_lane_ids(
-                    road_id_to_road.get(incoming_road_id)
-                )
-                connecting_lane_ids = Junction._get_driving_lane_ids(
-                    road_id_to_road.get(connecting_road_id)
-                )
-
-                # Issue #125 fix: Create lane links for ALL incoming lanes
-                # If connecting road has fewer lanes, map multiple incoming lanes to same
-                # connecting lane
-                if incoming_lane_ids and connecting_lane_ids:
-                    # Sort lane IDs (negative for right, positive for left)
-                    incoming_sorted = sorted(incoming_lane_ids)
-                    connecting_sorted = sorted(connecting_lane_ids)
-
-                    # Map each incoming lane to a connecting lane
-                    for incoming_lane in incoming_sorted:
-                        # Try to find exact match first
-                        if incoming_lane in connecting_lane_ids:
-                            to_lane = incoming_lane
-                        else:
-                            # No exact match - map to closest lane in connecting road
-                            # For right lanes (negative IDs): more negative = further
-                            # from center
-                            # For left lanes (positive IDs): more positive = further
-                            # from center
-                            to_lane = Junction._find_closest_lane(
-                                incoming_lane, connecting_sorted
-                            )
-
-                        # Check if this lane link already exists
-                        lane_link_exists = any(
-                            ll.from_lane == incoming_lane and ll.to_lane == to_lane
-                            for ll in connection.lane_links
-                        )
-                        if not lane_link_exists:
-                            connection.add_lane_link(
-                                from_lane=incoming_lane, to_lane=to_lane
-                            )
-                else:
-                    # If no lane links were created (roads not found or no lanes),
-                    # fall back to default -1 to -1 link
-                    if not connection.lane_links:
-                        connection.add_lane_link(from_lane=-1, to_lane=-1)
-
-        return list(connection_map.values())
+        return connections
 
     @staticmethod
     def build_priorities_from_regulatory_elements(
@@ -691,53 +656,3 @@ class Junction:
         if not result:
             log.info("No <priority> emitted (no valid right_of_way REs)")
         return result
-
-    @staticmethod
-    def _find_closest_lane(incoming_lane: int, connecting_lanes: list[int]) -> int:
-        """Find the closest lane in connecting road for a given incoming lane.
-
-        Args:
-            incoming_lane: Lane ID from incoming road
-            connecting_lanes: Sorted list of lane IDs in connecting road
-
-        Returns:
-            Closest lane ID in connecting road
-        """
-        if not connecting_lanes:
-            return -1  # Fallback to default lane
-
-        # For right lanes (negative IDs), find the closest (least negative if incoming
-        # is more negative)
-        # For left lanes (positive IDs), find the closest (least positive if incoming
-        # is more positive)
-        closest = min(connecting_lanes, key=lambda x: abs(x - incoming_lane))
-        return closest
-
-    @staticmethod
-    def _get_driving_lane_ids(road: Optional["Road"]) -> set[int]:
-        """Get all driving lane IDs from a road.
-
-        Args:
-            road: The Road object to extract lane IDs from
-
-        Returns:
-            Set of driving lane IDs (negative for right lanes, positive for left)
-        """
-        from .lane import LaneType
-
-        lane_ids: set[int] = set()
-
-        if road is None or road.lanes is None:
-            return lane_ids
-
-        for lane_section in road.lanes.lane_sections:
-            # Check right lanes (negative IDs)
-            for lane_id, lane in lane_section.right_lanes.items():
-                if lane.lane_type == LaneType.DRIVING:
-                    lane_ids.add(lane_id)
-            # Check left lanes (positive IDs)
-            for lane_id, lane in lane_section.left_lanes.items():
-                if lane.lane_type == LaneType.DRIVING:
-                    lane_ids.add(lane_id)
-
-        return lane_ids
