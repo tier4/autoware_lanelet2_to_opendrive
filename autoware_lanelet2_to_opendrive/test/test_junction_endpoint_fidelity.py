@@ -305,3 +305,26 @@ def test_junction_connection_endpoints_match_linked_roads():
             f"Max: {offenders[0][4]:.3f} m.\n"
             f"Worst 10:\n{sample}"
         )
+
+
+def test_nishishinjuku_emits_junction_priorities() -> None:
+    """End-to-end: 85 right_of_way REs in nishishinjuku produce > 0 <priority> nodes."""
+    xodr_path = _build_nishishinjuku_xodr()
+    tree = ET.parse(str(xodr_path))
+
+    priorities = tree.findall(".//junction/priority")
+    assert len(priorities) > 0, (
+        f"expected at least one <priority> from 85 right_of_way REs, "
+        f"got {len(priorities)} in {xodr_path}"
+    )
+
+    for p in priorities:
+        assert "high" in p.attrib
+        assert "low" in p.attrib
+        assert p.get("high") != p.get("low"), f"self-priority emitted: {p.attrib}"
+
+    # Every referenced road must exist in the map.
+    road_ids = {r.get("id") for r in tree.findall(".//road")}
+    for p in priorities:
+        assert p.get("high") in road_ids, p.attrib
+        assert p.get("low") in road_ids, p.attrib
