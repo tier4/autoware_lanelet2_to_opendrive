@@ -233,3 +233,63 @@ def test_lane_emits_width_when_polynomial_kind_is_width():
     xml = lane.to_xml()
     assert len(xml.findall("width")) == 1
     assert len(xml.findall("border")) == 0
+
+
+def test_mixed_road_emits_per_lane_width_or_border():
+    """A 2-lane road with a symmetric inner lane and an asymmetric outer lane
+    must emit <width> on lane -1 and <border> on lane -2 (per-lane mixing
+    decision from Issue #440 design)."""
+    import numpy as np
+    from autoware_lanelet2_to_opendrive.spline import Splines
+    from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+    from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneType
+    from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+    from autoware_lanelet2_to_opendrive.opendrive.reference_line import ReferenceLine
+    from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LanePolynomial
+    from autoware_lanelet2_to_opendrive.cubic_spline_1d import CubicSpline1D
+
+    lane_section = LaneSection(s_offset=0.0)
+
+    ref_pts = np.array([[x, 0.0, 0.0] for x in np.linspace(0, 10, 11)])
+    ref_spline = Splines(ref_pts)
+    height_spline = CubicSpline1D(
+        np.array([0.0, 10.0]), np.array([0.0, 0.0]), bc_type="not-a-knot"
+    )
+    center = ReferenceLine(centerline_2d=ref_spline, height_spline=height_spline)
+    lane_section._set_center_lane(center)
+
+    inner = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    inner._add_polynomial(
+        LanePolynomial(
+            kind="width",
+            segments=[(0.0, 3.5, 0.0, 0.0, 0.0)],
+            total_length=10.0,
+        )
+    )
+    lane_section._add_right_lane(inner)
+
+    outer = Lane(lane_id=-2, lane_type=LaneType.DRIVING)
+    outer._add_polynomial(
+        LanePolynomial(
+            kind="border",
+            segments=[(0.0, -7.0, 0.05, 0.0, 0.0)],
+            total_length=10.0,
+        )
+    )
+    lane_section._add_right_lane(outer)
+
+    xml = lane_section.to_xml()
+    right = xml.find("right")
+    assert right is not None
+    lanes = right.findall("lane")
+    assert len(lanes) == 2
+
+    by_id = {int(le.get("id")): le for le in lanes}
+    assert -1 in by_id and -2 in by_id
+
+    inner_xml = by_id[-1]
+    outer_xml = by_id[-2]
+    assert len(inner_xml.findall("width")) == 1
+    assert len(inner_xml.findall("border")) == 0
+    assert len(outer_xml.findall("border")) == 1
+    assert len(outer_xml.findall("width")) == 0
