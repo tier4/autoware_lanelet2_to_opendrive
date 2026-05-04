@@ -200,3 +200,61 @@ def test_build_priorities_self_priority_skipped(caplog):
 
     assert result == {}
     assert any("self-priority on road 11" in rec.message for rec in caplog.records)
+
+
+def test_build_priorities_cross_junction_warns(caplog):
+    """ROW lanelets in junction A, yield lanelets in junction B -> skip RE with WARNING."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=42, row_lanelet_ids=(101,), yield_lanelet_ids=(102,))
+    ]
+    lanelet_to_road_id = {101: 11, 102: 22}
+    lanelet_to_junction_id = {101: 9, 102: 8}  # different junctions
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="autoware_lanelet2_to_opendrive.opendrive.junction",
+    ):
+        result = _build_priorities_from_records(
+            records, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+    # row_jid resolves to {9}, yield_jid resolves to {8}; row+yield checked separately.
+    # Both row_jid and yield_jid are non-None, but they differ, so we expect
+    # the "span junctions" warning.
+    assert result == {}
+    assert any(
+        "span junctions" in rec.message and rec.levelno == logging.WARNING
+        for rec in caplog.records
+    )
+
+
+def test_build_priorities_no_junction_lanelet_warns(caplog):
+    """Lanelets that aren't in any junction -> WARNING + skip RE."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=42, row_lanelet_ids=(101,), yield_lanelet_ids=(102,))
+    ]
+    lanelet_to_road_id = {101: 11, 102: 22}
+    lanelet_to_junction_id: dict[int, int] = {}  # neither lanelet has a junction
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="autoware_lanelet2_to_opendrive.opendrive.junction",
+    ):
+        result = _build_priorities_from_records(
+            records, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+    assert result == {}
+    assert any(
+        "cannot determine owning junction" in rec.message for rec in caplog.records
+    )
