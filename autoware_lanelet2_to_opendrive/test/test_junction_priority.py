@@ -258,3 +258,37 @@ def test_build_priorities_no_junction_lanelet_warns(caplog):
     assert any(
         "cannot determine owning junction" in rec.message for rec in caplog.records
     )
+
+
+def test_build_priorities_conflict_both_emitted(caplog):
+    """RE1: A>B, RE2: B>A -> both <priority> emitted, ONE warning per pair."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=1, row_lanelet_ids=(101,), yield_lanelet_ids=(102,)),
+        _RightOfWayRecord(re_id=2, row_lanelet_ids=(102,), yield_lanelet_ids=(101,)),
+    ]
+    lanelet_to_road_id = {101: 11, 102: 22}
+    lanelet_to_junction_id = {101: 9, 102: 9}
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="autoware_lanelet2_to_opendrive.opendrive.junction",
+    ):
+        result = _build_priorities_from_records(
+            records, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+    assert result == {
+        9: [Priority(high=11, low=22), Priority(high=22, low=11)],
+    }
+    conflict_warnings = [
+        rec for rec in caplog.records if "Conflicting priority" in rec.message
+    ]
+    assert len(conflict_warnings) == 1, conflict_warnings
+    msg = conflict_warnings[0].message
+    assert "junction 9" in msg
+    assert "REs [1] vs [2]" in msg or "REs [2] vs [1]" in msg
