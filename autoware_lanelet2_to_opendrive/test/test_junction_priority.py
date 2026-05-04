@@ -131,3 +131,45 @@ def test_build_priorities_n_to_m_cartesian():
             Priority(high=12, low=14),
         ],
     }
+
+
+def test_build_priorities_dedup_across_res():
+    """Two REs claim the same (high, low) -> one priority."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=1, row_lanelet_ids=(101,), yield_lanelet_ids=(103,)),
+        _RightOfWayRecord(re_id=2, row_lanelet_ids=(101,), yield_lanelet_ids=(103,)),
+    ]
+    lanelet_to_road_id = {101: 11, 103: 13}
+    lanelet_to_junction_id = {101: 9, 103: 9}
+
+    result = _build_priorities_from_records(
+        records, lanelet_to_road_id, lanelet_to_junction_id
+    )
+
+    assert result == {9: [Priority(high=11, low=13)]}
+
+
+def test_build_priorities_dedup_via_road_merge():
+    """l1 and l2 merged into the same connecting road -> one priority."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=1, row_lanelet_ids=(101, 102), yield_lanelet_ids=(103,))
+    ]
+    # l1 and l2 both belong to road 11.
+    lanelet_to_road_id = {101: 11, 102: 11, 103: 13}
+    lanelet_to_junction_id = {101: 9, 102: 9, 103: 9}
+
+    result = _build_priorities_from_records(
+        records, lanelet_to_road_id, lanelet_to_junction_id
+    )
+
+    assert result == {9: [Priority(high=11, low=13)]}
