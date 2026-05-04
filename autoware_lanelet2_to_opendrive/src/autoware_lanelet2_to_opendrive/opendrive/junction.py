@@ -1,7 +1,10 @@
 """OpenDRIVE junction definitions."""
 
+import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Set
+
 import lxml.etree as ET
 import lanelet2
 
@@ -9,6 +12,8 @@ from .enums import ContactPoint
 
 if TYPE_CHECKING:
     from .road import Road
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,6 +33,230 @@ class LaneLink:
         elem.set("from", str(self.from_lane))
         elem.set("to", str(self.to_lane))
         return elem
+
+
+@dataclass(frozen=True)
+class Priority:
+    """OpenDRIVE <junction><priority high low/> element.
+
+    `high` and `low` are connecting road IDs inside the junction.
+    Frozen so the type is hashable and can be set-deduplicated.
+    """
+
+    high: int
+    low: int
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("priority")
+        elem.set("high", str(self.high))
+        elem.set("low", str(self.low))
+        return elem
+
+
+@dataclass(frozen=True)
+class _RightOfWayRecord:
+    """One right_of_way RE reduced to plain integers.
+
+    Used by the pure helper `_build_priorities_from_records` so the
+    algorithm can be unit-tested without constructing native lanelet2 REs.
+    """
+
+    re_id: int
+    row_lanelet_ids: tuple[int, ...]
+    yield_lanelet_ids: tuple[int, ...]
+
+
+def _build_priorities_from_records(
+    records: Iterable[_RightOfWayRecord],
+    lanelet_to_road_id: Dict[int, int],
+    lanelet_to_junction_id: Dict[int, int],
+) -> Dict[int, List["Priority"]]:
+    """Expand each record into per-junction Priority pairs.
+
+    See spec section 7 for the algorithm. Pure (no lanelet2 dependency)
+    so unit tests can drive each scenario with plain dicts and tuples.
+    """
+    junction_priorities: Dict[int, Set["Priority"]] = defaultdict(set)
+    sources: Dict[int, Dict["Priority", List[int]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+
+    for record in records:
+        row_roads, row_jid, row_unmapped = _resolve_lanelet_ids(
+            record.row_lanelet_ids, lanelet_to_road_id, lanelet_to_junction_id
+        )
+        yield_roads, yield_jid, yield_unmapped = _resolve_lanelet_ids(
+            record.yield_lanelet_ids, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+        if row_jid is None or yield_jid is None:
+            log.warning(
+                "RE %d: cannot determine owning junction; skipped",
+                record.re_id,
+            )
+            continue
+        if row_jid != yield_jid:
+            log.warning(
+                "RE %d: row/yield lanelets span junctions {%d, %d}; skipped",
+                record.re_id,
+                row_jid,
+                yield_jid,
+            )
+            continue
+        if row_unmapped or yield_unmapped:
+            # Reject the whole RE rather than emit a partial Cartesian product
+            # built from the lanelets that happened to resolve. A partial
+            # priority set is harder to detect downstream than a missing one.
+            log.warning(
+                "RE %d: lanelets without road mapping (row=%s, yield=%s); skipped",
+                record.re_id,
+                row_unmapped,
+                yield_unmapped,
+            )
+            continue
+        if not row_roads or not yield_roads:
+            log.warning(
+                "RE %d: row/yield road set empty after resolution; skipped",
+                record.re_id,
+            )
+            continue
+
+        jid = row_jid
+        for high in row_roads:
+            for low in yield_roads:
+                if high == low:
+                    log.debug(
+                        "RE %d: self-priority on road %d; skipped",
+                        record.re_id,
+                        high,
+                    )
+                    continue
+                p = Priority(high=high, low=low)
+                junction_priorities[jid].add(p)
+                sources[jid][p].append(record.re_id)
+
+    _warn_on_conflicts(junction_priorities, sources)
+
+    return {
+        jid: sorted(prio_set, key=lambda p: (p.high, p.low))
+        for jid, prio_set in junction_priorities.items()
+    }
+
+
+def _resolve_lanelet_ids(
+    lanelet_ids: Sequence[int],
+    lanelet_to_road_id: Dict[int, int],
+    lanelet_to_junction_id: Dict[int, int],
+) -> tuple[Set[int], Optional[int], List[int]]:
+    """Return (resolved road IDs, owning junction ID or None, unmapped lanelets).
+
+    Returns junction None when zero lanelets or multiple distinct junctions
+    are referenced. The third return value lists lanelet IDs with no road
+    mapping so the caller can reject the RE rather than emit a partial
+    Cartesian product.
+    """
+    road_ids: Set[int] = set()
+    junction_ids: Set[int] = set()
+    unmapped: List[int] = []
+    for lid in lanelet_ids:
+        rid = lanelet_to_road_id.get(lid)
+        jid = lanelet_to_junction_id.get(lid)
+        if rid is None:
+            unmapped.append(lid)
+        else:
+            road_ids.add(rid)
+        if jid is not None:
+            junction_ids.add(jid)
+    if len(junction_ids) != 1:
+        return road_ids, None, unmapped
+    return road_ids, next(iter(junction_ids)), unmapped
+
+
+def _warn_on_conflicts(
+    junction_priorities: Dict[int, Set["Priority"]],
+    sources: Dict[int, Dict["Priority", List[int]]],
+) -> None:
+    """Log a WARNING for every (high, low) where its reverse also exists."""
+    seen: Set[tuple[int, int, int]] = set()  # (jid, min, max)
+    for jid, prio_set in junction_priorities.items():
+        for p in prio_set:
+            rev = Priority(high=p.low, low=p.high)
+            if rev not in prio_set:
+                continue
+            key = (jid, min(p.high, p.low), max(p.high, p.low))
+            if key in seen:
+                continue
+            seen.add(key)
+            log.warning(
+                "Conflicting priority %d<->%d in junction %d "
+                "(REs %s vs %s); both pairs emitted.",
+                p.high,
+                p.low,
+                jid,
+                sources[jid][p],
+                sources[jid][rev],
+            )
+
+
+def _extract_right_of_way_records(
+    lanelet_map: lanelet2.core.LaneletMap,
+) -> List[_RightOfWayRecord]:
+    """Walk regulatoryElementLayer, filter by subtype, extract id sets.
+
+    Uses ``RightOfWay.rightOfWayLanelets()`` / ``yieldLanelets()`` to obtain
+    strong-ref ``Lanelet`` lists. The generic ``RegulatoryElement.parameters``
+    map exposes ``ConstWeakLanelet`` items for which lanelet2's Python
+    bindings have no by-value to-Python converter, so iterating it raises
+    ``TypeError`` — the typed accessors avoid that path.
+
+    Skips REs missing either side (logged at DEBUG). Map-data exceptions
+    on individual REs are caught and logged at WARNING so a single
+    malformed RE does not abort conversion; programming errors
+    (AttributeError, TypeError) are not caught — they indicate a code-level
+    bug that must surface, not be hidden.
+    """
+    records: List[_RightOfWayRecord] = []
+    for re in lanelet_map.regulatoryElementLayer:
+        attrs = re.attributes
+        if "subtype" not in attrs or attrs["subtype"] != "right_of_way":
+            continue
+        if not isinstance(re, lanelet2.core.RightOfWay):
+            # Subtype says right_of_way but the lanelet2 factory did not
+            # construct a typed RightOfWay (e.g. malformed parameters at
+            # load time). The generic .parameters map cannot be read for
+            # lanelet roles, so there is nothing further we can extract.
+            log.warning(
+                "RE %d: subtype=right_of_way but not RightOfWay-typed (%s); " "skipped",
+                re.id,
+                type(re).__name__,
+            )
+            continue
+        try:
+            row_lanelets = list(re.rightOfWayLanelets())
+            yield_lanelets = list(re.yieldLanelets())
+            if not row_lanelets or not yield_lanelets:
+                log.debug(
+                    "RE %d: incomplete right_of_way (row=%d, yield=%d); skipped",
+                    re.id,
+                    len(row_lanelets),
+                    len(yield_lanelets),
+                )
+                continue
+            records.append(
+                _RightOfWayRecord(
+                    re_id=re.id,
+                    row_lanelet_ids=tuple(ll.id for ll in row_lanelets),
+                    yield_lanelet_ids=tuple(ll.id for ll in yield_lanelets),
+                )
+            )
+        except (RuntimeError, ValueError, KeyError) as exc:
+            log.warning(
+                "Failed to parse regulatory element %d (%s); skipped",
+                getattr(re, "id", -1),
+                exc,
+            )
+    return records
 
 
 @dataclass
@@ -79,6 +308,7 @@ class Junction:
     name: Optional[str] = None
     connections: List[Connection] = field(default_factory=list)
     controller_ids: List[int] = field(default_factory=list)
+    priorities: List[Priority] = field(default_factory=list)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -91,8 +321,11 @@ class Junction:
         for connection in self.connections:
             elem.append(connection.to_xml())
 
-        # Add controller references after connections (OpenDRIVE XSD requires
-        # connection elements to precede controller elements within junction)
+        # OpenDRIVE 1.4 t_junction XSD requires connection* -> priority*
+        # -> controller* ordering.
+        for priority in self.priorities:
+            elem.append(priority.to_xml())
+
         for controller_id in self.controller_ids:
             controller_elem = ET.SubElement(elem, "controller")
             controller_elem.set("id", str(controller_id))
@@ -418,6 +651,46 @@ class Junction:
                         connection.add_lane_link(from_lane=-1, to_lane=-1)
 
         return list(connection_map.values())
+
+    @staticmethod
+    def build_priorities_from_regulatory_elements(
+        lanelet_map: lanelet2.core.LaneletMap,
+        junctions: List["Junction"],
+        junction_lanelet_groups: List[List[lanelet2.core.Lanelet]],
+        lanelet_to_road_id: Dict[int, int],
+    ) -> Dict[int, List[Priority]]:
+        """Walk right_of_way REs and emit per-junction <priority> pairs.
+
+        Args:
+            lanelet_map: Source lanelet2 map.
+            junctions: All junctions (parallel to junction_lanelet_groups).
+            junction_lanelet_groups: Lanelet groups for each junction
+                (same index = same junction).
+            lanelet_to_road_id: Existing lanelet -> road ID mapping
+                (covers regular and connecting roads).
+
+        Returns:
+            dict[junction_id -> List[Priority]] (sorted, deduplicated).
+        """
+        if len(junctions) != len(junction_lanelet_groups):
+            raise ValueError(
+                "junctions and junction_lanelet_groups must have equal length "
+                f"(got {len(junctions)} vs {len(junction_lanelet_groups)})"
+            )
+
+        lanelet_to_junction_id: Dict[int, int] = {}
+        for junction, group in zip(junctions, junction_lanelet_groups):
+            for ll in group:
+                lanelet_to_junction_id[ll.id] = junction.id
+
+        records = _extract_right_of_way_records(lanelet_map)
+        result = _build_priorities_from_records(
+            records, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+        if not result:
+            log.info("No <priority> emitted (no valid right_of_way REs)")
+        return result
 
     @staticmethod
     def _find_closest_lane(incoming_lane: int, connecting_lanes: list[int]) -> int:
