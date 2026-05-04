@@ -961,6 +961,9 @@ def _max_outer_bound_deviation(
         return 0.0
 
     rule_upper = (rule or "RHT").upper()
+    if rule_upper not in ("RHT", "LHT"):
+        raise ValueError(f"rule must be 'RHT' or 'LHT', got {rule!r}")
+
     if rule_upper == "RHT":
         anchor_points = extract_points_3d(lanelet.leftBound)
         outer_points = extract_points_3d(lanelet.rightBound)
@@ -1141,6 +1144,23 @@ def compute_lane_outer_polynomial(
     rule_upper = (rule or "RHT").upper()
     if rule_upper not in ("RHT", "LHT"):
         raise ValueError(f"rule must be 'RHT' or 'LHT', got {rule!r}")
+
+    # Anchor selection in ``estimate_lanelet_width_with_reference_line`` is
+    # driven by ``config.reference`` (LEFT_BOUND for RHT, RIGHT_BOUND for
+    # LHT). The deviation metric and border fit below derive their anchor /
+    # outer choice from ``rule``. If those disagree, the width adapter and
+    # the deviation logic operate on different bounds — silently producing
+    # the wrong border sign or false-positive triggers.
+    if rule_upper == "RHT" and config.reference == WidthReference.RIGHT_BOUND:
+        raise ValueError(
+            "rule='RHT' is inconsistent with config.reference=RIGHT_BOUND; "
+            "RHT pairs with LEFT_BOUND (or CENTER_LINE)."
+        )
+    if rule_upper == "LHT" and config.reference == WidthReference.LEFT_BOUND:
+        raise ValueError(
+            "rule='LHT' is inconsistent with config.reference=LEFT_BOUND; "
+            "LHT pairs with RIGHT_BOUND (or CENTER_LINE)."
+        )
 
     tol = (
         deviation_tolerance

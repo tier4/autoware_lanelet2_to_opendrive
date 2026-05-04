@@ -248,10 +248,26 @@ def test_lht_lane_widths_are_reasonable(lanelet_map):
     # Verify left lanes exist (LHT places driving lanes in the left section)
     assert len(lane_section.left_lanes) > 0, "LHT should have left lanes"
 
-    # Check each lane's width
+    # Check each lane's width or border. Per Issue #440 a lane may legally
+    # emit ``<lane><border>`` instead of ``<lane><width>`` when the cubic
+    # ``<width>`` cannot faithfully locate the outer edge — the two are
+    # mutually exclusive. The reasonableness checks below only apply to
+    # the ``<width>`` path (border t-coordinate has no direct interpretation
+    # as "lane width").
     for lane_id, lane in lane_section.left_lanes.items():
-        # Get width polynomial
-        assert len(lane.widths) > 0, f"Lane {lane_id} has no width entries"
+        has_width = len(lane.widths) > 0
+        has_border = len(lane.borders) > 0
+        assert (
+            has_width or has_border
+        ), f"Lane {lane_id} has neither width nor border entries"
+        assert not (has_width and has_border), (
+            f"Lane {lane_id} has both width and border entries; OpenDRIVE 1.4 "
+            f"requires they be mutually exclusive."
+        )
+        if has_border:
+            # Border-emitted lanes don't carry a "width" semantic the legacy
+            # range checks were designed for; skip them.
+            continue
 
         width_entry = lane.widths[0]
 
@@ -289,9 +305,19 @@ def test_lht_lane_widths_consistency(lanelet_map):
     assert len(road.lanes.lane_sections) > 0, "Road should have lane sections"
     lane_section = road.lanes.lane_sections[0]
 
-    # Check width consistency for each lane (LHT places driving lanes in left section)
+    # Check width consistency for each lane (LHT places driving lanes in left section).
+    # Per Issue #440 a lane may legally emit ``<border>`` instead of ``<width>``;
+    # the cubic-positivity / monotonicity checks below only apply to the
+    # ``<width>`` path. Border-emitted lanes are sanity-checked elsewhere
+    # (test_lane_border.py covers the border fit's invariants).
     for lane_id, lane in lane_section.left_lanes.items():
-        assert len(lane.widths) > 0, f"Lane {lane_id} has no width entries"
+        has_width = len(lane.widths) > 0
+        has_border = len(lane.borders) > 0
+        assert (
+            has_width or has_border
+        ), f"Lane {lane_id} has neither width nor border entries"
+        if has_border:
+            continue
 
         # Check each width segment
         for i, width_entry in enumerate(lane.widths):

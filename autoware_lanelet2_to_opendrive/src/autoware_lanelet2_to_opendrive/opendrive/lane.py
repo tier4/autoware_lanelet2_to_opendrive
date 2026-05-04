@@ -92,14 +92,26 @@ class Lane:
         Mirrors the ``s_offset < total_length`` filter used by
         :meth:`_add_width_from_spline` so trailing-segment artefacts beyond
         the curve's parameterised range are not emitted.
+
+        Raises:
+            ValueError: if ``poly.kind`` is not one of ``"width"`` /
+                ``"border"``. ``LanePolynomial.__post_init__`` already
+                rejects unknown kinds at construction time, so this is a
+                defence in depth against future polynomial subtypes
+                being added without updating this routing.
         """
         for s_offset, a, b, c, d in poly.segments:
             if s_offset >= poly.total_length:
                 continue
             if poly.kind == "width":
                 self._add_width(LaneWidth(s_offset=s_offset, a=a, b=b, c=c, d=d))
-            else:  # "border"
+            elif poly.kind == "border":
                 self._add_border(LaneBorder(s_offset=s_offset, a=a, b=b, c=c, d=d))
+            else:
+                raise ValueError(
+                    f"Unhandled LanePolynomial kind {poly.kind!r}; expected "
+                    f"'width' or 'border'."
+                )
 
     def _add_width_from_spline(
         self,
