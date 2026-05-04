@@ -190,3 +190,46 @@ def test_lane_section_invalid_traffic_rule(lanelet_map):
         LaneSection.construct_from_lanelet_groups(
             lanelet_map, lanelet_group, s_offset=0.0, traffic_rule="INVALID"
         )
+
+
+def test_lane_emits_border_when_polynomial_kind_is_border():
+    """If construct_from_lanelet receives an asymmetric lanelet, the resulting
+    Lane.to_xml() must contain <border> and no <width>."""
+    from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+    from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LanePolynomial
+
+    from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneType
+
+    lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    poly = LanePolynomial(
+        kind="border",
+        segments=[(0.0, -3.5, 0.1, 0.01, 0.0)],
+        total_length=10.0,
+    )
+    lane._add_polynomial(poly)
+    xml = lane.to_xml()
+    border_elems = xml.findall("border")
+    width_elems = xml.findall("width")
+    assert len(border_elems) == 1
+    assert len(width_elems) == 0
+    assert border_elems[0].get("sOffset") == "0.0"
+    assert float(border_elems[0].get("a")) == -3.5
+
+
+def test_lane_emits_width_when_polynomial_kind_is_width():
+    """If construct_from_lanelet receives a symmetric lanelet, the resulting
+    Lane.to_xml() must contain <width> and no <border>."""
+    from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+    from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LanePolynomial
+    from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneType
+
+    lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    poly = LanePolynomial(
+        kind="width",
+        segments=[(0.0, 3.5, 0.0, 0.0, 0.0)],
+        total_length=10.0,
+    )
+    lane._add_polynomial(poly)
+    xml = lane.to_xml()
+    assert len(xml.findall("width")) == 1
+    assert len(xml.findall("border")) == 0

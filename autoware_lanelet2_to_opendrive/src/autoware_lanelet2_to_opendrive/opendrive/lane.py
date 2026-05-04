@@ -4,7 +4,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import lanelet2
 import lxml.etree as ET
 
-from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
+from ..centerline import (
+    estimate_lanelet_width_as_spline,
+    Width1DSplineAdapter,
+    compute_lane_outer_polynomial,
+)
 from ..spline import Splines
 from ..conversion_config import WidthEstimationConfig, WidthReference
 
@@ -14,6 +18,7 @@ from .opendrive_dataclass import (
     RoadMark,
     LaneLink,
     LaneBorder,
+    LanePolynomial,
     LaneHeight,
     LaneSpeed,
     SpeedUnit,
@@ -135,6 +140,17 @@ class Lane:
                     LaneWidth(s_offset=s_start, a=width_value, b=0.0, c=0.0, d=0.0)
                 )
 
+    def _add_polynomial(self, poly: LanePolynomial) -> None:
+        """Route a LanePolynomial to width or border emission based on kind."""
+        if poly.kind == "width":
+            for s_offset, a, b, c, d in poly.segments:
+                if s_offset < poly.total_length:
+                    self._add_width(LaneWidth(s_offset=s_offset, a=a, b=b, c=c, d=d))
+        else:  # "border"
+            for s_offset, a, b, c, d in poly.segments:
+                if s_offset < poly.total_length:
+                    self._add_border(LaneBorder(s_offset=s_offset, a=a, b=b, c=c, d=d))
+
     @staticmethod
     def construct_from_lanelet(
         lanelet_map: lanelet2.core.LaneletMap,
@@ -224,23 +240,24 @@ class Lane:
                 default_sample_interval=width_config.default_sample_interval,
             )
 
-        # Use reference line-based width calculation if reference line is provided
+        # When a reference line is available, use the unified width-or-border
+        # entry point (Issue #440 fallback for asymmetric lanelets). When there is
+        # no reference line yet (legacy path), fall back to the old width-only
+        # approach which never emits <border>.
         if reference_line_spline is not None:
-            from ..centerline import estimate_lanelet_width_with_reference_line
-
-            width_spline = estimate_lanelet_width_with_reference_line(
+            poly = compute_lane_outer_polynomial(
                 lanelet,
                 reference_line_spline,
                 config,
+                rule=(rule or "RHT").upper(),
                 anchor_start_override=anchor_start_override,
                 anchor_end_override=anchor_end_override,
             )
+            lane._add_polynomial(poly)
         else:
-            # Fallback to old behavior (for backward compatibility)
+            # Reference-line-less callers (legacy / tests) keep <width>-only output.
             width_spline = estimate_lanelet_width_as_spline(lanelet, config)
-
-        # Sample the spline at multiple points to create width definitions
-        lane._add_width_from_spline(width_spline)
+            lane._add_width_from_spline(width_spline)
 
         # Road marks are assigned by LaneSection.construct_from_lanelet_groups
         # so that the routing-graph-derived laneChange permission can be
