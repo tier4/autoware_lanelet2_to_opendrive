@@ -74,3 +74,29 @@ def test_junction_to_xml_with_no_priorities_unchanged():
     child_tags = [child.tag for child in elem]
 
     assert child_tags == ["connection", "controller"]  # no priority slot
+
+
+def test_build_priorities_simple_n_to_1():
+    """ROW={l1, l2}, yield={l3} in junction J -> 2 priorities (R1>R3, R2>R3)."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(
+            re_id=42,
+            row_lanelet_ids=(101, 102),
+            yield_lanelet_ids=(103,),
+        )
+    ]
+    lanelet_to_road_id = {101: 1001, 102: 1002, 103: 1003}
+    lanelet_to_junction_id = {101: 9, 102: 9, 103: 9}
+
+    result = _build_priorities_from_records(
+        records, lanelet_to_road_id, lanelet_to_junction_id
+    )
+
+    assert result == {
+        9: [Priority(high=1001, low=1003), Priority(high=1002, low=1003)],
+    }

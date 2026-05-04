@@ -1,8 +1,9 @@
 """OpenDRIVE junction definitions."""
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Set
 
 import lxml.etree as ET
 import lanelet2
@@ -71,11 +72,116 @@ def _build_priorities_from_records(
     lanelet_to_road_id: Dict[int, int],
     lanelet_to_junction_id: Dict[int, int],
 ) -> Dict[int, List["Priority"]]:
-    """Pure: expand ROW x yield, dedup, conflict-warn, sort.
+    """Expand each record into per-junction Priority pairs.
 
-    Implementation lands in subsequent tasks (TDD).
+    See spec section 7 for the algorithm. Pure (no lanelet2 dependency)
+    so unit tests can drive each scenario with plain dicts and tuples.
     """
-    raise NotImplementedError
+    junction_priorities: Dict[int, Set["Priority"]] = defaultdict(set)
+    sources: Dict[int, Dict["Priority", List[int]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+
+    for record in records:
+        row_roads, row_jid = _resolve_lanelet_ids(
+            record.row_lanelet_ids, lanelet_to_road_id, lanelet_to_junction_id
+        )
+        yield_roads, yield_jid = _resolve_lanelet_ids(
+            record.yield_lanelet_ids, lanelet_to_road_id, lanelet_to_junction_id
+        )
+
+        if row_jid is None or yield_jid is None:
+            log.warning(
+                "RE %d: cannot determine owning junction; skipped",
+                record.re_id,
+            )
+            continue
+        if row_jid != yield_jid:
+            log.warning(
+                "RE %d: row/yield lanelets span junctions {%d, %d}; skipped",
+                record.re_id,
+                row_jid,
+                yield_jid,
+            )
+            continue
+        if not row_roads or not yield_roads:
+            log.warning(
+                "RE %d: row/yield road set empty after resolution; skipped",
+                record.re_id,
+            )
+            continue
+
+        jid = row_jid
+        for high in row_roads:
+            for low in yield_roads:
+                if high == low:
+                    log.debug(
+                        "RE %d: self-priority on road %d; skipped",
+                        record.re_id,
+                        high,
+                    )
+                    continue
+                p = Priority(high=high, low=low)
+                junction_priorities[jid].add(p)
+                sources[jid][p].append(record.re_id)
+
+    _warn_on_conflicts(junction_priorities, sources)
+
+    return {
+        jid: sorted(prio_set, key=lambda p: (p.high, p.low))
+        for jid, prio_set in junction_priorities.items()
+    }
+
+
+def _resolve_lanelet_ids(
+    lanelet_ids: Sequence[int],
+    lanelet_to_road_id: Dict[int, int],
+    lanelet_to_junction_id: Dict[int, int],
+) -> tuple[Set[int], Optional[int]]:
+    """Return (set of resolved road IDs, owning junction ID or None).
+
+    Returns junction None when zero lanelets or multiple distinct junctions
+    are referenced. Lanelets without a road mapping are silently dropped
+    (DEBUG-logged at the call site if needed).
+    """
+    road_ids: Set[int] = set()
+    junction_ids: Set[int] = set()
+    for lid in lanelet_ids:
+        rid = lanelet_to_road_id.get(lid)
+        jid = lanelet_to_junction_id.get(lid)
+        if rid is not None:
+            road_ids.add(rid)
+        if jid is not None:
+            junction_ids.add(jid)
+    if len(junction_ids) != 1:
+        return road_ids, None
+    return road_ids, next(iter(junction_ids))
+
+
+def _warn_on_conflicts(
+    junction_priorities: Dict[int, Set["Priority"]],
+    sources: Dict[int, Dict["Priority", List[int]]],
+) -> None:
+    """Log a WARNING for every (high, low) where its reverse also exists."""
+    seen: Set[tuple[int, int, int]] = set()  # (jid, min, max)
+    for jid, prio_set in junction_priorities.items():
+        for p in prio_set:
+            rev = Priority(high=p.low, low=p.high)
+            if rev not in prio_set:
+                continue
+            key = (jid, min(p.high, p.low), max(p.high, p.low))
+            if key in seen:
+                continue
+            seen.add(key)
+            log.warning(
+                "Conflicting priority %d<->%d in junction %d "
+                "(REs %s vs %s); both pairs emitted.",
+                p.high,
+                p.low,
+                jid,
+                sources[jid][p],
+                sources[jid][rev],
+            )
 
 
 @dataclass
