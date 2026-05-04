@@ -1,11 +1,17 @@
 """Tests for N:M ``<laneLink>`` enumeration in ``Junction`` (#439).
 
-Drives the pure ``_enumerate_lane_pairs`` helper with synthetic
-``junction_to_predecessors`` graphs so multi-lane merge/split scenarios
-can be exercised without constructing real lanelet2 fixtures.
+Drives the pure ``_enumerate_lane_pairs`` and
+``_build_connections_from_lane_pairs`` helpers with synthetic inputs so
+multi-lane merge/split scenarios — and the Connection construction loop
+that turns helper output into XML-ready objects — can be exercised
+without constructing real lanelet2 fixtures.
 """
 
+import lxml.etree as ET
+
+from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint
 from autoware_lanelet2_to_opendrive.opendrive.junction import (
+    _build_connections_from_lane_pairs,
     _enumerate_lane_pairs,
 )
 
@@ -157,3 +163,80 @@ def test_separate_incoming_roads_get_separate_keys():
         (10, 20): [(-1, -1)],
         (11, 20): [(-1, -1)],
     }
+
+
+# --- _build_connections_from_lane_pairs --------------------------------------
+# Drives the Connection construction loop directly so a regression in the
+# end-to-end emission path (e.g. dropping pairs after the first or
+# assigning unstable IDs) trips the regression suite — independent of
+# whether ``_enumerate_lane_pairs`` is correct.
+
+
+def test_build_connections_emits_one_connection_with_multi_lanelinks():
+    """Single (incoming, connecting) pair with N>1 lane links -> one Connection.
+
+    Direct guard against the original 1:1 collapse: the Connection must
+    carry one ``LaneLink`` per pair, in the helper's order.
+    """
+    pairs = {(10, 20): [(-2, -2), (-1, -1)]}
+
+    connections = _build_connections_from_lane_pairs(pairs)
+
+    assert len(connections) == 1
+    conn = connections[0]
+    assert conn.id == 0
+    assert conn.incoming_road == 10
+    assert conn.connecting_road == 20
+    assert conn.contact_point == ContactPoint.START
+    assert [(ll.from_lane, ll.to_lane) for ll in conn.lane_links] == [
+        (-2, -2),
+        (-1, -1),
+    ]
+
+
+def test_build_connections_assigns_sorted_deterministic_ids():
+    """Connection IDs assigned in sorted (incoming, connecting) order."""
+    pairs = {
+        (11, 20): [(-1, -1)],
+        (10, 20): [(-1, -1)],
+        (10, 21): [(-1, -1)],
+    }
+
+    connections = _build_connections_from_lane_pairs(pairs)
+
+    # Sorted: (10, 20) < (10, 21) < (11, 20)
+    assert [(c.id, c.incoming_road, c.connecting_road) for c in connections] == [
+        (0, 10, 20),
+        (1, 10, 21),
+        (2, 11, 20),
+    ]
+
+
+def test_build_connections_empty_input_returns_empty_list():
+    assert _build_connections_from_lane_pairs({}) == []
+
+
+def test_connection_xml_emits_one_lanelink_per_pair():
+    """End-to-end: helper output -> Connection -> ``<laneLink>`` XML.
+
+    Pins the user-visible XML shape so a regression in either the
+    construction loop or ``Connection.to_xml`` would fail this test.
+    """
+    pairs = {(10, 20): [(-2, -2), (-1, -1)]}
+
+    connections = _build_connections_from_lane_pairs(pairs)
+
+    elem = connections[0].to_xml()
+    lane_links = elem.findall("laneLink")
+
+    assert len(lane_links) == 2
+    assert [(ll.get("from"), ll.get("to")) for ll in lane_links] == [
+        ("-2", "-2"),
+        ("-1", "-1"),
+    ]
+    assert elem.get("incomingRoad") == "10"
+    assert elem.get("connectingRoad") == "20"
+    # Round-trip the bytes too so any XML namespace / serialization
+    # regression also surfaces.
+    rendered = ET.tostring(elem, encoding="unicode")
+    assert rendered.count("<laneLink") == 2

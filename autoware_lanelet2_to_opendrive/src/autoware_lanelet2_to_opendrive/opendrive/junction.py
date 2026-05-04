@@ -317,6 +317,36 @@ def _enumerate_lane_pairs(
     return {key: sorted(value) for key, value in pairs.items()}
 
 
+def _build_connections_from_lane_pairs(
+    lane_pairs_per_connection: Dict[tuple[int, int], List[tuple[int, int]]],
+) -> List["Connection"]:
+    """Build :class:`Connection` objects from the helper's lane-pair map.
+
+    Pure (no lanelet2 dependency) so the construction loop — connection
+    ID assignment, lane-link emission order, and per-connection laneLink
+    fan-out — is exercised by the regression suite without needing a
+    real lanelet2 routing graph (#439). Connection IDs are assigned in
+    sorted ``(incoming_road, connecting_road)`` order so the emitted
+    XML is deterministic across runs.
+    """
+    connections: List[Connection] = []
+    for connection_id, connection_key in enumerate(
+        sorted(lane_pairs_per_connection.keys())
+    ):
+        incoming_road_id, connecting_road_id = connection_key
+        connection = Connection(
+            id=connection_id,
+            incoming_road=incoming_road_id,
+            connecting_road=connecting_road_id,
+            contact_point=ContactPoint.START,
+            lane_links=[],
+        )
+        for from_lane, to_lane in lane_pairs_per_connection[connection_key]:
+            connection.add_lane_link(from_lane=from_lane, to_lane=to_lane)
+        connections.append(connection)
+    return connections
+
+
 @dataclass
 class Connection:
     """Connection within a junction.
@@ -576,12 +606,28 @@ class Junction:
                 prev.id for prev in routing_graph.previous(junction_lanelet)
             ]
 
-        # Per-road lanelet->lane lookup (cached; the per-Road call walks
-        # every lane section, and the same connecting/incoming road is
-        # hit once per lanelet otherwise).
+        # Lane mapping is needed only for roads that actually appear as a
+        # connecting road in this junction or as an incoming road feeding
+        # one of its lanelets.  ``Road.get_lanelet_to_lane_mapping()``
+        # walks every lane section, so for large maps it would otherwise
+        # be O(total_roads) per junction even though most roads never
+        # participate.
+        participating_road_ids: Set[int] = set()
+        for connecting_lid, prev_ids in junction_to_predecessors.items():
+            connecting_rid = lanelet_to_road_id.get(connecting_lid)
+            if connecting_rid is not None:
+                participating_road_ids.add(connecting_rid)
+            for prev_id in prev_ids:
+                if prev_id in junction_lanelet_ids:
+                    continue
+                incoming_rid = lanelet_to_road_id.get(prev_id)
+                if incoming_rid is not None:
+                    participating_road_ids.add(incoming_rid)
+
         road_id_to_lanelet_to_lane: Dict[int, Dict[int, int]] = {
-            road_id: road.get_lanelet_to_lane_mapping()
-            for road_id, road in road_id_to_road.items()
+            rid: road_id_to_road[rid].get_lanelet_to_lane_mapping()
+            for rid in participating_road_ids
+            if rid in road_id_to_road
         }
 
         # #439: enumerate every (incoming_lane, connecting_lane) pair the
@@ -595,27 +641,10 @@ class Junction:
             road_id_to_lanelet_to_lane=road_id_to_lanelet_to_lane,
         )
 
-        connections: List[Connection] = []
-        # Sort connection keys for deterministic IDs and XML output.
-        for connection_id_counter, connection_key in enumerate(
-            sorted(lane_pairs_per_connection.keys())
-        ):
-            incoming_road_id, connecting_road_id = connection_key
-            # ContactPoint determination: we connect to the START of the
-            # connecting road. Geometry-aware contact-point selection is
-            # tracked separately and out of scope for #439.
-            connection = Connection(
-                id=connection_id_counter,
-                incoming_road=incoming_road_id,
-                connecting_road=connecting_road_id,
-                contact_point=ContactPoint.START,
-                lane_links=[],
-            )
-            for from_lane, to_lane in lane_pairs_per_connection[connection_key]:
-                connection.add_lane_link(from_lane=from_lane, to_lane=to_lane)
-            connections.append(connection)
-
-        return connections
+        # ContactPoint is fixed to START of the connecting road;
+        # geometry-aware contact-point selection is tracked separately
+        # and out of scope for #439.
+        return _build_connections_from_lane_pairs(lane_pairs_per_connection)
 
     @staticmethod
     def build_priorities_from_regulatory_elements(
