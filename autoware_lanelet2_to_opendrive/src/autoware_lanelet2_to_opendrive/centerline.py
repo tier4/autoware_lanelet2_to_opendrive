@@ -404,12 +404,17 @@ def _max_relative_asymmetry(
     lanelet,
     config: WidthEstimationConfig,
 ) -> float:
-    """Return max_i |left_dist_i - right_dist_i| / width_i across samples.
+    """Return max relative width variation across samples.
 
     Samples both bounds at the same normalized arc-length positions used by
-    the centerline-reference width path, then measures how far the
-    centerline-as-midpoint sits from each bound. A perfectly symmetric
-    lanelet returns 0; a one-sided bulge returns a value approaching 1.0.
+    the centerline-reference width path, computes the cross-section width
+    at each sample, and returns ``(max_width - min_width) / max_width``.
+
+    Note: this proxy correlates with left/right asymmetry for the cases
+    Issue #440 targets — when one bound bulges relative to the other, the
+    width along s varies, and a single cubic <width> cannot represent that
+    variation faithfully. A constant-width lanelet (symmetric or not)
+    returns 0; a lanelet whose width swings from 2 m to 3 m returns ~0.33.
 
     Args:
         lanelet: lanelet-like object with leftBound and rightBound iterables
@@ -417,8 +422,8 @@ def _max_relative_asymmetry(
         config: WidthEstimationConfig (only ``num_samples`` is used).
 
     Returns:
-        Maximum relative asymmetry ratio across all sample positions, or 0.0
-        if the lanelet is too short to sample.
+        Maximum relative width variation across all sample positions, or
+        0.0 if the lanelet is too short to sample.
     """
     left_points = extract_points_3d(lanelet.leftBound)
     right_points = extract_points_3d(lanelet.rightBound)
@@ -442,7 +447,7 @@ def _max_relative_asymmetry(
     num_samples = max(config.num_samples, 2)
     normalized = np.linspace(0.0, 1.0, num_samples)
 
-    max_ratio = 0.0
+    widths: List[float] = []
     for t in normalized:
         s_left = t * left_total
         s_right = t * right_total
@@ -450,16 +455,12 @@ def _max_relative_asymmetry(
         right_pos = _interpolate_on_line_segments(
             right_points, right_cumulative, s_right
         )
-        center = (left_pos + right_pos) * 0.5
-        d_left = float(np.linalg.norm(center - left_pos))
-        d_right = float(np.linalg.norm(center - right_pos))
-        width = d_left + d_right
-        if width < DEFAULT_CONFIG.geometry.epsilon:
-            continue
-        ratio = abs(d_left - d_right) / width
-        if ratio > max_ratio:
-            max_ratio = ratio
-    return max_ratio
+        widths.append(float(np.linalg.norm(left_pos - right_pos)))
+
+    w_max = max(widths)
+    if w_max < DEFAULT_CONFIG.geometry.epsilon:
+        return 0.0
+    return (w_max - min(widths)) / w_max
 
 
 def _max_width_fit_residual(
@@ -541,13 +542,18 @@ def _fit_signed_t_spline(
     OpenDRIVE convention: points to the LEFT of the reference line have
     t > 0; points to the RIGHT have t < 0.
 
+    The returned spline's parameter is shifted to start at s=0 (lane-section
+    relative). The shift is the smallest projected reference-line s among
+    the deduplicated samples; the matching ``s_offset`` for OpenDRIVE
+    `<lane><border>` emission is therefore 0 at the start.
+
     Args:
         bound_points: (N, 3) array of boundary points in world frame.
         reference_line_spline: Road reference line (Splines).
 
     Returns:
-        CubicSpline1D giving signed t as a function of reference-line s,
-        with bc_type="not-a-knot" matching the existing width spline path.
+        CubicSpline1D giving signed t as a function of lane-section-relative
+        s, with bc_type="not-a-knot" matching the existing width spline path.
 
     Raises:
         ValueError: if fewer than 2 boundary points are supplied or all
@@ -594,8 +600,12 @@ def _fit_signed_t_spline(
             "same reference-line s"
         )
 
+    # Shift to lane-section-relative s so segments[0].s_offset == 0.
+    s_shift = deduped_s[0]
+    shifted_s = [s - s_shift for s in deduped_s]
+
     return CubicSpline1D(
-        np.asarray(deduped_s),
+        np.asarray(shifted_s),
         np.asarray(deduped_t),
         bc_type="not-a-knot",
     )
