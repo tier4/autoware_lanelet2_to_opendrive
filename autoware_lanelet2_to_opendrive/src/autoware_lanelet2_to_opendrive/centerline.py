@@ -531,6 +531,81 @@ def _max_width_fit_residual(
     return max_residual
 
 
+def _fit_signed_t_spline(
+    bound_points: np.ndarray,
+    reference_line_spline: "Splines",
+) -> CubicSpline1D:
+    """Fit a cubic 1D spline of signed t(s) for a boundary against a reference line.
+
+    For each input boundary point:
+      1. Find the closest reference-line s via Splines.find_closest_s.
+      2. Compute the reference-line position p_ref(s) and tangent tau(s).
+      3. The 2D left-hand normal n = (-tau_y, +tau_x) / ||tau_xy||.
+      4. Signed t = (p_outer - p_ref) . n on the xy plane.
+
+    OpenDRIVE convention: points to the LEFT of the reference line have
+    t > 0; points to the RIGHT have t < 0.
+
+    Args:
+        bound_points: (N, 3) array of boundary points in world frame.
+        reference_line_spline: Road reference line (Splines).
+
+    Returns:
+        CubicSpline1D giving signed t as a function of reference-line s,
+        with bc_type="not-a-knot" matching the existing width spline path.
+
+    Raises:
+        ValueError: if fewer than 2 boundary points are supplied or all
+            points project to nearly the same s (degenerate fit).
+    """
+    if bound_points.shape[0] < 2:
+        raise ValueError(
+            f"Need at least 2 boundary points for signed-t fit, "
+            f"got {bound_points.shape[0]}"
+        )
+
+    s_values: List[float] = []
+    t_values: List[float] = []
+
+    for pt in bound_points:
+        s_proj = reference_line_spline.find_closest_s(pt[:2])
+        p_ref = reference_line_spline.evaluate(s_proj, derivative=0)[:2]
+        tau = reference_line_spline.evaluate(s_proj, derivative=1)[:2]
+        tau_norm = float(np.linalg.norm(tau))
+        if tau_norm < DEFAULT_CONFIG.geometry.epsilon:
+            continue
+        tau_unit = tau / tau_norm
+        # left-hand 2D normal: rotate tangent +90 deg CCW -> (-y, +x)
+        n = np.array([-tau_unit[1], tau_unit[0]])
+        offset = pt[:2] - p_ref
+        t_signed = float(np.dot(offset, n))
+        s_values.append(float(s_proj))
+        t_values.append(t_signed)
+
+    # Sort by s and deduplicate ties (CubicSpline1D requires strictly
+    # increasing x). On a tie, keep the first occurrence.
+    paired = sorted(zip(s_values, t_values), key=lambda p: p[0])
+    deduped_s: List[float] = []
+    deduped_t: List[float] = []
+    for s_v, t_v in paired:
+        if deduped_s and (s_v - deduped_s[-1]) < DEFAULT_CONFIG.geometry.epsilon:
+            continue
+        deduped_s.append(s_v)
+        deduped_t.append(t_v)
+
+    if len(deduped_s) < 2:
+        raise ValueError(
+            "Signed-t fit degenerate: all boundary points project to the "
+            "same reference-line s"
+        )
+
+    return CubicSpline1D(
+        np.asarray(deduped_s),
+        np.asarray(deduped_t),
+        bc_type="not-a-knot",
+    )
+
+
 def estimate_lanelet_width_with_reference_line(
     lanelet: lanelet2.core.Lanelet,
     reference_line_spline: "Splines",

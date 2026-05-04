@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from autoware_lanelet2_to_opendrive.centerline import (
+    _fit_signed_t_spline,
     _max_relative_asymmetry,
     _max_width_fit_residual,
     estimate_lanelet_width_as_spline,
@@ -17,6 +18,7 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     WidthReference,
 )
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LanePolynomial
+from autoware_lanelet2_to_opendrive.spline import Splines
 
 
 class _MockPoint:
@@ -132,3 +134,42 @@ def test_max_width_fit_residual_s_shape_is_large():
     width_adapter = estimate_lanelet_width_as_spline(lanelet, config)
     residual = _max_width_fit_residual(lanelet, width_adapter, config)
     assert residual > 0.30
+
+
+def _make_straight_xy_spline(length: float = 10.0, n: int = 11) -> Splines:
+    """Reference line: straight along +x axis, y=0, z=0."""
+    pts = np.array([[x, 0.0, 0.0] for x in np.linspace(0, length, n)])
+    return Splines(pts)
+
+
+def test_fit_signed_t_spline_left_bound_positive_t():
+    """Left bound at y=+1 along a +x reference line yields t = +1."""
+    ref_line = _make_straight_xy_spline()
+    bound_points = np.array([[x, 1.0, 0.0] for x in np.linspace(0, 10, 11)])
+    adapter = _fit_signed_t_spline(bound_points, ref_line)
+    # Sample a few s and confirm t ~ +1
+    for s in (0.0, 2.5, 5.0, 7.5, 10.0):
+        t = adapter.evaluate(s)
+        assert abs(t - 1.0) < 1e-3
+
+
+def test_fit_signed_t_spline_right_bound_negative_t():
+    """Right bound at y=-1 along a +x reference line yields t = -1."""
+    ref_line = _make_straight_xy_spline()
+    bound_points = np.array([[x, -1.0, 0.0] for x in np.linspace(0, 10, 11)])
+    adapter = _fit_signed_t_spline(bound_points, ref_line)
+    for s in (0.0, 2.5, 5.0, 7.5, 10.0):
+        t = adapter.evaluate(s)
+        assert abs(t - (-1.0)) < 1e-3
+
+
+def test_fit_signed_t_spline_returns_segments():
+    """The returned adapter must expose get_segments() for cubic export."""
+    ref_line = _make_straight_xy_spline()
+    bound_points = np.array([[x, -1.0, 0.0] for x in np.linspace(0, 10, 11)])
+    adapter = _fit_signed_t_spline(bound_points, ref_line)
+    segments = adapter.get_segments()
+    assert len(segments) >= 1
+    s, a, b, c, d = segments[0]
+    assert s == 0.0
+    assert abs(a - (-1.0)) < 1e-3  # y intercept = t value at s=0
