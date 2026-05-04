@@ -405,6 +405,68 @@ def _calculate_optimal_num_samples(
     return num_samples
 
 
+def _max_relative_asymmetry(
+    lanelet,
+    config: WidthEstimationConfig,
+) -> float:
+    """Return max_i |left_dist_i - right_dist_i| / width_i across samples.
+
+    Samples both bounds at the same normalized arc-length positions used by
+    the centerline-reference width path, then measures how far the
+    centerline-as-midpoint sits from each bound. A perfectly symmetric
+    lanelet returns 0; a one-sided bulge returns a value approaching 1.0.
+
+    Args:
+        lanelet: lanelet-like object with leftBound and rightBound iterables
+            of points exposing .x, .y, .z.
+        config: WidthEstimationConfig (only ``num_samples`` is used).
+
+    Returns:
+        Maximum relative asymmetry ratio across all sample positions, or 0.0
+        if the lanelet is too short to sample.
+    """
+    left_points = extract_points_3d(lanelet.leftBound)
+    right_points = extract_points_3d(lanelet.rightBound)
+
+    if len(left_points) < 2 or len(right_points) < 2:
+        return 0.0
+
+    left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
+    left_cumulative = np.concatenate(([0], np.cumsum(left_dists)))
+    right_dists = np.linalg.norm(np.diff(right_points, axis=0), axis=1)
+    right_cumulative = np.concatenate(([0], np.cumsum(right_dists)))
+
+    left_total = float(left_cumulative[-1])
+    right_total = float(right_cumulative[-1])
+    if (
+        left_total < DEFAULT_CONFIG.geometry.epsilon
+        or right_total < DEFAULT_CONFIG.geometry.epsilon
+    ):
+        return 0.0
+
+    num_samples = max(config.num_samples, 2)
+    normalized = np.linspace(0.0, 1.0, num_samples)
+
+    max_ratio = 0.0
+    for t in normalized:
+        s_left = t * left_total
+        s_right = t * right_total
+        left_pos = _interpolate_on_line_segments(left_points, left_cumulative, s_left)
+        right_pos = _interpolate_on_line_segments(
+            right_points, right_cumulative, s_right
+        )
+        center = (left_pos + right_pos) * 0.5
+        d_left = float(np.linalg.norm(center - left_pos))
+        d_right = float(np.linalg.norm(center - right_pos))
+        width = d_left + d_right
+        if width < DEFAULT_CONFIG.geometry.epsilon:
+            continue
+        ratio = abs(d_left - d_right) / width
+        if ratio > max_ratio:
+            max_ratio = ratio
+    return max_ratio
+
+
 def estimate_lanelet_width_with_reference_line(
     lanelet: lanelet2.core.Lanelet,
     reference_line_spline: "Splines",
