@@ -321,10 +321,10 @@ def compute_point_layer_bounds(
     for p in iterator:
         if p.x < min_x:
             min_x = p.x
-        elif p.x > max_x:
+        if p.x > max_x:
             max_x = p.x
         if p.y < min_y:
             min_y = p.y
-        elif p.y > max_y:
+        if p.y > max_y:
             max_y = p.y
     return min_x, min_y, max_x, max_y
