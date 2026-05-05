@@ -187,3 +187,22 @@ def test_issue_291_road_185_successor_is_synthetic_junction():
 
     sources = {c.find("laneLink").get("from") for c in connections}
     assert sources == {"-1", "-2", "-3"}
+
+    # Verify the lane-to-road mapping: each connecting road must terminate at
+    # the expected candidate (-1 -> 186, -2 -> 187, -3 -> 188) (#291 review).
+    expected_targets = {("-1", "186"), ("-2", "187"), ("-3", "188")}
+    actual_targets = set()
+    for connection in connections:
+        connecting_road_id = connection.get("connectingRoad")
+        lane_link = connection.find("laneLink")
+        from_lane = lane_link.get("from")
+        cr = tree.find(f".//road[@id='{connecting_road_id}']")
+        assert cr is not None, f"Connecting road {connecting_road_id} missing"
+        succ = cr.find("link/successor")
+        assert (
+            succ is not None
+        ), f"Connecting road {connecting_road_id} has no <successor>"
+        actual_targets.add((from_lane, succ.get("elementId")))
+    assert (
+        actual_targets == expected_targets
+    ), f"Lane-to-road mapping wrong: {actual_targets}, expected {expected_targets}"

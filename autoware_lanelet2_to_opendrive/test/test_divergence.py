@@ -199,6 +199,24 @@ def test_sanity_gate_fails_on_orphan_successor_lanelet_road():
     assert "orphan" in reason or "exhaustive" in reason
 
 
+def test_sanity_gate_fails_when_candidate_has_no_lane_pairs():
+    """Every candidate road must contribute at least one lane pair (#291 review)."""
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (0.0, 0.0, 0.0),
+            187: (0.0, 0.0, 0.0),
+            188: (0.0, 0.0, 0.0),
+        },
+        # Road 188 has no lane pair.
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+    )
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "188" in reason or "lane pair" in reason
+
+
 def test_synthesise_divergence_emits_one_connecting_road_per_lane_pair():
     site = DivergenceSite(
         road_id=185,

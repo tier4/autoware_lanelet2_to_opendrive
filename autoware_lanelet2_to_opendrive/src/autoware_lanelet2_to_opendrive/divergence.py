@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Iterable, List, Set, Tuple
 
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
 from autoware_lanelet2_to_opendrive.opendrive.enums import (
     ContactPoint,
     ElementType,
@@ -34,10 +36,14 @@ from autoware_lanelet2_to_opendrive.opendrive.junction import (
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
 from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
+from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
 from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     LaneLink as LaneLevelLaneLink,
 )
-from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.opendrive.road import (
+    Road,
+    _evaluate_planview_endpoint_with_heading,
+)
 from autoware_lanelet2_to_opendrive.opendrive.road_links import (
     Predecessor,
     RoadLink,
@@ -180,6 +186,17 @@ def sanity_gate_passes(
             f"orphan successor road ids not in candidates: {sorted(orphans)}",
         )
 
+    # 4. Per-candidate lane-pair coverage: every candidate must have at least one
+    #    recovered lane pair, otherwise emitting the synthetic junction would
+    #    silently drop that branch (#291 review).
+    cands_with_pairs = {pair[1] for pair in inputs.lane_pairs}
+    missing_cands = candidate_set - cands_with_pairs
+    if missing_cands:
+        return (
+            False,
+            f"candidates with no recovered lane pairs: {sorted(missing_cands)}",
+        )
+
     return True, ""
 
 
@@ -215,21 +232,27 @@ def _make_zero_length_connecting_road(
     traffic_rule: TrafficRule,
     from_lane: int,
     to_lane: int,
+    fallback_heading: float = 0.0,
+    lane_width: float = 3.5,
 ) -> Road:
     """Build a single-line single-lane connecting road floored at ``min_segment_length``.
 
     The geometry is a straight :class:`Line` whose length is the planar
     distance between ``start_xyz`` and ``end_xyz``, lifted to at least
     ``min_segment_length`` so OpenDRIVE consumers that reject zero-length
-    geometry (e.g. CARLA) still accept it.  The lane carries lane-level
-    predecessor/successor links from ``from_lane`` to ``to_lane`` so the
-    eventual XML preserves the source-lane → connecting-lane mapping.
+    geometry (e.g. CARLA) still accept it.  When ``start_xyz`` and
+    ``end_xyz`` coincide the heading falls back to ``fallback_heading``
+    (typically the source road's reference-line tangent) so the connector
+    aligns with the linked roads instead of pointing along the world X
+    axis.  The lane carries lane-level predecessor/successor links from
+    ``from_lane`` to ``to_lane`` and a constant ``lane_width`` so the
+    eventual XML always emits a ``<width>`` element.
     """
     dx = end_xyz[0] - start_xyz[0]
     dy = end_xyz[1] - start_xyz[1]
     raw_length = math.sqrt(dx * dx + dy * dy)
     length = max(raw_length, min_segment_length)
-    heading = math.atan2(dy, dx) if raw_length > 1e-9 else 0.0
+    heading = math.atan2(dy, dx) if raw_length > 1e-9 else fallback_heading
 
     plan_view = PlanView(
         geometries=[
@@ -252,6 +275,17 @@ def _make_zero_length_connecting_road(
         predecessor=LaneLevelLaneLink(id=from_lane),
         successor=LaneLevelLaneLink(id=to_lane),
         rule=traffic_rule.value if hasattr(traffic_rule, "value") else None,
+    )
+    # Emit a constant width so consumers do not see an undefined-width lane
+    # (#291 review). Without this the connector lane has no <width> element.
+    lane.widths.append(
+        LaneWidth(
+            s_offset=0.0,
+            a=lane_width,
+            b=0.0,
+            c=0.0,
+            d=0.0,
+        )
     )
 
     lane_section = LaneSection(s_offset=0.0)
@@ -295,6 +329,8 @@ def synthesise_junction_for_site(
     junction_id: int,
     traffic_rule: TrafficRule,
     min_segment_length: float,
+    fallback_heading: float = 0.0,
+    lane_width: float = 3.5,
 ) -> SynthesisOutput:
     """Build one synthetic :class:`Junction` plus N zero-length connecting roads.
 
@@ -356,6 +392,8 @@ def synthesise_junction_for_site(
             traffic_rule=traffic_rule,
             from_lane=from_lane,
             to_lane=to_lane,
+            fallback_heading=fallback_heading,
+            lane_width=lane_width,
         )
 
         connecting_roads.append(road)
@@ -550,6 +588,18 @@ def apply_divergence_synthesis(
                 )
             continue
 
+        # Source road tangent at the divergence/merge endpoint becomes the
+        # heading fallback when start_xyz and end_xyz coincide (#291 review).
+        source_plan_view = getattr(source_road, "plan_view", None)
+        fallback_heading = 0.0
+        if source_plan_view is not None:
+            endpoint_with_heading = _evaluate_planview_endpoint_with_heading(
+                source_plan_view,
+                at_start=not site.is_divergence,
+            )
+            if endpoint_with_heading is not None:
+                fallback_heading = endpoint_with_heading[2]
+
         synthesis = synthesise_junction_for_site(
             site=site,
             inputs=gate_inputs,
@@ -557,6 +607,8 @@ def apply_divergence_synthesis(
             junction_id=next_junction_id,
             traffic_rule=traffic_rule,
             min_segment_length=min_segment_length,
+            fallback_heading=fallback_heading,
+            lane_width=DEFAULT_CONFIG.geometry.divergence_default_lane_width,
         )
 
         out_junctions.append(synthesis.junction)
@@ -577,6 +629,27 @@ def apply_divergence_synthesis(
                 element_type=ElementType.JUNCTION,
                 contact_point=None,
             )
+
+        # Mirror-side patch on each candidate so both sides agree on the
+        # junction link (#291 review). Without this the candidates retain
+        # their direct road->road links from construct_from_lanelet_map and
+        # the topology becomes inconsistent.
+        for cand_id in site.candidate_road_ids:
+            cand_road = roads_by_id.get(cand_id)
+            if cand_road is None:
+                continue
+            if site.is_divergence:
+                cand_road.add_predecessor(
+                    element_id=jid,
+                    element_type=ElementType.JUNCTION,
+                    contact_point=None,
+                )
+            else:
+                cand_road.add_successor(
+                    element_id=jid,
+                    element_type=ElementType.JUNCTION,
+                    contact_point=None,
+                )
 
     return DivergenceSynthesisResult(
         junctions=out_junctions, connecting_roads=out_connecting_roads

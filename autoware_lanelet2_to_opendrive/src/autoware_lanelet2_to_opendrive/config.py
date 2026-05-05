@@ -20,12 +20,16 @@ class GeometryConstants:
             regular road's mirrored endpoint. Sanity gate for issue #291.
         divergence_min_segment_length: Floor (m) on synthetic divergence/merge
             connecting-road geometry length. Issue #291.
+        divergence_default_lane_width: Default width (m) emitted on synthetic
+            divergence/merge connecting-road lanes so the rendered XODR
+            ``<width>`` element is always present. Issue #291.
     """
 
     epsilon: float = 1e-10
     point_distance_threshold: float = 0.001
     divergence_endpoint_tolerance: float = 0.5
     divergence_min_segment_length: float = 0.01
+    divergence_default_lane_width: float = 3.5
 
 
 @dataclass(frozen=True)

@@ -1016,7 +1016,6 @@ class _Lanelet2ToOpenDRIVEConverter:
         )
         from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
-        from autoware_lanelet2_to_opendrive.util import create_routing_graph
 
         divergence_sites = collect_divergence_sites(
             deferred_predecessor_candidates=regular_result.deferred_predecessor_candidates,
@@ -1027,7 +1026,9 @@ class _Lanelet2ToOpenDRIVEConverter:
                 f"\n=== Synthesising {len(divergence_sites)} divergence/merge "
                 f"junction(s) (#291) ==="
             )
-            divergence_routing_graph = create_routing_graph(self.lanelet_map)
+            # Reuse the routing graph built by Road.construct_from_lanelet_map
+            # rather than paying the cost a second time (#291 review).
+            divergence_routing_graph = regular_result.routing_graph
             traffic_rule_value = (
                 TrafficRule.LHT
                 if (self.config.traffic_rule or "RHT").upper() == "LHT"

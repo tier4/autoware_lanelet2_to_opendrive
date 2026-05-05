@@ -78,6 +78,9 @@ class ConstructedRoadsResult(NamedTuple):
             regular roads. The road-level predecessor link is left unset
             for these roads; the divergence/merge synthesis pass owns it.
         deferred_successor_candidates: same, mirror.
+        routing_graph: The :class:`RoutingGraph` already built for this map.
+            Returned so downstream passes (e.g. divergence synthesis) can
+            reuse it instead of paying the construction cost a second time.
     """
 
     roads: List["Road"]
@@ -85,6 +88,7 @@ class ConstructedRoadsResult(NamedTuple):
     num_groups: int
     deferred_predecessor_candidates: Dict[int, List[int]]
     deferred_successor_candidates: Dict[int, List[int]]
+    routing_graph: RoutingGraph
 
 
 def _evaluate_plan_view_world(
@@ -1226,6 +1230,7 @@ class Road:
             num_groups=len(adjacent_groups),
             deferred_predecessor_candidates=deferred_predecessor_candidates,
             deferred_successor_candidates=deferred_successor_candidates,
+            routing_graph=routing_graph,
         )
 
     @staticmethod
