@@ -25,7 +25,7 @@ from autoware_lanelet2_to_opendrive.opendrive.enums import (
     LaneType,
     TrafficRule,
 )
-from autoware_lanelet2_to_opendrive.opendrive.geometry import Line, PlanView
+from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3, PlanView
 from autoware_lanelet2_to_opendrive.opendrive.junction import (
     Connection,
     Junction,
@@ -235,18 +235,23 @@ def _make_zero_length_connecting_road(
     fallback_heading: float = 0.0,
     lane_width: float = 3.5,
 ) -> Road:
-    """Build a single-line single-lane connecting road floored at ``min_segment_length``.
+    """Build a single-segment single-lane connecting road floored at ``min_segment_length``.
 
-    The geometry is a straight :class:`Line` whose length is the planar
-    distance between ``start_xyz`` and ``end_xyz``, lifted to at least
-    ``min_segment_length`` so OpenDRIVE consumers that reject zero-length
-    geometry (e.g. CARLA) still accept it.  When ``start_xyz`` and
+    The geometry is a :class:`ParamPoly3` segment whose length is the
+    planar distance between ``start_xyz`` and ``end_xyz``, lifted to at
+    least ``min_segment_length`` so OpenDRIVE consumers that reject
+    zero-length geometry (e.g. CARLA) still accept it.  ParamPoly3 is
+    used (rather than :class:`Line`) because downstream samplers in this
+    converter — ``road_lanelet_geo_mapping``, ``analyze_xodr``,
+    ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc. directly without
+    a geometry-type guard. For a straight segment the coefficients
+    reduce to ``u(p) = p``, ``v(p) = 0``.  When ``start_xyz`` and
     ``end_xyz`` coincide the heading falls back to ``fallback_heading``
-    (typically the source road's reference-line tangent) so the connector
-    aligns with the linked roads instead of pointing along the world X
-    axis.  The lane carries lane-level predecessor/successor links from
-    ``from_lane`` to ``to_lane`` and a constant ``lane_width`` so the
-    eventual XML always emits a ``<width>`` element.
+    (typically the source road's reference-line tangent) so the
+    connector aligns with the linked roads instead of pointing along
+    the world X axis.  The lane carries lane-level predecessor/successor
+    links from ``from_lane`` to ``to_lane`` and a constant ``lane_width``
+    so the eventual XML always emits a ``<width>`` element.
     """
     dx = end_xyz[0] - start_xyz[0]
     dy = end_xyz[1] - start_xyz[1]
@@ -256,12 +261,21 @@ def _make_zero_length_connecting_road(
 
     plan_view = PlanView(
         geometries=[
-            Line(
+            ParamPoly3(
                 s=0.0,
                 x=start_xyz[0],
                 y=start_xyz[1],
                 hdg=heading,
                 length=length,
+                aU=0.0,
+                bU=1.0,
+                cU=0.0,
+                dU=0.0,
+                aV=0.0,
+                bV=0.0,
+                cV=0.0,
+                dV=0.0,
+                pRange="arcLength",
             )
         ]
     )
