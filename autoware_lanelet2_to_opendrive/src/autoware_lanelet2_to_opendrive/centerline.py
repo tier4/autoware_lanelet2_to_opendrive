@@ -11,12 +11,6 @@ from .conversion_config import WidthEstimationConfig, WidthReference
 logger = logging.getLogger(__name__)
 
 
-class AsymmetryLaneletException(Exception):
-    """Exception raised when a lanelet has asymmetric left and right widths."""
-
-    pass
-
-
 class Width1DSplineAdapter:
     """
     Adapter class that wraps CubicSpline1D to provide compatibility with existing interface.

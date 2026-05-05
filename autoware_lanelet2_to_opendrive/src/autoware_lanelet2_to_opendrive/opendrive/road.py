@@ -10,7 +10,6 @@ import numpy as np
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from tqdm import tqdm
 
-from ..centerline import AsymmetryLaneletException
 from ..conversion_config import (
     LaneLinksContext,
     ParamPoly3Config,
@@ -902,12 +901,6 @@ class Road:
                 # Store road ID to adjacent group mapping
                 road_to_group[road_id] = adjacent_group
 
-            except AsymmetryLaneletException as e:
-                # Log asymmetric lanelet warning and skip this road
-                tqdm.write(
-                    f"Warning: Skipping road {road_id} due to asymmetric lanelet: {e}"
-                )
-                continue
             except Exception as e:
                 # Log warning but continue with other groups
                 if "has no len()" in str(e):
@@ -1274,12 +1267,6 @@ class Road:
 
                     current_road_id += 1
 
-                except AsymmetryLaneletException as e:
-                    tqdm.write(
-                        f"Warning: Skipping connecting road in junction {junction_id} "
-                        f"due to asymmetric lanelet: {e}"
-                    )
-                    continue
                 except Exception as e:
                     tqdm.write(
                         f"Warning: Failed to create connecting road in junction {junction_id}: {e}"
