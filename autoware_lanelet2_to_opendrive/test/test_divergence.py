@@ -3,6 +3,7 @@
 import inspect
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+from autoware_lanelet2_to_opendrive.divergence import DivergenceSide, DivergenceSite
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
     _resolve_candidate_road_ids,
@@ -60,3 +61,15 @@ def test_construct_from_lanelet_map_returns_deferred_candidate_dicts():
     )
     docstring = Road.construct_from_lanelet_map.__doc__ or ""
     assert "deferred" in docstring.lower()
+
+
+def test_divergence_site_records_side_and_candidates():
+    site = DivergenceSite(
+        road_id=185,
+        side=DivergenceSide.SUCCESSOR,
+        candidate_road_ids=[186, 187, 188],
+    )
+    assert site.road_id == 185
+    assert site.side is DivergenceSide.SUCCESSOR
+    assert site.candidate_road_ids == [186, 187, 188]
+    assert site.is_divergence is True  # successor side with N>=2 candidates
