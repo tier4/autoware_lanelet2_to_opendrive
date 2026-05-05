@@ -1,10 +1,13 @@
 """OpenDRIVE signal definitions."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Optional, List
 import lxml.etree as ET
 
 from ..config import COORDINATE_OFFSET
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -504,3 +507,59 @@ class TrafficLightArrowBit:
     # Sentinels — not bit values; must never be OR-combined with LEFT/RIGHT/STRAIGHT.
     NO_BULB_INFO = -1
     NO_ARROWS = 0
+
+
+_ARROW_VALUE_TO_BIT = {
+    "left": TrafficLightArrowBit.LEFT,
+    "right": TrafficLightArrowBit.RIGHT,
+    "up": TrafficLightArrowBit.STRAIGHT,  # Lanelet2 uses "up" for the straight-ahead arrow
+}
+
+
+def _compute_signal_subtype_from_bulbs(light_linestring: Any) -> int:
+    """Compute `<signal>` `@subtype` bitmask from per-bulb `arrow` attributes.
+
+    Iterates the points of a Lanelet2 `light_bulbs` LineString and folds the
+    `arrow` attribute of each point into a bitmask
+    (left=1, right=2, straight=4). Lanelet2 encodes the straight-ahead arrow
+    as `arrow=up`.
+
+    Args:
+        light_linestring: Lanelet2 LineString of bulb points, or `None`.
+
+    Returns:
+        `TrafficLightArrowBit.NO_BULB_INFO` (-1) if `light_linestring` is
+        `None` or empty. `TrafficLightArrowBit.NO_ARROWS` (0) if bulbs are
+        present but none carry an `arrow` attribute. Otherwise the bitwise
+        OR of `TrafficLightArrowBit.LEFT/RIGHT/STRAIGHT` for the directions
+        that appear at least once.
+
+    Unknown `arrow` values produce a warning log and are ignored. Points
+    without an `attributes` accessor are skipped silently.
+    """
+    if light_linestring is None or len(light_linestring) == 0:
+        return TrafficLightArrowBit.NO_BULB_INFO
+
+    mask = TrafficLightArrowBit.NO_ARROWS
+    for i in range(len(light_linestring)):
+        point = light_linestring[i]
+        if not hasattr(point, "attributes"):
+            continue
+        try:
+            arrow = point.attributes.get("arrow")
+        except AttributeError:
+            # `attributes` exists but is not dict-like; skip defensively.
+            continue
+        if arrow is None:
+            continue
+        bit = _ARROW_VALUE_TO_BIT.get(arrow)
+        if bit is None:
+            point_id = getattr(point, "id", "?")
+            logger.warning(
+                "unknown arrow value %r on bulb point %s; ignoring",
+                arrow,
+                point_id,
+            )
+            continue
+        mask |= bit
+    return mask
