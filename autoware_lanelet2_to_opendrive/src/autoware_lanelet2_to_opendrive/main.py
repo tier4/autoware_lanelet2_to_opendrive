@@ -46,7 +46,10 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     Header,
     save_opendrive_to_file,
 )
-from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.opendrive.road import (
+    ConstructedRoadsResult,
+    Road,
+)
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
@@ -124,25 +127,22 @@ class _Lanelet2ToOpenDRIVEConverter:
 
     def _build_regular_roads(
         self,
-    ) -> Tuple[List[Road], Dict[int, int], int]:
+    ) -> ConstructedRoadsResult:
         """
         Build roads from non-junction lanelets.
 
         Returns:
-            Tuple of:
-                - List of Road objects for non-junction lanelets
-                - Dictionary mapping lanelet ID to road ID (only successfully built roads)
-                - Total number of adjacent groups (including failed ones)
+            ConstructedRoadsResult bundling roads, mapping, group count and
+            divergence/merge deferred candidate maps (issue #291).
         """
         print("\n=== Building regular roads ===")
-        regular_roads, lanelet_to_road_id, num_groups = Road.construct_from_lanelet_map(
+        result = Road.construct_from_lanelet_map(
             self.lanelet_map,
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
             width_config=self.config.width_estimation,
         )
-
-        return regular_roads, lanelet_to_road_id, num_groups
+        return result
 
     def _build_junction_structure(
         self,
@@ -1004,9 +1004,10 @@ class _Lanelet2ToOpenDRIVEConverter:
         print("Converting Lanelet2 map to OpenDRIVE format...")
 
         # Step 1: Build regular roads from non-junction lanelets
-        regular_roads, lanelet_to_road_id, num_regular_groups = (
-            self._build_regular_roads()
-        )
+        regular_result = self._build_regular_roads()
+        regular_roads = regular_result.roads
+        lanelet_to_road_id = regular_result.lanelet_to_road
+        num_regular_groups = regular_result.num_groups
 
         # Step 2: Build junction structure
         (

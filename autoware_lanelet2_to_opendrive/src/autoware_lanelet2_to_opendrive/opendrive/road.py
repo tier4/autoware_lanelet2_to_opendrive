@@ -2,7 +2,17 @@
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
 import lanelet2
 import lxml.etree as ET
@@ -53,6 +63,28 @@ def _resolve_candidate_road_ids(
             if rid is not None and rid not in seen:
                 seen.append(rid)
     return seen
+
+
+class ConstructedRoadsResult(NamedTuple):
+    """Return bundle for ``Road.construct_from_lanelet_map`` (issue #291).
+
+    Attributes:
+        roads: Successfully built regular roads.
+        lanelet_to_road: ``lanelet_id -> road_id`` for built roads.
+        num_groups: Total number of adjacent groups (including failed ones)
+            so callers keep the existing offset for connecting-road IDs.
+        deferred_predecessor_candidates: ``road_id -> [candidate road IDs]``
+            for roads whose predecessor side resolves to >= 2 distinct
+            regular roads. The road-level predecessor link is left unset
+            for these roads; the divergence/merge synthesis pass owns it.
+        deferred_successor_candidates: same, mirror.
+    """
+
+    roads: List["Road"]
+    lanelet_to_road: Dict[int, int]
+    num_groups: int
+    deferred_predecessor_candidates: Dict[int, List[int]]
+    deferred_successor_candidates: Dict[int, List[int]]
 
 
 def _evaluate_plan_view_world(
@@ -1006,7 +1038,7 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
-    ) -> Tuple[List["Road"], Dict[int, int], int]:
+    ) -> "ConstructedRoadsResult":
         """Construct Roads from a lanelet map.
 
         Args:
@@ -1016,10 +1048,9 @@ class Road:
             width_config: Configuration for width spline sampling
 
         Returns:
-            Tuple of:
-                - List of Road objects constructed from non-junction lanelets
-                - Dictionary mapping lanelet ID to road ID (only for successfully built roads)
-                - Total number of adjacent groups (including failed ones)
+            ConstructedRoadsResult: roads, lanelet-to-road mapping, total
+                adjacent-group count, and deferred predecessor/successor
+                candidate maps for divergence/merge sites (issue #291).
 
         Raises:
             ValueError: If lanelet_map is empty or contains no valid lanelets
@@ -1189,7 +1220,13 @@ class Road:
         # after combining regular roads and connecting roads from junctions.
         Road.set_all_lane_links(lanelet_map, roads, routing_graph)
 
-        return roads, lanelet_to_road, len(adjacent_groups)
+        return ConstructedRoadsResult(
+            roads=roads,
+            lanelet_to_road=lanelet_to_road,
+            num_groups=len(adjacent_groups),
+            deferred_predecessor_candidates=deferred_predecessor_candidates,
+            deferred_successor_candidates=deferred_successor_candidates,
+        )
 
     @staticmethod
     def construct_connecting_roads_from_junctions(

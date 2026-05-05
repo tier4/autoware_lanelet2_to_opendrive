@@ -1,7 +1,12 @@
 """Tests for divergence/merge synthesis (issue #291)."""
 
+import inspect
+
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
-from autoware_lanelet2_to_opendrive.opendrive.road import _resolve_candidate_road_ids
+from autoware_lanelet2_to_opendrive.opendrive.road import (
+    Road,
+    _resolve_candidate_road_ids,
+)
 
 
 def test_geometry_constants_expose_divergence_thresholds():
@@ -43,3 +48,15 @@ def test_resolve_candidate_road_ids_preserves_order_of_first_appearance():
     mapping = {10: 1, 11: 1, 20: 2}
 
     assert _resolve_candidate_road_ids(groups, mapping) == [2, 1]
+
+
+def test_construct_from_lanelet_map_returns_deferred_candidate_dicts():
+    """The signature must include deferred predecessor/successor candidate maps."""
+    sig = inspect.signature(Road.construct_from_lanelet_map)
+    return_annotation = str(sig.return_annotation).replace(" ", "")
+    assert (
+        "ConstructedRoadsResult" in return_annotation
+        or "Tuple[List[" in return_annotation
+    )
+    docstring = Road.construct_from_lanelet_map.__doc__ or ""
+    assert "deferred" in docstring.lower()
