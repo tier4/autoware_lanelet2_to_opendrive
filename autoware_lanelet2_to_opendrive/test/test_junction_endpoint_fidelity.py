@@ -1,20 +1,30 @@
 """Regression test for P0-2 junction endpoint fidelity.
 
 Ensures that each connecting road (junction != -1) in the output OpenDRIVE map
-lands exactly on its linked incoming and outgoing roads at its start and end
-points.  Prior to the fix, the connecting road's reference line came from a
-different OSM LineString than the incoming/outgoing road's reference line,
-which caused gaps of up to ~11.6 m at junction entry/exit.
+lands exactly on its linked incoming and outgoing roads at the **lane edge**
+shared between them.  Prior to the fix, the connecting road's reference line
+came from a different OSM LineString than the incoming/outgoing road's
+reference line, which caused gaps of up to ~11.6 m at junction entry/exit.
 
 The test evaluates the 3D endpoint (x, y, z) of every connection by
-reconstructing the planView + elevationProfile from XML and compares it with
-the endpoint of the linked road.  A tolerance of 5 cm is used.
+reconstructing the planView + elevationProfile from XML and compares it
+with the corresponding lane edge of the linked road, derived from the
+junction ``<laneLink>`` mapping (incoming side) and the lane-level
+``<successor>`` link (outgoing side).  A tolerance of 5 cm is used.
+
+Note: comparing reference-line endpoints (the pre-#437 invariant) is only
+correct when the connecting road's outermost lanelet links to the linked
+road's outermost lanelet.  When it links to an inner lanelet — the case
+that #437 fixes via lane-aware pinning — the reference lines differ by
+one or more lane widths, but the **lane edges** still coincide.
 """
 
+import math
 import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Optional, Tuple
 
 import lxml.etree as ET
 import pytest
@@ -24,15 +34,185 @@ from autoware_lanelet2_to_opendrive.opendrive.geometry import evaluate_road_endp
 
 TOLERANCE_M = 0.05
 
-# Connections gated out of the override path because applying the pin
-# would shift the connecting road laterally onto a parallel regular road
-# (see ``_MAX_OVERRIDE_LATERAL_M`` in ``opendrive/road.py``).  Their
-# rendered endpoints intentionally fall back to the natural lanelet
-# boundary, so the gap to the linked regular road can exceed the strict
-# 5 cm tolerance.  The test treats anything beyond this radius as a
-# gated (intentional) case rather than a fidelity regression — until
-# lane-aware pinning lands as a follow-up to #437.
-GATED_GAP_M = 1.5
+
+def _evaluate_lane_inner_edge(
+    road_elem: ET._Element, lane_id: int, at_start: bool
+) -> Optional[Tuple[float, float, float]]:
+    """Return ``(x, y, z)`` of lane ``lane_id``'s reference-side edge.
+
+    The reference-side edge of lane ``±k`` is the boundary closer to the
+    reference line — for ``|k| == 1`` this is the reference line itself
+    (lateral offset ``t = 0``); for ``|k| >= 2`` it is at
+    ``t = sign(k) * sum(widths of lanes between reference and lane k)``.
+
+    Evaluated at ``s = 0`` if ``at_start`` is true, otherwise at
+    ``s = sum(geometry.length)``.
+
+    Returns ``None`` if the road is missing planView geometry, lane
+    section, or the requested lane's width data.
+    """
+    plan_view = road_elem.find("planView")
+    if plan_view is None:
+        return None
+    geom_elems = plan_view.findall("geometry")
+    if not geom_elems:
+        return None
+    geom = geom_elems[0] if at_start else geom_elems[-1]
+    geom_length = float(geom.get("length", "0.0"))
+    p_local = 0.0 if at_start else geom_length
+
+    geom_x = float(geom.get("x"))
+    geom_y = float(geom.get("y"))
+    hdg_base = float(geom.get("hdg"))
+    cos_h = math.cos(hdg_base)
+    sin_h = math.sin(hdg_base)
+
+    pp3 = geom.find("paramPoly3")
+    if pp3 is not None:
+        a_u = float(pp3.get("aU", "0.0"))
+        b_u = float(pp3.get("bU", "0.0"))
+        c_u = float(pp3.get("cU", "0.0"))
+        d_u = float(pp3.get("dU", "0.0"))
+        a_v = float(pp3.get("aV", "0.0"))
+        b_v = float(pp3.get("bV", "0.0"))
+        c_v = float(pp3.get("cV", "0.0"))
+        d_v = float(pp3.get("dV", "0.0"))
+        local_u = a_u + b_u * p_local + c_u * p_local**2 + d_u * p_local**3
+        local_v = a_v + b_v * p_local + c_v * p_local**2 + d_v * p_local**3
+        x_ref = geom_x + local_u * cos_h - local_v * sin_h
+        y_ref = geom_y + local_u * sin_h + local_v * cos_h
+        du = b_u + 2.0 * c_u * p_local + 3.0 * d_u * p_local**2
+        dv = b_v + 2.0 * c_v * p_local + 3.0 * d_v * p_local**2
+        dx = du * cos_h - dv * sin_h
+        dy = du * sin_h + dv * cos_h
+        heading = math.atan2(dy, dx)
+    else:
+        x_ref = geom_x + p_local * cos_h
+        y_ref = geom_y + p_local * sin_h
+        heading = hdg_base
+
+    s_road = float(geom_elems[0].get("s", "0.0")) + (
+        0.0
+        if at_start
+        else (
+            float(geom_elems[-1].get("s", "0.0"))
+            - float(geom_elems[0].get("s", "0.0"))
+            + geom_length
+        )
+    )
+
+    lanes_elem = road_elem.find("lanes")
+    if lanes_elem is None:
+        return None
+    section_elems = lanes_elem.findall("laneSection")
+    if not section_elems:
+        return None
+    section = section_elems[0]
+    s_in_section = s_road - float(section.get("s", "0.0"))
+
+    t = 0.0
+    if lane_id != 0:
+        side_name = "left" if lane_id > 0 else "right"
+        side_elem = section.find(side_name)
+        if side_elem is None:
+            return None
+        lane_by_id = {int(le.get("id")): le for le in side_elem.findall("lane")}
+        sign = 1 if lane_id > 0 else -1
+        for j in range(1, abs(lane_id)):
+            inner_lane = lane_by_id.get(sign * j)
+            if inner_lane is None:
+                return None
+            width_elems = inner_lane.findall("width")
+            if not width_elems:
+                continue
+            seg = width_elems[0]
+            for we in width_elems:
+                if float(we.get("sOffset", "0")) <= s_in_section:
+                    seg = we
+                else:
+                    break
+            ds = s_in_section - float(seg.get("sOffset", "0"))
+            w = (
+                float(seg.get("a", "0"))
+                + float(seg.get("b", "0")) * ds
+                + float(seg.get("c", "0")) * ds**2
+                + float(seg.get("d", "0")) * ds**3
+            )
+            t += sign * w
+
+    nx = -math.sin(heading)
+    ny = math.cos(heading)
+    x = x_ref + t * nx
+    y = y_ref + t * ny
+
+    elev = road_elem.find("elevationProfile")
+    z = 0.0
+    if elev is not None:
+        for elev_seg in elev.findall("elevation"):
+            s_off = float(elev_seg.get("s", "0"))
+            if s_off > s_road:
+                break
+            ds = s_road - s_off
+            z = (
+                float(elev_seg.get("a", "0"))
+                + float(elev_seg.get("b", "0")) * ds
+                + float(elev_seg.get("c", "0")) * ds**2
+                + float(elev_seg.get("d", "0")) * ds**3
+            )
+
+    return (x, y, z)
+
+
+def _outermost_lane_id(road_elem: ET._Element) -> Optional[int]:
+    """Return the outermost lane ID of a road (``-1`` for RHT, ``+1`` for LHT).
+
+    Determined by which side of the laneSection contains lanes; the
+    reference-line side has the smallest absolute lane id (``±1``).
+    """
+    lanes_elem = road_elem.find("lanes")
+    if lanes_elem is None:
+        return None
+    section_elems = lanes_elem.findall("laneSection")
+    if not section_elems:
+        return None
+    section = section_elems[0]
+    right = section.find("right")
+    if right is not None and right.findall("lane"):
+        return -1
+    left = section.find("left")
+    if left is not None and left.findall("lane"):
+        return 1
+    return None
+
+
+def _outermost_lane_link_target(
+    road_elem: ET._Element,
+    outermost_lane_id: int,
+    follow: str,
+) -> Optional[int]:
+    """Return the lane ID of the outermost lane's predecessor or successor.
+
+    ``follow`` must be ``"predecessor"`` or ``"successor"``.  Returns
+    ``None`` if the lane has no link of that kind.
+    """
+    lanes_elem = road_elem.find("lanes")
+    if lanes_elem is None:
+        return None
+    section = lanes_elem.findall("laneSection")[0]
+    side_name = "left" if outermost_lane_id > 0 else "right"
+    side = section.find(side_name)
+    if side is None:
+        return None
+    for lane in side.findall("lane"):
+        if int(lane.get("id")) == outermost_lane_id:
+            link = lane.find("link")
+            if link is None:
+                return None
+            target = link.find(follow)
+            if target is None:
+                return None
+            return int(target.get("id"))
+    return None
 
 
 def _nishishinjuku_xodr_path() -> Path:
@@ -128,16 +308,17 @@ def test_evaluate_road_endpoints_minimal():
 
 
 def test_junction_connection_endpoints_match_linked_roads():
-    """Every junction connection must land on the linked road within 5 cm.
+    """Every junction connection must land on the linked lane edge within 5 cm.
 
-    The P0-2 fix overrides the connecting-road endpoints with the linked
-    regular-road endpoints during construction.  Because a single connecting
-    road has only two endpoints (start, end), it can only be pinned to one
-    incoming and one outgoing regular road at a time.  Multi-incoming /
-    multi-outgoing junctions therefore necessarily have gaps on the
-    non-pinned sides — this test excludes those cases and checks only the
-    connections whose connecting road has a unique incoming and unique
-    outgoing regular road in the junction table.
+    The P0-2 fix (made lane-aware in #437) overrides the connecting-road
+    endpoints with the rendered XYZ of the lane edge that the connecting
+    road's outermost lanelet shares with its linked predecessor /
+    successor lanelet in the regular road.
+
+    A connecting road has only two endpoints, so it can only be pinned to
+    one incoming and one outgoing regular road; multi-incoming /
+    multi-outgoing cases necessarily have gaps on the non-pinned sides
+    and are excluded.
     """
     xodr_path = _build_nishishinjuku_xodr()
 
@@ -146,33 +327,19 @@ def test_junction_connection_endpoints_match_linked_roads():
 
     endpoints = evaluate_road_endpoints(root)
 
-    # Map road_id -> junction attribute (-1 if not in a junction)
+    road_by_id: dict[int, ET._Element] = {}
     road_junction: dict[int, int] = {}
-    road_predecessor: dict[int, tuple] = {}
-    road_successor: dict[int, tuple] = {}
     for road_elem in root.findall("road"):
         rid = int(road_elem.get("id"))
+        road_by_id[rid] = road_elem
         road_junction[rid] = int(road_elem.get("junction", "-1"))
 
-        link = road_elem.find("link")
-        if link is not None:
-            pred = link.find("predecessor")
-            if pred is not None:
-                road_predecessor[rid] = (
-                    pred.get("elementType"),
-                    int(pred.get("elementId")),
-                    pred.get("contactPoint"),
-                )
-            succ = link.find("successor")
-            if succ is not None:
-                road_successor[rid] = (
-                    succ.get("elementType"),
-                    int(succ.get("elementId")),
-                    succ.get("contactPoint"),
-                )
-
-    # Build per-connecting-road sets of incoming roads (from junction table).
-    conn_road_incomings: dict[int, set] = {}
+    # Build per-connecting-road junction info: incoming roads + outermost
+    # ``<laneLink>`` (the one mapping to lane ±1) + connection contact point.
+    # ``conn_road_incoming_link[cr]`` = ``(incoming_road_id, from_lane_id)``
+    # when the connecting road has exactly one incoming regular road.
+    conn_road_incomings: dict[int, set[int]] = {}
+    conn_road_outer_link: dict[int, dict[int, int]] = {}
     conn_road_junction: dict[int, int] = {}
     conn_road_contact: dict[int, str] = {}
     for junction_elem in root.findall("junction"):
@@ -187,25 +354,18 @@ def test_junction_connection_endpoints_match_linked_roads():
             conn_road_junction[connecting_road_id] = junction_id
             conn_road_contact[connecting_road_id] = contact_point
 
-    # ``offenders``: mismatches in ``(TOLERANCE_M, GATED_GAP_M)`` — strict
-    # regression band, always a test failure.
-    # ``gated_offenders``: mismatches ``>= GATED_GAP_M`` — assumed to be the
-    # intentionally gated wrong-pin cases (see ``GATED_GAP_M`` comment).
-    # We report them separately so a regression that creates new large gaps
-    # is still visible in test output rather than silently ignored.
-    offenders: list[tuple[int, int, str, int, float]] = []
-    gated_offenders: list[tuple[int, int, str, int, float]] = []
+            # Find the laneLink mapping to the connecting road's outermost
+            # lane (``to == ±1``) — the lane the override pins.
+            for lane_link in conn_elem.findall("laneLink"):
+                to_id = int(lane_link.get("to"))
+                if abs(to_id) != 1:
+                    continue
+                from_id = int(lane_link.get("from"))
+                conn_road_outer_link.setdefault(connecting_road_id, {})[
+                    incoming_road_id
+                ] = from_id
 
-    def _classify(
-        record: tuple[int, int, str, int, float],
-    ) -> None:
-        d = record[4]
-        if d <= TOLERANCE_M:
-            return
-        if d < GATED_GAP_M:
-            offenders.append(record)
-        else:
-            gated_offenders.append(record)
+    offenders: list[tuple[int, int, str, int, float]] = []
 
     for connecting_road_id, incoming_ids in conn_road_incomings.items():
         junction_id = conn_road_junction[connecting_road_id]
@@ -213,85 +373,94 @@ def test_junction_connection_endpoints_match_linked_roads():
 
         if connecting_road_id not in endpoints:
             continue
+        if connecting_road_id not in road_by_id:
+            continue
         conn_start, conn_end = endpoints[connecting_road_id]
 
-        # Incoming side: check only when the connecting road has exactly
-        # one incoming regular road — the override can pin only one.
+        # ----- Incoming side -----
+        # Skip multi-incoming connections: the override can pin only one.
         if len(incoming_ids) == 1:
             (incoming_road_id,) = incoming_ids
             if (
-                incoming_road_id in endpoints
+                incoming_road_id in road_by_id
                 and road_junction.get(incoming_road_id, -1) == -1
             ):
-                inc_start, inc_end = endpoints[incoming_road_id]
-                if contact_point == "start":
-                    expected_in = inc_end
-                    actual_in = conn_start
-                else:
-                    expected_in = inc_start
-                    actual_in = conn_end
-                d_in = _distance3(expected_in, actual_in)
-                _classify(
-                    (
-                        junction_id,
-                        connecting_road_id,
-                        "incoming",
-                        incoming_road_id,
-                        d_in,
-                    )
+                from_lane_id = conn_road_outer_link.get(connecting_road_id, {}).get(
+                    incoming_road_id
                 )
+                if from_lane_id is not None:
+                    inc_at_start = contact_point != "start"
+                    expected_in = _evaluate_lane_inner_edge(
+                        road_by_id[incoming_road_id],
+                        from_lane_id,
+                        at_start=inc_at_start,
+                    )
+                    actual_in = conn_start if contact_point == "start" else conn_end
+                    if expected_in is not None:
+                        d_in = _distance3(expected_in, actual_in)
+                        if d_in > TOLERANCE_M:
+                            offenders.append(
+                                (
+                                    junction_id,
+                                    connecting_road_id,
+                                    "incoming",
+                                    incoming_road_id,
+                                    d_in,
+                                )
+                            )
 
-        # Outgoing side: the connecting road's link references the
-        # outgoing road.  Check only when it resolves to a single regular
-        # road (i.e. not a chained connecting road, and not multi-successor).
+        # ----- Outgoing side -----
+        # Read the outgoing lane via the connecting road's outermost lane's
+        # lane-level link (predecessor when contactPoint=end, successor when
+        # contactPoint=start).
+        conn_road_elem = road_by_id[connecting_road_id]
+        outer_lane_id = _outermost_lane_id(conn_road_elem)
+        if outer_lane_id is None:
+            continue
+
         if contact_point == "start":
-            link = road_successor.get(connecting_road_id)
-            out_side = conn_end
-            out_contact_label = "end"
+            road_link = conn_road_elem.find("link")
+            link_kind = "successor"
         else:
-            link = road_predecessor.get(connecting_road_id)
-            out_side = conn_start
-            out_contact_label = "start"
+            road_link = conn_road_elem.find("link")
+            link_kind = "predecessor"
+        if road_link is None:
+            continue
+        outgoing_link = road_link.find(link_kind)
+        if outgoing_link is None or outgoing_link.get("elementType") != "road":
+            continue
+        outgoing_road_id = int(outgoing_link.get("elementId"))
+        if road_junction.get(outgoing_road_id, -1) != -1:
+            continue
+        if outgoing_road_id not in road_by_id:
+            continue
+        outgoing_contact = outgoing_link.get("contactPoint")
+        out_at_start = outgoing_contact == "start"
 
-        if link is None:
-            continue
-        link_type, link_id, link_contact = link
-        if link_type != "road":
-            continue
-        if link_id not in endpoints:
-            continue
-        if road_junction.get(link_id, -1) != -1:
-            # Chained connecting roads are not part of this check.
+        target_lane_id = _outermost_lane_link_target(
+            conn_road_elem, outer_lane_id, link_kind
+        )
+        if target_lane_id is None:
             continue
 
-        link_start, link_end = endpoints[link_id]
-        expected_out = link_start if link_contact == "start" else link_end
-        d_out = _distance3(expected_out, out_side)
-        _classify(
-            (
-                junction_id,
-                connecting_road_id,
-                out_contact_label,
-                link_id,
-                d_out,
+        expected_out = _evaluate_lane_inner_edge(
+            road_by_id[outgoing_road_id], target_lane_id, at_start=out_at_start
+        )
+        actual_out = conn_end if contact_point == "start" else conn_start
+        if expected_out is None:
+            continue
+        d_out = _distance3(expected_out, actual_out)
+        out_label = "end" if contact_point == "start" else "start"
+        if d_out > TOLERANCE_M:
+            offenders.append(
+                (
+                    junction_id,
+                    connecting_road_id,
+                    out_label,
+                    outgoing_road_id,
+                    d_out,
+                )
             )
-        )
-
-    # Surface gated (``d >= GATED_GAP_M``) cases on stdout so a regression
-    # that adds new large gaps is visible during ``pytest -s`` / CI logs,
-    # even when the strict-band assertion below passes.
-    if gated_offenders:
-        gated_offenders.sort(key=lambda o: -o[4])
-        gated_sample = "\n".join(
-            f"  junction={j} conn_road={cr} side={side} linked_road={lr} d={d:.3f}"
-            for j, cr, side, lr, d in gated_offenders[:10]
-        )
-        print(
-            f"\n[junction-endpoint-fidelity] {len(gated_offenders)} gated "
-            f"endpoint gap(s) >= {GATED_GAP_M} m (intentional fallback to "
-            f"natural lanelet boundary; tracked separately so regressions "
-            f"that grow this set are visible):\n{gated_sample}"
-        )
 
     if offenders:
         offenders.sort(key=lambda o: -o[4])
@@ -300,8 +469,7 @@ def test_junction_connection_endpoints_match_linked_roads():
             for j, cr, side, lr, d in offenders[:10]
         )
         pytest.fail(
-            f"{len(offenders)} junction endpoint mismatches > {TOLERANCE_M} m "
-            f"(below the {GATED_GAP_M} m gated radius).\n"
+            f"{len(offenders)} junction endpoint mismatches > {TOLERANCE_M} m.\n"
             f"Max: {offenders[0][4]:.3f} m.\n"
             f"Worst 10:\n{sample}"
         )

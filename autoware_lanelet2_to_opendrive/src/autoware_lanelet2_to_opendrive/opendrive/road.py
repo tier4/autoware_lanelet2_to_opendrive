@@ -79,6 +79,70 @@ def _evaluate_elevation_profile(elevation_profile: ElevationProfile, s: float) -
     return z
 
 
+def _evaluate_planview_endpoint_with_heading(
+    plan_view: PlanView, at_start: bool
+) -> Optional[Tuple[float, float, float]]:
+    """Return ``(x, y, heading)`` at the ``s=0`` or ``s=length`` endpoint.
+
+    Heading is the world-frame tangent angle, computed from the geometry's
+    base ``hdg`` and (for ``paramPoly3``) the local UV derivatives evaluated
+    at the endpoint parameter.  Used by lane-aware junction pinning to
+    apply a lateral normal offset along the rendered tangent.
+    """
+    if plan_view is None or not plan_view.geometries:
+        return None
+
+    geom = plan_view.geometries[0] if at_start else plan_view.geometries[-1]
+    p = 0.0 if at_start else geom.length
+
+    coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
+        None
+    )
+    if isinstance(geom, ParamPoly3):
+        coeffs = (
+            geom.aU,
+            geom.bU,
+            geom.cU,
+            geom.dU,
+            geom.aV,
+            geom.bV,
+            geom.cV,
+            geom.dV,
+        )
+
+    xy = evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs)
+    if xy is None:
+        return None
+    x_w, y_w = xy
+
+    if isinstance(geom, ParamPoly3):
+        du = geom.bU + 2.0 * geom.cU * p + 3.0 * geom.dU * p * p
+        dv = geom.bV + 2.0 * geom.cV * p + 3.0 * geom.dV * p * p
+        cos_h = float(np.cos(geom.hdg))
+        sin_h = float(np.sin(geom.hdg))
+        dx = du * cos_h - dv * sin_h
+        dy = du * sin_h + dv * cos_h
+        heading = float(np.arctan2(dy, dx))
+    else:
+        heading = float(geom.hdg)
+
+    return (float(x_w), float(y_w), heading)
+
+
+def _evaluate_lane_width(lane: "Lane", s: float) -> float:
+    """Evaluate a Lane's piecewise-cubic width polynomial at ``s``."""
+    if not lane.widths:
+        return 0.0
+    seg = lane.widths[0]
+    for w in lane.widths:
+        if w.s_offset <= s:
+            seg = w
+        else:
+            break
+    ds = s - seg.s_offset
+    return float(seg.a + seg.b * ds + seg.c * ds * ds + seg.d * ds * ds * ds)
+
+
 if TYPE_CHECKING:
     from .signal import Signal
     from .lane import Lane
@@ -108,6 +172,91 @@ class Road:
     # can propagate these as overrides into connecting roads (P0-2).
     reference_start_xyz: Optional[Tuple[float, float, float]] = None
     reference_end_xyz: Optional[Tuple[float, float, float]] = None
+    # Source lanelet IDs in left-to-right sorted order, as produced by
+    # ``sort_adjacent_groups`` during construction.  The junction phase
+    # uses this to map a *specific* predecessor lanelet to its lane index
+    # inside this road so connecting-road endpoints can be pinned to the
+    # correct rendered lane edge rather than the regular road's reference
+    # line — see :meth:`evaluate_lane_anchor_xyz` and #437.
+    sorted_lanelet_ids: Optional[List[int]] = None
+
+    def evaluate_lane_anchor_xyz(
+        self,
+        sorted_index: int,
+        at_start: bool,
+    ) -> Optional[Tuple[float, float, float]]:
+        """Return the rendered ``(x, y, z)`` of the anchor boundary of the
+        lanelet at ``sorted_index`` at the road's ``s=0`` or ``s=length``.
+
+        ``sorted_index`` is the 0-based position in
+        :attr:`sorted_lanelet_ids` (left-to-right).  The anchor boundary is
+        ``leftBound`` for RHT roads and ``rightBound`` for LHT roads — the
+        side that joins the reference line for the outermost lanelet.
+
+        For ``sorted_index == 0`` (RHT) or ``sorted_index == n-1`` (LHT)
+        this is the reference line itself (lateral offset ``t = 0``) and
+        the result equals :attr:`reference_start_xyz` /
+        :attr:`reference_end_xyz`.  For other indices the result is offset
+        laterally by the cumulative width of the lanes between the anchor
+        and the reference line — the lane-aware pin target used when a
+        connecting road joins a non-outermost lane of a regular road
+        (see #437).
+
+        Returns ``None`` if the road is missing geometry, lanes, or the
+        sorted-lanelet index is out of range.
+        """
+        if (
+            self.plan_view is None
+            or not self.plan_view.geometries
+            or self.lanes is None
+            or not self.lanes.lane_sections
+            or self.sorted_lanelet_ids is None
+        ):
+            return None
+        n = len(self.sorted_lanelet_ids)
+        if not (0 <= sorted_index < n):
+            return None
+
+        endpoint = _evaluate_planview_endpoint_with_heading(
+            self.plan_view, at_start=at_start
+        )
+        if endpoint is None:
+            return None
+        x_ref, y_ref, heading = endpoint
+
+        s = 0.0 if at_start else self.length
+
+        lane_section = self.lanes.lane_sections[0]
+        is_lht = self.rule == TrafficRule.LHT
+        t = 0.0
+        if is_lht:
+            # LHT: lanelets at ``sorted_index k`` carry lane id ``n - k``.
+            # The anchor (rightBound) of lane ``n - k`` sits at
+            # ``t = + sum(widths of lanes 1 .. n - k - 1)`` — the widths of
+            # the lanelets to its right (more rightward in sorted order).
+            target_lane_id = n - sorted_index
+            for lane_id in range(1, target_lane_id):
+                lane = lane_section.left_lanes.get(lane_id)
+                if lane is None:
+                    return None
+                t += _evaluate_lane_width(lane, s)
+        else:
+            # RHT: lanelets at ``sorted_index k`` carry lane id ``-(k + 1)``.
+            # The anchor (leftBound) of lane ``-(k + 1)`` sits at
+            # ``t = - sum(widths of lanes -1 .. -k)`` — the widths of the
+            # lanelets to its left in sorted order.
+            for j in range(1, sorted_index + 1):
+                lane = lane_section.right_lanes.get(-j)
+                if lane is None:
+                    return None
+                t -= _evaluate_lane_width(lane, s)
+
+        nx = -float(np.sin(heading))
+        ny = float(np.cos(heading))
+        x = x_ref + t * nx
+        y = y_ref + t * ny
+        z = _evaluate_elevation_profile(self.elevation_profile, s)
+        return (float(x), float(y), float(z))
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -781,6 +930,14 @@ class Road:
                 z_end,
             )
 
+        from ..util import sort_adjacent_groups
+
+        try:
+            sorted_lls = sort_adjacent_groups(lanelet_map, set(lanelet_list))
+            sorted_lanelet_ids: Optional[List[int]] = [ll.id for ll in sorted_lls]
+        except Exception:
+            sorted_lanelet_ids = None
+
         road = Road(
             id=road_id,
             name=f"Road_{road_id}",
@@ -794,6 +951,7 @@ class Road:
             road_types=road_types_list,
             reference_start_xyz=rendered_start_xyz,
             reference_end_xyz=rendered_end_xyz,
+            sorted_lanelet_ids=sorted_lanelet_ids,
         )
 
         return road
@@ -1081,35 +1239,36 @@ class Road:
                 lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
             )
 
-        # Maximum lateral displacement (metres) that the override may
-        # introduce relative to the connecting road's natural reference
-        # endpoint.  An override that moves the rendered endpoint laterally
-        # by more than this is almost certainly pinning to a *parallel*
-        # regular road that happens to share a junction-boundary XY with
-        # the correct neighbour (different physical lane), and applying it
-        # collapses the connecting road onto the wrong rendered geometry —
-        # which then trips the conversion-vs-geo mapping cross-check on
-        # nishishinjuku (lanelets 3013150 / 3012677 / 3012500 / 3012728 /
-        # 3012711).  Legitimate longitudinal gap-closing overrides (the
-        # original P0-2 motivation, up to 11.6 m end-to-end) project
-        # mostly along the road tangent, so a small lateral budget is
-        # enough to reject the wrong-pin cases without losing the fix.
-        # Roughly half a typical lane width.
-        _MAX_OVERRIDE_LATERAL_M = 1.5
+        is_lht = (traffic_rule or "RHT").upper() == "LHT"
 
-        def _outermost_anchor_endpoint(
+        def _lane_aware_endpoint(
             group: Set[lanelet2.core.Lanelet],
-            at_start: bool,
-        ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-            """Return ``(anchor_xy, tangent_xy)`` for this connecting group.
+            direction: str,
+        ) -> Optional[Tuple[float, float, float]]:
+            """Resolve the rendered XYZ at the connecting group's anchor lane.
 
-            ``anchor_xy`` is the OUTERMOST connecting lanelet's anchor
-            boundary endpoint XY — the natural (un-pinned) reference-line
-            endpoint of the rendered road.  ``tangent_xy`` is a unit vector
-            pointing along the road at that endpoint, used to decompose
-            the override displacement into longitudinal vs lateral parts.
+            Walks the routing graph from the *outermost* lanelet of the
+            connecting group (leftmost for RHT, rightmost for LHT) in the
+            requested direction and identifies the unique predecessor /
+            successor lanelet ``pl`` that lives in a regular road ``R``.
+            Returns ``R``'s rendered ``(x, y, z)`` evaluated at the anchor
+            boundary of ``pl`` — i.e., the lane edge that ``pl`` shares
+            with the lane immediately closer to the road's reference line.
+
+            This is the structurally correct pin target: it equals
+            ``R.reference_end_xyz`` only when ``pl`` is itself the outermost
+            lanelet of ``R``; otherwise the two are offset laterally by
+            one or more lane widths, which is the original wrong-pin case
+            previously rejected by ``_MAX_OVERRIDE_LATERAL_M``.
+
+            Returns ``None`` when the predecessor/successor cannot be
+            resolved to a single lanelet inside a single known regular
+            road (asymmetric / multi-successor / non-regular neighbour).
             """
-            from ..util import sort_adjacent_groups, extract_points_3d
+            if not regular_road_by_id or routing_graph is None:
+                return None
+
+            from ..util import sort_adjacent_groups
 
             try:
                 sorted_lls = sort_adjacent_groups(lanelet_map, group)
@@ -1118,105 +1277,36 @@ class Road:
             if not sorted_lls:
                 return None
 
-            is_lht = (traffic_rule or "RHT").upper() == "LHT"
-            outer = sorted_lls[-1] if is_lht else sorted_lls[0]
-            boundary = outer.rightBound if is_lht else outer.leftBound
-            try:
-                pts = extract_points_3d(boundary)
-            except Exception:
-                return None
-            if len(pts) < 2:
-                return None
-
-            anchor_xy = np.asarray(pts[0 if at_start else -1, :2], dtype=float)
-            if at_start:
-                tangent = np.asarray(pts[1, :2], dtype=float) - anchor_xy
-            else:
-                tangent = anchor_xy - np.asarray(pts[-2, :2], dtype=float)
-            n = float(np.linalg.norm(tangent))
-            if n < 1e-9:
-                return None
-            return anchor_xy, tangent / n
-
-        def _gate_override(
-            override_xyz: Optional[Tuple[float, float, float]],
-            group: Set[lanelet2.core.Lanelet],
-            at_start: bool,
-        ) -> Optional[Tuple[float, float, float]]:
-            """Reject overrides whose lateral component is too large.
-
-            Returns the override unchanged when the displacement from the
-            natural anchor endpoint projects mostly along the road tangent
-            (legitimate longitudinal gap closure); returns ``None`` when
-            the lateral component exceeds ``_MAX_OVERRIDE_LATERAL_M``
-            (wrong-pin to a parallel road).
-            """
-            if override_xyz is None:
-                return None
-            info = _outermost_anchor_endpoint(group, at_start)
-            if info is None:
-                # Cannot decompose the displacement (sorting failed, boundary
-                # too short, degenerate tangent, ...).  Be conservative: skip
-                # the override rather than apply an unchecked pin, which is
-                # exactly the scenario the gate exists to prevent.
-                lanelet_ids = sorted(ll.id for ll in group)
-                logger.warning(
-                    "Skipping junction endpoint override (at_start=%s) for "
-                    "lanelet group %s: could not extract outermost anchor "
-                    "endpoint to apply lateral-displacement gate.",
-                    at_start,
-                    lanelet_ids,
-                )
-                return None
-            anchor_xy, tangent = info
-            disp = np.asarray(override_xyz, dtype=float)[:2] - anchor_xy
-            normal = np.array([-tangent[1], tangent[0]])
-            lateral = abs(float(np.dot(disp, normal)))
-            if lateral > _MAX_OVERRIDE_LATERAL_M:
-                return None
-            return override_xyz
-
-        def _unique_regular_endpoint(
-            group: Set[lanelet2.core.Lanelet],
-            direction: str,
-        ) -> Optional[Tuple[float, float, float]]:
-            """Resolve a connecting group's incoming/outgoing regular endpoint.
-
-            Walks the routing graph in the requested direction to find the
-            regular roads adjacent to this junction group.  Returns the
-            endpoint world-frame position if exactly one such regular road
-            exists — otherwise ``None`` (asymmetric / multi-successor case).
-
-            The candidate is gated by :func:`_gate_override` to skip cases
-            where the override would shift the connecting road laterally
-            onto a parallel regular road (see the lateral-budget comment).
-            """
-            if not regular_road_by_id or routing_graph is None:
-                return None
-            neighbour_road_ids: Set[int] = set()
-            for ll in group:
-                if direction == "previous":
-                    neighbours = routing_graph.previous(ll)
-                else:
-                    neighbours = routing_graph.following(ll)
-                for n in neighbours:
-                    r_id = ll_to_regular_road.get(n.id)
-                    if r_id is not None and r_id in regular_road_by_id:
-                        neighbour_road_ids.add(r_id)
-            if len(neighbour_road_ids) != 1:
-                return None
-            (r_id,) = neighbour_road_ids
-            neighbour_road = regular_road_by_id[r_id]
+            outermost_ll = sorted_lls[-1] if is_lht else sorted_lls[0]
             if direction == "previous":
-                # Incoming road: use its reference-line END (flows into
-                # the connecting road).
-                candidate = neighbour_road.reference_end_xyz
-                return _gate_override(candidate, group, at_start=True)
+                neighbour_lls = list(routing_graph.previous(outermost_ll))
             else:
-                # Outgoing road: use its reference-line START (connecting
-                # road flows into it).
-                candidate = neighbour_road.reference_start_xyz
-                return _gate_override(candidate, group, at_start=False)
+                neighbour_lls = list(routing_graph.following(outermost_ll))
+
+            # Filter to lanelets that map to known regular roads.
+            candidates = [
+                n
+                for n in neighbour_lls
+                if ll_to_regular_road.get(n.id) in regular_road_by_id
+            ]
+            if len(candidates) != 1:
+                # Asymmetric junction or chained connecting roads — leave
+                # the endpoint at its natural (un-pinned) lanelet boundary.
+                return None
+            pl = candidates[0]
+            r_id = ll_to_regular_road[pl.id]
+            r = regular_road_by_id[r_id]
+
+            if r.sorted_lanelet_ids is None or pl.id not in r.sorted_lanelet_ids:
+                return None
+            sorted_index = r.sorted_lanelet_ids.index(pl.id)
+
+            # ``previous`` ⇒ pin C's start to R's end; ``following`` ⇒ pin
+            # C's end to R's start.
+            return r.evaluate_lane_anchor_xyz(
+                sorted_index=sorted_index,
+                at_start=(direction == "following"),
+            )
 
         current_road_id = starting_road_id
 
@@ -1240,13 +1330,14 @@ class Road:
 
             # Create one road per adjacent group within the junction
             for adjacent_group in adjacent_groups_in_junction:
-                # Resolve endpoint overrides from linked regular roads.
-                # - Incoming side is always overridden when unique.
-                # - Outgoing side is only overridden when a single outgoing
-                #   regular road exists; multi-successor cases leave the
-                #   end alone (see docstring note above).
-                start_override = _unique_regular_endpoint(adjacent_group, "previous")
-                end_override = _unique_regular_endpoint(adjacent_group, "following")
+                # Resolve endpoint overrides from linked regular roads using
+                # lane-aware pinning: the pin target is the rendered lane
+                # edge of the *specific* predecessor/successor lanelet of
+                # the connecting group's outermost lanelet, not the regular
+                # road's reference line.  See ``_lane_aware_endpoint`` and
+                # #437 for the wrong-pin case this fixes.
+                start_override = _lane_aware_endpoint(adjacent_group, "previous")
+                end_override = _lane_aware_endpoint(adjacent_group, "following")
 
                 try:
                     road = Road.construct_from_lanelet_groups(
