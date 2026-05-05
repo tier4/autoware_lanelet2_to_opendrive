@@ -1,5 +1,6 @@
+import lanelet2
 import numpy as np
-from typing import Optional, List, Union
+from typing import Optional, List, Tuple, Union
 
 from .config import DEFAULT_CONFIG
 from .types import Point2D, Point3D
@@ -279,3 +280,51 @@ def line_line_intersection_typed(
     except np.linalg.LinAlgError:
         # Lines are parallel or coincident
         return None
+
+
+def compute_point_layer_bounds(
+    lanelet_map: "lanelet2.core.LaneletMap",
+) -> Tuple[float, float, float, float]:
+    """Return (min_x, min_y, max_x, max_y) over all Point3d in pointLayer.
+
+    The values are the axis-aligned bounding box of every projected point
+    already loaded into the lanelet2 map. They map onto OpenDRIVE
+    ``<header>`` attributes as: ``west=min_x``, ``south=min_y``,
+    ``east=max_x``, ``north=max_y``.
+
+    Parameters
+    ----------
+    lanelet_map : lanelet2.core.LaneletMap
+        Map whose ``pointLayer`` will be scanned.
+
+    Returns
+    -------
+    tuple of (float, float, float, float)
+        ``(min_x, min_y, max_x, max_y)`` in projected (metric) coordinates.
+
+    Raises
+    ------
+    ValueError
+        If ``lanelet_map.pointLayer`` is empty. Falling back to zeros would
+        silently reproduce the bug fixed by issue #465.
+    """
+    points = lanelet_map.pointLayer
+    if len(points) == 0:
+        raise ValueError(
+            "Cannot compute header bounds: lanelet_map.pointLayer is empty."
+        )
+
+    iterator = iter(points)
+    first = next(iterator)
+    min_x = max_x = first.x
+    min_y = max_y = first.y
+    for p in iterator:
+        if p.x < min_x:
+            min_x = p.x
+        elif p.x > max_x:
+            max_x = p.x
+        if p.y < min_y:
+            min_y = p.y
+        elif p.y > max_y:
+            max_y = p.y
+    return min_x, min_y, max_x, max_y
