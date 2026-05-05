@@ -25,6 +25,10 @@ from autoware_lanelet2_to_opendrive.opendrive.enums import (
     LaneType,
     TrafficRule,
 )
+from autoware_lanelet2_to_opendrive.opendrive.elevation import (
+    Elevation,
+    ElevationProfile,
+)
 from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3, PlanView
 from autoware_lanelet2_to_opendrive.opendrive.junction import (
     Connection,
@@ -281,6 +285,20 @@ def _make_zero_length_connecting_road(
         ]
     )
 
+    # Linear elevation profile so the connector matches the linked roads'
+    # z at both endpoints. Without this the synthesised road serializes
+    # without an <elevationProfile> and downstream consumers (CARLA,
+    # qc-validate, test_junction_endpoint_fidelity) read z=0 — producing
+    # gross 3D mismatches at ramps, hills, or any non-flat divergence.
+    z_start = start_xyz[2]
+    z_end = end_xyz[2]
+    elev_b = (z_end - z_start) / length if length > 0 else 0.0
+    elevation_profile = ElevationProfile(
+        elevations=[
+            Elevation(s=0.0, a=z_start, b=elev_b, c=0.0, d=0.0),
+        ]
+    )
+
     is_lht = traffic_rule == TrafficRule.LHT
     lane_id = 1 if is_lht else -1
 
@@ -339,6 +357,7 @@ def _make_zero_length_connecting_road(
         junction=junction_id,
         rule=traffic_rule,
         plan_view=plan_view,
+        elevation_profile=elevation_profile,
         lanes=lanes,
         link=link,
         reference_start_xyz=start_xyz,
@@ -503,18 +522,26 @@ def _lane_anchor_xyz(
     ``sorted_lanelet_ids`` index (``0..n-1`` left-to-right) and forwards
     the call. Returns ``None`` when the road lacks the metadata required
     by the helper, mirroring its own ``None`` semantics so callers can
-    fall back to the road's reference endpoint.
+    fall back to the road's reference endpoint.  Uses ``getattr`` for
+    defence against mock road stubs that omit the attribute from their
+    ``spec``.
     """
-    if road is None or road.sorted_lanelet_ids is None:
+    if road is None:
         return None
-    n = len(road.sorted_lanelet_ids)
+    sorted_lanelet_ids = getattr(road, "sorted_lanelet_ids", None)
+    if sorted_lanelet_ids is None:
+        return None
+    evaluator = getattr(road, "evaluate_lane_anchor_xyz", None)
+    if evaluator is None:
+        return None
+    n = len(sorted_lanelet_ids)
     if traffic_rule == TrafficRule.LHT:
         sorted_index = n - lane_id
     else:
         sorted_index = -lane_id - 1
     if not (0 <= sorted_index < n):
         return None
-    return road.evaluate_lane_anchor_xyz(sorted_index=sorted_index, at_start=at_start)
+    return evaluator(sorted_index=sorted_index, at_start=at_start)
 
 
 def _lane_pairs_for_site(

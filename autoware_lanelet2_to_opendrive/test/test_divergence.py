@@ -321,11 +321,19 @@ def _build_road_stub(
             "link",
             "add_successor",
             "add_predecessor",
+            "plan_view",
+            "sorted_lanelet_ids",
+            "evaluate_lane_anchor_xyz",
         ]
     )
     r.id = road_id
     r.reference_start_xyz = start_xyz
     r.reference_end_xyz = end_xyz
+    # Lane-aware anchor metadata is intentionally absent so the driver
+    # falls back to the road reference endpoint (the synthesiser tests
+    # the per-lane override path through the integration suite, not here).
+    r.plan_view = None
+    r.sorted_lanelet_ids = None
     r.link = MagicMock()
     r.link.predecessor = None
     r.link.successor = None
