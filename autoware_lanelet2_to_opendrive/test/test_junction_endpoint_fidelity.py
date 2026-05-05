@@ -124,7 +124,10 @@ def _evaluate_lane_inner_edge(
                 return None
             width_elems = inner_lane.findall("width")
             if not width_elems:
-                continue
+                # Lane is missing required <width> data — refuse to
+                # silently substitute zero, which would mask malformed
+                # XODR and let the assertion pass for the wrong reason.
+                return None
             seg = width_elems[0]
             for we in width_elems:
                 if float(we.get("sOffset", "0")) <= s_in_section:
@@ -336,8 +339,9 @@ def test_junction_connection_endpoints_match_linked_roads():
 
     # Build per-connecting-road junction info: incoming roads + outermost
     # ``<laneLink>`` (the one mapping to lane ±1) + connection contact point.
-    # ``conn_road_incoming_link[cr]`` = ``(incoming_road_id, from_lane_id)``
-    # when the connecting road has exactly one incoming regular road.
+    # ``conn_road_outer_link[cr][incoming_road_id] = from_lane_id`` records
+    # the regular-road lane that links to the connecting road's outermost
+    # lane — the only one the override can pin.
     conn_road_incomings: dict[int, set[int]] = {}
     conn_road_outer_link: dict[int, dict[int, int]] = {}
     conn_road_junction: dict[int, int] = {}

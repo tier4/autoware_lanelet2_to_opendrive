@@ -129,10 +129,16 @@ def _evaluate_planview_endpoint_with_heading(
     return (float(x_w), float(y_w), heading)
 
 
-def _evaluate_lane_width(lane: "Lane", s: float) -> float:
-    """Evaluate a Lane's piecewise-cubic width polynomial at ``s``."""
+def _evaluate_lane_width(lane: "Lane", s: float) -> Optional[float]:
+    """Evaluate a Lane's piecewise-cubic width polynomial at ``s``.
+
+    Returns ``None`` when the lane has no width data — callers must treat
+    that as a failure rather than substituting ``0``, otherwise lane-aware
+    pinning can silently collapse onto the reference line and mask
+    malformed input.
+    """
     if not lane.widths:
-        return 0.0
+        return None
     seg = lane.widths[0]
     for w in lane.widths:
         if w.s_offset <= s:
@@ -239,7 +245,10 @@ class Road:
                 lane = lane_section.left_lanes.get(lane_id)
                 if lane is None:
                     return None
-                t += _evaluate_lane_width(lane, s)
+                w = _evaluate_lane_width(lane, s)
+                if w is None:
+                    return None
+                t += w
         else:
             # RHT: lanelets at ``sorted_index k`` carry lane id ``-(k + 1)``.
             # The anchor (leftBound) of lane ``-(k + 1)`` sits at
@@ -249,7 +258,10 @@ class Road:
                 lane = lane_section.right_lanes.get(-j)
                 if lane is None:
                     return None
-                t -= _evaluate_lane_width(lane, s)
+                w = _evaluate_lane_width(lane, s)
+                if w is None:
+                    return None
+                t -= w
 
         nx = -float(np.sin(heading))
         ny = float(np.cos(heading))
@@ -933,9 +945,14 @@ class Road:
         from ..util import sort_adjacent_groups
 
         try:
-            sorted_lls = sort_adjacent_groups(lanelet_map, set(lanelet_list))
+            sorted_lls = sort_adjacent_groups(
+                lanelet_map, set(lanelet_list), routing_graph
+            )
             sorted_lanelet_ids: Optional[List[int]] = [ll.id for ll in sorted_lls]
-        except Exception:
+        except ValueError:
+            # Non-adjacent lanelet group — leaves lane-aware pinning
+            # disabled for this road; the junction phase falls back to
+            # the natural lanelet boundary for any incoming connection.
             sorted_lanelet_ids = None
 
         road = Road(
