@@ -6,7 +6,9 @@ from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
     DivergenceSide,
     DivergenceSite,
+    SanityGateInputs,
     collect_divergence_sites,
+    sanity_gate_passes,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
@@ -109,3 +111,79 @@ def test_collect_divergence_sites_handles_road_with_both_sides_deferred():
     sides = {s.side for s in sites}
     assert sides == {DivergenceSide.PREDECESSOR, DivergenceSide.SUCCESSOR}
     assert all(s.road_id == 42 for s in sites)
+
+
+def _site():
+    return DivergenceSite(
+        road_id=185,
+        side=DivergenceSide.SUCCESSOR,
+        candidate_road_ids=[186, 187, 188],
+    )
+
+
+def test_sanity_gate_passes_when_all_three_checks_clear():
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (0.0, 0.0, 0.0),
+            187: (0.1, 0.0, 0.0),
+            188: (0.2, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is True
+    assert reason == ""
+
+
+def test_sanity_gate_fails_on_endpoint_distance():
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (5.0, 0.0, 0.0),
+            187: (0.0, 0.0, 0.0),
+            188: (0.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "endpoint" in reason
+
+
+def test_sanity_gate_fails_on_lane_collision():
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (0.0, 0.0, 0.0),
+            187: (0.0, 0.0, 0.0),
+            188: (0.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 186, -1)],  # two source lanes -> same target
+        all_successor_lanelet_road_ids={186, 187, 188},
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "lane" in reason
+
+
+def test_sanity_gate_fails_on_orphan_successor_lanelet_road():
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (0.0, 0.0, 0.0),
+            187: (0.0, 0.0, 0.0),
+            188: (0.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188, 999},  # 999 is orphan
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "orphan" in reason or "exhaustive" in reason

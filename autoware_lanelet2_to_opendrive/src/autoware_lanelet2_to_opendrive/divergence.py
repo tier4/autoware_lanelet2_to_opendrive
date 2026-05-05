@@ -11,9 +11,10 @@ flow uniformly closes both sides.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Set, Tuple
 
 
 class DivergenceSide(Enum):
@@ -74,3 +75,75 @@ def collect_divergence_sites(
         *_emit(DivergenceSide.PREDECESSOR, deferred_predecessor_candidates),
         *_emit(DivergenceSide.SUCCESSOR, deferred_successor_candidates),
     ]
+
+
+@dataclass(frozen=True)
+class SanityGateInputs:
+    """Pre-computed inputs to the divergence/merge sanity gate.
+
+    Attributes:
+        endpoint_road: ``(x, y, z)`` of the regular road's reference-line
+            endpoint on the side under consideration.
+        endpoints_candidates: ``candidate_road_id -> (x, y, z)`` of each
+            candidate road's mirrored endpoint.
+        lane_pairs: list of ``(source_lane_id, candidate_road_id,
+            candidate_lane_id)`` triples recovered from the lanelet routing
+            graph for the side under consideration.
+        all_successor_lanelet_road_ids: set of road IDs that **every**
+            successor (or predecessor) lanelet of the source road resolves
+            to. Must be a subset of ``set(candidate_road_ids)`` for the
+            "group exhaustiveness" check to pass.
+    """
+
+    endpoint_road: Tuple[float, float, float]
+    endpoints_candidates: Dict[int, Tuple[float, float, float]]
+    lane_pairs: List[Tuple[int, int, int]]
+    all_successor_lanelet_road_ids: Set[int]
+
+
+def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
+    return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+
+
+def sanity_gate_passes(
+    site: DivergenceSite,
+    inputs: SanityGateInputs,
+    endpoint_tolerance: float,
+) -> Tuple[bool, str]:
+    """Return ``(passed, reason)``.
+
+    The gate fails fast on the first violation; the second-level reason
+    string is logged by the caller. Order matches the spec: endpoint
+    coincidence, lane uniqueness, group exhaustiveness.
+    """
+    candidate_set = set(site.candidate_road_ids)
+
+    # 1. Endpoint coincidence.
+    for cand_id in site.candidate_road_ids:
+        cand_endpoint = inputs.endpoints_candidates.get(cand_id)
+        if cand_endpoint is None:
+            return False, f"missing endpoint for candidate road {cand_id}"
+        if _distance(inputs.endpoint_road, cand_endpoint) > endpoint_tolerance:
+            return (
+                False,
+                f"endpoint distance for candidate {cand_id} exceeds "
+                f"{endpoint_tolerance:.3f} m",
+            )
+
+    # 2. Lane uniqueness: each (candidate_road, candidate_lane) appears at most once.
+    seen_targets: Set[Tuple[int, int]] = set()
+    for _src_lane, cand_id, cand_lane in inputs.lane_pairs:
+        target = (cand_id, cand_lane)
+        if target in seen_targets:
+            return False, f"lane collision: two source lanes map to {target}"
+        seen_targets.add(target)
+
+    # 3. Group exhaustiveness: every successor lanelet road id must be a candidate.
+    orphans = inputs.all_successor_lanelet_road_ids - candidate_set
+    if orphans:
+        return (
+            False,
+            f"orphan successor road ids not in candidates: {sorted(orphans)}",
+        )
+
+    return True, ""
