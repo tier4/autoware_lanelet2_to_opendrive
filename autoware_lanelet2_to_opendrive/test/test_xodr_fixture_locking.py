@@ -14,12 +14,19 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+from multiprocessing.synchronize import Barrier as MPBarrier
 from pathlib import Path
+from typing import Optional
 
 from filelock import FileLock
 
 
 _PAYLOAD = "x" * 100_000
+
+# Generous upper bound on per-worker wall time. The bodies are tiny and
+# usually complete in well under a second; the budget exists only so a
+# hung worker fails fast instead of hanging the whole pytest invocation.
+_JOIN_TIMEOUT_S = 30.0
 
 
 def _ensure_file(target: Path, lock_path: Path, marker: Path) -> None:
@@ -48,10 +55,49 @@ def _ensure_file(target: Path, lock_path: Path, marker: Path) -> None:
                     pass
 
 
+def _ensure_file_no_lock(
+    target: Path, marker: Path, barrier: Optional[MPBarrier]
+) -> None:
+    """Buggy variant kept only for the negative test below.
+
+    The optional barrier lets the test force every worker past the
+    ``target.exists()`` check before any of them writes, making the
+    race deterministic instead of timing-dependent.
+    """
+    if target.exists():
+        return
+    if barrier is not None:
+        barrier.wait()
+    with marker.open("a") as f:
+        f.write(f"{os.getpid()}\n")
+    target.write_text(_PAYLOAD)
+
+
+def _join_or_kill(p: "mp.Process", timeout: float = _JOIN_TIMEOUT_S) -> None:
+    """Join *p* within *timeout*; otherwise terminate/kill so we never leak.
+
+    A bare ``p.join(timeout=...)`` followed by an ``exitcode`` assertion
+    leaves the child running on timeout — orphaning it would let it
+    contend with the next test. Escalate SIGTERM → SIGKILL and raise
+    ``AssertionError`` so the failure is loud and the child is gone.
+    """
+    p.join(timeout=timeout)
+    if not p.is_alive():
+        return
+    p.terminate()
+    p.join(timeout=5)
+    if p.is_alive():
+        p.kill()
+        p.join()
+    raise AssertionError(
+        f"worker pid={p.pid} did not exit within {timeout:.0f}s; killed"
+    )
+
+
 def test_lock_serialises_concurrent_workers(tmp_path: Path) -> None:
     """Eight concurrent workers — only one performs the write."""
-    target = tmp_path / "out.bin"
-    lock_path = tmp_path / "out.bin.lock"
+    target = tmp_path / "out.txt"
+    lock_path = tmp_path / "out.txt.lock"
     marker = tmp_path / "marker.log"
 
     ctx = mp.get_context("spawn")
@@ -61,9 +107,15 @@ def test_lock_serialises_concurrent_workers(tmp_path: Path) -> None:
     ]
     for p in procs:
         p.start()
-    for p in procs:
-        p.join(timeout=30)
-        assert p.exitcode == 0, f"worker pid={p.pid} exited with {p.exitcode}"
+    try:
+        for p in procs:
+            _join_or_kill(p)
+            assert p.exitcode == 0, f"worker pid={p.pid} exited with {p.exitcode}"
+    finally:
+        for p in procs:
+            if p.is_alive():
+                p.kill()
+                p.join()
 
     # Exactly one worker should have produced the file.
     assert marker.read_text().count("\n") == 1
@@ -71,38 +123,36 @@ def test_lock_serialises_concurrent_workers(tmp_path: Path) -> None:
     assert target.read_text() == _PAYLOAD
 
 
-def _ensure_file_no_lock(target: Path, marker: Path) -> None:
-    """Buggy variant kept only for the negative test below."""
-    if target.exists():
-        return
-    with marker.open("a") as f:
-        f.write(f"{os.getpid()}\n")
-    target.write_text(_PAYLOAD)
+def test_unlocked_variant_races_deterministically(tmp_path: Path) -> None:
+    """Without the lock, every worker writes after the existence check.
 
-
-def test_unlocked_variant_can_double_generate(tmp_path: Path) -> None:
-    """Sanity check: without the lock, multiple workers can both write.
-
-    This documents the failure mode the lock is designed to prevent.
-    The assertion is intentionally permissive (>= 1) because the race
-    is timing-dependent and not guaranteed to fire on every run; the
-    point is that the *un*locked path makes the multi-write outcome
-    *possible*, while the locked path makes it impossible (proved by
-    :func:`test_lock_serialises_concurrent_workers`).
+    A :class:`multiprocessing.Barrier` synchronises the workers
+    immediately after they pass the ``target.exists()`` check, so the
+    race is forced to fire on every run. ``writers == n_workers``
+    exactly demonstrates the failure mode the lock prevents (compare
+    with :func:`test_lock_serialises_concurrent_workers`).
     """
-    target = tmp_path / "out.bin"
+    target = tmp_path / "out.txt"
     marker = tmp_path / "marker.log"
 
+    n_workers = 8
     ctx = mp.get_context("spawn")
+    barrier = ctx.Barrier(n_workers)
     procs = [
-        ctx.Process(target=_ensure_file_no_lock, args=(target, marker))
-        for _ in range(8)
+        ctx.Process(target=_ensure_file_no_lock, args=(target, marker, barrier))
+        for _ in range(n_workers)
     ]
     for p in procs:
         p.start()
-    for p in procs:
-        p.join(timeout=30)
-        assert p.exitcode == 0
+    try:
+        for p in procs:
+            _join_or_kill(p)
+            assert p.exitcode == 0, f"worker pid={p.pid} exited with {p.exitcode}"
+    finally:
+        for p in procs:
+            if p.is_alive():
+                p.kill()
+                p.join()
 
     writers = marker.read_text().count("\n")
-    assert writers >= 1
+    assert writers == n_workers
