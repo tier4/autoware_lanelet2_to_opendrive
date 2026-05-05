@@ -501,5 +501,6 @@ class TrafficLightArrowBit:
     RIGHT = 2
     STRAIGHT = 4
 
+    # Sentinels — not bit values; must never be OR-combined with LEFT/RIGHT/STRAIGHT.
     NO_BULB_INFO = -1
     NO_ARROWS = 0

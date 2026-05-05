@@ -9,6 +9,7 @@ from autoware_lanelet2_to_opendrive.opendrive.signal import (
     Signal,
     SignalType,
     SignalUserData,
+    TrafficLightArrowBit,
     Validity,
 )
 
@@ -1073,8 +1074,6 @@ def test_multiple_linestrings_different_names():
 
 def test_traffic_light_arrow_bit_constants():
     """Bitmask values follow the documented scheme: left=1, right=2, straight=4."""
-    from autoware_lanelet2_to_opendrive.opendrive.signal import TrafficLightArrowBit
-
     assert TrafficLightArrowBit.LEFT == 1
     assert TrafficLightArrowBit.RIGHT == 2
     assert TrafficLightArrowBit.STRAIGHT == 4
