@@ -168,12 +168,15 @@ class LaneBorderConstants:
         outer_bound_deviation_tolerance: Maximum allowed perpendicular
             distance, in metres, between the cubic-``<width>``-predicted
             outer edge and the actual outer-bound polyline. Default
-            ``50.0`` m (effectively disabled — see class docstring);
-            tune downwards (e.g. to ``0.30`` m) once the metric and
-            real-world deviations are characterised.
+            ``1000.0`` m (effectively disabled — see class docstring);
+            ``compute_lane_outer_polynomial`` short-circuits the deviation
+            computation entirely when this value is ``>= 100`` m, so the
+            default also keeps the per-lanelet conversion hot path on
+            master's cost profile. Tune downwards (e.g. to ``0.30`` m)
+            once the metric and real-world deviations are characterised.
     """
 
-    outer_bound_deviation_tolerance: float = 50.0
+    outer_bound_deviation_tolerance: float = 1000.0
 
 
 @dataclass(frozen=True)

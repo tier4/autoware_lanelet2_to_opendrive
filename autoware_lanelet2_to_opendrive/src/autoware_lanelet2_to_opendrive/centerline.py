@@ -1176,6 +1176,22 @@ def compute_lane_outer_polynomial(
         anchor_end_override=anchor_end_override,
     )
 
+    # Short-circuit the deviation metric when the configured tolerance is
+    # so large that no realistic geometry could trip it. This preserves
+    # bit-for-bit width-path output and — more importantly — keeps the
+    # per-lanelet hot path on master's cost profile when the trigger is
+    # effectively disabled (the default in this PR; the metric otherwise
+    # adds an O(num_samples * outer_polyline) inner loop on every lanelet).
+    # Real OSM lanelets in the corpus we've seen so far max out around
+    # 10 m of deviation, so a 100 m sentinel is safely beyond that.
+    deviation_threshold_for_skip = 100.0
+    if tol >= deviation_threshold_for_skip:
+        return LanePolynomial(
+            kind="width",
+            segments=width_adapter.get_polynomial_segments(),
+            total_length=float(width_adapter.total_length),
+        )
+
     deviation = _max_outer_bound_deviation(
         lanelet, reference_line_spline, width_adapter, config, rule_upper
     )

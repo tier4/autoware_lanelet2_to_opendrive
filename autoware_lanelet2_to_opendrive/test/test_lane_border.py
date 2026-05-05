@@ -132,17 +132,20 @@ def _bulged_left_lanelet() -> _MockLanelet:
 def test_lane_border_constants_default():
     """``LaneBorderConstants`` exposes the documented default tolerance.
 
-    The default is intentionally HIGH (50 m) so production conversion is
-    a no-op out of the box; see the class docstring for the rationale.
+    The default is intentionally HIGH (1000 m) so production conversion
+    is a no-op out of the box; ``compute_lane_outer_polynomial``
+    additionally short-circuits the deviation computation when the
+    tolerance is ``>= 100`` m, keeping the per-lanelet hot path on
+    master's cost profile. See the class docstring for the rationale.
     """
     cfg = LaneBorderConstants()
-    assert cfg.outer_bound_deviation_tolerance == 50.0
+    assert cfg.outer_bound_deviation_tolerance == 1000.0
 
 
 def test_default_config_exposes_lane_border():
     """``DEFAULT_CONFIG.lane_border`` is wired into ``ConversionConstants``."""
     assert isinstance(DEFAULT_CONFIG.lane_border, LaneBorderConstants)
-    assert DEFAULT_CONFIG.lane_border.outer_bound_deviation_tolerance == 50.0
+    assert DEFAULT_CONFIG.lane_border.outer_bound_deviation_tolerance == 1000.0
 
 
 # ---------------------------------------------------------------------------
