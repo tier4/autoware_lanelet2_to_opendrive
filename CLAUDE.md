@@ -32,6 +32,46 @@ uv run python <script.py>
 uv venv
 ```
 
+## Local Test Verification (Container-Based)
+
+**IMPORTANT**: Run local test verification inside the Docker container, not directly on the host.
+
+### Why
+
+The runtime dependency `lanelet2-python-api-for-autoware` is built from source against system Boost. Many host environments (e.g., Ubuntu 24.04 with Boost 1.83) cannot compile it — `uv sync` and `uv run pytest` fail with `RuntimeError: Command failed: make -j24` during the wheel build. The Docker image pins Ubuntu 22.04 with Boost 1.74, matching CI exactly, and avoids this failure.
+
+### How
+
+The repository ships a multi-stage `Dockerfile` and `docker-compose.yml` with profiles that mirror each CI job. See [`docs/docker.md`](docs/docker.md) for the full reference. The most common commands:
+
+```bash
+# Run the full pytest suite (matches CI's `test` job)
+docker compose --profile test run --rm pytest
+
+# Run pre-commit on all files (matches CI's `lint-and-format` job)
+docker compose --profile lint run --rm lint
+
+# Open an interactive shell with the workspace bind-mounted
+docker compose --profile dev run --rm dev
+```
+
+A `GH_PAT` environment variable with `repo` scope is required at image build time (the project depends on the private repository `tier4/lanelet2_python_api_for_autoware`).
+
+### Instructions for Claude Code
+
+When the user asks to "run the tests", "verify locally", or otherwise validate a change end-to-end:
+
+1. **Do NOT run `uv run pytest` on the host.** It will likely fail on the Boost build step, producing noise unrelated to the change.
+2. **Use `docker compose --profile test run --rm pytest`** for the full suite, or the appropriate profile (`lint`, `qc`, `carla`) for a narrower check.
+3. If the container is unavailable in the current environment (e.g., Docker not installed, no `GH_PAT`), say so explicitly rather than running broken host commands. Defer test verification to CI in that case.
+4. Static checks that do **not** import the package (e.g., `ruff`, `ruff-format`, `mypy --ignore-missing-imports` on individual files) **can** still be run on the host and should be used for fast iteration.
+
+### Rationale
+
+- **Reproducibility**: Container matches CI exactly; host doesn't.
+- **Avoids false negatives**: Host build failures are an environment quirk, not a code defect.
+- **Fast iteration**: Static checks on the host stay fast; dynamic test verification gets pushed to a known-good environment.
+
 ## Pre-commit Hooks and Lint Checking
 
 **CRITICAL**: This project uses pre-commit hooks to ensure code quality and prevent lint errors. All commits must pass these checks before being pushed.
