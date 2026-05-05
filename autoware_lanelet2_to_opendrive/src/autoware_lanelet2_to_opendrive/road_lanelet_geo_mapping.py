@@ -52,6 +52,15 @@ _MATCH_THRESHOLD: float = 3.5
 #: geometrically similar junction lanelets that connect different roads.
 _ENDPOINT_WEIGHT: float = 0.1
 
+#: Total geometry length (m) below which a connecting road
+#: (``junction != -1``) is treated as a synthetic divergence/merge stub
+#: from the issue #291 pass and excluded from geometric matching. Real
+#: ``turn_direction`` connecting roads are at least several metres long;
+#: synthetic stubs default to 0.01 m. The threshold of 0.5 m matches
+#: ``ParamPoly3Constants.min_segment_length`` — the project's existing
+#: floor for non-degenerate segments.
+_SYNTHETIC_CONNECTOR_MAX_LENGTH: float = 0.5
+
 
 # ---------------------------------------------------------------------------
 # Stop line mapping dataclasses
@@ -501,6 +510,19 @@ def _compute_all_candidates(
     no_candidate_diag: dict[int, dict] = {}
 
     for road in roads:
+        # Skip synthetic divergence/merge connecting roads (#291): they have
+        # no backing lanelets, so geometric matching would either drop them
+        # silently or claim a regular lanelet from the divergence-point
+        # neighbourhood (poisoning Phase 2 conflict resolution and Phase 3
+        # adjacency walk for the affected source road). Identify them by
+        # junction membership combined with sub-minimum total geometry
+        # length: real connecting roads built from ``turn_direction``
+        # lanelets are at least several metres long.
+        if road.junction != -1 and road.plan_view is not None:
+            total_length = sum(g.length for g in road.plan_view.geometries)
+            if total_length < _SYNTHETIC_CONNECTOR_MAX_LENGTH:
+                continue
+
         ref_line = _sample_reference_line_from_road(road)
         if len(ref_line) < 2:
             continue

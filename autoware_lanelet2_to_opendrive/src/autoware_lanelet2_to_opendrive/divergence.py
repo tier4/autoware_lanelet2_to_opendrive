@@ -37,6 +37,7 @@ from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
 from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
+from autoware_lanelet2_to_opendrive.opendrive.reference_line import ReferenceLine
 from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     LaneLink as LaneLevelLaneLink,
 )
@@ -307,6 +308,15 @@ def _make_zero_length_connecting_road(
         lane_section.left_lanes[lane_id] = lane
     else:
         lane_section.right_lanes[lane_id] = lane
+
+    # OpenDRIVE 1.4 XSD requires every <laneSection> to contain a <center>
+    # element. Use the same dummy ReferenceLine pattern that
+    # ``parse_roads_from_xodr`` uses when reconstructing roads from XML
+    # — bypass ``ReferenceLine.__init__`` (which requires a Splines
+    # centerline) and inject a stub Lane(id=0, type=NONE).
+    center_ref = ReferenceLine.__new__(ReferenceLine)
+    center_ref._lane = Lane(lane_id=0, lane_type=LaneType.NONE, level=False)
+    lane_section.center_lane = center_ref
 
     lanes = Lanes(lane_sections=[lane_section])
 
