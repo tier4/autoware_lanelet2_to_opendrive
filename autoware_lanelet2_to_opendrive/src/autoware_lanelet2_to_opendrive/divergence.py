@@ -11,6 +11,7 @@ flow uniformly closes both sides.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -42,6 +43,12 @@ from autoware_lanelet2_to_opendrive.opendrive.road_links import (
     RoadLink,
     Successor,
 )
+from autoware_lanelet2_to_opendrive.util import (
+    ConnectionDirection,
+    find_connecting_lanelet_groups,
+)
+
+log = logging.getLogger(__name__)
 
 
 class DivergenceSide(Enum):
@@ -371,4 +378,206 @@ def synthesise_junction_for_site(
         junction=junction,
         connecting_roads=connecting_roads,
         deferred_link_patch=(side_keyword, source_road_id, junction.id),
+    )
+
+
+@dataclass(frozen=True)
+class DivergenceSynthesisResult:
+    """Aggregated synthetic objects produced by :func:`apply_divergence_synthesis`.
+
+    Attributes:
+        junctions: synthetic ``Junction`` objects, one per site that passed
+            the sanity gate.
+        connecting_roads: synthetic zero-length connecting roads. Their IDs
+            are contiguous and start at ``starting_connecting_road_id`` of
+            the call.
+    """
+
+    junctions: List[Junction]
+    connecting_roads: List[Road]
+
+
+def _lane_pairs_for_site(
+    site: DivergenceSite,
+    roads_by_id: Dict[int, Road],
+    lanelet_map,
+    routing_graph,
+    lanelet_to_road: Dict[int, int],
+) -> Tuple[List[Tuple[int, int, int]], Set[int]]:
+    """Recover lane-to-lane pairs and the set of all neighbour-road ids.
+
+    Walks the routing graph from each lanelet of ``site.road_id``'s lane
+    map in the configured direction (FOLLOWING for divergence, PREVIOUS
+    for merge). For every neighbour lanelet that lives in a regular road
+    different from ``site.road_id``, emits one ``(source_lane,
+    candidate_road, candidate_lane)`` triple. Lanes are recovered via
+    ``Road.get_lanelet_to_lane_mapping()`` (existing helper).
+
+    Returns ``(lane_pairs, neighbour_road_ids)``. ``neighbour_road_ids``
+    is the set used by :func:`sanity_gate_passes` for the orphan check.
+    """
+    direction = (
+        ConnectionDirection.FOLLOWING
+        if site.is_divergence
+        else ConnectionDirection.PREVIOUS
+    )
+    source_road = roads_by_id[site.road_id]
+    source_lane_map = source_road.get_lanelet_to_lane_mapping()
+
+    pairs: List[Tuple[int, int, int]] = []
+    neighbour_road_ids: Set[int] = set()
+    seen_pairs: Set[Tuple[int, int, int]] = set()
+
+    for src_lanelet_id, src_lane_id in source_lane_map.items():
+        # `find_connecting_lanelet_groups` accepts an iterable; pass a
+        # single-element list. The lanelet object must come from the map.
+        lanelet_obj = lanelet_map.laneletLayer[src_lanelet_id]
+        groups = find_connecting_lanelet_groups(
+            lanelet_map, [lanelet_obj], direction, routing_graph
+        )
+        for group in groups:
+            for ll in group:
+                neighbour_road_id = lanelet_to_road.get(ll.id)
+                if neighbour_road_id is None or neighbour_road_id == site.road_id:
+                    continue
+                neighbour_road_ids.add(neighbour_road_id)
+                neighbour_road = roads_by_id.get(neighbour_road_id)
+                if neighbour_road is None:
+                    continue
+                neighbour_lane_id = neighbour_road.get_lanelet_to_lane_mapping().get(
+                    ll.id
+                )
+                if neighbour_lane_id is None:
+                    continue
+                triple = (src_lane_id, neighbour_road_id, neighbour_lane_id)
+                if triple in seen_pairs:
+                    continue
+                seen_pairs.add(triple)
+                pairs.append(triple)
+
+    return pairs, neighbour_road_ids
+
+
+def apply_divergence_synthesis(
+    sites: List[DivergenceSite],
+    roads_by_id: Dict[int, Road],
+    lanelet_map,
+    routing_graph,
+    lanelet_to_road: Dict[int, int],
+    traffic_rule: TrafficRule,
+    starting_connecting_road_id: int,
+    starting_junction_id: int,
+    endpoint_tolerance: float,
+    min_segment_length: float,
+) -> DivergenceSynthesisResult:
+    """Run detection -> sanity gate -> synthesis for every site.
+
+    Sites that fail the gate fall back to the existing "first candidate
+    wins" road-level link (logged as a WARNING). Sites that pass are
+    synthesised; the returned ``DivergenceSynthesisResult`` is fed into
+    the caller's ``junctions`` and ``connecting_roads`` lists.
+    """
+    next_road_id = starting_connecting_road_id
+    next_junction_id = starting_junction_id
+
+    out_junctions: List[Junction] = []
+    out_connecting_roads: List[Road] = []
+
+    for site in sites:
+        source_road = roads_by_id.get(site.road_id)
+        if source_road is None:
+            log.warning("divergence: source road %d missing; skipping", site.road_id)
+            continue
+
+        endpoint_road = (
+            source_road.reference_end_xyz
+            if site.is_divergence
+            else source_road.reference_start_xyz
+        )
+        if endpoint_road is None:
+            log.warning(
+                "divergence: source road %d has no reference endpoint; skipping",
+                site.road_id,
+            )
+            continue
+
+        endpoints_candidates: Dict[int, Tuple[float, float, float]] = {}
+        for cand_id in site.candidate_road_ids:
+            cand_road = roads_by_id.get(cand_id)
+            if cand_road is None:
+                # Missing candidate forces gate failure — represent with
+                # placeholder None so the gate can flag it.
+                continue
+            cand_endpoint = (
+                cand_road.reference_start_xyz
+                if site.is_divergence
+                else cand_road.reference_end_xyz
+            )
+            if cand_endpoint is not None:
+                endpoints_candidates[cand_id] = cand_endpoint
+
+        lane_pairs, neighbour_road_ids = _lane_pairs_for_site(
+            site, roads_by_id, lanelet_map, routing_graph, lanelet_to_road
+        )
+
+        gate_inputs = SanityGateInputs(
+            endpoint_road=endpoint_road,
+            endpoints_candidates=endpoints_candidates,
+            lane_pairs=lane_pairs,
+            all_successor_lanelet_road_ids=neighbour_road_ids,
+        )
+        ok, reason = sanity_gate_passes(site, gate_inputs, endpoint_tolerance)
+        if not ok:
+            log.warning(
+                "divergence: sanity gate failed for road %d (%s side): %s; "
+                "falling back to first-candidate link",
+                site.road_id,
+                site.side.value,
+                reason,
+            )
+            first_candidate = site.candidate_road_ids[0]
+            if site.is_divergence:
+                source_road.add_successor(
+                    element_id=first_candidate,
+                    element_type=ElementType.ROAD,
+                    contact_point=ContactPoint.START,
+                )
+            else:
+                source_road.add_predecessor(
+                    element_id=first_candidate,
+                    element_type=ElementType.ROAD,
+                    contact_point=ContactPoint.END,
+                )
+            continue
+
+        synthesis = synthesise_junction_for_site(
+            site=site,
+            inputs=gate_inputs,
+            starting_connecting_road_id=next_road_id,
+            junction_id=next_junction_id,
+            traffic_rule=traffic_rule,
+            min_segment_length=min_segment_length,
+        )
+
+        out_junctions.append(synthesis.junction)
+        out_connecting_roads.extend(synthesis.connecting_roads)
+        next_road_id += len(synthesis.connecting_roads)
+        next_junction_id += 1
+
+        side, _src, jid = synthesis.deferred_link_patch
+        if side == "successor":
+            source_road.add_successor(
+                element_id=jid,
+                element_type=ElementType.JUNCTION,
+                contact_point=None,
+            )
+        else:
+            source_road.add_predecessor(
+                element_id=jid,
+                element_type=ElementType.JUNCTION,
+                contact_point=None,
+            )
+
+    return DivergenceSynthesisResult(
+        junctions=out_junctions, connecting_roads=out_connecting_roads
     )

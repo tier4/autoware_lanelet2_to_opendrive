@@ -1,13 +1,16 @@
 """Tests for divergence/merge synthesis (issue #291)."""
 
 import inspect
+from unittest.mock import MagicMock
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
     DivergenceSide,
     DivergenceSite,
+    DivergenceSynthesisResult,
     SanityGateInputs,
     SynthesisOutput,
+    apply_divergence_synthesis,
     collect_divergence_sites,
     sanity_gate_passes,
     synthesise_junction_for_site,
@@ -285,3 +288,121 @@ def test_synthesise_merge_sets_predecessor_link_on_each_candidate():
         assert r.link.predecessor.contact_point == ContactPoint.END
 
     assert out.deferred_link_patch == ("predecessor", 42, 3000)
+
+
+def _build_road_stub(
+    road_id: int,
+    end_xyz=(0.0, 0.0, 0.0),
+    start_xyz=(0.0, 0.0, 0.0),
+):
+    r = MagicMock(
+        spec=[
+            "id",
+            "reference_start_xyz",
+            "reference_end_xyz",
+            "link",
+            "add_successor",
+            "add_predecessor",
+        ]
+    )
+    r.id = road_id
+    r.reference_start_xyz = start_xyz
+    r.reference_end_xyz = end_xyz
+    r.link = MagicMock()
+    r.link.predecessor = None
+    r.link.successor = None
+    return r
+
+
+def test_apply_divergence_synthesis_happy_path_emits_objects_and_patches_link(
+    monkeypatch,
+):
+    sites = [
+        DivergenceSite(
+            road_id=185,
+            side=DivergenceSide.SUCCESSOR,
+            candidate_road_ids=[186, 187, 188],
+        )
+    ]
+    roads_by_id = {
+        185: _build_road_stub(185, end_xyz=(10.0, 0.0, 0.0)),
+        186: _build_road_stub(186, start_xyz=(10.0, 0.0, 0.0)),
+        187: _build_road_stub(187, start_xyz=(10.0, 0.0, 0.0)),
+        188: _build_road_stub(188, start_xyz=(10.0, 0.0, 0.0)),
+    }
+
+    def fake_lane_pairs(
+        site, _roads_by_id, _lanelet_map, _routing_graph, _lanelet_to_road
+    ):
+        # Bypass the real routing-graph walk: hand back the lane mapping the
+        # spec assumes for Road 185.
+        return [(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)], {186, 187, 188}
+
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        fake_lane_pairs,
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert isinstance(result, DivergenceSynthesisResult)
+    assert len(result.junctions) == 1
+    assert len(result.connecting_roads) == 3
+    # The source road's deferred successor link was patched.
+    assert roads_by_id[185].add_successor.called
+
+
+def test_apply_divergence_synthesis_falls_back_on_gate_failure(monkeypatch):
+    sites = [
+        DivergenceSite(
+            road_id=185,
+            side=DivergenceSide.SUCCESSOR,
+            candidate_road_ids=[186, 187, 188],
+        )
+    ]
+    roads_by_id = {
+        185: _build_road_stub(185, end_xyz=(0.0, 0.0, 0.0)),
+        186: _build_road_stub(186, start_xyz=(99.0, 0.0, 0.0)),  # endpoint mismatch
+        187: _build_road_stub(187, start_xyz=(0.0, 0.0, 0.0)),
+        188: _build_road_stub(188, start_xyz=(0.0, 0.0, 0.0)),
+    }
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lambda *_a, **_kw: (
+            [(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+            {186, 187, 188},
+        ),
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    # No synthetic junction emitted; source road took the first candidate as its
+    # road-level successor (single-road fallback).
+    assert result.junctions == []
+    assert result.connecting_roads == []
+    roads_by_id[185].add_successor.assert_called_once()
+    args, kwargs = roads_by_id[185].add_successor.call_args
+    assert kwargs["element_type"] == ElementType.ROAD
+    assert kwargs["element_id"] == 186
