@@ -355,6 +355,13 @@ def synthesise_junction_for_site(
     min_segment_length: float,
     fallback_heading: float = 0.0,
     lane_width: float = 3.5,
+    lane_pair_endpoints: (
+        Dict[
+            Tuple[int, int, int],
+            Tuple[Tuple[float, float, float], Tuple[float, float, float]],
+        ]
+        | None
+    ) = None,
 ) -> SynthesisOutput:
     """Build one synthetic :class:`Junction` plus N zero-length connecting roads.
 
@@ -364,6 +371,17 @@ def synthesise_junction_for_site(
     the source road's start.  Connection IDs and connecting-road IDs are
     assigned in deterministic source-lane order so the emitted XML is
     stable across runs.
+
+    ``lane_pair_endpoints`` optionally supplies per-(src_lane,
+    cand_road, cand_lane) ``(start_xyz, end_xyz)`` pairs computed from
+    each road's lane-aware anchor (see ``Road.evaluate_lane_anchor_xyz``)
+    so the synthetic connector terminates on the *lane* edge rather than
+    the road's reference line.  This matches the endpoint-pinning
+    contract enforced by ``test_junction_endpoint_fidelity`` for
+    real ``turn_direction`` connecting roads (#437).  When omitted, the
+    synthesiser falls back to ``inputs.endpoint_road`` /
+    ``inputs.endpoints_candidates`` so non-Road callers (unit tests
+    using mock road stubs) still work.
     """
     junction = Junction(
         id=junction_id, name=f"divergence_{site.road_id}", connections=[]
@@ -402,6 +420,19 @@ def synthesise_junction_for_site(
             end_xyz = inputs.endpoint_road
             connection_incoming = cand_road_id
             from_lane, to_lane = cand_lane, src_lane
+
+        # Override with lane-aware anchor endpoints when the driver
+        # supplied them. Per-pair anchors place each connector on the
+        # corresponding lane edge instead of all sharing the source
+        # road's reference line endpoint (#291 endpoint-fidelity fix).
+        if lane_pair_endpoints is not None:
+            anchored = lane_pair_endpoints.get((src_lane, cand_road_id, cand_lane))
+            if anchored is not None:
+                anchored_start, anchored_end = anchored
+                if anchored_start is not None:
+                    start_xyz = anchored_start
+                if anchored_end is not None:
+                    end_xyz = anchored_end
 
         road = _make_zero_length_connecting_road(
             road_id=next_road_id,
@@ -457,6 +488,33 @@ class DivergenceSynthesisResult:
 
     junctions: List[Junction]
     connecting_roads: List[Road]
+
+
+def _lane_anchor_xyz(
+    road: Road | None,
+    lane_id: int,
+    *,
+    at_start: bool,
+    traffic_rule: TrafficRule,
+) -> Tuple[float, float, float] | None:
+    """Resolve ``Road.evaluate_lane_anchor_xyz`` for a given OpenDRIVE lane id.
+
+    Maps the lane id (negative for RHT, positive for LHT) to the road's
+    ``sorted_lanelet_ids`` index (``0..n-1`` left-to-right) and forwards
+    the call. Returns ``None`` when the road lacks the metadata required
+    by the helper, mirroring its own ``None`` semantics so callers can
+    fall back to the road's reference endpoint.
+    """
+    if road is None or road.sorted_lanelet_ids is None:
+        return None
+    n = len(road.sorted_lanelet_ids)
+    if traffic_rule == TrafficRule.LHT:
+        sorted_index = n - lane_id
+    else:
+        sorted_index = -lane_id - 1
+    if not (0 <= sorted_index < n):
+        return None
+    return road.evaluate_lane_anchor_xyz(sorted_index=sorted_index, at_start=at_start)
 
 
 def _lane_pairs_for_site(
@@ -624,6 +682,46 @@ def apply_divergence_synthesis(
             if endpoint_with_heading is not None:
                 fallback_heading = endpoint_with_heading[2]
 
+        # Per-pair lane-aware anchor endpoints. For divergence the source
+        # side uses ``Road.evaluate_lane_anchor_xyz(lane_index, at_start=
+        # False)`` so each connector terminates on the lane edge of the
+        # source's specific src_lane; the candidate side uses
+        # ``at_start=True`` on the candidate's cand_lane.  For merge it is
+        # mirrored.  When the source/candidate road lacks the metadata
+        # required by ``evaluate_lane_anchor_xyz`` (sorted_lanelet_ids,
+        # lanes, plan_view), we fall back to the road's reference
+        # endpoint by leaving the entry as ``None`` — the synthesiser
+        # then uses ``inputs.endpoint_road`` / ``endpoints_candidates``.
+        lane_pair_endpoints: Dict[
+            Tuple[int, int, int],
+            Tuple[
+                Tuple[float, float, float] | None,
+                Tuple[float, float, float] | None,
+            ],
+        ] = {}
+        for src_lane, cand_road_id, cand_lane in lane_pairs:
+            cand_road = roads_by_id.get(cand_road_id)
+            if site.is_divergence:
+                src_anchor = _lane_anchor_xyz(
+                    source_road, src_lane, at_start=False, traffic_rule=traffic_rule
+                )
+                cand_anchor = _lane_anchor_xyz(
+                    cand_road, cand_lane, at_start=True, traffic_rule=traffic_rule
+                )
+                start_anchor, end_anchor = src_anchor, cand_anchor
+            else:
+                src_anchor = _lane_anchor_xyz(
+                    source_road, src_lane, at_start=True, traffic_rule=traffic_rule
+                )
+                cand_anchor = _lane_anchor_xyz(
+                    cand_road, cand_lane, at_start=False, traffic_rule=traffic_rule
+                )
+                start_anchor, end_anchor = cand_anchor, src_anchor
+            lane_pair_endpoints[(src_lane, cand_road_id, cand_lane)] = (
+                start_anchor,
+                end_anchor,
+            )
+
         synthesis = synthesise_junction_for_site(
             site=site,
             inputs=gate_inputs,
@@ -633,6 +731,7 @@ def apply_divergence_synthesis(
             min_segment_length=min_segment_length,
             fallback_heading=fallback_heading,
             lane_width=DEFAULT_CONFIG.geometry.divergence_default_lane_width,
+            lane_pair_endpoints=lane_pair_endpoints,
         )
 
         out_junctions.append(synthesis.junction)
