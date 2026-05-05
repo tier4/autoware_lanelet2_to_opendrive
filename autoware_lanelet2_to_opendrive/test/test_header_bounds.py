@@ -43,13 +43,15 @@ def test_header_bounding_box_reflects_map_extent(tmp_path: Path) -> None:
     east = float(header.attrib["east"])
     west = float(header.attrib["west"])
 
-    # Issue #465: all-zero bounds is the bug we are fixing.
-    assert (north, south, east, west) != (
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    ), "header bounds are still all zero — issue #465 regression"
+    # Issue #465: every axis must be wired, not just some. Catch partial-fix
+    # regressions where (e.g.) only north/south get populated.
+    for name, value in (
+        ("north", north),
+        ("south", south),
+        ("east", east),
+        ("west", west),
+    ):
+        assert value != 0.0, f"header @{name} is 0.0 — issue #465 regression"
 
     # Self-consistency: north > south, east > west.
     assert south < north, f"south ({south}) must be < north ({north})"
