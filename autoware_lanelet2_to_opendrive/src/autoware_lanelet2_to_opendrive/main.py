@@ -36,6 +36,7 @@ from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
+from autoware_lanelet2_to_opendrive.geometry import compute_point_layer_bounds
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
     LaneletPreprocessor,
@@ -956,6 +957,11 @@ class _Lanelet2ToOpenDRIVEConverter:
             )
         logger.info("geoReference (PROJ string): %s", geo_reference_proj)
 
+        # Bounding box of the projected map — populates the OpenDRIVE
+        # ``<header>`` ``@north/@south/@east/@west`` attributes used by
+        # esmini, RoadRunner, and asam-qc-opendrive (issue #465).
+        min_x, min_y, max_x, max_y = compute_point_layer_bounds(self.lanelet_map)
+
         # Create header
         header = Header(
             rev_major="1",
@@ -963,10 +969,10 @@ class _Lanelet2ToOpenDRIVEConverter:
             name="Converted from Lanelet2",
             version="1.0",
             date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            north="0.0",
-            south="0.0",
-            east="0.0",
-            west="0.0",
+            north=f"{max_y}",
+            south=f"{min_y}",
+            east=f"{max_x}",
+            west=f"{min_x}",
             geo_reference=geo_reference_proj,
         )
 

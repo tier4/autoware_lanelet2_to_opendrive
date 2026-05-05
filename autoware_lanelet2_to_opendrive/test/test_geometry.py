@@ -1,7 +1,11 @@
 """Tests for geometry utility functions."""
 
+import lanelet2
 import numpy as np
+import pytest
+
 from autoware_lanelet2_to_opendrive.geometry import (
+    compute_point_layer_bounds,
     point_to_line_segment_distance,
 )
 
@@ -189,3 +193,43 @@ class TestPointToLineSegmentDistance:
 
         # Should return the small distance
         assert abs(distance - 1e-12) < 1e-15
+
+
+class TestComputePointLayerBounds:
+    """Tests for compute_point_layer_bounds."""
+
+    def test_synthetic_minimal_map_returns_exact_bounds(self):
+        """Hand-placed Point3d instances yield exact min/max."""
+        lanelet_map = lanelet2.core.LaneletMap()
+        # Build a minimal LineString3d so the points end up in pointLayer.
+        points = [
+            lanelet2.core.Point3d(lanelet2.core.getId(), -3.0, 7.0, 0.0),
+            lanelet2.core.Point3d(lanelet2.core.getId(), 11.0, -2.5, 0.0),
+            lanelet2.core.Point3d(lanelet2.core.getId(), 4.0, 1.0, 0.0),
+        ]
+        ls = lanelet2.core.LineString3d(lanelet2.core.getId(), points)
+        lanelet_map.add(ls)
+
+        min_x, min_y, max_x, max_y = compute_point_layer_bounds(lanelet_map)
+
+        assert min_x == pytest.approx(-3.0)
+        assert min_y == pytest.approx(-2.5)
+        assert max_x == pytest.approx(11.0)
+        assert max_y == pytest.approx(7.0)
+
+    def test_real_fixture_bounds_are_finite_and_nondegenerate(self, lanelet_map):
+        """The session-scoped nishishinjuku fixture yields a non-degenerate box."""
+        import math
+
+        min_x, min_y, max_x, max_y = compute_point_layer_bounds(lanelet_map)
+
+        for v in (min_x, min_y, max_x, max_y):
+            assert math.isfinite(v)
+        assert min_x < max_x
+        assert min_y < max_y
+
+    def test_empty_point_layer_raises(self):
+        """An empty LaneletMap must raise ValueError, not silently return zeros."""
+        empty = lanelet2.core.LaneletMap()
+        with pytest.raises(ValueError):
+            compute_point_layer_bounds(empty)
