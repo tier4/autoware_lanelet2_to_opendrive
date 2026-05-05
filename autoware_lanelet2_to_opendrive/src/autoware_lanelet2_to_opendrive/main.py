@@ -47,7 +47,10 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     Header,
     save_opendrive_to_file,
 )
-from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.opendrive.road import (
+    ConstructedRoadsResult,
+    Road,
+)
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
@@ -125,25 +128,22 @@ class _Lanelet2ToOpenDRIVEConverter:
 
     def _build_regular_roads(
         self,
-    ) -> Tuple[List[Road], Dict[int, int], int]:
+    ) -> ConstructedRoadsResult:
         """
         Build roads from non-junction lanelets.
 
         Returns:
-            Tuple of:
-                - List of Road objects for non-junction lanelets
-                - Dictionary mapping lanelet ID to road ID (only successfully built roads)
-                - Total number of adjacent groups (including failed ones)
+            ConstructedRoadsResult bundling roads, mapping, group count and
+            divergence/merge deferred candidate maps (issue #291).
         """
         print("\n=== Building regular roads ===")
-        regular_roads, lanelet_to_road_id, num_groups = Road.construct_from_lanelet_map(
+        result = Road.construct_from_lanelet_map(
             self.lanelet_map,
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
             width_config=self.config.width_estimation,
         )
-
-        return regular_roads, lanelet_to_road_id, num_groups
+        return result
 
     def _build_junction_structure(
         self,
@@ -1010,9 +1010,57 @@ class _Lanelet2ToOpenDRIVEConverter:
         print("Converting Lanelet2 map to OpenDRIVE format...")
 
         # Step 1: Build regular roads from non-junction lanelets
-        regular_roads, lanelet_to_road_id, num_regular_groups = (
-            self._build_regular_roads()
+        regular_result = self._build_regular_roads()
+        regular_roads = regular_result.roads
+        lanelet_to_road_id = regular_result.lanelet_to_road
+        num_regular_groups = regular_result.num_groups
+
+        # Step 1.5: Synthesise divergence/merge junctions (issue #291)
+        from autoware_lanelet2_to_opendrive.divergence import (
+            apply_divergence_synthesis,
+            collect_divergence_sites,
         )
+        from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
+        divergence_sites = collect_divergence_sites(
+            deferred_predecessor_candidates=regular_result.deferred_predecessor_candidates,
+            deferred_successor_candidates=regular_result.deferred_successor_candidates,
+        )
+        if divergence_sites:
+            print(
+                f"\n=== Synthesising {len(divergence_sites)} divergence/merge "
+                f"junction(s) (#291) ==="
+            )
+            # Reuse the routing graph built by Road.construct_from_lanelet_map
+            # rather than paying the cost a second time (#291 review).
+            divergence_routing_graph = regular_result.routing_graph
+            traffic_rule_value = (
+                TrafficRule.LHT
+                if (self.config.traffic_rule or "RHT").upper() == "LHT"
+                else TrafficRule.RHT
+            )
+            divergence_result = apply_divergence_synthesis(
+                sites=divergence_sites,
+                roads_by_id={r.id: r for r in regular_roads},
+                lanelet_map=self.lanelet_map,
+                routing_graph=divergence_routing_graph,
+                lanelet_to_road=lanelet_to_road_id,
+                traffic_rule=traffic_rule_value,
+                starting_connecting_road_id=num_regular_groups,
+                starting_junction_id=self.config.junction_id_offset + 10_000,
+                endpoint_tolerance=DEFAULT_CONFIG.geometry.divergence_endpoint_tolerance,
+                min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
+            )
+            synthetic_junctions = divergence_result.junctions
+            synthetic_connecting_roads = divergence_result.connecting_roads
+            num_groups_after_synthesis = num_regular_groups + len(
+                synthetic_connecting_roads
+            )
+        else:
+            synthetic_junctions = []
+            synthetic_connecting_roads = []
+            num_groups_after_synthesis = num_regular_groups
 
         # Step 2: Build junction structure
         (
@@ -1022,8 +1070,15 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_lanelet_to_road,
             junction_lanelets,
         ) = self._build_junction_structure(
-            regular_roads, lanelet_to_road_id, num_regular_groups
+            regular_roads, lanelet_to_road_id, num_groups_after_synthesis
         )
+
+        # Issue #291: fold synthetic divergence/merge junctions and their
+        # connecting roads into the same aggregates the existing pipeline
+        # already feeds through ``set_incoming_road_junction_links`` and
+        # ``set_all_lane_links``.
+        connecting_roads = connecting_roads + synthetic_connecting_roads
+        junctions = junctions + synthetic_junctions
 
         # Step 3: Create bidirectional mappings
         mapping = self._build_road_lanelet_mappings(lanelet_to_road_id)

@@ -2,7 +2,17 @@
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
 import lanelet2
 import lxml.etree as ET
@@ -25,6 +35,60 @@ from .reference_line import ReferenceLine
 from .road_links import Predecessor, RoadLink, Successor
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_candidate_road_ids(
+    groups: List[Set["lanelet2.core.Lanelet"]],
+    mapping: Dict[int, int],
+) -> List[int]:
+    """Return the distinct regular-road IDs covered by ``groups``.
+
+    Used by both ``Road.construct_from_lanelet_map`` (to decide whether to
+    set a road-level link or defer to the divergence/merge synthesis pass)
+    and the synthesis pass itself. Returns ``[]`` when any group contains a
+    ``turn_direction`` lanelet — that signals a real-junction lanelet group
+    whose link is owned by the existing junction pipeline (issue #291).
+    Order of first appearance is preserved so callers that fall back to
+    "first wins" behave the same as the previous helper.
+    """
+    has_real_junction = any(
+        "turn_direction" in ll.attributes for g in groups for ll in g
+    )
+    if has_real_junction:
+        return []
+    seen: List[int] = []
+    for group in groups:
+        for ll in group:
+            rid = mapping.get(ll.id)
+            if rid is not None and rid not in seen:
+                seen.append(rid)
+    return seen
+
+
+class ConstructedRoadsResult(NamedTuple):
+    """Return bundle for ``Road.construct_from_lanelet_map`` (issue #291).
+
+    Attributes:
+        roads: Successfully built regular roads.
+        lanelet_to_road: ``lanelet_id -> road_id`` for built roads.
+        num_groups: Total number of adjacent groups (including failed ones)
+            so callers keep the existing offset for connecting-road IDs.
+        deferred_predecessor_candidates: ``road_id -> [candidate road IDs]``
+            for roads whose predecessor side resolves to >= 2 distinct
+            regular roads. The road-level predecessor link is left unset
+            for these roads; the divergence/merge synthesis pass owns it.
+        deferred_successor_candidates: same, mirror.
+        routing_graph: The :class:`RoutingGraph` already built for this map.
+            Returned so downstream passes (e.g. divergence synthesis) can
+            reuse it instead of paying the construction cost a second time.
+    """
+
+    roads: List["Road"]
+    lanelet_to_road: Dict[int, int]
+    num_groups: int
+    deferred_predecessor_candidates: Dict[int, List[int]]
+    deferred_successor_candidates: Dict[int, List[int]]
+    routing_graph: RoutingGraph
 
 
 def _evaluate_plan_view_world(
@@ -978,7 +1042,7 @@ class Road:
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
         width_config: Optional[WidthEstimationConfig] = None,
-    ) -> Tuple[List["Road"], Dict[int, int], int]:
+    ) -> "ConstructedRoadsResult":
         """Construct Roads from a lanelet map.
 
         Args:
@@ -988,10 +1052,9 @@ class Road:
             width_config: Configuration for width spline sampling
 
         Returns:
-            Tuple of:
-                - List of Road objects constructed from non-junction lanelets
-                - Dictionary mapping lanelet ID to road ID (only for successfully built roads)
-                - Total number of adjacent groups (including failed ones)
+            ConstructedRoadsResult: roads, lanelet-to-road mapping, total
+                adjacent-group count, and deferred predecessor/successor
+                candidate maps for divergence/merge sites (issue #291).
 
         Raises:
             ValueError: If lanelet_map is empty or contains no valid lanelets
@@ -1098,26 +1161,8 @@ class Road:
         # Build road links based on lanelet previous/following relationships
         from ..util import find_connecting_lanelet_groups, ConnectionDirection
 
-        def _resolve_road_from_groups(
-            groups: List[Set[lanelet2.core.Lanelet]],
-            mapping: Dict[int, int],
-        ) -> Optional[int]:
-            """Return the road ID from the first mapped lanelet in *groups*.
-
-            If any lanelet has ``turn_direction`` (junction lanelet), the
-            road-to-road link is deferred to the junction phase and ``None``
-            is returned.
-            """
-            has_junction = any(
-                "turn_direction" in ll.attributes for g in groups for ll in g
-            )
-            if has_junction:
-                return None
-            for group in groups:
-                for ll in group:
-                    if ll.id in mapping:
-                        return mapping[ll.id]
-            return None
+        deferred_predecessor_candidates: Dict[int, List[int]] = {}
+        deferred_successor_candidates: Dict[int, List[int]] = {}
 
         print(f"Building road links for {len(roads)} roads...")
         for road in tqdm(roads, desc="Building road links"):
@@ -1131,15 +1176,18 @@ class Road:
                     ConnectionDirection.PREVIOUS,
                     routing_graph,
                 )
-                pred_road_id = _resolve_road_from_groups(
+                pred_candidates = _resolve_candidate_road_ids(
                     preceding_groups, lanelet_to_road
                 )
-                if pred_road_id is not None:
+                if len(pred_candidates) == 1:
                     road.add_predecessor(
-                        element_id=pred_road_id,
+                        element_id=pred_candidates[0],
                         element_type=ElementType.ROAD,
                         contact_point=ContactPoint.END,
                     )
+                elif len(pred_candidates) >= 2:
+                    # Defer to divergence/merge synthesis (issue #291).
+                    deferred_predecessor_candidates[road.id] = pred_candidates
             except Exception as e:
                 tqdm.write(
                     f"Warning: Failed to find predecessors for road {road.id}: {e}"
@@ -1153,15 +1201,18 @@ class Road:
                     ConnectionDirection.FOLLOWING,
                     routing_graph,
                 )
-                succ_road_id = _resolve_road_from_groups(
+                succ_candidates = _resolve_candidate_road_ids(
                     following_groups, lanelet_to_road
                 )
-                if succ_road_id is not None:
+                if len(succ_candidates) == 1:
                     road.add_successor(
-                        element_id=succ_road_id,
+                        element_id=succ_candidates[0],
                         element_type=ElementType.ROAD,
                         contact_point=ContactPoint.START,
                     )
+                elif len(succ_candidates) >= 2:
+                    # Defer to divergence/merge synthesis (issue #291).
+                    deferred_successor_candidates[road.id] = succ_candidates
             except Exception as e:
                 tqdm.write(
                     f"Warning: Failed to find successors for road {road.id}: {e}"
@@ -1173,7 +1224,14 @@ class Road:
         # after combining regular roads and connecting roads from junctions.
         Road.set_all_lane_links(lanelet_map, roads, routing_graph)
 
-        return roads, lanelet_to_road, len(adjacent_groups)
+        return ConstructedRoadsResult(
+            roads=roads,
+            lanelet_to_road=lanelet_to_road,
+            num_groups=len(adjacent_groups),
+            deferred_predecessor_candidates=deferred_predecessor_candidates,
+            deferred_successor_candidates=deferred_successor_candidates,
+            routing_graph=routing_graph,
+        )
 
     @staticmethod
     def construct_connecting_roads_from_junctions(
