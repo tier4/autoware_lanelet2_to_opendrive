@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+from multiprocessing.process import BaseProcess
 from multiprocessing.synchronize import Barrier as MPBarrier
 from pathlib import Path
 from typing import Optional
@@ -73,7 +74,7 @@ def _ensure_file_no_lock(
     target.write_text(_PAYLOAD)
 
 
-def _join_or_kill(p: "mp.Process", timeout: float = _JOIN_TIMEOUT_S) -> None:
+def _join_or_kill(p: BaseProcess, timeout: float = _JOIN_TIMEOUT_S) -> None:
     """Join *p* within *timeout*; otherwise terminate/kill so we never leak.
 
     A bare ``p.join(timeout=...)`` followed by an ``exitcode`` assertion
