@@ -283,7 +283,7 @@ def line_line_intersection_typed(
 
 
 def compute_point_layer_bounds(
-    lanelet_map: "lanelet2.core.LaneletMap",
+    lanelet_map: lanelet2.core.LaneletMap,
 ) -> Tuple[float, float, float, float]:
     """Return (min_x, min_y, max_x, max_y) over all Point3d in pointLayer.
 

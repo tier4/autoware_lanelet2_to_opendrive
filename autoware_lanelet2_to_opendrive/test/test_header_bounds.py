@@ -7,6 +7,7 @@ the four header attributes are present, finite, non-zero, and
 internally consistent (``west < east`` and ``south < north``).
 """
 
+import math
 import subprocess
 from pathlib import Path
 
@@ -43,14 +44,17 @@ def test_header_bounding_box_reflects_map_extent(tmp_path: Path) -> None:
     east = float(header.attrib["east"])
     west = float(header.attrib["west"])
 
-    # Issue #465: every axis must be wired, not just some. Catch partial-fix
-    # regressions where (e.g.) only north/south get populated.
+    # Issue #465: every axis must be finite (not NaN/inf — `nan != 0.0` is
+    # true, so the non-zero check below would otherwise let a broken header
+    # slip through) and non-zero (catches partial-fix regressions where only
+    # some of north/south/east/west get populated).
     for name, value in (
         ("north", north),
         ("south", south),
         ("east", east),
         ("west", west),
     ):
+        assert math.isfinite(value), f"header @{name} is not finite ({value})"
         assert value != 0.0, f"header @{name} is 0.0 — issue #465 regression"
 
     # Self-consistency: north > south, east > west.
