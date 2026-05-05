@@ -473,3 +473,33 @@ class SignalType:
 
     # Custom types should use appropriate country codes and follow
     # national regulations (e.g., country="DE" for German StVO signals)
+
+
+class TrafficLightArrowBit:
+    """Bit positions for `<signal>` `@subtype` encoding of light_bulbs arrow attributes.
+
+    Used only for vehicle traffic lights (`@type=1000001`). Pedestrian
+    traffic lights (`@type=1000002`) always emit `@subtype=-1`.
+
+    Layout:
+        bit 0 (= 1): left-turn arrow
+        bit 1 (= 2): right-turn arrow
+        bit 2 (= 4): straight arrow (sourced from Lanelet2 `arrow=up`)
+
+    Sentinel values:
+        NO_BULB_INFO (-1): the converter could not analyse a `light_bulbs`
+            LineString (None or empty). Distinguished from NO_ARROWS so
+            consumers can tell "not analysed" from "analysed, no arrows".
+        NO_ARROWS (0): bulbs present but none carry an arrow attribute
+            (the standard 3-aspect signal case).
+
+    See `docs/signals.md` "Subtype encoding for vehicle traffic lights"
+    for the full mapping table.
+    """
+
+    LEFT = 1
+    RIGHT = 2
+    STRAIGHT = 4
+
+    NO_BULB_INFO = -1
+    NO_ARROWS = 0

@@ -1069,3 +1069,18 @@ def test_multiple_linestrings_different_names():
     assert sig1.name == "TrafficLight_44444_1001"
     assert sig2.name == "TrafficLight_44444_1002"
     assert sig1.name != sig2.name
+
+
+def test_traffic_light_arrow_bit_constants():
+    """Bitmask values follow the documented scheme: left=1, right=2, straight=4."""
+    from autoware_lanelet2_to_opendrive.opendrive.signal import TrafficLightArrowBit
+
+    assert TrafficLightArrowBit.LEFT == 1
+    assert TrafficLightArrowBit.RIGHT == 2
+    assert TrafficLightArrowBit.STRAIGHT == 4
+    assert TrafficLightArrowBit.NO_BULB_INFO == -1
+    assert TrafficLightArrowBit.NO_ARROWS == 0
+    # Bits must be disjoint single-bit values so OR-aggregation is unambiguous.
+    assert TrafficLightArrowBit.LEFT & TrafficLightArrowBit.RIGHT == 0
+    assert TrafficLightArrowBit.LEFT & TrafficLightArrowBit.STRAIGHT == 0
+    assert TrafficLightArrowBit.RIGHT & TrafficLightArrowBit.STRAIGHT == 0
