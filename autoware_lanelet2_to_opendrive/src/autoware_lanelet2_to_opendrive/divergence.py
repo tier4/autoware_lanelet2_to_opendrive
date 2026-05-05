@@ -16,6 +16,33 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Iterable, List, Set, Tuple
 
+from autoware_lanelet2_to_opendrive.opendrive.enums import (
+    ContactPoint,
+    ElementType,
+    LaneType,
+    TrafficRule,
+)
+from autoware_lanelet2_to_opendrive.opendrive.geometry import Line, PlanView
+from autoware_lanelet2_to_opendrive.opendrive.junction import (
+    Connection,
+    Junction,
+)
+from autoware_lanelet2_to_opendrive.opendrive.junction import (
+    LaneLink as JunctionLaneLink,
+)
+from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
+from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
+    LaneLink as LaneLevelLaneLink,
+)
+from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.opendrive.road_links import (
+    Predecessor,
+    RoadLink,
+    Successor,
+)
+
 
 class DivergenceSide(Enum):
     """Which side of a regular road has multiple candidate roads."""
@@ -147,3 +174,201 @@ def sanity_gate_passes(
         )
 
     return True, ""
+
+
+@dataclass(frozen=True)
+class SynthesisOutput:
+    """Result of synthesising one divergence/merge junction.
+
+    Attributes:
+        junction: the new :class:`Junction` (real-junction-compatible).
+        connecting_roads: zero-length connecting roads. Their IDs start at
+            ``starting_connecting_road_id`` and increment.
+        deferred_link_patch: ``(side, source_road_id, junction_id)`` triple
+            the caller applies to the source road's road-level link. ``side``
+            is ``"predecessor"`` for a merge and ``"successor"`` for a
+            divergence.
+    """
+
+    junction: Junction
+    connecting_roads: List[Road]
+    deferred_link_patch: Tuple[str, int, int]
+
+
+def _make_zero_length_connecting_road(
+    road_id: int,
+    junction_id: int,
+    incoming_road_id: int,
+    outgoing_road_id: int,
+    incoming_contact: ContactPoint,
+    outgoing_contact: ContactPoint,
+    start_xyz: Tuple[float, float, float],
+    end_xyz: Tuple[float, float, float],
+    min_segment_length: float,
+    traffic_rule: TrafficRule,
+    from_lane: int,
+    to_lane: int,
+) -> Road:
+    """Build a single-line single-lane connecting road floored at ``min_segment_length``.
+
+    The geometry is a straight :class:`Line` whose length is the planar
+    distance between ``start_xyz`` and ``end_xyz``, lifted to at least
+    ``min_segment_length`` so OpenDRIVE consumers that reject zero-length
+    geometry (e.g. CARLA) still accept it.  The lane carries lane-level
+    predecessor/successor links from ``from_lane`` to ``to_lane`` so the
+    eventual XML preserves the source-lane → connecting-lane mapping.
+    """
+    dx = end_xyz[0] - start_xyz[0]
+    dy = end_xyz[1] - start_xyz[1]
+    raw_length = math.sqrt(dx * dx + dy * dy)
+    length = max(raw_length, min_segment_length)
+    heading = math.atan2(dy, dx) if raw_length > 1e-9 else 0.0
+
+    plan_view = PlanView(
+        geometries=[
+            Line(
+                s=0.0,
+                x=start_xyz[0],
+                y=start_xyz[1],
+                hdg=heading,
+                length=length,
+            )
+        ]
+    )
+
+    is_lht = traffic_rule == TrafficRule.LHT
+    lane_id = 1 if is_lht else -1
+
+    lane = Lane(
+        lane_id=lane_id,
+        lane_type=LaneType.DRIVING,
+        predecessor=LaneLevelLaneLink(id=from_lane),
+        successor=LaneLevelLaneLink(id=to_lane),
+        rule=traffic_rule.value if hasattr(traffic_rule, "value") else None,
+    )
+
+    lane_section = LaneSection(s_offset=0.0)
+    if is_lht:
+        lane_section.left_lanes[lane_id] = lane
+    else:
+        lane_section.right_lanes[lane_id] = lane
+
+    lanes = Lanes(lane_sections=[lane_section])
+
+    link = RoadLink(
+        predecessor=Predecessor(
+            element_type=ElementType.ROAD,
+            element_id=incoming_road_id,
+            contact_point=incoming_contact,
+        ),
+        successor=Successor(
+            element_type=ElementType.ROAD,
+            element_id=outgoing_road_id,
+            contact_point=outgoing_contact,
+        ),
+    )
+
+    return Road(
+        id=road_id,
+        length=length,
+        junction=junction_id,
+        rule=traffic_rule,
+        plan_view=plan_view,
+        lanes=lanes,
+        link=link,
+        reference_start_xyz=start_xyz,
+        reference_end_xyz=end_xyz,
+    )
+
+
+def synthesise_junction_for_site(
+    site: DivergenceSite,
+    inputs: SanityGateInputs,
+    starting_connecting_road_id: int,
+    junction_id: int,
+    traffic_rule: TrafficRule,
+    min_segment_length: float,
+) -> SynthesisOutput:
+    """Build one synthetic :class:`Junction` plus N zero-length connecting roads.
+
+    For a divergence (``site.is_divergence`` is ``True``) every connecting
+    road runs from the source road's end to one candidate road's start.
+    For a merge each connecting road runs from a candidate road's end to
+    the source road's start.  Connection IDs and connecting-road IDs are
+    assigned in deterministic source-lane order so the emitted XML is
+    stable across runs.
+    """
+    junction = Junction(
+        id=junction_id, name=f"divergence_{site.road_id}", connections=[]
+    )
+    connecting_roads: List[Road] = []
+    next_road_id = starting_connecting_road_id
+
+    is_divergence = site.is_divergence
+    source_road_id = site.road_id
+
+    # Sort lane pairs by source lane id (descending: -1, -2, -3 for RHT;
+    # ascending +1, +2, +3 for LHT) so the emitted connecting-road IDs are
+    # deterministic and follow the natural left-to-right lane order on the
+    # source road.
+    is_lht = traffic_rule == TrafficRule.LHT
+    sorted_pairs = sorted(inputs.lane_pairs, key=lambda t: (t[0] if is_lht else -t[0]))
+
+    connecting_lane_id = 1 if is_lht else -1
+
+    for src_lane, cand_road_id, cand_lane in sorted_pairs:
+        if is_divergence:
+            incoming_road_id = source_road_id
+            outgoing_road_id = cand_road_id
+            incoming_contact = ContactPoint.END
+            outgoing_contact = ContactPoint.START
+            start_xyz = inputs.endpoint_road
+            end_xyz = inputs.endpoints_candidates[cand_road_id]
+            connection_incoming = source_road_id
+            from_lane, to_lane = src_lane, cand_lane
+        else:
+            incoming_road_id = cand_road_id
+            outgoing_road_id = source_road_id
+            incoming_contact = ContactPoint.END
+            outgoing_contact = ContactPoint.START
+            start_xyz = inputs.endpoints_candidates[cand_road_id]
+            end_xyz = inputs.endpoint_road
+            connection_incoming = cand_road_id
+            from_lane, to_lane = cand_lane, src_lane
+
+        road = _make_zero_length_connecting_road(
+            road_id=next_road_id,
+            junction_id=junction.id,
+            incoming_road_id=incoming_road_id,
+            outgoing_road_id=outgoing_road_id,
+            incoming_contact=incoming_contact,
+            outgoing_contact=outgoing_contact,
+            start_xyz=start_xyz,
+            end_xyz=end_xyz,
+            min_segment_length=min_segment_length,
+            traffic_rule=traffic_rule,
+            from_lane=from_lane,
+            to_lane=to_lane,
+        )
+
+        connecting_roads.append(road)
+
+        connection = Connection(
+            id=len(junction.connections),
+            incoming_road=connection_incoming,
+            connecting_road=next_road_id,
+            contact_point=ContactPoint.START,
+            lane_links=[
+                JunctionLaneLink(from_lane=from_lane, to_lane=connecting_lane_id)
+            ],
+        )
+        junction.connections.append(connection)
+
+        next_road_id += 1
+
+    side_keyword = "successor" if is_divergence else "predecessor"
+    return SynthesisOutput(
+        junction=junction,
+        connecting_roads=connecting_roads,
+        deferred_link_patch=(side_keyword, source_road_id, junction.id),
+    )

@@ -7,8 +7,15 @@ from autoware_lanelet2_to_opendrive.divergence import (
     DivergenceSide,
     DivergenceSite,
     SanityGateInputs,
+    SynthesisOutput,
     collect_divergence_sites,
     sanity_gate_passes,
+    synthesise_junction_for_site,
+)
+from autoware_lanelet2_to_opendrive.opendrive.enums import (
+    ContactPoint,
+    ElementType,
+    TrafficRule,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
@@ -187,3 +194,94 @@ def test_sanity_gate_fails_on_orphan_successor_lanelet_road():
     ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
     assert ok is False
     assert "orphan" in reason or "exhaustive" in reason
+
+
+def test_synthesise_divergence_emits_one_connecting_road_per_lane_pair():
+    site = DivergenceSite(
+        road_id=185,
+        side=DivergenceSide.SUCCESSOR,
+        candidate_road_ids=[186, 187, 188],
+    )
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (0.0, 0.0, 0.0),
+            187: (0.0, 0.0, 0.0),
+            188: (0.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+    )
+
+    out: SynthesisOutput = synthesise_junction_for_site(
+        site=site,
+        inputs=inputs,
+        starting_connecting_road_id=200,
+        junction_id=2000,
+        traffic_rule=TrafficRule.RHT,
+        min_segment_length=0.01,
+    )
+
+    # 1 junction
+    assert out.junction.id == 2000
+    assert len(out.junction.connections) == 3
+
+    # 3 connecting roads, contiguous IDs from 200
+    assert [r.id for r in out.connecting_roads] == [200, 201, 202]
+    for r in out.connecting_roads:
+        assert r.junction == 2000
+        assert r.length >= 0.01
+        assert r.link.predecessor.element_id == 185
+        assert r.link.predecessor.element_type == ElementType.ROAD
+        assert r.link.predecessor.contact_point == ContactPoint.END
+        assert r.link.successor.element_type == ElementType.ROAD
+
+    # Lane links inside connections preserve the source-lane ordering.
+    incoming_to_connecting = [
+        (
+            c.incoming_road,
+            c.connecting_road,
+            c.lane_links[0].from_lane,
+            c.lane_links[0].to_lane,
+        )
+        for c in out.junction.connections
+    ]
+    assert (185, 200, -1, -1) in incoming_to_connecting
+    assert (185, 201, -2, -1) in incoming_to_connecting
+    assert (185, 202, -3, -1) in incoming_to_connecting
+
+    # Source road link patch returned for the caller to apply.
+    assert out.deferred_link_patch == ("successor", 185, 2000)
+
+
+def test_synthesise_merge_sets_predecessor_link_on_each_candidate():
+    site = DivergenceSite(
+        road_id=42,
+        side=DivergenceSide.PREDECESSOR,
+        candidate_road_ids=[10, 11],
+    )
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={10: (0.0, 0.0, 0.0), 11: (0.0, 0.0, 0.0)},
+        lane_pairs=[(-1, 10, -1), (-2, 11, -1)],
+        all_successor_lanelet_road_ids={10, 11},
+    )
+
+    out = synthesise_junction_for_site(
+        site=site,
+        inputs=inputs,
+        starting_connecting_road_id=300,
+        junction_id=3000,
+        traffic_rule=TrafficRule.RHT,
+        min_segment_length=0.01,
+    )
+
+    # For merge, incoming roads of the connecting road = candidates,
+    # successor = the merged road (42).
+    for r in out.connecting_roads:
+        assert r.link.successor.element_id == 42
+        assert r.link.successor.contact_point == ContactPoint.START
+        assert r.link.predecessor.element_id in {10, 11}
+        assert r.link.predecessor.contact_point == ContactPoint.END
+
+    assert out.deferred_link_patch == ("predecessor", 42, 3000)
