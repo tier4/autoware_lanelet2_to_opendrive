@@ -1,5 +1,13 @@
 """Tests for main conversion functionality and RoadLaneletMapping."""
 
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
+import lxml.etree as ET
+import pytest
+
 from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
 
 
@@ -114,3 +122,68 @@ def test_single_road_multiple_lanelets():
     assert mapping.get_lanelets_for_road(road_id) == lanelet_ids
     for lanelet_id in lanelet_ids:
         assert mapping.get_road_for_lanelet(lanelet_id) == road_id
+
+
+def _nishishinjuku_xodr_for_issue_291() -> Path:
+    """Build (or reuse) the Nishishinjuku XODR for the Road 185 regression test.
+
+    Mirrors the on-demand build pattern in ``test_junction_endpoint_fidelity``:
+    invoke ``uv run convert`` on the bundled OSM fixture and parse the result.
+    Skips when the converter or fixture isn't available so the test is
+    sandbox-friendly.
+    """
+    fixture = Path(
+        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
+    ).resolve()
+    if not fixture.is_file():
+        pytest.skip(f"{fixture} not available; cannot build XODR")
+
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    xodr_path = (
+        Path(tempfile.gettempdir()) / f"nishishinjuku_issue_291_{worker_id}.xodr"
+    )
+
+    cmd = [
+        "uv",
+        "run",
+        "convert",
+        "map=nishishinjuku",
+        "target=carla",
+        f"input_map_path={fixture}",
+        f"output_map_path={xodr_path}",
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as exc:
+        pytest.skip(f"converter unavailable: {exc}")
+
+    if not xodr_path.is_file():
+        pytest.fail(f"converter exited successfully but {xodr_path} was not produced")
+    return xodr_path
+
+
+def test_issue_291_road_185_successor_is_synthetic_junction():
+    """Road 185 (Nishishinjuku) diverges into 186/187/188 — successor must be a junction."""
+    xodr_path = _nishishinjuku_xodr_for_issue_291()
+    tree = ET.parse(str(xodr_path))
+
+    road_185 = tree.find(".//road[@id='185']")
+    assert road_185 is not None, "Road 185 missing from generated XODR"
+
+    succ = road_185.find("link/successor")
+    assert succ is not None, "Road 185 has no <successor> element"
+    assert succ.get("elementType") == "junction", (
+        f"Road 185 <successor> elementType is {succ.get('elementType')!r}, "
+        "expected 'junction' (#291)"
+    )
+
+    junction_id = succ.get("elementId")
+    junction = tree.find(f".//junction[@id='{junction_id}']")
+    assert junction is not None, f"Junction {junction_id} not present"
+    connections = junction.findall("connection")
+    assert (
+        len(connections) == 3
+    ), f"Expected 3 connections (one per Road 185 lane), got {len(connections)}"
+
+    sources = {c.find("laneLink").get("from") for c in connections}
+    assert sources == {"-1", "-2", "-3"}
