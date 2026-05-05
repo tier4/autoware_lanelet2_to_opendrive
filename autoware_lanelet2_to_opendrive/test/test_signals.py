@@ -1,5 +1,7 @@
 """Tests for OpenDRIVE signal module."""
 
+import logging
+
 import lxml.etree as ET
 import pytest
 from autoware_lanelet2_to_opendrive.opendrive.signal import (
@@ -1179,8 +1181,6 @@ def test_compute_subtype_all_three_arrows_returns_seven():
 
 
 def test_compute_subtype_unknown_arrow_value_warns_and_skips(caplog):
-    import logging
-
     ls = _BulbLineString(
         [
             _BulbPoint({"color": "green", "arrow": "diagonal"}),
