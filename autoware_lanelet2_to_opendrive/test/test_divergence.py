@@ -3,7 +3,11 @@
 import inspect
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
-from autoware_lanelet2_to_opendrive.divergence import DivergenceSide, DivergenceSite
+from autoware_lanelet2_to_opendrive.divergence import (
+    DivergenceSide,
+    DivergenceSite,
+    collect_divergence_sites,
+)
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
     _resolve_candidate_road_ids,
@@ -73,3 +77,35 @@ def test_divergence_site_records_side_and_candidates():
     assert site.side is DivergenceSide.SUCCESSOR
     assert site.candidate_road_ids == [186, 187, 188]
     assert site.is_divergence is True  # successor side with N>=2 candidates
+
+
+def test_collect_divergence_sites_emits_one_site_per_deferred_entry():
+    sites = collect_divergence_sites(
+        deferred_predecessor_candidates={11: [1, 2]},
+        deferred_successor_candidates={185: [186, 187, 188]},
+    )
+
+    sides = {(s.road_id, s.side, tuple(s.candidate_road_ids)) for s in sites}
+    assert sides == {
+        (11, DivergenceSide.PREDECESSOR, (1, 2)),
+        (185, DivergenceSide.SUCCESSOR, (186, 187, 188)),
+    }
+
+
+def test_collect_divergence_sites_skips_singleton_or_empty_lists():
+    sites = collect_divergence_sites(
+        deferred_predecessor_candidates={5: [9], 6: []},
+        deferred_successor_candidates={},
+    )
+    assert sites == []
+
+
+def test_collect_divergence_sites_handles_road_with_both_sides_deferred():
+    sites = collect_divergence_sites(
+        deferred_predecessor_candidates={42: [1, 2]},
+        deferred_successor_candidates={42: [3, 4, 5]},
+    )
+
+    sides = {s.side for s in sites}
+    assert sides == {DivergenceSide.PREDECESSOR, DivergenceSide.SUCCESSOR}
+    assert all(s.road_id == 42 for s in sites)

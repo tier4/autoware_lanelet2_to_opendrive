@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List
+from typing import Dict, Iterable, List
 
 
 class DivergenceSide(Enum):
@@ -43,3 +43,34 @@ class DivergenceSite:
     def is_divergence(self) -> bool:
         """True for 1->N successor splits, False for N->1 predecessor merges."""
         return self.side is DivergenceSide.SUCCESSOR
+
+
+def collect_divergence_sites(
+    deferred_predecessor_candidates: Dict[int, List[int]],
+    deferred_successor_candidates: Dict[int, List[int]],
+) -> List[DivergenceSite]:
+    """Materialise :class:`DivergenceSite` instances from deferred candidate maps.
+
+    The deferred maps come from :meth:`Road.construct_from_lanelet_map`. Only
+    entries with two or more candidates produce a site; singletons / empties
+    are dropped because they were already linked or have nothing to link.
+    Output order is deterministic: predecessor sites first (sorted by road id),
+    then successor sites (sorted by road id).
+    """
+
+    def _emit(
+        side: DivergenceSide, mapping: Dict[int, List[int]]
+    ) -> Iterable[DivergenceSite]:
+        for road_id in sorted(mapping):
+            cands = mapping[road_id]
+            if len(cands) >= 2:
+                yield DivergenceSite(
+                    road_id=road_id,
+                    side=side,
+                    candidate_road_ids=list(cands),
+                )
+
+    return [
+        *_emit(DivergenceSide.PREDECESSOR, deferred_predecessor_candidates),
+        *_emit(DivergenceSide.SUCCESSOR, deferred_successor_candidates),
+    ]
