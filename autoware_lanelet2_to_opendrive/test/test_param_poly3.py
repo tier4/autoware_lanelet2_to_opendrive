@@ -426,3 +426,37 @@ class TestEvaluatePlanViewWorldArc:
                 param_poly3_coeffs=(0, 1, 0, 0, 0, 0, 0, 0),
                 arc_curvature=0.5,
             )
+
+
+class TestEvalGeometryWorldArcElement:
+    """Tests for _eval_geometry_world parsing <arc> child elements."""
+
+    def test_parses_arc_curvature(self):
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            _eval_geometry_world,
+        )
+        import lxml.etree as ET
+
+        geom = ET.fromstring(
+            '<geometry s="0" x="0" y="0" hdg="0" length="1.5707963267948966">'
+            '<arc curvature="1.0"/></geometry>'
+        )
+        wx, wy = _eval_geometry_world(geom, p=np.pi / 2.0)
+        assert wx == pytest.approx(1.0, abs=1e-9)
+        assert wy == pytest.approx(1.0, abs=1e-9)
+
+    def test_arc_with_paramPoly3_raises(self):
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            _eval_geometry_world,
+        )
+        import lxml.etree as ET
+
+        geom = ET.fromstring(
+            '<geometry s="0" x="0" y="0" hdg="0" length="1.0">'
+            '<arc curvature="0.5"/>'
+            '<paramPoly3 aU="0" bU="1" cU="0" dU="0" '
+            'aV="0" bV="0" cV="0" dV="0" pRange="arcLength"/>'
+            "</geometry>"
+        )
+        with pytest.raises(ValueError):
+            _eval_geometry_world(geom, p=0.5)

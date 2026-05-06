@@ -164,7 +164,16 @@ def _eval_geometry_world(
     except (TypeError, ValueError):
         return None
 
+    arc = geom_elem.find("arc")
     param_poly3 = geom_elem.find("paramPoly3")
+
+    arc_curvature: Optional[float] = None
+    if arc is not None:
+        try:
+            arc_curvature = float(arc.get("curvature"))
+        except (TypeError, ValueError):
+            arc_curvature = None
+
     coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
         None
     )
@@ -180,7 +189,7 @@ def _eval_geometry_world(
             float(param_poly3.get("dV", "0.0")),
         )
 
-    return evaluate_plan_view_world(x, y, hdg, p, coeffs)
+    return evaluate_plan_view_world(x, y, hdg, p, coeffs, arc_curvature)
 
 
 def _eval_elevation_at_s(elevation_profile: Optional[ET._Element], s: float) -> float:
