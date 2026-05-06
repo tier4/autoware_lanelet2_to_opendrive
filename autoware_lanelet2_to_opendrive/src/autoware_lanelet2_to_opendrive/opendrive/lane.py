@@ -1,5 +1,6 @@
 """Lane implementation for OpenDRIVE conversion."""
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 import lanelet2
 import lxml.etree as ET
@@ -16,8 +17,22 @@ from .opendrive_dataclass import (
     LaneBorder,
     LaneHeight,
     LaneSpeed,
+    LaneAccess,
     SpeedUnit,
 )
+
+logger = logging.getLogger(__name__)
+
+
+_PARTICIPANT_TO_RESTRICTION: Dict[str, str] = {
+    "vehicle": "passengerCar",
+    "pedestrian": "pedestrian",
+    "bicycle": "bicycle",
+    "bus": "bus",
+    "taxi": "taxi",
+    "truck": "truck",
+    "motorcycle": "motorcycle",
+}
 
 
 class Lane:
@@ -64,6 +79,7 @@ class Lane:
         self.borders: List[LaneBorder] = []
         self.heights: List[LaneHeight] = []
         self.speeds: List[LaneSpeed] = []
+        self.accesses: List[LaneAccess] = []
 
     def _add_width(self, width: LaneWidth) -> None:
         """Add a width definition to the lane."""
@@ -84,6 +100,10 @@ class Lane:
     def _add_speed(self, speed: LaneSpeed) -> None:
         """Add a speed limit to the lane."""
         self.speeds.append(speed)
+
+    def _add_access(self, access: LaneAccess) -> None:
+        """Add an access restriction to the lane."""
+        self.accesses.append(access)
 
     def _add_width_from_spline(
         self,
@@ -261,6 +281,40 @@ class Lane:
                 # If speed limit cannot be parsed, skip it
                 pass
 
+        # Translate participant:* attributes into <access> entries (#468).
+        # Lanelet2 conventions:
+        #   participant:X=yes -> allow X
+        #   participant:X=no  -> deny X
+        # Only OpenDRIVE 1.4 e_accessRestrictionType values are emitted;
+        # unknown participants and non-yes/no values are skipped (debug log).
+        for key, value in lanelet.attributes.items():
+            if not key.startswith("participant:"):
+                continue
+            participant = key[len("participant:") :]
+            restriction = _PARTICIPANT_TO_RESTRICTION.get(participant)
+            if restriction is None:
+                logger.debug(
+                    "Skipping unknown participant '%s' on lanelet %d",
+                    participant,
+                    lanelet.id,
+                )
+                continue
+            if value == "yes":
+                rule = "allow"
+            elif value == "no":
+                rule = "deny"
+            else:
+                logger.debug(
+                    "Skipping participant '%s'='%s' (not yes/no) on lanelet %d",
+                    participant,
+                    value,
+                    lanelet.id,
+                )
+                continue
+            lane._add_access(
+                LaneAccess(s_offset=0.0, rule=rule, restriction=restriction)
+            )
+
         return lane
 
     def to_lane_def_data(self) -> Dict[str, Any]:
@@ -316,6 +370,10 @@ class Lane:
         # Add speeds
         for speed in self.speeds:
             elem.append(speed.to_xml())
+
+        # Add access restrictions (must precede heights per OpenDRIVE 1.4 schema)
+        for access in self.accesses:
+            elem.append(access.to_xml())
 
         # Add heights
         for height in self.heights:

@@ -10,3 +10,11 @@ attribute 'rule'
 # <positionInertial> was deprecated in 1.8; qc-framework flags it as invalid
 # on our 1.4-declared output. CARLA ue5-dev requires it.
 Element 'positionInertial'
+
+# OpenDRIVE 1.4 XSD restricts <lane><access> @restriction to a small set
+# (simulator, autonomous traffic, pedestrian, none); the richer enumeration
+# (passengerCar, bus, taxi, truck, motorcycle, bicycle) was added in 1.7+
+# but is what CARLA actually accepts. We emit those values from Lanelet2
+# `participant:*` attributes (#468), so the enumeration mismatch is
+# intentional and a false positive against the 1.4-declared schema.
+attribute 'restriction': \[facet 'enumeration'\]

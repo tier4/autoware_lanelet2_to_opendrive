@@ -1274,6 +1274,7 @@ This section summarizes which Lanelet2 tags are used by the converter and which 
 | **`turn_direction`** | Lanelet | Junction detection | Identifies intersection lanelets | Yes (for junctions) |
 | **`type`** / **`subtype`** | Traffic light | Signal type mapping | Maps to OpenDRIVE signal types | No (defaults available) |
 | **`trafficLights`** | Regulatory element | Signal positioning | Provides signal geometry | Yes (for signals) |
+| **`participant:vehicle\|pedestrian\|bicycle\|bus\|taxi\|truck\|motorcycle`** | Lanelet | Lane access restriction | Emits `<lane><access>` (#468) | No (additive metadata) |
 
 !!! note "Tag Extraction Priority"
     - **Lane level:** `subtype`, `speed_limit` are read per-lanelet
@@ -1288,7 +1289,6 @@ The following Lanelet2 tags are commonly found in maps but are **not currently u
 
 | Tag | Scope | Typical Use | Reason Not Used | Future Consideration |
 |-----|-------|-------------|-----------------|----------------------|
-| **`participant`** | Lanelet | Specifies allowed users (vehicle, pedestrian, bicycle) | Not mapped to OpenDRIVE lane access restrictions | Could enhance lane `<access>` elements |
 | **`one_way`** | Lanelet | Indicates one-way streets | Lanelet2 directionality already encoded in geometry | Redundant with Lanelet2 semantics |
 | **`vehicle`** | Lanelet | Vehicle type restrictions (car, bus, truck) | Not mapped to OpenDRIVE lane restrictions | Could enhance lane `<access>` rules |
 | **`region`** | Lanelet | Administrative region or area type | Not relevant to OpenDRIVE geometry | Out of scope for geometric conversion |
@@ -1422,7 +1422,6 @@ To ensure optimal conversion results:
 Potential improvements to tag handling:
 
 1. **Extended Tag Support:**
-   - Support `participant` tag for lane access restrictions
    - Support `vehicle` tag for vehicle type restrictions
    - Support general `traffic_sign` regulatory elements
 
