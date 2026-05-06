@@ -21,6 +21,7 @@ from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from tqdm import tqdm
 
 from ..conversion_config import (
+    ArcSpiralConfig,
     LaneLinksContext,
     ParamPoly3Config,
     WidthEstimationConfig,
@@ -28,13 +29,98 @@ from ..conversion_config import (
 from ..util import LaneletInput, filter_lanelets_by_subtype, to_lanelet_list
 from .elevation import ElevationProfile
 from .enums import ContactPoint, ElementType, RoadType, TrafficRule
-from .geometry import GeometryBase, ParamPoly3, PlanView, evaluate_plan_view_world
+from .geometry import (
+    Arc,
+    GeometryBase,
+    Line,
+    ParamPoly3,
+    PlanView,
+    evaluate_plan_view_world,
+)
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
 from .road_links import Predecessor, RoadLink, Successor
 
 logger = logging.getLogger(__name__)
+
+
+def _build_planview_geometries(
+    spline,
+    parampoly3_config: Optional[ParamPoly3Config],
+    arcspiral_config: Optional[ArcSpiralConfig],
+) -> List[GeometryBase]:
+    """Emit a list of planView geometry primitives for ``spline``.
+
+    Honours ``arcspiral_config.enabled`` — when False (or None), behaviour
+    is bit-for-bit identical to the previous ParamPoly3-only path.
+    """
+    from .geometry_classifier import (
+        ArcRun,
+        ClassifiedSegment,
+        LineRun,
+        ParamPoly3Run,
+        classify_spline,
+    )
+    from ..config import DEFAULT_CONFIG
+
+    if arcspiral_config is None or not arcspiral_config.enabled:
+        return cast(
+            List[GeometryBase],
+            ParamPoly3.from_spline(spline, config=parampoly3_config),
+        )
+
+    pp3_cfg = parampoly3_config or ParamPoly3Config()
+    runs: List[ClassifiedSegment] = classify_spline(
+        spline,
+        config=arcspiral_config,
+        constants=DEFAULT_CONFIG.arcspiral,
+    )
+
+    out: List[GeometryBase] = []
+    for run in runs:
+        if isinstance(run, LineRun):
+            out.append(Line.from_spline_window(spline, run.s_start, run.s_end))
+        elif isinstance(run, ArcRun):
+            out.append(
+                Arc.from_spline_window(spline, run.s_start, run.s_end, run.curvature)
+            )
+        elif isinstance(run, ParamPoly3Run):
+            # Re-use existing per-window splitting (CARLA min length).
+            out.extend(_emit_paramPoly3_run(spline, run, pp3_cfg))
+        else:
+            raise TypeError(f"Unknown ClassifiedSegment type: {type(run)!r}")
+    return out
+
+
+def _emit_paramPoly3_run(
+    spline,
+    run,
+    pp3_cfg: ParamPoly3Config,
+) -> List[ParamPoly3]:
+    """Emit one or more ParamPoly3 segments covering a ParamPoly3Run.
+
+    Honours ``pp3_cfg.min_segment_length`` by sub-dividing the run if
+    needed (mirrors the per-segment loop in ``ParamPoly3.from_spline``).
+    """
+    length = run.s_end - run.s_start
+    target = pp3_cfg.default_segment_length if pp3_cfg.enabled else length
+    n = max(1, int(np.ceil(length / max(target, pp3_cfg.min_segment_length))))
+    out: List[ParamPoly3] = []
+    for i in range(n):
+        s0 = run.s_start + (i / n) * length
+        s1 = run.s_start + ((i + 1) / n) * length
+        if s1 - s0 < pp3_cfg.min_segment_length:
+            continue
+        out.append(
+            ParamPoly3.from_spline_window(
+                spline,
+                s0,
+                s1,
+                coefficient_epsilon=pp3_cfg.coefficient_epsilon,
+            )
+        )
+    return out
 
 
 def _resolve_candidate_road_ids(
@@ -881,6 +967,7 @@ class Road:
         s_offset: float = 0.0,
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
+        arcspiral_config: Optional[ArcSpiralConfig] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
@@ -894,6 +981,9 @@ class Road:
             s_offset: Starting s-coordinate offset for the road
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
+            arcspiral_config: Configuration for arc/spiral primitive detection
+                (issue #466). Default ``None`` preserves the byte-exact
+                paramPoly3-only output for backward compatibility.
             width_config: Configuration for width spline sampling
             routing_graph: Optional pre-built routing graph for lane-change detection.
                 If None, creates a new one internally.
@@ -926,11 +1016,15 @@ class Road:
         )
         centerline_2d = reference_line.centerline_2d
 
-        # Create paramPoly3 geometries from 2D spline using from_spline method
-        # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate
-        geometries: List[GeometryBase] = cast(
-            List[GeometryBase],
-            ParamPoly3.from_spline(centerline_2d, config=parampoly3_config),
+        # Create planView geometries from 2D spline. When ``arcspiral_config``
+        # is None or disabled this is bit-for-bit identical to the previous
+        # ParamPoly3-only path; otherwise the classifier dispatches into
+        # <line> / <arc> / <paramPoly3> primitives (issue #466).
+        # ParamPoly3 only uses XY coordinates, so 2D spline is appropriate.
+        geometries: List[GeometryBase] = _build_planview_geometries(
+            centerline_2d,
+            parampoly3_config=parampoly3_config,
+            arcspiral_config=arcspiral_config,
         )
 
         # Create plan view with the paramPoly3 geometries
@@ -1041,6 +1135,7 @@ class Road:
         lanelet_map: lanelet2.core.LaneletMap,
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
+        arcspiral_config: Optional[ArcSpiralConfig] = None,
         width_config: Optional[WidthEstimationConfig] = None,
     ) -> "ConstructedRoadsResult":
         """Construct Roads from a lanelet map.
@@ -1049,6 +1144,8 @@ class Road:
             lanelet_map: The lanelet2 map containing all lanelets
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
+            arcspiral_config: Configuration for arc/spiral primitive detection
+                (issue #466). Default ``None`` preserves byte-exact output.
             width_config: Configuration for width spline sampling
 
         Returns:
@@ -1127,6 +1224,7 @@ class Road:
                     s_offset=0.0,
                     traffic_rule=traffic_rule,
                     parampoly3_config=parampoly3_config,
+                    arcspiral_config=arcspiral_config,
                     width_config=width_config,
                     routing_graph=routing_graph,
                 )
@@ -1241,6 +1339,7 @@ class Road:
         junction_id_offset: int = 0,
         traffic_rule: Optional[str] = None,
         parampoly3_config: Optional[ParamPoly3Config] = None,
+        arcspiral_config: Optional[ArcSpiralConfig] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         regular_roads: Optional[List["Road"]] = None,
         lanelet_to_road_id: Optional[Dict[int, int]] = None,
@@ -1274,6 +1373,8 @@ class Road:
                                with road IDs (default: 0). Issue #132 fix.
             traffic_rule: Traffic rule for lanes (RHT or LHT)
             parampoly3_config: Configuration for ParamPoly3 segment generation
+            arcspiral_config: Configuration for arc/spiral primitive detection
+                (issue #466). Default ``None`` preserves byte-exact output.
             width_config: Configuration for width spline sampling
             regular_roads: Already-built non-junction roads used to source
                 world-frame endpoints for connecting-road overrides.
@@ -1415,6 +1516,7 @@ class Road:
                         s_offset=0.0,
                         traffic_rule=traffic_rule,
                         parampoly3_config=parampoly3_config,
+                        arcspiral_config=arcspiral_config,
                         width_config=width_config,
                         routing_graph=routing_graph,
                         start_xyz_override=start_override,
