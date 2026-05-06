@@ -65,7 +65,7 @@ def test_subtype_maps_to_expected_lane_type(
     """
     lanelet_map, lanelet = _make_straight_lanelet(subtype)
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.lane_type is expected_type
 
@@ -80,7 +80,7 @@ def test_highway_subtype_maps_to_driving() -> None:
     """
     lanelet_map, lanelet = _make_straight_lanelet("highway")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.lane_type is LaneType.DRIVING
 
@@ -95,7 +95,7 @@ def test_road_shoulder_subtype_maps_to_shoulder() -> None:
     """
     lanelet_map, lanelet = _make_straight_lanelet("road_shoulder")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.lane_type is LaneType.SHOULDER
 
@@ -104,7 +104,7 @@ def test_walkway_subtype_maps_to_sidewalk() -> None:
     """Confirmation test: walkway still maps to sidewalk (P0-1 behaviour)."""
     lanelet_map, lanelet = _make_straight_lanelet("walkway")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.lane_type is LaneType.SIDEWALK
 
@@ -113,7 +113,7 @@ def test_unknown_subtype_falls_back_to_driving() -> None:
     """An unrecognised subtype (e.g. ``ferry``) falls back to DRIVING."""
     lanelet_map, lanelet = _make_straight_lanelet("ferry")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.lane_type is LaneType.DRIVING
 
@@ -122,6 +122,6 @@ def test_missing_subtype_falls_back_to_driving() -> None:
     """A lanelet without any ``subtype`` attribute falls back to DRIVING."""
     lanelet_map, lanelet = _make_straight_lanelet(subtype=None)
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.lane_type is LaneType.DRIVING

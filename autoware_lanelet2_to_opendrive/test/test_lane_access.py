@@ -94,7 +94,7 @@ def test_construct_translates_vehicle_yes_to_passenger_car_allow() -> None:
         100, {"subtype": "road", "participant:vehicle": "yes"}
     )
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert len(lane.accesses) == 1
     assert lane.accesses[0].s_offset == 0.0
@@ -107,7 +107,7 @@ def test_construct_translates_pedestrian_no_to_deny() -> None:
         101, {"subtype": "road", "participant:pedestrian": "no"}
     )
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert len(lane.accesses) == 1
     assert lane.accesses[0].rule == "deny"
@@ -124,7 +124,7 @@ def test_construct_emits_one_access_per_participant() -> None:
         },
     )
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert {(a.rule, a.restriction) for a in lane.accesses} == {
         ("allow", "passengerCar"),
@@ -137,7 +137,7 @@ def test_construct_skips_unknown_participant() -> None:
         103, {"subtype": "road", "participant:emergency": "yes"}
     )
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.accesses == []
 
@@ -147,7 +147,7 @@ def test_construct_skips_non_yes_no_value() -> None:
         104, {"subtype": "road", "participant:vehicle": "true"}
     )
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.accesses == []
 
@@ -155,7 +155,7 @@ def test_construct_skips_non_yes_no_value() -> None:
 def test_construct_with_no_participant_attribute_yields_no_access() -> None:
     lanelet_map, lanelet = _make_lanelet(105, {"subtype": "road"})
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.accesses == []
 
@@ -176,7 +176,7 @@ def test_construct_translates_full_recognised_set() -> None:
         },
     )
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     restrictions = {a.restriction for a in lane.accesses}
     assert restrictions == {

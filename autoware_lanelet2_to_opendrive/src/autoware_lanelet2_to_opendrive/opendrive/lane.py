@@ -84,7 +84,7 @@ class Lane:
 
     def __init__(
         self,
-        lane_id: int,
+        lane_id: Optional[int],
         lane_type: LaneType,
         level: bool = False,
         predecessor: Optional[LaneLink] = None,
@@ -96,7 +96,11 @@ class Lane:
         Initialize a Lane object.
 
         Args:
-            lane_id: Lane ID (negative for right lanes, positive for left lanes)
+            lane_id: Lane ID. Negative for right lanes, positive for left lanes,
+                ``0`` for the centre/reference lane. ``None`` is accepted as a
+                sentinel for partially-constructed lanes (e.g. test fixtures);
+                the value MUST be resolved to an ``int`` before ``to_xml()`` is
+                called or the lane is added to a ``LaneSection``.
             lane_type: Type of the lane
             level: Whether the lane is level
             predecessor: Link to predecessor lane
@@ -198,6 +202,8 @@ class Lane:
     def construct_from_lanelet(
         lanelet_map: lanelet2.core.LaneletMap,
         lanelet: lanelet2.core.Lanelet,
+        *,
+        lane_id: int,
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         reference_line_spline: Optional["Splines"] = None,
@@ -210,6 +216,10 @@ class Lane:
         Args:
             lanelet_map: The Lanelet2 map containing the lanelet
             lanelet: The lanelet to convert to Lane
+            lane_id: Pre-computed OpenDRIVE lane ID. The caller is responsible
+                for assigning a value consistent with the section's traffic rule
+                (RHT: negative, starting at -1 from the inside out; LHT: positive,
+                starting at +1 from the inside out).
             rule: Traffic rule for the lane (RHT or LHT)
             width_config: Configuration for width spline sampling
             reference_line_spline: Road reference line spline for s-coordinate alignment.
@@ -226,9 +236,6 @@ class Lane:
         Returns:
             Lane instance constructed from the lanelet
         """
-        # TODO: Determine lane ID based on lanelet position and direction
-        lane_id = 0
-
         # Determine lane type from lanelet attributes
         if "subtype" in lanelet.attributes:
             subtype = lanelet.attributes["subtype"]
@@ -383,6 +390,8 @@ class Lane:
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
+        if self.lane_id is None:
+            raise ValueError("Lane.lane_id must be resolved before serialisation")
         elem = ET.Element("lane")
         elem.set("id", str(self.lane_id))
         elem.set("type", self.lane_type.value)

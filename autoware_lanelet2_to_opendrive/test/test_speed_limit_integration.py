@@ -94,7 +94,7 @@ def test_construct_from_lanelet_with_speed_limit():
     lanelet_map.add(lanelet)
 
     # Construct Lane from lanelet
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     # Check that speed limit was extracted
     assert len(lane.speeds) == 1
