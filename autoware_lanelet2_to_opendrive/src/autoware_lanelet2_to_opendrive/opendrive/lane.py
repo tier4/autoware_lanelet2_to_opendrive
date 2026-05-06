@@ -45,7 +45,7 @@ class Lane:
 
     def __init__(
         self,
-        lane_id: int,
+        lane_id: Optional[int],
         lane_type: LaneType,
         level: bool = False,
         predecessor: Optional[LaneLink] = None,
@@ -57,7 +57,10 @@ class Lane:
         Initialize a Lane object.
 
         Args:
-            lane_id: Lane ID (negative for right lanes, positive for left lanes)
+            lane_id: Lane ID. Negative for right lanes, positive for left lanes,
+                ``0`` for the centre/reference lane. May be ``None`` during
+                multi-step construction; the value MUST be resolved before
+                ``to_xml()`` is called or the lane is added to a ``LaneSection``.
             lane_type: Type of the lane
             level: Whether the lane is level
             predecessor: Link to predecessor lane
@@ -336,6 +339,9 @@ class Lane:
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
+        assert (
+            self.lane_id is not None
+        ), "Lane.lane_id must be resolved before serialisation"
         elem = ET.Element("lane")
         elem.set("id", str(self.lane_id))
         elem.set("type", self.lane_type.value)
