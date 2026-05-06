@@ -1,5 +1,7 @@
 """Tests for OpenDRIVE signal module."""
 
+import logging
+
 import lxml.etree as ET
 import pytest
 from autoware_lanelet2_to_opendrive.opendrive.signal import (
@@ -9,7 +11,9 @@ from autoware_lanelet2_to_opendrive.opendrive.signal import (
     Signal,
     SignalType,
     SignalUserData,
+    TrafficLightArrowBit,
     Validity,
+    _compute_signal_subtype_from_bulbs,
 )
 
 
@@ -229,7 +233,9 @@ def test_construct_from_lanelet2_traffic_signal_basic():
     assert signal.dynamic == "yes"
     assert signal.country == "DE"
     assert signal.type == SignalType.TRAFFIC_LIGHT_3_LIGHTS
-    assert signal.subtype == -1
+    # Bulb point has no `attributes` accessor in this mock → helper skips it
+    # → subtype = NO_ARROWS (0).
+    assert signal.subtype == TrafficLightArrowBit.NO_ARROWS
     assert len(signal.validities) == 1
     assert signal.validities[0].from_lane == -1
     assert signal.validities[0].to_lane == -1
@@ -275,43 +281,6 @@ def test_construct_from_lanelet2_traffic_signal_with_attributes():
 
     assert signal.type == SignalType.TRAFFIC_LIGHT_PEDESTRIAN
     assert signal.orientation == "+"  # Positive t means left side
-
-
-def test_construct_from_lanelet2_traffic_signal_arrow():
-    """Test construction with arrow traffic light."""
-
-    class MockPoint:
-        def __init__(self, x, y, z):
-            self.x = x
-            self.y = y
-            self.z = z
-
-    class MockLineString:
-        def __init__(self, ls_id, points):
-            self.id = ls_id
-            self.points = points
-
-        def __len__(self):
-            return len(self.points)
-
-        def __getitem__(self, index):
-            return self.points[index]
-
-    class MockTrafficLight:
-        def __init__(self, traffic_light_id, geometry, attrs):
-            self.id = traffic_light_id
-            self.trafficLights = geometry
-            self.attributes = attrs
-
-    point = MockPoint(150.0, 250.0, 4.5)
-    linestring = MockLineString(5002, [point])
-    traffic_light = MockTrafficLight(11111, [linestring], {"type": "arrow_light"})
-
-    signal = Signal.construct_from_lanelet2_traffic_signal(
-        traffic_light=traffic_light, signal_id=300, s=100.0, t=-5.0
-    )
-
-    assert signal.type == SignalType.TRAFFIC_LIGHT_ARROW
 
 
 def test_construct_from_lanelet2_traffic_signal_multiple_lanes():
@@ -1069,3 +1038,258 @@ def test_multiple_linestrings_different_names():
     assert sig1.name == "TrafficLight_44444_1001"
     assert sig2.name == "TrafficLight_44444_1002"
     assert sig1.name != sig2.name
+
+
+def test_traffic_light_arrow_bit_constants():
+    """Bitmask values follow the documented scheme: left=1, right=2, straight=4."""
+    assert TrafficLightArrowBit.LEFT == 1
+    assert TrafficLightArrowBit.RIGHT == 2
+    assert TrafficLightArrowBit.STRAIGHT == 4
+    assert TrafficLightArrowBit.NO_BULB_INFO == -1
+    assert TrafficLightArrowBit.NO_ARROWS == 0
+    # Bits must be disjoint single-bit values so OR-aggregation is unambiguous.
+    assert TrafficLightArrowBit.LEFT & TrafficLightArrowBit.RIGHT == 0
+    assert TrafficLightArrowBit.LEFT & TrafficLightArrowBit.STRAIGHT == 0
+    assert TrafficLightArrowBit.RIGHT & TrafficLightArrowBit.STRAIGHT == 0
+
+
+# ---------------------------------------------------------------------------
+# Mock helpers for _compute_signal_subtype_from_bulbs tests (Task 2)
+# ---------------------------------------------------------------------------
+
+
+class _BulbPoint:
+    """Mock lanelet2 point with an attributes dict."""
+
+    def __init__(self, attrs=None):
+        self.attributes = attrs if attrs is not None else {}
+
+
+class _BulbPointWithoutAttrs:
+    """Mock lanelet2 point that lacks the `attributes` accessor entirely."""
+
+    pass
+
+
+class _BulbLineString:
+    """Mock lanelet2 LineString of bulb points."""
+
+    def __init__(self, pts):
+        self._pts = list(pts)
+
+    def __len__(self):
+        return len(self._pts)
+
+    def __getitem__(self, i):
+        return self._pts[i]
+
+
+def test_compute_subtype_none_linestring_returns_no_bulb_info():
+    assert _compute_signal_subtype_from_bulbs(None) == TrafficLightArrowBit.NO_BULB_INFO
+
+
+def test_compute_subtype_empty_linestring_returns_no_bulb_info():
+    assert (
+        _compute_signal_subtype_from_bulbs(_BulbLineString([]))
+        == TrafficLightArrowBit.NO_BULB_INFO
+    )
+
+
+def test_compute_subtype_no_arrow_attributes_returns_zero():
+    ls = _BulbLineString(
+        [
+            _BulbPoint({"color": "red"}),
+            _BulbPoint({"color": "yellow"}),
+            _BulbPoint({"color": "green"}),
+        ]
+    )
+    assert _compute_signal_subtype_from_bulbs(ls) == TrafficLightArrowBit.NO_ARROWS
+
+
+def test_compute_subtype_left_arrow_only():
+    ls = _BulbLineString(
+        [
+            _BulbPoint({"color": "red"}),
+            _BulbPoint({"color": "yellow"}),
+            _BulbPoint({"color": "green"}),
+            _BulbPoint({"color": "green", "arrow": "left"}),
+        ]
+    )
+    assert _compute_signal_subtype_from_bulbs(ls) == TrafficLightArrowBit.LEFT
+
+
+def test_compute_subtype_right_arrow_only():
+    ls = _BulbLineString([_BulbPoint({"color": "green", "arrow": "right"})])
+    assert _compute_signal_subtype_from_bulbs(ls) == TrafficLightArrowBit.RIGHT
+
+
+def test_compute_subtype_up_maps_to_straight_bit():
+    """Lanelet2 vocabulary uses arrow=up for the straight-ahead arrow."""
+    ls = _BulbLineString([_BulbPoint({"color": "green", "arrow": "up"})])
+    assert _compute_signal_subtype_from_bulbs(ls) == TrafficLightArrowBit.STRAIGHT
+
+
+def test_compute_subtype_all_three_arrows_returns_seven():
+    ls = _BulbLineString(
+        [
+            _BulbPoint({"color": "green", "arrow": "left"}),
+            _BulbPoint({"color": "green", "arrow": "right"}),
+            _BulbPoint({"color": "green", "arrow": "up"}),
+        ]
+    )
+    expected = (
+        TrafficLightArrowBit.LEFT
+        | TrafficLightArrowBit.RIGHT
+        | TrafficLightArrowBit.STRAIGHT
+    )
+    assert _compute_signal_subtype_from_bulbs(ls) == expected
+
+
+def test_compute_subtype_unknown_arrow_value_warns_and_skips(caplog):
+    ls = _BulbLineString(
+        [
+            _BulbPoint({"color": "green", "arrow": "diagonal"}),
+            _BulbPoint({"color": "green", "arrow": "left"}),
+        ]
+    )
+    with caplog.at_level(
+        logging.WARNING,
+        logger="autoware_lanelet2_to_opendrive.opendrive.signal",
+    ):
+        result = _compute_signal_subtype_from_bulbs(ls)
+    # Unknown value ignored, known value still applied.
+    assert result == TrafficLightArrowBit.LEFT
+    assert any("diagonal" in rec.message for rec in caplog.records)
+
+
+def test_compute_subtype_point_without_attributes_is_skipped():
+    ls = _BulbLineString(
+        [
+            _BulbPointWithoutAttrs(),
+            _BulbPoint({"color": "green", "arrow": "left"}),
+        ]
+    )
+    assert _compute_signal_subtype_from_bulbs(ls) == TrafficLightArrowBit.LEFT
+
+
+def test_construct_from_lanelet2_traffic_signal_with_bulb_arrow():
+    """Bulb arrow attributes drive @subtype, @type stays at 1000001."""
+
+    class MockPoint:
+        def __init__(self, x, y, z, attrs=None):
+            self.x = x
+            self.y = y
+            self.z = z
+            self.attributes = attrs if attrs is not None else {}
+
+    class MockLineString:
+        def __init__(self, ls_id, points):
+            self.id = ls_id
+            self.points = points
+
+        def __len__(self):
+            return len(self.points)
+
+        def __getitem__(self, i):
+            return self.points[i]
+
+    class MockTrafficLight:
+        def __init__(self, tl_id, geometry, attrs):
+            self.id = tl_id
+            self.trafficLights = geometry
+            self.attributes = attrs
+
+    pts = [
+        MockPoint(0.0, 0.0, 5.0, {"color": "red"}),
+        MockPoint(0.1, 0.0, 5.0, {"color": "yellow"}),
+        MockPoint(0.2, 0.0, 5.0, {"color": "green"}),
+        MockPoint(0.3, 0.0, 5.0, {"color": "green", "arrow": "left"}),
+    ]
+    ls = MockLineString(7000, pts)
+    tl = MockTrafficLight(7777, [ls], {"subtype": "red_yellow_green"})
+
+    sig = Signal.construct_from_lanelet2_traffic_signal(
+        traffic_light=tl, signal_id=1, s=0.0, t=-3.0, lane_ids=[-1]
+    )
+    assert sig.type == SignalType.TRAFFIC_LIGHT_3_LIGHTS
+    assert sig.subtype == TrafficLightArrowBit.LEFT
+
+
+def test_construct_from_lanelet2_traffic_signal_pure_three_aspect_subtype_zero():
+    """A 3-colour-only fixture yields subtype=NO_ARROWS (0)."""
+
+    class MockPoint:
+        def __init__(self, x, y, z, attrs=None):
+            self.x = x
+            self.y = y
+            self.z = z
+            self.attributes = attrs if attrs is not None else {}
+
+    class MockLineString:
+        def __init__(self, ls_id, points):
+            self.id = ls_id
+            self.points = points
+
+        def __len__(self):
+            return len(self.points)
+
+        def __getitem__(self, i):
+            return self.points[i]
+
+    class MockTrafficLight:
+        def __init__(self, tl_id, geometry):
+            self.id = tl_id
+            self.trafficLights = geometry
+            self.attributes = {"subtype": "red_yellow_green"}
+
+    pts = [
+        MockPoint(0.0, 0.0, 5.0, {"color": "red"}),
+        MockPoint(0.1, 0.0, 5.0, {"color": "yellow"}),
+        MockPoint(0.2, 0.0, 5.0, {"color": "green"}),
+    ]
+    ls = MockLineString(7001, pts)
+    tl = MockTrafficLight(7778, [ls])
+
+    sig = Signal.construct_from_lanelet2_traffic_signal(
+        traffic_light=tl, signal_id=2, s=0.0, t=-3.0, lane_ids=[-1]
+    )
+    assert sig.type == SignalType.TRAFFIC_LIGHT_3_LIGHTS
+    assert sig.subtype == TrafficLightArrowBit.NO_ARROWS
+
+
+def test_construct_from_lanelet2_traffic_signal_pedestrian_always_minus_one():
+    """Pedestrian fixtures always emit subtype=NO_BULB_INFO (-1) even with arrow bulbs."""
+
+    class MockPoint:
+        def __init__(self, x, y, z, attrs=None):
+            self.x = x
+            self.y = y
+            self.z = z
+            self.attributes = attrs if attrs is not None else {}
+
+    class MockLineString:
+        def __init__(self, ls_id, points):
+            self.id = ls_id
+            self.points = points
+
+        def __len__(self):
+            return len(self.points)
+
+        def __getitem__(self, i):
+            return self.points[i]
+
+    class MockTrafficLight:
+        def __init__(self, tl_id, geometry):
+            self.id = tl_id
+            self.trafficLights = geometry
+            self.attributes = {"subtype": "pedestrian"}
+
+    pts = [MockPoint(0.0, 0.0, 5.0, {"color": "green", "arrow": "left"})]
+    ls = MockLineString(7002, pts)
+    tl = MockTrafficLight(7779, [ls])
+
+    sig = Signal.construct_from_lanelet2_traffic_signal(
+        traffic_light=tl, signal_id=3, s=0.0, t=-3.0, lane_ids=[-1]
+    )
+    assert sig.type == SignalType.TRAFFIC_LIGHT_PEDESTRIAN
+    assert sig.subtype == TrafficLightArrowBit.NO_BULB_INFO

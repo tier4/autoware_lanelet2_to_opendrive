@@ -88,9 +88,52 @@ The `SignalType` class provides constants for common signal types:
 
 - **`TRAFFIC_LIGHT_3_LIGHTS`** (1000001): Standard 3-light traffic signal (red, yellow, green)
 - **`TRAFFIC_LIGHT_PEDESTRIAN`** (1000002): Pedestrian traffic light
-- **`TRAFFIC_LIGHT_ARROW`** (1000003): Arrow traffic light
 
 These types use `country="DE"` (German StVO). For other national regulations, use appropriate country codes (e.g., "US", "JP").
+
+## Subtype Encoding for Vehicle Traffic Lights
+
+For `@type=1000001` (vehicle traffic lights), the `@subtype` attribute encodes
+which arrow-direction bulbs are present on the fixture, sourced from the
+`arrow` attribute of each point in the Lanelet2 `light_bulbs` LineString.
+
+The encoding is a bitmask:
+
+| Bit | Value | Meaning | Source |
+|---|---|---|---|
+| 0 | 1 | Left-turn arrow present | `arrow=left` |
+| 1 | 2 | Right-turn arrow present | `arrow=right` |
+| 2 | 4 | Straight arrow present | `arrow=up` |
+
+Sentinel values:
+
+- `-1`: the converter could not analyse a `light_bulbs` LineString (none
+  attached, or empty).
+- `0`: bulbs were analysed and none carry an `arrow` attribute (the standard
+  three-aspect signal case).
+- `1`–`7`: bitwise OR of the bits above. For example, `subtype="3"` means
+  the fixture has both a left-turn and a right-turn arrow.
+
+Pedestrian traffic lights (`@type=1000002`) always emit `@subtype=-1`.
+
+### Example
+
+A Japanese intersection fixture with red/yellow/green bulbs plus a left-turn
+green arrow (Lanelet2 `light_bulbs` LineString contains four points: red,
+yellow, green, and a green point with `arrow=left`):
+
+```xml
+<signal id="42" name="TrafficLight_..."
+        s="..." t="..." orientation="-"
+        dynamic="yes" country="DE"
+        type="1000001" subtype="1">
+  <validity fromLane="-1" toLane="-1"/>
+</signal>
+```
+
+CARLA does not consume `@subtype` and is unaffected by this encoding;
+SUMO and RoadRunner-style consumers use it to drive direction-specific
+signal phases.
 
 ## Signal Attributes
 

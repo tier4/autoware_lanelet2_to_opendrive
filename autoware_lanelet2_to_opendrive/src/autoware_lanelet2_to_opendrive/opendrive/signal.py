@@ -1,10 +1,13 @@
 """OpenDRIVE signal definitions."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Optional, List
 import lxml.etree as ET
 
 from ..config import COORDINATE_OFFSET
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -368,30 +371,36 @@ class Signal:
         else:
             z_offset = signal_absolute_z
 
-        # Determine signal type from attributes
-        # Check if traffic light has a 'subtype' or 'type' attribute
-        signal_type = SignalType.TRAFFIC_LIGHT_3_LIGHTS  # Default type
-        signal_subtype = -1
-
-        # Try to extract type from attributes if available
+        # Determine @type from the regulatory element's `subtype` attribute.
+        # @subtype is driven by per-bulb `arrow` attributes for vehicle TLs;
+        # pedestrian TLs always emit `@subtype=NO_BULB_INFO` (out of scope for #467).
+        signal_type = SignalType.TRAFFIC_LIGHT_3_LIGHTS  # Default
         if hasattr(traffic_light, "attributes"):
             attrs = traffic_light.attributes
-            # Check for common attribute keys used in lanelet2
-            if "subtype" in attrs:
-                subtype_str = attrs["subtype"]
-                # Map lanelet2 subtypes to OpenDRIVE types
-                if "red_yellow_green" in subtype_str or "3_lights" in subtype_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_3_LIGHTS
-                elif "pedestrian" in subtype_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_PEDESTRIAN
-                elif "arrow" in subtype_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_ARROW
-            elif "type" in attrs:
-                type_str = attrs["type"]
-                if "pedestrian" in type_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_PEDESTRIAN
-                elif "arrow" in type_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_ARROW
+            # Use `in` + `[]` access to support both plain dicts and Lanelet2
+            # AttributeMap objects (the latter lack a `.get()` method).
+            try:
+                subtype_str = attrs["subtype"] if "subtype" in attrs else ""
+            except (KeyError, TypeError):
+                subtype_str = ""
+            if "pedestrian" in subtype_str:
+                signal_type = SignalType.TRAFFIC_LIGHT_PEDESTRIAN
+            elif (
+                "red_yellow_green" not in subtype_str
+                and "3_lights" not in subtype_str
+                and subtype_str
+            ):
+                logger.debug(
+                    "unrecognised traffic_light subtype %r on RE %s; "
+                    "defaulting to @type=1000001",
+                    subtype_str,
+                    getattr(traffic_light, "id", "?"),
+                )
+
+        if signal_type == SignalType.TRAFFIC_LIGHT_PEDESTRIAN:
+            signal_subtype = TrafficLightArrowBit.NO_BULB_INFO
+        else:
+            signal_subtype = _compute_signal_subtype_from_bulbs(light_linestring)
 
         # Determine signal dimensions (width x height)
         # Default dimensions for a standard traffic light
@@ -452,12 +461,11 @@ class Signal:
 class SignalType:
     """Common signal type IDs for OpenDRIVE signals."""
 
-    # Traffic lights (type 1000001-1000003 commonly used with country="DE")
+    # Traffic lights (type 1000001 vehicle, 1000002 pedestrian; country="DE")
     TRAFFIC_LIGHT_3_LIGHTS = (
         1000001  # Standard 3-light traffic signal (red, yellow, green)
     )
     TRAFFIC_LIGHT_PEDESTRIAN = 1000002  # Pedestrian traffic light
-    TRAFFIC_LIGHT_ARROW = 1000003  # Arrow traffic light
 
     # Yield sign (type 205 corresponds to German StVO sign 205 - "Vorfahrt gewähren")
     # Used in OpenDRIVE to represent yield signs at intersections
@@ -473,3 +481,93 @@ class SignalType:
 
     # Custom types should use appropriate country codes and follow
     # national regulations (e.g., country="DE" for German StVO signals)
+
+
+class TrafficLightArrowBit:
+    """Bit positions for `<signal>` `@subtype` encoding of light_bulbs arrow attributes.
+
+    Used only for vehicle traffic lights (`@type=1000001`). Pedestrian
+    traffic lights (`@type=1000002`) always emit `@subtype=-1`.
+
+    Layout:
+        bit 0 (= 1): left-turn arrow
+        bit 1 (= 2): right-turn arrow
+        bit 2 (= 4): straight arrow (sourced from Lanelet2 `arrow=up`)
+
+    Sentinel values:
+        NO_BULB_INFO (-1): the converter could not analyse a `light_bulbs`
+            LineString (None or empty). Distinguished from NO_ARROWS so
+            consumers can tell "not analysed" from "analysed, no arrows".
+        NO_ARROWS (0): bulbs present but none carry an arrow attribute
+            (the standard 3-aspect signal case).
+
+    See `docs/signals.md` "Subtype encoding for vehicle traffic lights"
+    for the full mapping table.
+    """
+
+    LEFT = 1
+    RIGHT = 2
+    STRAIGHT = 4
+
+    # Sentinels — not bit values; must never be OR-combined with LEFT/RIGHT/STRAIGHT.
+    NO_BULB_INFO = -1
+    NO_ARROWS = 0
+
+
+_ARROW_VALUE_TO_BIT = {
+    "left": TrafficLightArrowBit.LEFT,
+    "right": TrafficLightArrowBit.RIGHT,
+    "up": TrafficLightArrowBit.STRAIGHT,  # Lanelet2 uses "up" for the straight-ahead arrow
+}
+
+
+def _compute_signal_subtype_from_bulbs(light_linestring: Any) -> int:
+    """Compute `<signal>` `@subtype` bitmask from per-bulb `arrow` attributes.
+
+    Iterates the points of a Lanelet2 `light_bulbs` LineString and folds the
+    `arrow` attribute of each point into a bitmask
+    (left=1, right=2, straight=4). Lanelet2 encodes the straight-ahead arrow
+    as `arrow=up`.
+
+    Args:
+        light_linestring: Lanelet2 LineString of bulb points, or `None`.
+
+    Returns:
+        `TrafficLightArrowBit.NO_BULB_INFO` (-1) if `light_linestring` is
+        `None` or empty. `TrafficLightArrowBit.NO_ARROWS` (0) if bulbs are
+        present but none carry an `arrow` attribute. Otherwise the bitwise
+        OR of `TrafficLightArrowBit.LEFT/RIGHT/STRAIGHT` for the directions
+        that appear at least once.
+
+    Unknown `arrow` values produce a warning log and are ignored. Points
+    without an `attributes` accessor are skipped silently.
+    """
+    if light_linestring is None or len(light_linestring) == 0:
+        return TrafficLightArrowBit.NO_BULB_INFO
+
+    mask = TrafficLightArrowBit.NO_ARROWS
+    for i in range(len(light_linestring)):
+        point = light_linestring[i]
+        if not hasattr(point, "attributes"):
+            continue
+        try:
+            attrs = point.attributes
+            # Use `in` + `[]` to support Lanelet2 AttributeMap objects,
+            # which do not expose a `.get()` method (unlike plain dicts).
+            arrow = attrs["arrow"] if "arrow" in attrs else None
+        except (AttributeError, KeyError, TypeError):
+            # `attributes` missing, not subscriptable, or unexpected error; skip.
+            continue
+        if arrow is None:
+            continue
+        bit = _ARROW_VALUE_TO_BIT.get(arrow)
+        if bit is None:
+            point_id = getattr(point, "id", "?")
+            logger.warning(
+                "unknown arrow value %r on bulb point %s; ignoring",
+                arrow,
+                point_id,
+            )
+            continue
+        mask |= bit
+    return mask

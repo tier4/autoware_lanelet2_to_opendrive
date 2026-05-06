@@ -556,7 +556,8 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 | Tag | Source | Purpose | Mapping |
 |-----|--------|---------|---------|
-| `type` or `subtype` | Traffic light regulatory element | Signal type | `"red_yellow_green"` or `"3_lights"` → `TRAFFIC_LIGHT_3_LIGHTS`<br/>`"pedestrian"` → `TRAFFIC_LIGHT_PEDESTRIAN`<br/>`"arrow"` → `TRAFFIC_LIGHT_ARROW` |
+| `subtype` (RE attr) | Traffic light regulatory element | Signal type | `"pedestrian"` → `TRAFFIC_LIGHT_PEDESTRIAN`<br/>otherwise → `TRAFFIC_LIGHT_3_LIGHTS` |
+| `arrow` (light_bulbs point attr) | Per-bulb attribute on `light_bulbs` LineString | Signal subtype bitmask | `left=1`, `right=2`, `up=4` (OR-combined; see `signals.md`) |
 | `trafficLights` | Regulatory element | Signal geometry | LineString3d → Signal position |
 
 **Processing:**
