@@ -16,6 +16,7 @@ from .opendrive_dataclass import (
     LaneBorder,
     LaneHeight,
     LaneSpeed,
+    LaneAccess,
     SpeedUnit,
 )
 
@@ -64,6 +65,7 @@ class Lane:
         self.borders: List[LaneBorder] = []
         self.heights: List[LaneHeight] = []
         self.speeds: List[LaneSpeed] = []
+        self.accesses: List[LaneAccess] = []
 
     def _add_width(self, width: LaneWidth) -> None:
         """Add a width definition to the lane."""
@@ -84,6 +86,10 @@ class Lane:
     def _add_speed(self, speed: LaneSpeed) -> None:
         """Add a speed limit to the lane."""
         self.speeds.append(speed)
+
+    def _add_access(self, access: LaneAccess) -> None:
+        """Add an access restriction to the lane."""
+        self.accesses.append(access)
 
     def _add_width_from_spline(
         self,
@@ -316,6 +322,10 @@ class Lane:
         # Add speeds
         for speed in self.speeds:
             elem.append(speed.to_xml())
+
+        # Add access restrictions (must precede heights per OpenDRIVE 1.4 schema)
+        for access in self.accesses:
+            elem.append(access.to_xml())
 
         # Add heights
         for height in self.heights:
