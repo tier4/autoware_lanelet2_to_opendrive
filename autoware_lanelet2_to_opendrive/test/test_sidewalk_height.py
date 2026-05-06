@@ -45,7 +45,7 @@ def test_rht_walkway_with_inner_curbstone_emits_height() -> None:
     """RHT + walkway + leftBound type=curbstone → exactly one height (0.15/0.15)."""
     lanelet_map, lanelet = _make_lanelet("walkway", left_type="curbstone")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule="RHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="RHT")
 
     assert len(lane.heights) == 1
     h = lane.heights[0]
@@ -58,7 +58,7 @@ def test_lht_walkway_with_inner_road_border_emits_height() -> None:
     """LHT + walkway + rightBound type=road_border → one height entry."""
     lanelet_map, lanelet = _make_lanelet("walkway", right_type="road_border")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule="LHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="LHT")
 
     assert len(lane.heights) == 1
     assert lane.heights[0].inner == pytest.approx(0.15)
@@ -69,7 +69,7 @@ def test_walkway_without_curb_emits_no_height() -> None:
     """Walkway with no curb-tagged inner boundary → no height entry."""
     lanelet_map, lanelet = _make_lanelet("walkway", left_type="line_thin")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule="RHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="RHT")
 
     assert lane.heights == []
 
@@ -78,7 +78,7 @@ def test_walkway_with_curb_only_on_outer_emits_no_height() -> None:
     """Inner-only check: outer-side curb is not enough to trigger emission."""
     lanelet_map, lanelet = _make_lanelet("walkway", right_type="curbstone")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule="RHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="RHT")
 
     assert lane.heights == []
 
@@ -87,7 +87,7 @@ def test_driving_lanelet_with_inner_curb_emits_no_height() -> None:
     """A road lanelet (lane_type=DRIVING) is unaffected even with a curb."""
     lanelet_map, lanelet = _make_lanelet("road", left_type="curbstone")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule="RHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="RHT")
 
     assert lane.heights == []
 
@@ -96,7 +96,7 @@ def test_road_shoulder_with_inner_curb_emits_height() -> None:
     """Shoulder is in scope: RHT + road_shoulder + leftBound curb → height."""
     lanelet_map, lanelet = _make_lanelet("road_shoulder", left_type="curbstone")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule="RHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="RHT")
 
     assert len(lane.heights) == 1
     assert lane.heights[0].inner == pytest.approx(0.15)
@@ -106,7 +106,7 @@ def test_default_rule_is_rht() -> None:
     """rule=None is treated as RHT (same convention as width anchoring)."""
     lanelet_map, lanelet = _make_lanelet("walkway", left_type="curbstone")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule=None)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule=None)
 
     assert len(lane.heights) == 1
 
@@ -128,7 +128,7 @@ def test_sidewalk_height_value_comes_from_config(
     monkeypatch.setattr(lane_module, "DEFAULT_CONFIG", custom)
 
     lanelet_map, lanelet = _make_lanelet("walkway", left_type="curbstone")
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, rule="RHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="RHT")
 
     assert len(lane.heights) == 1
     assert lane.heights[0].inner == pytest.approx(0.25)
