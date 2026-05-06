@@ -486,48 +486,34 @@ def test_dedup_all_empty_skipped():
 
 
 def test_real_data_emits_arrow_subtypes(lanelet_map):
-    """Real Autoware data has arrow-bearing fixtures; some signals must carry subtype>=1.
+    """Real Autoware data drives the constructor's subtype path to non-trivial values.
 
-    Exercises _compute_signal_subtype_from_bulbs against the light_bulbs LineStrings
-    from AutowareTrafficLight regulatory elements in the nishishinjuku dataset.
-    AutowareTrafficLight.lightBulbs() returns the role=light_bulbs LineStrings; their
-    per-point arrow attributes are the input that the helper encodes into the bitmask.
-
-    Dataset facts (nishishinjuku.osm, 143 light_bulbs LineStrings):
-    - 101 have no arrow attributes -> subtype 0
-    - 42 have at least one arrow bulb -> subtype in {1, 2, 3, 4, 5, 6, 7}
+    Exercises `_compute_signal_subtype_from_traffic_light` — the helper the
+    `Signal.construct_from_lanelet2_traffic_signal` constructor calls — against
+    the `AutowareTrafficLight` regulatory elements in `nishishinjuku.osm`.
+    Going through the RE-level aggregator (rather than just
+    `_compute_signal_subtype_from_bulbs` on individual LineStrings) is the test
+    that would have caught wiring bugs where the constructor reads from the
+    geometry LineString instead of `lightBulbs()`.
     """
     import autoware_lanelet2_extension_python.regulatory_elements as ll2_ext_reg
 
     from autoware_lanelet2_to_opendrive.opendrive.signal import (
-        _compute_signal_subtype_from_bulbs,
+        _compute_signal_subtype_from_traffic_light,
     )
 
-    arrow_subtypes_seen: set = set()
+    subtypes_seen: set = set()
     for reg_elem in lanelet_map.regulatoryElementLayer:
         if not isinstance(reg_elem, ll2_ext_reg.AutowareTrafficLight):
             continue
-        # lightBulbs is a callable method on AutowareTrafficLight that returns
-        # the role=light_bulbs LineStrings (per-bulb arrow attributes live here).
-        bulbs = reg_elem.lightBulbs
-        if callable(bulbs):
-            bulbs = bulbs()
-        for ls in bulbs:
-            if len(ls) > 0:
-                arrow_subtypes_seen.add(_compute_signal_subtype_from_bulbs(ls))
+        subtypes_seen.add(_compute_signal_subtype_from_traffic_light(reg_elem))
 
-    # Expectations grounded in dataset analysis (143 light_bulbs LineStrings):
-    # - 101 have no arrow attributes -> subtype 0
-    # - 42 have at least one arrow -> subtype in {1, 2, 3, 4, 5, 6, 7}
-    assert 0 in arrow_subtypes_seen, (
-        "Expected at least one pure 3-aspect fixture (subtype=0) "
-        f"but only saw {sorted(arrow_subtypes_seen)}"
+    # The dataset has both pure 3-aspect REs and arrow-bearing REs.
+    assert 0 in subtypes_seen, (
+        "Expected at least one pure 3-aspect RE (subtype=0) but only saw "
+        f"{sorted(subtypes_seen)}"
     )
-    assert any(s >= 1 for s in arrow_subtypes_seen), (
-        "Expected at least one arrow-bearing fixture (subtype>=1) "
-        f"but only saw {sorted(arrow_subtypes_seen)}"
+    assert any(s >= 1 for s in subtypes_seen), (
+        "Expected at least one arrow-bearing RE (subtype>=1) but only saw "
+        f"{sorted(subtypes_seen)}"
     )
-    # No sentinel: every Nishishinjuku light_bulbs LineString is non-empty.
-    assert (
-        -1 not in arrow_subtypes_seen
-    ), f"Unexpected NO_BULB_INFO sentinel in real data; saw {sorted(arrow_subtypes_seen)}"
