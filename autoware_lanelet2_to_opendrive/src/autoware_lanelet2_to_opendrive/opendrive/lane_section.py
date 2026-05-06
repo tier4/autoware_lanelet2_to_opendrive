@@ -49,19 +49,23 @@ class LaneSection:
 
     def _add_left_lane(self, lane: "Lane") -> None:
         """Add a left lane to the section."""
+        if lane.lane_id is None:
+            raise ValueError("Lane added to LaneSection must have a resolved lane_id")
         if lane.lane_id <= 0:
             raise ValueError(f"Left lane must have positive ID, got {lane.lane_id}")
         self.left_lanes[lane.lane_id] = lane
 
     def _add_right_lane(self, lane: "Lane") -> None:
         """Add a right lane to the section."""
+        if lane.lane_id is None:
+            raise ValueError("Lane added to LaneSection must have a resolved lane_id")
         if lane.lane_id >= 0:
             raise ValueError(f"Right lane must have negative ID, got {lane.lane_id}")
         self.right_lanes[lane.lane_id] = lane
 
     def _set_center_lane(self, reference_line: ReferenceLine) -> None:
         """Set the center/reference lane."""
-        if reference_line.lane_id != 0:
+        if reference_line.lane_id is None or reference_line.lane_id != 0:
             raise ValueError(
                 f"Center lane must have ID 0, got {reference_line.lane_id}"
             )

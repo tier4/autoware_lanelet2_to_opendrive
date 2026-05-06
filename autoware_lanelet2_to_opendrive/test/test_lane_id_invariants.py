@@ -43,3 +43,25 @@ def test_construct_from_lanelet_round_trips_lane_id() -> None:
     lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-2)
 
     assert lane.lane_id == -2
+
+
+def test_add_left_lane_rejects_unresolved_lane_id() -> None:
+    """``LaneSection._add_left_lane`` rejects a Lane whose ID is None."""
+    from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+
+    section = LaneSection(s_offset=0.0)
+    lane = Lane(lane_id=None, lane_type=LaneType.DRIVING)
+
+    with pytest.raises(ValueError, match="resolved lane_id"):
+        section._add_left_lane(lane)
+
+
+def test_add_right_lane_rejects_unresolved_lane_id() -> None:
+    """``LaneSection._add_right_lane`` rejects a Lane whose ID is None."""
+    from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+
+    section = LaneSection(s_offset=0.0)
+    lane = Lane(lane_id=None, lane_type=LaneType.DRIVING)
+
+    with pytest.raises(ValueError, match="resolved lane_id"):
+        section._add_right_lane(lane)
