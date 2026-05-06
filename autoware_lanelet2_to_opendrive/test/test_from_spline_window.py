@@ -6,6 +6,7 @@ import pytest
 from autoware_lanelet2_to_opendrive.opendrive.geometry import (
     Arc,
     Line,
+    ParamPoly3,
 )
 from autoware_lanelet2_to_opendrive.spline import Splines
 
@@ -68,3 +69,37 @@ class TestArcFromSplineWindow:
         arc_elem = xml.find("arc")
         assert arc_elem is not None
         assert float(arc_elem.get("curvature")) == pytest.approx(0.02)
+
+
+class TestParamPoly3FromSplineWindow:
+    def test_single_window_matches_spline_endpoints(self):
+        spline = _straight_spline(length=10.0)
+        seg = ParamPoly3.from_spline_window(spline, s_start=0.0, s_end=10.0)
+        assert seg.length == pytest.approx(10.0)
+        # Straight line: end of segment in local UV is (10, 0).
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            evaluate_plan_view_world,
+        )
+
+        coeffs = (
+            seg.aU,
+            seg.bU,
+            seg.cU,
+            seg.dU,
+            seg.aV,
+            seg.bV,
+            seg.cV,
+            seg.dV,
+        )
+        wx, wy = evaluate_plan_view_world(
+            seg.x, seg.y, seg.hdg, seg.length, param_poly3_coeffs=coeffs
+        )
+        assert wx == pytest.approx(10.0, abs=1e-6)
+        assert wy == pytest.approx(0.0, abs=1e-6)
+
+    def test_existing_from_spline_still_returns_chain(self):
+        # Regression: existing API must keep working.
+        spline = _straight_spline(length=20.0)
+        segs = ParamPoly3.from_spline(spline)
+        assert len(segs) >= 1
+        assert all(s.length > 0.0 for s in segs)
