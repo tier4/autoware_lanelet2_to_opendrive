@@ -95,7 +95,7 @@ def _build_planview_geometries(
 
 def _emit_paramPoly3_run(
     spline,
-    run,
+    run: "ParamPoly3Run",
     pp3_cfg: ParamPoly3Config,
 ) -> List[ParamPoly3]:
     """Emit one or more ParamPoly3 segments covering a ParamPoly3Run.
@@ -183,13 +183,10 @@ def _evaluate_plan_view_world(
     """Evaluate the planView's reference-line XY position at its s=0 or
     s=length endpoint.
 
-    This returns the coordinate that the rendered OpenDRIVE paramPoly3 +
-    planView actually resolves to, which can differ slightly from the raw
-    OSM boundary endpoint because of spline-fit approximation.
-
-    Note: only ``<paramPoly3>`` and ``<line>`` geometries are expected
-    here today; arc/spiral would require extending both this wrapper and
-    the shared :func:`evaluate_plan_view_world` kernel in ``geometry.py``.
+    This returns the coordinate that the rendered planView actually
+    resolves to, which can differ slightly from the raw OSM boundary
+    endpoint because of spline-fit approximation.  Supports
+    ``<paramPoly3>``, ``<line>``, and ``<arc>`` geometry primitives.
     """
     if plan_view is None or not plan_view.geometries:
         return None
@@ -200,6 +197,7 @@ def _evaluate_plan_view_world(
     coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
         None
     )
+    arc_curvature: Optional[float] = None
     if isinstance(geom, ParamPoly3):
         coeffs = (
             geom.aU,
@@ -211,8 +209,10 @@ def _evaluate_plan_view_world(
             geom.cV,
             geom.dV,
         )
+    elif isinstance(geom, Arc):
+        arc_curvature = geom.curvature
 
-    return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs)
+    return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs, arc_curvature)
 
 
 def _evaluate_elevation_profile(elevation_profile: ElevationProfile, s: float) -> float:
@@ -235,8 +235,9 @@ def _evaluate_planview_endpoint_with_heading(
 
     Heading is the world-frame tangent angle, computed from the geometry's
     base ``hdg`` and (for ``paramPoly3``) the local UV derivatives evaluated
-    at the endpoint parameter.  Used by lane-aware junction pinning to
-    apply a lateral normal offset along the rendered tangent.
+    at the endpoint parameter, or (for ``arc``) the accumulated curvature.
+    Used by lane-aware junction pinning to apply a lateral normal offset
+    along the rendered tangent.
     """
     if plan_view is None or not plan_view.geometries:
         return None
@@ -247,6 +248,7 @@ def _evaluate_planview_endpoint_with_heading(
     coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
         None
     )
+    arc_curvature: Optional[float] = None
     if isinstance(geom, ParamPoly3):
         coeffs = (
             geom.aU,
@@ -258,8 +260,10 @@ def _evaluate_planview_endpoint_with_heading(
             geom.cV,
             geom.dV,
         )
+    elif isinstance(geom, Arc):
+        arc_curvature = geom.curvature
 
-    xy = evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs)
+    xy = evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p, coeffs, arc_curvature)
     if xy is None:
         return None
     x_w, y_w = xy
@@ -272,6 +276,9 @@ def _evaluate_planview_endpoint_with_heading(
         dx = du * cos_h - dv * sin_h
         dy = du * sin_h + dv * cos_h
         heading = float(np.arctan2(dy, dx))
+    elif isinstance(geom, Arc):
+        # For a constant-curvature arc the heading grows linearly with p.
+        heading = float(geom.hdg + geom.curvature * p)
     else:
         heading = float(geom.hdg)
 
@@ -303,6 +310,7 @@ if TYPE_CHECKING:
     from .lane import Lane
     from .junction import Junction
     from .objects import CrosswalkObject, StopLineObject
+    from .geometry_classifier import ParamPoly3Run
 
 
 @dataclass
