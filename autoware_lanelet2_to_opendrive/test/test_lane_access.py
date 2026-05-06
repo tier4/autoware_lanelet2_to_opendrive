@@ -32,3 +32,11 @@ def test_lane_access_to_xml_serialises_nonzero_s_offset() -> None:
     """A non-zero s_offset is serialised as a float (not truncated to int)."""
     access = LaneAccess(s_offset=1.5, rule="allow", restriction="bicycle")
     assert access.to_xml().get("sOffset") == "1.5"
+
+
+def test_lane_access_reexported_from_opendrive_dataclass() -> None:
+    """LaneAccess is reachable from the back-compat ``opendrive_dataclass`` module."""
+    from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneAccess
+
+    access = LaneAccess(s_offset=0.0, rule="allow", restriction="bicycle")
+    assert access.restriction == "bicycle"

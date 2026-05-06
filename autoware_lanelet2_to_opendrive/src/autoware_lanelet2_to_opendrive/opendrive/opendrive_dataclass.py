@@ -18,6 +18,7 @@ from .lane_elements import (
     LaneBorder,
     LaneHeight,
     LaneSpeed,
+    LaneAccess,
     RoadTypeSpeed,
     RoadTypeDefinition,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "LaneBorder",
     "LaneHeight",
     "LaneSpeed",
+    "LaneAccess",
     "RoadTypeSpeed",
     "RoadTypeDefinition",
     # Geometry
