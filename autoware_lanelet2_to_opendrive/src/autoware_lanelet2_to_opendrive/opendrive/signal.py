@@ -551,9 +551,12 @@ def _compute_signal_subtype_from_bulbs(light_linestring: Any) -> int:
         if not hasattr(point, "attributes"):
             continue
         try:
-            arrow = point.attributes.get("arrow")
-        except AttributeError:
-            # `attributes` exists but is not dict-like; skip defensively.
+            attrs = point.attributes
+            # Use `in` + `[]` to support Lanelet2 AttributeMap objects,
+            # which do not expose a `.get()` method (unlike plain dicts).
+            arrow = attrs["arrow"] if "arrow" in attrs else None
+        except (AttributeError, KeyError, TypeError):
+            # `attributes` missing, not subscriptable, or unexpected error; skip.
             continue
         if arrow is None:
             continue
