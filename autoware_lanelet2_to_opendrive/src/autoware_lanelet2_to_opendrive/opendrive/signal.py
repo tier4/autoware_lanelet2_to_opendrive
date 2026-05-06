@@ -466,7 +466,6 @@ class SignalType:
         1000001  # Standard 3-light traffic signal (red, yellow, green)
     )
     TRAFFIC_LIGHT_PEDESTRIAN = 1000002  # Pedestrian traffic light
-    TRAFFIC_LIGHT_ARROW = 1000003  # Arrow traffic light
 
     # Yield sign (type 205 corresponds to German StVO sign 205 - "Vorfahrt gewähren")
     # Used in OpenDRIVE to represent yield signs at intersections
