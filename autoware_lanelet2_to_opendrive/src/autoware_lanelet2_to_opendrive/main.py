@@ -56,6 +56,7 @@ from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
 )
 from autoware_lanelet2_to_opendrive.conversion_config import (
+    ArcSpiralConfig,
     ConversionConfig,
     OriginSpec,
     ParamPoly3Config,
@@ -141,6 +142,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             self.lanelet_map,
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
+            arcspiral_config=self.config.arcspiral,
             width_config=self.config.width_estimation,
         )
         return result
@@ -204,6 +206,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_id_offset=junction_id_offset,
             traffic_rule=self.config.traffic_rule,
             parampoly3_config=self.config.parampoly3,
+            arcspiral_config=self.config.arcspiral,
             width_config=self.config.width_estimation,
             # P0-2: plumb already-built regular roads so that each
             # connecting road's endpoints are pinned to the linked
@@ -1483,6 +1486,27 @@ def preprocess_and_convert_with_hydra(
     else:
         parampoly3_config = ParamPoly3Config()
 
+    # Build ArcSpiralConfig from Hydra config
+    # Priority: map config > target config > default
+    arcspiral_dict = cfg.map.get("arcspiral") or cfg.target.get("arcspiral", {})
+    if arcspiral_dict:
+        arcspiral_config = ArcSpiralConfig(
+            enabled=arcspiral_dict.get("enabled", False),
+            arc_enabled=arcspiral_dict.get("arc_enabled", True),
+            spiral_enabled=arcspiral_dict.get("spiral_enabled", False),
+            line_curvature_tol=arcspiral_dict.get("line_curvature_tol", 1e-4),
+            arc_curvature_tol=arcspiral_dict.get("arc_curvature_tol", 5e-4),
+            arc_position_tol=arcspiral_dict.get("arc_position_tol", 0.05),
+            min_line_length=arcspiral_dict.get("min_line_length", 5.0),
+            min_arc_length=arcspiral_dict.get("min_arc_length", 5.0),
+        )
+        logger.info(
+            f"ArcSpiral config: enabled={arcspiral_config.enabled}, "
+            f"arc_enabled={arcspiral_config.arc_enabled}"
+        )
+    else:
+        arcspiral_config = ArcSpiralConfig()
+
     # Build WidthEstimationConfig from Hydra config
     # Priority: map config > target config > default
     width_dict = cfg.map.get("width_estimation") or cfg.target.get(
@@ -1547,6 +1571,7 @@ def preprocess_and_convert_with_hydra(
         exclude_non_junction_signals=exclude_non_junction_signals,
         traffic_rule=traffic_rule,
         parampoly3=parampoly3_config,
+        arcspiral=arcspiral_config,
         width_estimation=width_config,
         stopline=stopline_config,
         traffic_light=tl_config,
