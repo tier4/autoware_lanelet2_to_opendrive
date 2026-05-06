@@ -343,9 +343,8 @@ class Lane:
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
-        assert (
-            self.lane_id is not None
-        ), "Lane.lane_id must be resolved before serialisation"
+        if self.lane_id is None:
+            raise ValueError("Lane.lane_id must be resolved before serialisation")
         elem = ET.Element("lane")
         elem.set("id", str(self.lane_id))
         elem.set("type", self.lane_type.value)

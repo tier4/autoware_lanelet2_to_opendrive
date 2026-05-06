@@ -16,7 +16,7 @@ def test_to_xml_rejects_unresolved_lane_id() -> None:
     """``Lane.to_xml`` must refuse to serialise a Lane whose ID is None."""
     lane = Lane(lane_id=None, lane_type=LaneType.DRIVING)
 
-    with pytest.raises(AssertionError, match="lane_id"):
+    with pytest.raises(ValueError, match="lane_id"):
         lane.to_xml()
 
 
