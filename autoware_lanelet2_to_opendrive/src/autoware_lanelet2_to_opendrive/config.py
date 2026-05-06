@@ -154,6 +154,30 @@ class ParamPoly3Constants:
 
 
 @dataclass(frozen=True)
+class ArcSpiralConstants:
+    """Internal numeric tunables for the arc/spiral classifier.
+
+    Not user-facing — these govern numeric stability and sampling
+    granularity of the curvature classification pass introduced for
+    issue #466 (arc emission).
+
+    Attributes:
+        classification_step: Curvature sampling stride along arc length (m).
+        lookahead_steps: How many strides the paramPoly3 fallback advances
+            before emitting one run.
+        arc_fit_max_bisect: Number of window-shrink retries when arc fit
+            validation fails.
+        arc_endpoint_kappa_tol: Maximum |κ_const - κ(s_end)| allowed at the
+            tail of an accepted arc window (1/m).
+    """
+
+    classification_step: float = 0.5
+    lookahead_steps: int = 4
+    arc_fit_max_bisect: int = 1
+    arc_endpoint_kappa_tol: float = 1e-3
+
+
+@dataclass(frozen=True)
 class ConversionConstants:
     """Main container for all internal constants used in the conversion process.
 
@@ -192,6 +216,8 @@ class ConversionConstants:
         centerline: Centerline extraction constants
         preprocessing: Preprocessing operation constants
         opendrive: OpenDRIVE format constants
+        parampoly3: ParamPoly3 geometry generation constants
+        arcspiral: Arc/spiral classifier internal tunables
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -200,6 +226,7 @@ class ConversionConstants:
     preprocessing: PreprocessingConstants = PreprocessingConstants()
     opendrive: OpenDriveConstants = OpenDriveConstants()
     parampoly3: ParamPoly3Constants = ParamPoly3Constants()
+    arcspiral: ArcSpiralConstants = ArcSpiralConstants()
 
 
 @dataclass
