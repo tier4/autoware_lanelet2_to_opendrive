@@ -173,7 +173,7 @@ class ArcSpiralConstants:
 
     classification_step: float = 0.5
     lookahead_steps: int = 4
-    arc_fit_max_bisect: int = 1
+    arc_fit_max_bisect: int = 8
     arc_endpoint_kappa_tol: float = 1e-3
 
 
