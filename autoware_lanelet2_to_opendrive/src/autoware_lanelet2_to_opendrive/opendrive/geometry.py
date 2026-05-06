@@ -283,6 +283,31 @@ class Arc(GeometryBase):
         arc_elem.set("curvature", str(self.curvature))
         return elem
 
+    @classmethod
+    def from_spline_window(
+        cls,
+        spline: "Splines",
+        s_start: float,
+        s_end: float,
+        curvature: float,
+    ) -> "Arc":
+        """Build an Arc covering arc-length [s_start, s_end] of ``spline``.
+
+        ``curvature`` must be the constant κ chosen by the classifier
+        (typically ``Splines.evaluate(s_start, derivative=2)`` projected
+        appropriately). Heading and start position come from the spline.
+        """
+        start = spline.evaluate(s_start, derivative=0)
+        tangent = spline.evaluate(s_start, derivative=1)
+        return cls(
+            s=s_start,
+            x=float(start[0]),
+            y=float(start[1]),
+            hdg=float(np.arctan2(tangent[1], tangent[0])),
+            length=float(s_end - s_start),
+            curvature=float(curvature),
+        )
+
 
 @dataclass
 class Spiral(GeometryBase):
