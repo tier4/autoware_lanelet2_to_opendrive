@@ -371,30 +371,36 @@ class Signal:
         else:
             z_offset = signal_absolute_z
 
-        # Determine signal type from attributes
-        # Check if traffic light has a 'subtype' or 'type' attribute
-        signal_type = SignalType.TRAFFIC_LIGHT_3_LIGHTS  # Default type
-        signal_subtype = -1
-
-        # Try to extract type from attributes if available
+        # Determine @type from the regulatory element's `subtype` attribute.
+        # @subtype is driven by per-bulb `arrow` attributes for vehicle TLs;
+        # pedestrian TLs always emit `@subtype=NO_BULB_INFO` (out of scope for #467).
+        signal_type = SignalType.TRAFFIC_LIGHT_3_LIGHTS  # Default
         if hasattr(traffic_light, "attributes"):
             attrs = traffic_light.attributes
-            # Check for common attribute keys used in lanelet2
-            if "subtype" in attrs:
-                subtype_str = attrs["subtype"]
-                # Map lanelet2 subtypes to OpenDRIVE types
-                if "red_yellow_green" in subtype_str or "3_lights" in subtype_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_3_LIGHTS
-                elif "pedestrian" in subtype_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_PEDESTRIAN
-                elif "arrow" in subtype_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_ARROW
-            elif "type" in attrs:
-                type_str = attrs["type"]
-                if "pedestrian" in type_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_PEDESTRIAN
-                elif "arrow" in type_str:
-                    signal_type = SignalType.TRAFFIC_LIGHT_ARROW
+            # Use `in` + `[]` access to support both plain dicts and Lanelet2
+            # AttributeMap objects (the latter lack a `.get()` method).
+            try:
+                subtype_str = attrs["subtype"] if "subtype" in attrs else ""
+            except (KeyError, TypeError):
+                subtype_str = ""
+            if "pedestrian" in subtype_str:
+                signal_type = SignalType.TRAFFIC_LIGHT_PEDESTRIAN
+            elif (
+                "red_yellow_green" not in subtype_str
+                and "3_lights" not in subtype_str
+                and subtype_str
+            ):
+                logger.debug(
+                    "unrecognised traffic_light subtype %r on RE %s; "
+                    "defaulting to @type=1000001",
+                    subtype_str,
+                    getattr(traffic_light, "id", "?"),
+                )
+
+        if signal_type == SignalType.TRAFFIC_LIGHT_PEDESTRIAN:
+            signal_subtype = TrafficLightArrowBit.NO_BULB_INFO
+        else:
+            signal_subtype = _compute_signal_subtype_from_bulbs(light_linestring)
 
         # Determine signal dimensions (width x height)
         # Default dimensions for a standard traffic light
