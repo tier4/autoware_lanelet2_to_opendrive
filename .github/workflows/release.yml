@@ -20,7 +20,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # GH_PAT is required so that `git push origin master` (version-bump
+          # commit) and `git push origin v<version>` (release tag) can satisfy
+          # the master branch ruleset. The default GITHUB_TOKEN identity
+          # (github-actions[bot]) is not in the ruleset's bypass list, so
+          # direct pushes to master are rejected with GH013.
+          token: ${{ secrets.GH_PAT }}
 
       - name: Setup base environment
         uses: ./.github/actions/setup-env
