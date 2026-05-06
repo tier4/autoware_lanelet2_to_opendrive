@@ -73,7 +73,7 @@
   <way id="4002">
     <nd ref="3003"/>
     <nd ref="3004"/>
-    <tag k="type" v="virtual"/>
+    <tag k="type" v="curbstone"/>
   </way>
 
   <!-- Right boundary linestring for the walkway lanelet -->
