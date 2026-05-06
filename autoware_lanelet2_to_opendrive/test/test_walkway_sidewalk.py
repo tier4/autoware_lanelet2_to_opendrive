@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import lxml.etree as ET
+import pytest
 
 from autoware_lanelet2_to_opendrive.qc_validate import (
     load_ignore_patterns,
@@ -54,3 +55,17 @@ def test_walkway_fixture_passes_qc_validate(tmp_path: Path) -> None:
     out = _run_convert(tmp_path)
     errors = validate(out, load_ignore_patterns())
     assert errors == 0, f"qc-framework reported {errors} ERROR(s)"
+
+
+def test_walkway_emits_sidewalk_height(tmp_path: Path) -> None:
+    """A curbstone-bounded walkway must produce <height> under the sidewalk lane."""
+    out = _run_convert(tmp_path)
+    root = ET.parse(out).getroot()
+    sidewalk_heights = root.findall(".//lane[@type='sidewalk']/height")
+    assert (
+        len(sidewalk_heights) >= 1
+    ), "curbstone-bounded walkway must emit at least one <height> child"
+    h = sidewalk_heights[0]
+    assert h.get("sOffset") == "0.0"
+    assert float(h.get("inner")) == pytest.approx(0.15)
+    assert float(h.get("outer")) == pytest.approx(0.15)
