@@ -74,6 +74,7 @@ from .actions import (
     TurnAction,
     TurnDirection,
 )
+from .camera_recorder import CameraRecorder
 from .sensor import (
     CameraSensorBase,
     CameraSensorConfig,
@@ -234,6 +235,7 @@ __all__ = [
     "TurnAction",
     "TurnDirection",
     # Sensors
+    "CameraRecorder",
     "CameraSensorBase",
     "CameraSensorConfig",
     "CarlaCameraSensor",

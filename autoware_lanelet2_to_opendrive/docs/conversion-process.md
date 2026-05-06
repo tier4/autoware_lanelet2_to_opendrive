@@ -4,14 +4,25 @@ This page provides a comprehensive overview of the Lanelet2 to OpenDRIVE convers
 
 ## Overview
 
-The converter transforms Lanelet2 map data into OpenDRIVE format through a multi-stage pipeline that:
+The converter transforms Lanelet2 map data into OpenDRIVE 1.4 through the
+pipeline orchestrated by `_Lanelet2ToOpenDRIVEConverter.convert()`
+([`main.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)):
 
-1. Loads and preprocesses Lanelet2 map data
-2. Classifies lanelets into roads and junctions
-3. Extracts metadata from lanelet attributes (tags)
-4. Constructs OpenDRIVE objects (roads, lanes, signals)
-5. Establishes connectivity between elements
-6. Exports to OpenDRIVE XML format
+1. Load and (optionally) preprocess the Lanelet2 map
+2. Classify lanelets into regular-road groups vs. junction lanelets
+3. Build regular roads, then synthesise divergence/merge junctions where
+   regular-road predecessors/successors fan out (issue #291)
+4. Build connecting roads + `Junction` objects for `turn_direction`-tagged
+   intersection groups, and emit `<junction><priority>` records from
+   right-of-way regulatory elements
+5. Build the bidirectional road ↔ lanelet mapping
+6. Establish road-level and lane-level predecessor/successor links
+7. Extract traffic-light signals + controllers; assign signals to roads and
+   controllers to junctions
+8. Extract crosswalks and stop lines as `<object>`s; emit StopLine /
+   StopSign / YieldSign `<signal>`s with dependency back-references
+9. Build synthetic parking-lot roads from `Area`s tagged `parking_lot`
+10. Validate (no duplicate road IDs, ASAM QC) and write the OpenDRIVE XML
 
 ---
 
@@ -81,37 +92,40 @@ The converter supports three methods for specifying the map origin:
 
 **Method 1: MGRS Grid Code Only**
 ```yaml
-mgrs_code: "54SUE"
+mgrs_grid: "54SUE815501"   # legacy field name `mgrs_code` is also accepted
 ```
-- Converts MGRS grid to lat/lon using zero-padding to grid origin
-- Example: "54SUE" → "54SUE0000000000" (grid southwest corner)
-- Used when map is already aligned to MGRS grid
+- The Lanelet2 origin is the south-west corner of the MGRS grid square
+- Used when the input map is already aligned to that grid
 
 **Method 2: MGRS Grid Code + Offset**
 ```yaml
-mgrs_code: "54SUE"
+mgrs_grid: "54SUE"
 offset:
-  x: 81550.0  # Easting offset in meters
-  y: 150100.0 # Northing offset in meters
-  z: 0.0      # Altitude offset in meters (optional)
+  x: 81655.73    # Easting offset in meters
+  y: 50137.43    # Northing offset in meters
+  z: 42.49998    # Altitude offset in meters (optional)
 ```
-- Applies offset to MGRS grid origin
-- Useful for maps with local coordinate systems
-- **Coordinate offset is subtracted** during export: `output = coordinate - offset`
+- Shifts the origin by the offset; the lat/lon used for the geoReference is
+  derived from `(mgrs_grid + offset)`
+- During OpenDRIVE export, the same offset is **subtracted** from every
+  coordinate so the resulting `.xodr` lives in a local frame anchored at
+  the offset point: `output = coordinate − offset`
 
 **Method 3: Latitude/Longitude**
 ```yaml
-origin:
-  lat: 35.6762   # Latitude in decimal degrees [-90, 90]
-  lon: 139.6503  # Longitude in decimal degrees [-180, 180]
-  altitude: 0.0  # Altitude in meters (optional)
+lat_lon:
+  latitude: 35.6762    # Decimal degrees [-90, 90]
+  longitude: 139.6503  # Decimal degrees [-180, 180]
+  altitude: 0.0        # Optional, defaults to 0.0
 ```
 - Direct lat/lon origin specification
-- MGRS grid is derived automatically for PROJ string generation
-- Validates latitude and longitude ranges
+- The MGRS grid for the `<header><geoReference>` PROJ string is derived
+  automatically from the lat/lon
 
 !!! note "Mutual Exclusivity"
-    Only **one** origin method can be specified. Using both MGRS and lat/lon will raise a validation error.
+    Exactly one of `mgrs_grid` (with optional `offset`) or `lat_lon` may
+    be specified. Combining them, or using `offset` without `mgrs_grid`,
+    raises `ValueError` from `parse_origin_from_config`.
 
 ---
 
@@ -119,7 +133,7 @@ origin:
 
 **A. WGS84 to Local Coordinates**
 
-During map loading (`load_lanelet2_map()` in [main.py:52-81](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L52-L81)):
+During map loading (`load_lanelet2_map()` in [`main.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)):
 1. Creates `MGRSProjector` with specified origin
 2. Lanelet2 library transforms WGS84 (lat/lon) to local XY coordinates
 3. Projection uses UTM zone derived from longitude: `zone = int((lon + 180) / 6) + 1`
@@ -127,7 +141,7 @@ During map loading (`load_lanelet2_map()` in [main.py:52-81](https://github.com/
 
 **B. Coordinate Offset Application**
 
-Global offset system ([config.py:155-207](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/config.py#L155-L207)):
+Global offset system ([`config.py:COORDINATE_OFFSET`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/config.py)):
 - Set before map loading via `COORDINATE_OFFSET.set(x, y, z)`
 - Applied during OpenDRIVE export when extracting geometry
 - **Subtraction operation**: `output_coordinate = lanelet2_coordinate - offset`
@@ -137,8 +151,8 @@ Global offset system ([config.py:155-207](https://github.com/tier4/autoware_lane
 **C. PROJ String Generation**
 
 For OpenDRIVE `<geoReference>` element:
-- **From MGRS**: `mgrs_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/projection.py))
-- **From Lat/Lon**: `latlon_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/projection.py))
+- **From MGRS**: `mgrs_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/projection.py))
+- **From Lat/Lon**: `latlon_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/projection.py))
 
 Format: `+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m +no_defs`
 
@@ -146,7 +160,7 @@ Format: `+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m
 
 #### **1.3: Map Loading Process**
 
-**Function:** `load_lanelet2_map()` ([main.py:52-81](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L52-L81))
+**Function:** [`load_lanelet2_map()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
 
 **Steps:**
 
@@ -211,7 +225,7 @@ The following table lists all preprocessing operations and their parameters:
 
 - ✓ = Required parameter
 - ✗ = Optional parameter
-- Default values from [config.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/config.py) and operation dataclasses
+- Default values from [config.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/config.py) and operation dataclasses
 
 ---
 
@@ -239,7 +253,7 @@ The following table lists all preprocessing operations and their parameters:
 
 ##### **Detailed Operation Descriptions**
 
-**A. Move Point Operations** ([geometry.py:311-379](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L311-L379))
+**A. Move Point Operations** ([`geometry.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/geometry.py))
 ```yaml
 move_point_operations:
   - point_id: 12345
@@ -261,7 +275,7 @@ move_point_operations:
 
 ![After](image/after_move_point_operation.png)
 
-**B. Delete Point Operations** ([geometry.py:208-308](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L208-L308))
+**B. Delete Point Operations** ([`geometry.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/geometry.py))
 ```yaml
 delete_point_operations:
   - point_ids: [12345, 12346, 12347]
@@ -280,7 +294,7 @@ delete_point_operations:
 
 ![After](image/after_delete_point_operation.png)
 
-**C. Validate Operations** ([lanelet.py:93-131](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L93-L131))
+**C. Validate Operations** ([`lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/lanelet.py))
 ```yaml
 validate_operations:
   - first_lanelet_id: 100
@@ -291,7 +305,7 @@ validate_operations:
 - Reports pass/fail, does **not** modify map
 - Useful for debugging connectivity issues
 
-**D. Replace Operations** ([lanelet.py:318-401](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L318-L401))
+**D. Replace Operations** ([`lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/lanelet.py))
 ```yaml
 replace_operations:
   - lanelet_ids: [100, 101, 102]
@@ -303,7 +317,7 @@ replace_operations:
 - Creates new lanelet with auto-generated ID
 - Copies attributes from first lanelet
 
-**E. Merge Operations** ([lanelet.py:8-200](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L8-L200))
+**E. Merge Operations** ([`lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/lanelet.py))
 ```yaml
 merge_operations:
   - lanelet_ids: [100, 101, 102]
@@ -329,7 +343,7 @@ merge_operations:
 
 
 
-**F. Remove Operations (Old Style)** ([preprocess_lanelet.py:661-682](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L661-L682))
+**F. Remove Operations (Old Style)** ([`preprocess_lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py))
 ```yaml
 remove_operations:
   - lanelet_ids: [300, 301]
@@ -337,7 +351,7 @@ remove_operations:
 - Legacy removal method
 - Prefer `remove_lanelet_operations` for new code
 
-**G. Remove Lanelet Operations** ([preprocess_lanelet.py:822-872](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L822-L872))
+**G. Remove Lanelet Operations** ([`preprocess_lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py))
 ```yaml
 remove_lanelet_operations:
   - lanelet_ids: [300, 301, 302]
@@ -356,7 +370,7 @@ remove_lanelet_operations:
 ![After](image/after_remove_operation.png)
 - Reports successful and missing lanelet IDs
 
-**H. Remove Turn Direction Operations** ([preprocess_lanelet.py:874-929](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L874-L929))
+**H. Remove Turn Direction Operations** ([`preprocess_lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py))
 ```yaml
 remove_turn_direction_operations:
   - lanelet_ids: []  # Empty list = all lanelets
@@ -381,7 +395,7 @@ remove_turn_direction_operations:
 
 #### **1.5: Merge Operation Details**
 
-**Process** ([lanelet.py:8-200](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L8-L200)):
+**Process** ([`lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/lanelet.py)):
 
 1. **Validation** (if enabled):
    - Check left boundary endpoint of lanelet N matches start point of lanelet N+1
@@ -407,22 +421,23 @@ remove_turn_direction_operations:
 
 #### **1.6: Validation and Error Handling**
 
-**Origin Validation** ([preprocess_lanelet.py:243-265](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L243-L265)):
-- Ensures exactly one of: `mgrs_code` OR `origin` (lat/lon)
-- Validates `offset` only used with `mgrs_code`
+**Origin Validation** ([`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)):
+- Ensures exactly one of: `mgrs_grid` (with optional `offset`) or `lat_lon`
+- Validates `offset` only used with `mgrs_grid`
+- Accepts the legacy `mgrs_code` field as a synonym for `mgrs_grid`
 - Raises `ValueError` for invalid combinations
 
-**Coordinate Range Validation** ([preprocess_lanelet.py:157-162](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L157-L162)):
+**Coordinate Range Validation** ([`preprocess_lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py)):
 - Latitude: must be in range [-90, 90]
 - Longitude: must be in range [-180, 180]
 - Raises `ValueError` if out of range
 
-**Continuity Validation** ([lanelet.py:93-131](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/lanelet.py#L93-L131)):
+**Continuity Validation** ([`lanelet.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/lanelet.py)):
 - Checks 3D distance between consecutive lanelet boundaries
 - Used in merge and replace operations
 - Reports specific distance values when validation fails
 
-**Point Deletion Validation** ([geometry.py:208-308](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/geometry.py#L208-L308)):
+**Point Deletion Validation** ([`geometry.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/geometry.py)):
 - Ensures linestrings retain minimum 2 points
 - Prevents creation of invalid geometry
 - Skips linestrings that would become invalid
@@ -431,7 +446,7 @@ remove_turn_direction_operations:
 
 #### **1.7: Configuration Flow**
 
-**Main Entry Point:** `preprocess_and_convert_with_hydra()` ([main.py:741-852](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L741-L852))
+**Main Entry Point:** [`preprocess_and_convert_with_hydra()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
 
 **Execution Sequence:**
 1. **Parse Hydra Config**: Load YAML configuration
@@ -444,10 +459,10 @@ remove_turn_direction_operations:
 
 **Code Locations:**
 
-- Main flow: [main.py:741-852](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L741-L852)
-- Origin parsing: [main.py:597-738](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L597-L738)
-- Preprocessing execution: [preprocess_lanelet.py:931-987](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L931-L987)
-- Coordinate transformations: [util.py:595-897](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L595-L897)
+- Main flow: [`main.py:preprocess_and_convert_with_hydra`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
+- Origin parsing: [`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
+- Preprocessing execution: [`preprocess_lanelet.py:LaneletPreprocessor.process`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py)
+- MGRS / lat-lon projection helpers: [`projection.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/projection.py)
 
 ---
 
@@ -480,7 +495,7 @@ road_lanelets = _filter_lanelets_outside_junction(all_lanelets)
 - List of junction lanelets
 - List of regular road lanelets
 
-**Code Location:** [`junction.py:8-52`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L8-L52)
+**Code Location:** [`junction.py:_filter_lanelets_inside_junction` / `find_junction_groups`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/junction.py)
 
 ---
 
@@ -495,7 +510,7 @@ road_lanelets = _filter_lanelets_outside_junction(all_lanelets)
 
 **Output:** List of road groups (each group = set of laterally adjacent lanelets)
 
-**Code Location:** [`road.py` – `Road.construct_from_lanelet_map()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py), [`util.py` – `find_adjacent_groups()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py)
+**Code Location:** [`road.py` – `Road.construct_from_lanelet_map()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/road.py), [`util.py` – `find_adjacent_groups()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/util.py)
 
 ---
 
@@ -524,7 +539,7 @@ road_type_definitions = Road._extract_road_types_from_lanelets(lanelets)
 
 **Output:** `RoadTypeDefinition` objects with speed and road type
 
-**Code Location:** [`road.py:479-538`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L479-L538)
+**Code Location:** [`opendrive/road.py:Road._extract_road_types_from_lanelets`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/road.py)
 
 ---
 
@@ -546,7 +561,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** `Lane` objects with proper type and speed attributes
 
-**Code Location:** [`lane.py:138-239`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L138-L239)
+**Code Location:** [`opendrive/lane.py:Lane.construct_from_lanelet`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/lane.py)
 
 ---
 
@@ -575,8 +590,8 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Code Location:**
 
-- Signal extraction: [`signals_and_controllers.py:75-249`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py#L75-L249)
-- Type mapping: [`signal.py:281-304`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signal.py#L281-L304)
+- Signal extraction: [`opendrive/signals_and_controllers.py:SignalsAndControllers.construct_from_lanelet_map`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py)
+- Type mapping: [`opendrive/signal.py:Signal.construct_from_lanelet2_traffic_signal` and `SignalType`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/signal.py)
 
 ---
 
@@ -594,9 +609,11 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Code Location:**
 
-- Junction grouping: [`junction.py:48-100`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L48-L100) – `find_junction_groups()`
-- Connecting road construction: [`road.py` – `Road.construct_connecting_roads_from_junctions()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py)
-- Orchestration: [`main.py` – `_build_junction_structure()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+- Junction grouping: [`junction.py:find_junction_groups`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/junction.py)
+- Connecting road construction: [`opendrive/road.py:Road.construct_connecting_roads_from_junctions`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/road.py)
+- Junction objects + connections: [`opendrive/junction.py:Junction.construct_from_lanelet_groups` / `Junction.build_connections_from_roads` / `Junction.build_priorities_from_regulatory_elements`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/junction.py)
+- Synthetic divergence/merge junctions (issue #291): [`divergence.py:apply_divergence_synthesis`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/divergence.py)
+- Orchestration: [`main.py:_Lanelet2ToOpenDRIVEConverter._build_junction_structure` / `convert`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
 
 ---
 
@@ -639,7 +656,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** `Road.objects` populated with `CrosswalkObject` instances
 
-**Code Location:** [`opendrive/objects.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`main.py` – `_extract_and_assign_crosswalks()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+**Code Location:** [`opendrive/objects.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`main.py` – `_extract_and_assign_crosswalks()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
 
 !!! info "Detailed Documentation"
     For full details on the crosswalk conversion algorithm, coordinate systems, and CARLA behavior, see [Crosswalk Objects](crosswalk_objects.md).
@@ -671,7 +688,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** `Road.objects` populated with `StopLineObject` instances alongside any existing `CrosswalkObject` instances
 
-**Code Location:** [`opendrive/objects.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`main.py` – `_extract_and_assign_stop_lines()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+**Code Location:** [`opendrive/objects.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`main.py` – `_extract_and_assign_stop_lines()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
 
 !!! info "Detailed Documentation"
     For full details on the stop line conversion algorithm, see [Stop Line Objects](stop_line_objects.md).
@@ -702,7 +719,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 **Output:** `all_roads` extended with synthetic parking roads, each carrying its associated `ParkingSpaceObject` list.
 
-**Code Location:** [`opendrive/parking.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/parking.py), [`main.py` – Step 6.9 in `_Lanelet2ToOpenDRIVEConverter.convert()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+**Code Location:** [`opendrive/parking.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/parking.py), [`main.py` – Step 6.9 in `_Lanelet2ToOpenDRIVEConverter.convert()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
 
 **Scope notes:** Per spec §2.2, the following are intentionally out of scope for this stage: curved geometry along the road reference line (only straight-line OBB axis is used), multi-row decomposition within a single parking-lot area, multi-level or stacked parking structures, predecessor/successor road linkage connecting synthetic parking roads to adjacent traffic roads, and export of the parking-lot polygon outline as an OpenDRIVE outline element.
 
@@ -713,14 +730,15 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 **Purpose:** Serialize the constructed OpenDRIVE objects to XML format.
 
 **Processing:**
-1. Create `OpenDRIVE` root object
-2. Add all roads, junctions, and signals
-3. Serialize to XML using `xsdata` library
-4. Write to output file
+1. Compute `north`/`south`/`east`/`west` bounds from the projected `pointLayer` ([`geometry.py:compute_point_layer_bounds`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/geometry.py))
+2. Generate the geoReference PROJ string from the resolved origin (`projection.latlon_to_proj_string` or `projection.mgrs_to_proj_string`)
+3. Build the `Header` (revMajor/revMinor pinned to `1`/`4`) plus `<road>`, `<junction>`, `<controller>` collections inside the `OpenDRIVE` dataclass
+4. Serialize to XML using `lxml` (`opendrive.export_to_xml` / `opendrive.save_opendrive_to_file`)
+5. Write the `.xodr` and the persisted lanelet → (road, lane) mapping JSON next to it
 
-**Output:** OpenDRIVE XML file
+**Output:** OpenDRIVE 1.4 `.xodr` file plus `<stem>_mapping.json` (and `<stem>_preprocessed.osm` if any preprocessing ran).
 
-**Code Location:** [`main.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+**Code Location:** [`main.py:_Lanelet2ToOpenDRIVEConverter._write_opendrive_output`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py), [`opendrive/opendrive_dataclass.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/opendrive_dataclass.py), [`opendrive/xml_utils.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/xml_utils.py)
 
 ---
 
@@ -982,13 +1000,22 @@ verbose=true dry_run=false traffic_rule=LHT
 ```
 
 **3. Override Nested Values:**
+
+Use the same dotted path that exists in the resolved config (e.g.
+`map.offset`, `parampoly3.coefficient_epsilon`, `stopline.width`):
+
 ```bash
-offset.x=100.5 offset.y=200.3 offset.z=10.0
+map.offset.x=100.5 map.offset.y=200.3 map.offset.z=10.0
+parampoly3.default_segment_length=2.0 stopline.width=0.2
 ```
 
 **4. Add Preprocessing Operations:**
+
+Preprocessing operations live under the selected `map=` config, so override
+them via the `map.*` namespace:
+
 ```bash
-+merge_operations='[{lanelet_ids: [100,101], validate: true}]'
+'+map.merge_operations=[{lanelet_ids: [100, 101], validate: true}]'
 ```
 
 **5. Null Out Optional Values:**
@@ -1058,11 +1085,11 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 uv run python -m autoware_lanelet2_to_opendrive.main \
     map=example \
     input_map_path=input.osm \
-    mgrs_grid=54SUE \
-    offset.x=81655.73 \
-    offset.y=50137.43 \
-    offset.z=42.5 \
-    +merge_operations='[{lanelet_ids: [100,101,102], validate: true}]'
+    map.mgrs_grid=54SUE \
+    map.offset.x=81655.73 \
+    map.offset.y=50137.43 \
+    map.offset.z=42.5 \
+    '+map.merge_operations=[{lanelet_ids: [100,101,102], validate: true}]'
 ```
 
 **Configuration Result:**
@@ -1108,18 +1135,18 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 
 **Runtime Validation Checks:**
 
-1. **Origin Mutual Exclusivity** ([preprocess_lanelet.py:243-265](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L243-L265))
+1. **Origin Mutual Exclusivity** ([`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py))
    - Error if both `mgrs_grid` and `lat_lon` specified
    - Error if `offset` used without `mgrs_grid`
 
-2. **Required Fields** ([main.py:741-852](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py#L741-L852))
-   - Error if `input_map_path` not specified (marked with `???`)
+2. **Required Fields** ([`main.py:main`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py))
+   - Error if `input_map_path` not specified (marked with `???` in `config.yaml`)
 
-3. **Coordinate Ranges** ([preprocess_lanelet.py:157-162](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py#L157-L162))
+3. **Coordinate Ranges** ([`preprocess_lanelet.py:LatLonOrigin`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/preprocess_lanelet.py))
    - Error if latitude not in [-90, 90]
    - Error if longitude not in [-180, 180]
 
-4. **Traffic Rule** ([conversion_config.py:63-68](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/conversion_config.py#L63-L68))
+4. **Traffic Rule** ([`conversion_config.py:ConversionConfig.__post_init__`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/conversion_config.py))
    - Error if `traffic_rule` not in ["RHT", "LHT", null]
 
 **Validation Error Examples:**
@@ -1319,15 +1346,19 @@ The following Point-level attributes are created during preprocessing but are no
 
 For developers seeking to understand or modify tag handling:
 
-| Operation | File | Code Link | Description |
-|-----------|------|-----------|-------------|
-| **Road type extraction** | `opendrive/road.py` | [Lines 453-513](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/road.py#L453-L513) | Reads `location` and `speed_limit` tags |
-| **Lane type extraction** | `opendrive/lane.py` | [Lines 150-216](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/lane.py#L150-L216) | Reads `subtype` and `speed_limit` tags |
-| **Junction filtering** | `junction.py` | [Lines 8-52](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/junction.py#L8-L52) | Checks for `turn_direction` tag presence |
-| **Signal type mapping** | `opendrive/signal.py` | [Lines 281-304](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signal.py#L281-L304) | Reads `type`/`subtype` from traffic lights |
-| **Signal extraction** | `opendrive/signals_and_controllers.py` | [Lines 75-249](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/signals_and_controllers.py#L75-L249) | Extracts regulatory elements |
-| **Subtype filtering** | `util.py` | [Lines 456-503](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/util.py#L456-L503) | Filters lanelets by `subtype` |
-| **Stop line extraction** | `opendrive/objects.py` | [`StopLineObject`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py), [`find_nearest_road_for_linestring()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/objects.py) | Reads `type` tag from linestrings, detects `stop_line` |
+| Operation | File | Symbol | Description |
+|-----------|------|--------|-------------|
+| **Road type extraction** | `opendrive/road.py` | `Road._extract_road_types_from_lanelets` | Reads `location` and `speed_limit` tags |
+| **Lane type extraction** | `opendrive/lane.py` | `Lane.construct_from_lanelet` | Reads `subtype` and `speed_limit` tags |
+| **Junction filtering** | `junction.py` | `_filter_lanelets_inside_junction` / `find_junction_groups` | Checks for `turn_direction` tag presence and groups overlapping junction lanelets |
+| **Signal type mapping** | `opendrive/signal.py` | `Signal.construct_from_lanelet2_traffic_signal` / `SignalType` | Reads `type`/`subtype` from traffic lights, applies arrow-bulb subtype encoding |
+| **Signal extraction** | `opendrive/signals_and_controllers.py` | `SignalsAndControllers.construct_from_lanelet_map` | Extracts traffic-light regulatory elements |
+| **Subtype filtering** | `util.py` | `filter_lanelets_by_subtype` | Filters lanelets by `subtype` |
+| **Crosswalk extraction** | `opendrive/objects.py` | `CrosswalkObject.construct_from_crosswalk_lanelet` / `find_nearest_road` | Builds `<object type="crosswalk">` from `subtype="crosswalk"` lanelets |
+| **Stop line extraction** | `opendrive/objects.py` | `StopLineObject.construct_from_linestring` / `find_nearest_road_for_linestring` | Reads `type="stop_line"` from `lineStringLayer`; emits `<object type="stopLine">` (or CARLA `Stencil_STOP`) |
+| **Stop line / stop sign / yield sign signals** | `main.py` | `_Lanelet2ToOpenDRIVEConverter._extract_and_assign_stop_lines` | Emits `<signal type="294">` (StopLine), `type="206"` (StopSign), `type="205"` (YieldSign) with dependencies |
+| **Right-of-way priority** | `opendrive/junction.py` | `Junction.build_priorities_from_regulatory_elements` | Emits `<junction><priority>` from `right_of_way` regulatory elements |
+| **Parking lots** | `opendrive/parking.py` | `construct_parking_roads` | Synthetic roads + `<lane type="parking">` + `<object type="parkingSpace">` from `parking_lot` areas |
 
 ---
 

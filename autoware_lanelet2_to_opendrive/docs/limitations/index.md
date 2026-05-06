@@ -13,13 +13,13 @@ The conversion from Lanelet2 to OpenDRIVE involves transforming between two fund
 
 Jump to specific limitations:
 
-1. [Stop Line Position Discrepancies](stop-line-position.md) - CARLA trigger volume-based detection causes position shifts
-2. [Lane Width Inconsistencies](lane-width.md) - Mathematical interpolation between different geometric representations
-3. [Special Traffic Signals Not Supported](special-signals.md) - Arrow signals, pedestrian signals, and directional signals
-4. [Priority-Based Right-of-Way Control Not Supported](priority-right-of-way.md) - CARLA does not support priority attributes
-5. [Geometric Approximation Limitations](geometric-approximation.md) - Parametric curve fitting to discrete points
-6. [Coordinate System Considerations](coordinate-system.md) - MGRS projection constraints
-7. [ASAM Schema Compliance](asam-schema-compliance.md) - Known QC checker false positives due to CARLA's LHT extension on OpenDRIVE 1.4
+1. [Stop Line Position Discrepancies](stop-line-position.md) — CARLA's trigger-volume-based detection causes position shifts even though the converter emits stop lines correctly
+2. [Lane Width Inconsistencies](lane-width.md) — mathematical interpolation between different geometric representations
+3. [Special Traffic Signals](special-signals.md) — vehicle/pedestrian traffic lights with arrow encoding plus stop-line / stop-sign / yield-sign signals are supported; everything else (variable-message signs, flashing-only beacons, railroad crossings, general traffic signs) is not
+4. [Priority-Based Right-of-Way Control](priority-right-of-way.md) — converter now emits `<junction><priority>` from `right_of_way` REs, but CARLA still ignores them
+5. [Geometric Approximation Limitations](geometric-approximation.md) — parametric curve fitting to discrete points
+6. [Coordinate System Considerations](coordinate-system.md) — MGRS projection constraints
+7. [ASAM Schema Compliance](asam-schema-compliance.md) — known QC-checker false positives from CARLA's LHT `rule` extension on top of OpenDRIVE 1.4
 
 For a summary comparison, see the [Summary](#summary) table below.
 
@@ -29,13 +29,13 @@ For a summary comparison, see the [Summary](#summary) table below.
 
 | Limitation | Severity | CARLA Source Modification Required | Workaround Available |
 |------------|----------|------------------------------------|---------------------|
-| [Stop line position discrepancies](stop-line-position.md) | Medium | Yes (for precise positioning) | Manual trigger volume adjustment |
-| [Lane width inconsistencies](lane-width.md) | Low | No | Validation with tolerances |
-| [Special signals not supported](special-signals.md) | High | Yes (for full support) | Community contribution needed |
-| [Priority-based right-of-way not supported](priority-right-of-way.md) | Low | Yes | CARLA source modification only |
-| [Geometric approximation](geometric-approximation.md) | Low | No | Use high-resolution input data |
+| [Stop line position discrepancies](stop-line-position.md) | Medium | Yes (for precise positioning) | Manual trigger volume adjustment in CARLA |
+| [Lane width inconsistencies](lane-width.md) | Low | No | Validate widths with a tolerance band |
+| [Special signals partially supported](special-signals.md) | Medium | No (CARLA already consumes the supported ones) | Most needs already covered; see page for unsupported types |
+| [Priority emitted but ignored by CARLA](priority-right-of-way.md) | Low | Yes (CARLA-side) | None on the converter side; non-CARLA consumers already work |
+| [Geometric approximation](geometric-approximation.md) | Low | No | Use higher-resolution input data |
 | [MGRS projection limitations](coordinate-system.md) | Medium | No | Split large maps by grid zone |
-| [ASAM schema compliance](asam-schema-compliance.md) | Low | No | Suppressed automatically by `analyze` command |
+| [ASAM schema compliance](asam-schema-compliance.md) | Low | No | Suppressed automatically by the `analyze` command |
 
 !!! info "Feedback Welcome"
     If you encounter limitations not documented here, please [report them](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues) so we can improve this documentation.

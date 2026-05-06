@@ -1,402 +1,383 @@
 # Usage Guide
 
-This guide explains how to use the `autoware-lanelet2-to-opendrive` package to convert Lanelet2 maps to OpenDRIVE format.
+This guide explains how to use the `autoware-lanelet2-to-opendrive` package
+to convert Lanelet2 maps to OpenDRIVE format.
 
-## Basic Usage
+## Console Scripts
 
-### CLI Commands
+The package registers five console scripts (see `[project.scripts]` in
+[`pyproject.toml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/pyproject.toml)):
 
-The package includes two CLI commands:
+| Script | Purpose |
+|--------|---------|
+| `convert` | Run the full Lanelet2 → OpenDRIVE pipeline (Hydra CLI) |
+| `preprocess-lanelet` | Run preprocessing operations only (argparse CLI) |
+| `analyze` | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
+| `qc-validate` | Run ASAM QC checker on an existing `.xodr` |
+| `carla-import-test` | Smoke-test loading the `.xodr` in a running CARLA server |
 
-#### 1. `convert` - Convert from Lanelet2 to OpenDRIVE
+Run them via `uv run <script>` (or `<script>` directly inside an active venv).
 
-```bash
-convert input.osm --preprocess-config config.yaml
+## `convert` (Hydra CLI)
+
+`convert` is configured with [Hydra](https://hydra.cc/). Configuration is
+composed from three files in
+[`src/autoware_lanelet2_to_opendrive/conf/`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/conf):
+
+```
+conf/
+├── config.yaml          # base
+├── map/                 # map-specific (origin + preprocessing)
+│   ├── example.yaml
+│   ├── example_latlon.yaml
+│   ├── example_mgrs_offset.yaml
+│   ├── nishishinjuku.yaml
+│   └── odaiba.yaml
+└── target/              # simulator-specific
+    ├── default.yaml
+    └── carla.yaml
 ```
 
-#### 2. `preprocess-lanelet` - Preprocess Lanelet2 Maps
+### Required and Optional Top-Level Keys
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `input_map_path` | yes | Path to input Lanelet2 `.osm` file |
+| `output_map_path` | no | Output `.xodr` (defaults to `<input>.xodr`) |
+| `dry_run` | no | Validate only, no save (default `false`) |
+| `verbose` | no | Enable debug logging (default `false`) |
+| `map=<name>` | no | Selects `conf/map/<name>.yaml` (default `example`) |
+| `target=<name>` | no | Selects `conf/target/<name>.yaml` (default `default`) |
+
+### Basic Conversion
 
 ```bash
-preprocess-lanelet config.yaml
+uv run convert input_map_path=/path/to/map.osm
 ```
 
-## Convert Command Details
+The default `map=example` provides MGRS grid `54SUE815501`. Output path is
+`/path/to/map.xodr`.
 
-### Basic Conversion Example
-
-The simplest usage:
+### Custom Map Configuration
 
 ```bash
-convert input_map.osm --preprocess-config config.yaml
+uv run convert \
+  input_map_path=/path/to/nishishinjuku.osm \
+  map=nishishinjuku
 ```
 
-This command will generate `input_map.xodr` (the default output file name).
-
-### Specify Output File Name
+### CARLA-Compatible Output
 
 ```bash
-convert input_map.osm --preprocess-config config.yaml -o output_map.xodr
+uv run convert \
+  input_map_path=/path/to/map.osm \
+  map=nishishinjuku \
+  target=carla
 ```
 
-or
+The `target=carla` overlay sets `exclude_non_junction_signals: true`, switches
+`stopline.carla_stop_line` to `true` (emitting `<object name="Stencil_STOP">`),
+and applies traffic-light spawn offsets tuned for CARLA actors.
+
+### Override Output Path
 
 ```bash
-convert input_map.osm --preprocess-config config.yaml --output output_map.xodr
+uv run convert \
+  input_map_path=/path/to/map.osm \
+  output_map_path=/path/to/output.xodr
 ```
 
-### Enable Verbose Logging
+### Override Individual Keys
+
+Hydra supports dotted overrides:
 
 ```bash
-convert input_map.osm --preprocess-config config.yaml -v
+uv run convert \
+  input_map_path=/path/to/map.osm \
+  verbose=true \
+  parampoly3.default_segment_length=2.0 \
+  stopline.width=0.2
 ```
 
-or
+### Verbose Output
 
 ```bash
-convert input_map.osm --preprocess-config config.yaml --verbose
+uv run convert input_map_path=/path/to/map.osm verbose=true
 ```
 
-## Command Line Options
+`verbose=true` raises the log level to DEBUG and prints the resolved Hydra
+configuration before running.
 
-### `convert` Command Options
+## Origin Specification
 
-| Option | Short Form | Description | Required |
-|--------|------------|-------------|----------|
-| `lanelet2_file` | - | Path to the input Lanelet2 OSM file | ✓ |
-| `--preprocess-config` | - | Path to the preprocessing configuration YAML file (contains MGRS code) | ✓ |
-| `--output` | `-o` | Path to the output OpenDRIVE file (default: input_file.xodr) | |
-| `--verbose` | `-v` | Enable verbose log output | |
+Each map config in `conf/map/*.yaml` must specify exactly **one** origin
+method. Three are supported (see
+[`example.yaml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/conf/map/example.yaml)):
 
-### `preprocess-lanelet` Command Options
-
-| Option | Short Form | Description | Required |
-|--------|------------|-------------|----------|
-| `config` | - | Path to the YAML configuration file | ✓ |
-| `--mgrs` | - | MGRS code (overrides configuration file) | |
-| `--dry-run` | - | Run without saving output (validation only) | |
-| `--verbose` | `-v` | Enable verbose log output | |
-| `--output-config` | - | Save loaded configuration to a new YAML file | |
-
-## Input File Requirements
-
-### Lanelet2 Map Requirements
-
-A valid Lanelet2 OSM file is required as input:
-
-- **File Format**: Lanelet2 map in `.osm` format
-- **Coordinate System**: Map defined in MGRS coordinate system
-- **Required Elements**:
-  - Lanelet elements
-  - Linestring elements
-  - Point elements
-- **Attributes**: Standard Lanelet2 attributes for Autoware
-
-### Preprocessing Configuration File (YAML)
-
-A preprocessing configuration file is required for conversion. This file must include the MGRS code and can optionally contain preprocessing operations.
-
-#### Minimal Configuration Example
+### Method 1 — MGRS grid only
 
 ```yaml
-input_map_path: /path/to/input.osm
-output_map_path: /path/to/preprocessed.osm
-mgrs_code: 54SUE815501
-
-# No preprocessing operations (only use MGRS code for conversion)
+mgrs_grid: 54SUE815501
 ```
 
-#### Configuration Example with Preprocessing Operations
+The legacy field name `mgrs_code` is also accepted.
+
+### Method 2 — MGRS grid + offset
 
 ```yaml
-input_map_path: /path/to/input.osm
-output_map_path: /path/to/preprocessed.osm
-mgrs_code: 54SUE815501
+mgrs_grid: 54SUE
+offset:
+  x: 81655.73
+  y: 50137.43
+  z: 42.49998
+```
 
-# Merge lanelets
+The offset is **subtracted** from every coordinate during export, so the
+resulting `.xodr` lives in a local frame anchored at the offset point.
+
+### Method 3 — Latitude / Longitude
+
+```yaml
+lat_lon:
+  latitude: 35.6762
+  longitude: 139.6503
+  altitude: 0.0
+```
+
+The MGRS grid for the `<header><geoReference>` PROJ string is derived
+automatically.
+
+The validator in
+[`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
+rejects combinations that mix `mgrs_grid` and `lat_lon`, or use `offset`
+without `mgrs_grid`.
+
+## Preprocessing Operations
+
+Preprocessing operations are declared inside a map config and run before
+conversion. The execution order is fixed (defined in
+`LaneletPreprocessor.process()`):
+
+1. `move_point_operations`
+2. `delete_point_operations`
+3. `validate_operations`
+4. `replace_operations`
+5. `merge_operations`
+6. `remove_operations` (legacy; prefer `remove_lanelet_operations`)
+7. `remove_lanelet_operations`
+8. `remove_turn_direction_operations`
+
+Skeleton (commented examples are in `conf/map/example.yaml`):
+
+```yaml
+mgrs_grid: 54SUE815501
+
 merge_operations:
   - lanelet_ids: [100, 101, 102]
     validate: true
     tolerance: 0.001
 
-# Remove lanelets
 remove_lanelet_operations:
   - lanelet_ids: [300, 301]
 
-# Remove turn_direction attributes (from all lanelets)
 remove_turn_direction_operations:
-  - lanelet_ids: []  # Empty list = remove from all lanelets
-
-# Global settings
-dry_run: false
-verbose: true
+  - lanelet_ids: []   # empty list = strip turn_direction from all lanelets
 ```
 
-#### Available Preprocessing Operations
+See [Conversion Process](conversion-process.md#preprocessing-operations-optional)
+for the full operation reference.
 
-1. **merge_operations**: Merge multiple lanelets into one
-2. **remove_operations**: Remove lanelets (legacy format)
-3. **replace_operations**: Replace lanelets
-4. **validate_operations**: Validate lanelet continuity
-5. **move_point_operations**: Move point coordinates
-6. **delete_point_operations**: Delete points
-7. **remove_lanelet_operations**: Remove entire lanelets
-8. **remove_turn_direction_operations**: Remove turn_direction attributes
+## Tunable Conversion Parameters
 
-## Output Files
+The default target (`conf/target/default.yaml`) exposes the following knobs;
+each is also overridable from the command line.
 
-### OpenDRIVE Format
+| Section | Key | Default | Effect |
+|---------|-----|---------|--------|
+| `parampoly3` | `enabled` | `true` | Use dynamic ParamPoly3 segment generation |
+| | `min_segment_length` | `0.5` m | CARLA crashes below 0.5 m |
+| | `default_segment_length` | `1.0` m | Target segment length |
+| | `max_segments` / `min_segments` | 100 / 1 | Caps on segment count per road |
+| | `coefficient_epsilon` | `1e-8` | Round small coefficients to zero |
+| `arcspiral` | `enabled` | `false` | Emit `<line>` / `<arc>` / `<paramPoly3>` mix |
+| | `arc_enabled` | `true` | Detect constant-curvature arcs |
+| | `min_line_length` | 5.0 m | Reject shorter line runs |
+| `stopline` | `width` | `0.1` m | Painted stop-line width |
+| | `carla_stop_line` | `false` | Emit `Stencil_STOP` instead of `stopLine` |
+| `traffic_light` | `offset_x/y/z`, `hdg_offset` | 0 / 0 / 0 / π/2 | CARLA actor placement |
+| `width_estimation` | `adaptive_sampling` | `true` | Sample width based on road length |
+| | `default_sample_interval` | 5.0 m | Spacing between width samples |
+| `parking_lot` | `enabled` | `true` | Emit synthetic parking-lot roads |
+| | `default_stall_width` | `2.5` m | Stall width |
+| | `nearest_area_threshold_m` | 30 m | Stall ↔ area association radius |
 
-After conversion, an OpenDRIVE format (.xodr) file is generated with the following characteristics:
+## `preprocess-lanelet`
 
-- **OpenDRIVE Version**: 1.4
-- **Coordinate System**: MGRS coordinate system (same as input map)
-- **Included Elements**:
-  - Roads: Normal roads and junction connecting roads
-  - Junctions: Intersection areas and connection information
-  - Signals: Traffic signals extracted from Lanelet2 map
-  - Controllers: Traffic signal controllers
-- **Target**: Optimized for CARLA simulator
-
-### Output Structure
+A standalone CLI that runs only the preprocessing pipeline and writes the
+resulting `.osm`. Useful for validating a config without converting to
+OpenDRIVE.
 
 ```
-output.xodr
-├── header (header information and geoReference)
-├── roads
-│   ├── Normal roads (outside junctions)
-│   └── Connecting roads (inside junctions)
-├── junctions (intersections and their connections)
-└── controllers (traffic signal controllers)
+preprocess-lanelet config.yaml [--mgrs MGRS] [--origin LAT,LON]
+                               [--dry-run] [--verbose]
+                               [--output-config OUTPUT_CONFIG]
 ```
 
-## Common Use Cases
+| Flag | Description |
+|------|-------------|
+| `config` (positional) | YAML config in `PreprocessOperation` schema |
+| `--mgrs` | Override MGRS code |
+| `--origin LAT,LON` | Override lat/lon origin (comma-separated) |
+| `--dry-run` | Run pipeline without saving the `.osm` |
+| `-v`, `--verbose` | Enable debug logging |
+| `--output-config PATH` | Dump the resolved config to a YAML file |
 
-### Use Case 1: Simple Conversion
+`--mgrs` and `--origin` are mutually exclusive. The YAML schema mirrors
+`PreprocessOperation` (see API reference), e.g.:
 
-Convert a Lanelet2 map to OpenDRIVE without preprocessing:
+```yaml
+input_map_path: /path/to/input.osm
+output_map_path: /path/to/preprocessed.osm
+mgrs_code: 54SUE815501
 
-```bash
-# 1. Create a minimal configuration file (config.yaml)
-# Include input_map_path, output_map_path, mgrs_code
-
-# 2. Execute conversion
-convert my_map.osm --preprocess-config config.yaml -o my_map.xodr
+merge_operations:
+  - lanelet_ids: [100, 101, 102]
+    validate: true
+    tolerance: 0.001
 ```
 
-### Use Case 2: Conversion with Preprocessing
+## `analyze`
 
-Fix map issues before conversion:
+Runs the [ASAM QC OpenDRIVE checker](https://github.com/asam-ev/qc-opendrive)
+on a `.xodr` and cross-validates the persisted `lanelet → (road, lane)`
+mapping against a live geometric reprojection.
 
-```bash
-# 1. Create a configuration file with preprocessing operations (nishishinjuku_preprocess_config.yaml)
-# Include merge_operations, remove_lanelet_operations, etc.
-
-# 2. Execute preprocessing and conversion in one step
-convert original_map.osm --preprocess-config nishishinjuku_preprocess_config.yaml -o fixed_map.xodr
+```
+analyze <xodr_file> <osm_file> [--output FILE] [--min-severity LEVEL]
+                               [--max-issues N] [--ignore-pattern REGEX]
+                               [--no-default-ignores]
+                               [--fail-on-warning] [--verbose]
 ```
 
-### Use Case 3: Run Preprocessing Only
+Both arguments are required. `<osm_file>` is the source Lanelet2 map; the
+mapping JSON saved alongside the `.xodr` (named `<stem>_mapping.json`) is
+loaded for cross-validation.
 
-Preprocess a map before OpenDRIVE conversion:
+Default ignore patterns suppress the known false-positive
+`attribute 'rule' is not allowed` reported by the 1.4 schema validator (see
+[ASAM Schema Compliance](limitations/asam-schema-compliance.md)). Pass
+`--no-default-ignores` to see them.
 
-```bash
-# 1. Run preprocessing only
-preprocess-lanelet nishishinjuku_preprocess_config.yaml
+## `qc-validate`
 
-# 2. Validate the preprocessed map
-preprocess-lanelet nishishinjuku_preprocess_config.yaml --dry-run -v
+Thin wrapper that runs only the ASAM QC checker on a standalone `.xodr`. Use
+it when you do not have the source `.osm` (or do not need the mapping
+cross-check).
 
-# 3. Convert the preprocessed map
-convert preprocessed_map.osm --preprocess-config simple_config.yaml
+```
+qc-validate <xodr_file> [--output FILE] [--no-default-ignores] [...]
 ```
 
-### Use Case 4: Autoware + CARLA Simulation
+## `carla-import-test`
 
-Use an Autoware map in CARLA simulator:
+Connects to a running CARLA server and verifies that the generated `.xodr`
+imports cleanly. Only used inside the `carla` docker-compose profile and CI.
 
-```bash
-# 1. Convert Autoware Lanelet2 map
-convert autoware_map.osm --preprocess-config config.yaml -o carla_map.xodr
-
-# 2. Import the generated carla_map.xodr into CARLA
-# (Refer to CARLA documentation)
+```
+carla-import-test <xodr_file> --map-name <name> [--host HOST] [--port PORT]
 ```
 
-### Use Case 5: Debugging and Validation
+## Output File
 
-Debug the conversion process using verbose logging:
+`convert` writes:
 
-```bash
-# Run with verbose logging
-convert input.osm --preprocess-config config.yaml -v -o output.xodr
+- `<output_map_path>` — the OpenDRIVE 1.4 file
+- `<output_map_path stem>_mapping.json` — the persisted mapping used by `analyze`
+- `<output_map_path stem>_preprocessed.osm` (only if preprocessing ran) — the
+  intermediate Lanelet2 map after preprocessing, so `analyze` can replay the
+  same input
 
-# This will display the following information:
-# - Number of loaded lanelets, linestrings, and points
-# - Building normal roads and junction roads
-# - Building junction connections
-# - Extracting signals and controllers
-# - Road-Lanelet mapping information
+OpenDRIVE structure:
+
 ```
-
-## Autoware Integration
-
-This package is designed for use with Autoware autonomous driving software.
-
-### Typical Workflow
-
-1. **Export Autoware Map**: Prepare your Autoware map in Lanelet2 format
-2. **Get MGRS Code**: Confirm the MGRS code corresponding to your map's coordinate system
-3. **Create Preprocessing Configuration**: Define necessary map corrections
-4. **Convert to OpenDRIVE**: Use the `convert` command
-5. **Import to Simulator**: Use the generated OpenDRIVE file in CARLA, etc.
-
-## Simulation and Testing
-
-!!! info "Current Support"
-    Currently, this package generates OpenDRIVE format for **CARLA simulator**. Support for other simulation platforms may be added in future releases.
-
-### Using with CARLA Simulator
-
-The generated OpenDRIVE map is compatible with:
-
-- **CARLA Simulator** (primary target)
-- Custom map import
-- Autonomous driving testing in simulation environments
-
-## Best Practices
-
-### Input Validation
-
-Ensure your Lanelet2 map is in the correct format before conversion:
-
-```bash
-# Validate with preprocessing dry-run mode
-preprocess-lanelet config.yaml --dry-run -v
+<OpenDRIVE>
+  <header revMajor="1" revMinor="4" .../>      # PROJ geoReference + bounding box
+  <road id=... rule="RHT|LHT" .../>            # regular + connecting + parking roads
+  <junction id=... .../>                       # intersection + synthetic divergence/merge
+  <controller id=... .../>                     # signal groups
+</OpenDRIVE>
 ```
-
-### Output Verification
-
-Verify the generated OpenDRIVE file in your target application:
-
-- Load the map in CARLA simulator
-- Visually confirm with an OpenDRIVE viewer
-- Validate the XML structure
-
-### Reporting Issues
-
-If you encounter conversion issues, report them at [GitHub Issues](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues).
-
-When reporting, please include:
-- Sample of the input Lanelet2 map (if possible)
-- The preprocessing configuration file used
-- Error messages or unexpected behavior
-- Verbose log output (using `--verbose` flag)
 
 ## Using as a Python Library
 
-### Importing the Package
+The package re-exports the main entry points at the top level (see
+[`__init__.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/__init__.py)):
 
 ```python
-import autoware_lanelet2_to_opendrive
-from autoware_lanelet2_to_opendrive.main import (
-    load_lanelet2_map,
+from pathlib import Path
+import lanelet2
+
+from autoware_lanelet2_to_opendrive import (
     convert_lanelet2_to_opendrive,
-    preprocess_and_convert
+    PreprocessOperation,
+    LaneletPreprocessor,
+    RoadLaneletMapping,
 )
-```
-
-### Programmatic Conversion
-
-```python
-from pathlib import Path
-from autoware_lanelet2_to_opendrive.main import preprocess_and_convert
-
-# Execute conversion
-preprocess_and_convert(
-    lanelet2_file=Path("input_map.osm"),
-    output_file=Path("output_map.xodr"),
-    preprocess_config_path=Path("config.yaml"),
-    verbose=True
-)
-```
-
-### Advanced Usage Example
-
-```python
-from pathlib import Path
-from autoware_lanelet2_to_opendrive.main import (
-    load_lanelet2_map,
-    convert_lanelet2_to_opendrive
+from autoware_lanelet2_to_opendrive.main import load_lanelet2_map
+from autoware_lanelet2_to_opendrive.projection import mgrs_to_lanelet2_origin
+from autoware_lanelet2_to_opendrive.conversion_config import (
+    ConversionConfig, OriginSpec,
 )
 
-# 1. Load the map
-lanelet_map = load_lanelet2_map(
-    Path("input.osm"),
-    mgrs="54SUE815501"
+# 1. Load
+origin = mgrs_to_lanelet2_origin("54SUE815501")
+lanelet_map = load_lanelet2_map(Path("input.osm"), origin)
+
+# 2. Convert
+config = ConversionConfig(
+    output_path=Path("output.xodr"),
+    origin=OriginSpec(mgrs_code="54SUE815501"),
+)
+opendrive, mapping, lanelet_to_road_and_lane, sl_map, sl_skipped = (
+    convert_lanelet2_to_opendrive(lanelet_map, config)
 )
 
-# 2. Convert to OpenDRIVE
-opendrive, mapping = convert_lanelet2_to_opendrive(
-    lanelet_map=lanelet_map,
-    mgrs_code="54SUE815501",
-    output_path=Path("output.xodr")
-)
-
-# 3. Use mapping information
+# 3. Inspect
 print(f"Roads: {len(mapping.road_to_lanelets)}")
 print(f"Lanelets: {len(mapping.lanelet_to_road)}")
-
-# Check which road a specific lanelet corresponds to
-lanelet_id = 100
-if lanelet_id in mapping.lanelet_to_road:
-    road_id = mapping.lanelet_to_road[lanelet_id]
-    print(f"Lanelet {lanelet_id} -> Road {road_id}")
 ```
+
+The same five-tuple is what `convert` writes internally before invoking
+`analyze`.
 
 ## Examples
 
-For practical usage examples, check the `examples/` directory in the repository.
+The repository's `examples/` directory contains:
 
-## Next Steps
-
-- Refer to [API Reference](api.md) for detailed API specifications
-- Check [Development Guide](development.md) if you want to contribute to development
-- See [Signals Documentation](signals.md) for information on signal and traffic rule conversion
+- `cartesian_to_frenet_demo.py` — driving the `Splines` API to convert
+  Cartesian (x, y) into Frenet (s, d) coordinates
+- `README_cartesian_to_frenet.md` — companion notes for the demo
 
 ## Troubleshooting
 
-### Common Errors
+### `omegaconf.errors.MissingMandatoryValue: input_map_path` is missing
 
-#### "MGRS code must be provided"
+`config.yaml` marks `input_map_path` as `???` (Hydra "must override"). Pass
+it on the command line: `convert input_map_path=/path/to/map.osm`.
 
-**Cause**: The preprocessing configuration file does not contain an MGRS code
+### `Multiple origin specification methods detected`
 
-**Solution**:
-```yaml
-# Add the following to config.yaml
-mgrs_code: 54SUE815501  # Replace with actual MGRS code
-```
+Set exactly one of `mgrs_grid` or `lat_lon` in the map config. `offset`
+applies only with `mgrs_grid`.
 
-#### "Lanelet2 file not found"
+### `Failed to load Lanelet2 map`
 
-**Cause**: The input file path is incorrect
+Verify the `.osm` is a Lanelet2 map (not a vanilla OSM extract) and that the
+MGRS / lat-lon origin matches it. Re-run with `verbose=true` for the full
+stack trace.
 
-**Solution**:
-- Verify the file path
-- Correctly specify absolute or relative path
+## Next Steps
 
-#### "Failed to load Lanelet2 map"
-
-**Cause**: The map file format is incorrect, or the MGRS code is wrong
-
-**Solution**:
-- Confirm the map file is in Lanelet2 OSM format
-- Ensure the MGRS code matches the map's coordinate system
-- Check details with the `--verbose` flag
-
-### Debugging Tips
-
-1. **Enable Verbose Logging**: Always use the `-v` flag
-2. **Execute Step by Step**: Separate preprocessing and conversion
-3. **Use Dry-Run Mode**: Validate before making actual changes
-4. **Test with Small Maps**: Try with a smaller map first
+- [API Reference](api.md) — class-level documentation
+- [Conversion Process](conversion-process.md) — pipeline internals
+- [Known Limitations](limitations/index.md) — caveats by topic

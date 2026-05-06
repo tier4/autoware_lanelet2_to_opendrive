@@ -8,14 +8,25 @@ This package provides a framework for creating and running automated scenario te
 
 ## Features
 
-- Automated scenario execution in CARLA simulator
-- Configurable scenario definitions using Hydra
-- Condition-based scenario evaluation (collision detection, timing, traffic signals)
-- Entity management (ego vehicle, NPC vehicles)
-- Coordinate system transforms between CARLA and Autoware
-- Lanelet-based constraint sweeping for scenario generation
-- Web UI for scenario monitoring and control
-- Camera recording for scenario playback
+- Automated scenario execution in CARLA simulator (UE5 / `0.10.0` and legacy `0.9.16`)
+- Configurable scenarios using Hydra `compose` + structured configs
+- Glob-pattern batch execution of multiple scenarios in a single CARLA session
+- Condition-based scenario evaluation: timing, collisions, traffic signals,
+  speed / standstill, lane / area position, waypoint crossing, plus
+  logical (`And` / `Or` / `Not`), latching (`Sticky`), and persistent combinators
+- Action system for side effects: turns, lane changes, traffic-light state,
+  on-demand camera attachment
+- Entity management for ego (`EgoVehicle`) and NPC vehicles with spawn
+  retry and ground projection
+- Coordinate transforms between Lanelet2, OpenDRIVE, and CARLA world
+- Lanelet-based constraint sweeping via a Hydra `lanelet_constraint`
+  sweeper plugin (also resolvable without CARLA from the viewer)
+- Web UI (FastAPI + Uvicorn) for browsing results, replaying videos,
+  and triggering runs
+- Two-pass video recording (CARLA native log + replayed RGB camera +
+  ffmpeg H.264)
+- pytest integration via `CarlaScenarioFixture` (auto-skip when
+  `CARLA_EXECUTABLE` is unset)
 
 ## Quick Links
 
@@ -30,7 +41,7 @@ This package provides a framework for creating and running automated scenario te
 - **Repository**: [tier4/autoware_lanelet2_to_opendrive](https://github.com/tier4/autoware_lanelet2_to_opendrive)
 - **Release Notes**: [View all releases on GitHub](https://github.com/tier4/autoware_lanelet2_to_opendrive/releases)
 - **License**: Check the repository for license information
-- **Python Version**: 3.10 required
+- **Python Version**: 3.10 required (`>=3.10,<3.11`, locked by CARLA's bindings)
 
 ## Getting Help
 

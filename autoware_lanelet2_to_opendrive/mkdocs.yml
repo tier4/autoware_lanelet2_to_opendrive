@@ -86,6 +86,7 @@ nav:
     - Priority Right-of-Way: limitations/priority-right-of-way.md
     - Geometric Approximation: limitations/geometric-approximation.md
     - Coordinate System: limitations/coordinate-system.md
+    - ASAM Schema Compliance: limitations/asam-schema-compliance.md
   - Signals: signals.md
   - Crosswalk Objects: crosswalk_objects.md
   - Stop Line Objects: stop_line_objects.md

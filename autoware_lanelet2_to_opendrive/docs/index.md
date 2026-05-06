@@ -8,13 +8,18 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 
 ## Features
 
-- Convert Lanelet2 map data to OpenDRIVE format
-- Crosswalk lanelets (`subtype="crosswalk"`) converted to OpenDRIVE `<objects>` for CARLA navigation mesh
-- Stop line linestrings (`type="stop_line"`) converted to OpenDRIVE `<object type="stopLine">` elements
-- Traffic signal extraction from Lanelet2 regulatory elements
-- Designed for integration with Autoware autonomous driving software
-- Type-safe implementation with full type hints support
-- Modern Python packaging with `uv`
+- Lanelet2 → OpenDRIVE 1.4 conversion targeted at CARLA (with a `target=carla` overlay)
+- Hydra-based CLI (`convert`) composable from `conf/config.yaml`, `conf/map/*.yaml`, and `conf/target/*.yaml`
+- Optional Lanelet2 preprocessing pipeline (merge / replace / remove / move-point / delete-point / remove-turn-direction / validate) configurable from the same YAML
+- Reference-line geometry emitted as `<paramPoly3>` chains, optionally classified into `<line>` / `<arc>` / `<paramPoly3>` runs (`arcspiral.enabled`)
+- Crosswalk lanelets (`subtype="crosswalk"`) emitted as `<object type="crosswalk">` with closed outlines
+- Stop-line linestrings (`type="stop_line"`) emitted as `<object type="stopLine">` (or CARLA `Stencil_STOP`) with optional `<signal type="294">` plus dependencies on associated traffic-light, stop-sign and yield-sign signals
+- Parking-lot `Area`s emitted as synthetic parking roads with `<lane type="parking">` and `<object type="parkingSpace">` per stall
+- Traffic-light extraction from Autoware regulatory elements with arrow-bulb subtype encoding (see [Signals](signals.md))
+- Right-of-way regulatory elements emitted as `<junction><priority>` records (`high`/`low` road IDs)
+- ASAM QC validation and Lanelet2-to-road geometric cross-validation built in (`analyze`, `qc-validate`)
+- CARLA import smoke test (`carla-import-test`)
+- Pure Python 3.10 with full type hints (`py.typed`); managed by `uv`
 
 ## Quick Links
 
@@ -34,7 +39,7 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 - **Repository**: [tier4/autoware_lanelet2_to_opendrive](https://github.com/tier4/autoware_lanelet2_to_opendrive)
 - **Release Notes**: [View all releases on GitHub](https://github.com/tier4/autoware_lanelet2_to_opendrive/releases)
 - **License**: Check the repository for license information
-- **Python Version**: 3.10 or higher required
+- **Python Version**: exactly 3.10 (pinned to `>=3.10,<3.11` because `lanelet2-python-api-for-autoware` ships a CPython-3.10 ABI-tagged wheel)
 
 ## Getting Help
 

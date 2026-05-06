@@ -17,42 +17,80 @@ Each stop line linestring produces an `<object>` element:
     <object type="stopLine" id="3002478" name="stop_line_3002478"
             s="15.4" t="1.8" zOffset="0.0"
             hdg="1.5707" pitch="0.0" roll="0.0"
-            orientation="none" width="3.5" length="0.0"/>
+            orientation="none" width="0.1" length="3.5"/>
   </objects>
 </road>
+```
+
+When `target=carla` (or `stopline.carla_stop_line=true`) is selected, the
+same linestring is emitted in CARLA's `Stencil_STOP` form instead, and
+CARLA actually consumes it:
+
+```xml
+<object type="-1" name="Stencil_STOP" id="3002478" s="15.4" t="1.8"
+        zOffset="0.0" hdg="1.5707" pitch="0.0" roll="0.0"
+        orientation="-" width="2.0" length="3.5"/>
 ```
 
 ### Attribute Mapping
 
 | OpenDRIVE Attribute | Source | Description |
 |---------------------|--------|-------------|
-| `type` | Fixed value | Always `"stopLine"` |
-| `id` | Linestring ID | The Lanelet2 linestring ID |
-| `name` | Derived | `"stop_line_<id>"` |
-| `s` | Projection | Arc-length position along road reference line |
-| `t` | Projection | Lateral offset from road reference line |
-| `zOffset` | Elevation | Absolute stop line elevation minus road elevation at `s` |
-| `hdg` | Computed | Stop line heading relative to road direction (radians) |
-| `pitch` | Fixed value | Always `0.0` |
-| `roll` | Fixed value | Always `0.0` |
-| `orientation` | Fixed value | Always `"none"` |
-| `width` | Geometry | Distance from first to last point of the linestring |
-| `length` | Fixed value | Always `0.0` (zero thickness) |
+| `type` | Fixed | Standard form: `"stopLine"`. CARLA form: `"-1"` (with `name="Stencil_STOP"`). |
+| `id` | Linestring ID | The Lanelet2 linestring ID. |
+| `name` | Derived | Standard form: `"stop_line_<id>"`. CARLA form: `"Stencil_STOP"`. |
+| `s` | Projection | Arc-length position along road reference line. |
+| `t` | Projection | Lateral offset from road reference line. |
+| `zOffset` | Elevation | Standard form: stop-line absolute elevation minus road elevation at `s`. CARLA form: fixed at `0.0`. |
+| `hdg` | Computed | Stop-line heading relative to road direction (radians). |
+| `pitch` | Fixed | `0.0`. |
+| `roll` | Fixed | `0.0`. |
+| `orientation` | Fixed | Standard form: `"none"`. CARLA form: `"-"`. |
+| `width` | Config | Painted thickness in the **v-direction** (along the road). Default `0.1` m for the standard form (`stopline.width`); CARLA target overrides this to `2.0` m to match `Stencil_STOP` decals. |
+| `length` | Geometry | Span in the **u-direction** (across the road) — the Euclidean distance between the linestring's first and last 2D points. |
 
 ## Module Structure
 
 ### `opendrive/objects.py`
 
-Key definitions added for stop line support:
+- **`StopLineObject`** — dataclass for the `<object>` (or
+  `Stencil_STOP`) element, with `to_xml()` handling the dual-form
+  serialization
+- **`StopLineObject.construct_from_linestring()`** — static factory that
+  builds a `StopLineObject` from a Lanelet2 linestring and its nearest
+  road; takes `width` (painted thickness) and `carla_format` flags
+- **`find_nearest_road_for_linestring()`** — shared nearest-road search
+- **`_sample_road_points()`** / **`_project_point_onto_road()`** —
+  ParamPoly3-aware reference-line sampling helpers reused from the
+  crosswalk path
 
-- **`StopLineObject`**: OpenDRIVE stop line object dataclass with position, dimensions, and `to_xml()` serialization
-- **`StopLineObject.construct_from_linestring()`**: Static factory method that builds a `StopLineObject` from a Lanelet2 linestring and its nearest road
-- **`find_nearest_road_for_linestring()`**: Finds the nearest road for a given linestring centroid (shared distance-search logic)
+### `main.py` — `_extract_and_assign_stop_lines`
 
-The following helpers defined for crosswalk support are also reused:
+In addition to attaching the `StopLineObject` to its road, this method
+emits up to three companion `<signal>` elements per stop line, depending
+on what the Lanelet2 regulatory elements say:
 
-- **`_sample_road_points()`**: Samples points along the road reference line (ParamPoly3-aware)
-- **`_project_point_onto_road()`**: Projects a point onto the road reference line to obtain `s`/`t`/`hdg`
+- `Signal(@type=294, name="StopLine_<id>")` with one
+  `<dependency type="trafficLight">` per associated traffic-light signal
+  — emitted when the linestring is referenced by a `traffic_light`
+  regulatory element's `stopLine`
+- `Signal(@type=206, name="StopSign_<id>")` — emitted when the
+  linestring is referenced via a `traffic_sign` regulatory element
+  whose `refers` member has `subtype="stop_sign"`
+- `Signal(@type=205, name="YieldSign_<id>")` plus
+  `Signal(@type=294, name="StopLine_<id>")` with a
+  `<dependency type="yieldSign">` — emitted for stop lines that come
+  from a `road_marking` regulatory element (skipped when the same
+  linestring is also handled by the traffic-light branch above)
+
+After all stop-line signals are emitted, the converter adds back-pointer
+`<reference id="<StopLine signal id>" elementType="signal" type="stopLine"/>`
+elements to each linked traffic-light signal so the relationship is
+expressed in both directions. In CARLA mode
+(`stopline.carla_stop_line=true`) the traffic-light → stop-line
+dependency emission is suppressed (`Stencil_STOP` already covers what
+CARLA needs); the StopSign / YieldSign / stand-alone StopLine signals
+are still emitted.
 
 ## Conversion Algorithm
 
@@ -110,29 +148,41 @@ stop_line_angle = atan2(pts[-1].y - pts[0].y,
 hdg = normalize_to_pi(stop_line_angle - road_hdg)
 ```
 
-### 7. Width Computation
+### 7. Width and Length Computation
 
-The stop line width (transversal span) is the Euclidean distance between the first and last 2D points:
+OpenDRIVE's object model places `length` along the local `u`-axis
+(aligned with the object's heading) and `width` along the local
+`v`-axis. For a stop line, the heading runs across the road, so:
 
 ```
-width = ‖pts_2d[-1] − pts_2d[0]‖
+length = ‖pts_2d[-1] − pts_2d[0]‖     # span across the road (u-axis)
+width  = stopline.width                # painted thickness along the road (v-axis)
 ```
 
-`length` is always set to `0.0` because a stop line has no meaningful thickness.
+`width` is therefore a configurable painted-thickness value, not a
+geometric measurement: `0.1` m by default, and `2.0` m when the
+`target=carla` overlay swaps to `Stencil_STOP` so the stencil decal has
+the right footprint.
 
 ## Coordinate System
 
 ```
-         road direction (s-axis →)
-              ↑ road_hdg
-  pts[0] ─────────────────── pts[-1]
-              ↕ width
-         ● centroid
+                 road direction (s-axis →)
+                            ↑ road_hdg
+
+  pts[0] ─────●───────────── pts[-1]      ← stop-line span = `length` (u-axis)
+            centroid
+                            ↕ painted thickness = `width` (v-axis, along road)
 ```
 
-Object-local coordinates follow the standard OpenDRIVE convention:
-- `s`/`t` are road-curve-relative coordinates
-- `hdg` is the angle between the stop line direction and the road direction
+Object-local conventions:
+
+- `s` / `t` are road-curve-relative coordinates of the stop-line
+  centroid;
+- `hdg` is the angle between the stop-line direction (`pts[0] →
+  pts[-1]`) and the road direction at `s`;
+- in object-local frame, `u` runs along `hdg` (across the road) and `v`
+  runs perpendicular to `hdg` (along the road).
 
 ## Lanelet2 Input Requirements
 
@@ -184,11 +234,23 @@ Expected output format:
 
 ## Known Limitations
 
-- Only the **nearest road** (within 50 m) is associated with each stop line; stop lines near road boundaries may be assigned to the closest road rather than the most semantically correct one
-- `length` is always `0.0`; the stop line is modeled as a zero-thickness line across the road
-- `orientation` is always `"none"`
-- Only `ParamPoly3` and simple `Line` geometry are fully supported for road sampling; other geometry types fall back to straight-line approximation
-- CARLA's current OpenDRIVE object parser does not specifically handle `type="stopLine"` objects; see [Stop Line Position Discrepancies](limitations/stop-line-position.md) for details
+- Only the **nearest road** (within 50 m) is associated with each stop
+  line; stop lines near road boundaries may be assigned to the closest
+  road rather than the most semantically correct one.
+- `width` is a painted-thickness constant (`stopline.width`) rather than
+  a geometric measurement; the actual painted-stop-line thickness in the
+  source map is not preserved.
+- `orientation` is always `"none"` for the standard form (`"-"` for the
+  CARLA `Stencil_STOP` form).
+- Only `ParamPoly3` and simple `Line` geometry are fully supported for
+  road sampling; other geometry types fall back to straight-line
+  approximation.
+- CARLA's stock OpenDRIVE object parser does **not** consume
+  `<object type="stopLine">`; use `target=carla` (or
+  `stopline.carla_stop_line=true`) to emit the `Stencil_STOP` form CARLA
+  actually reads. See
+  [Stop Line Position Discrepancies](limitations/stop-line-position.md)
+  for the architectural background.
 
 ## See Also
 
