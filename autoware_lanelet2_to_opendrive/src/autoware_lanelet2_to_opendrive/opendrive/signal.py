@@ -323,8 +323,14 @@ class Signal:
             road_elevation_at_s: Elevation of the road surface at position s (m).
                 If provided, used to calculate relative z_offset from
                 signal's absolute height. If None, uses absolute height.
-            light_linestring: Specific Light Bulb LineString to use for this
-                signal. If None, falls back to trafficLights[0].
+            light_linestring: Geometry LineString to use for the signal's
+                position/centroid (sourced from `traffic_light.trafficLights`,
+                NOT from `lightBulbs`). If None, falls back to
+                `traffic_light.trafficLights[0]`. Note: arrow attributes for
+                `@subtype` are sourced separately via
+                `_compute_signal_subtype_from_traffic_light`, which reads
+                `lightBulbs()`. Despite the historical name, this parameter
+                does not carry per-bulb attributes.
             position_inertial: Physical position of the signal in inertial
                 coordinates. If provided, attached to the Signal object.
 
