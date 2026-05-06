@@ -249,6 +249,25 @@ class Line(GeometryBase):
         ET.SubElement(elem, "line")
         return elem
 
+    @classmethod
+    def from_spline_window(
+        cls, spline: "Splines", s_start: float, s_end: float
+    ) -> "Line":
+        """Build a Line covering arc-length [s_start, s_end] of ``spline``.
+
+        Heading is taken from the spline tangent at ``s_start`` so that
+        adjacent primitives are G1-continuous when their bounds match.
+        """
+        start = spline.evaluate(s_start, derivative=0)
+        tangent = spline.evaluate(s_start, derivative=1)
+        return cls(
+            s=s_start,
+            x=float(start[0]),
+            y=float(start[1]),
+            hdg=float(np.arctan2(tangent[1], tangent[0])),
+            length=float(s_end - s_start),
+        )
+
 
 @dataclass
 class Arc(GeometryBase):
