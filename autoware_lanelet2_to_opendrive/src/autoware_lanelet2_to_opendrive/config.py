@@ -23,6 +23,11 @@ class GeometryConstants:
         divergence_default_lane_width: Default width (m) emitted on synthetic
             divergence/merge connecting-road lanes so the rendered XODR
             ``<width>`` element is always present. Issue #291.
+        sidewalk_height: Height (m) emitted on ``lane[type=sidewalk]`` and
+            ``lane[type=shoulder]`` when the inner boundary LineString has
+            ``type=curbstone`` or ``type=road_border``. Both ``inner`` and
+            ``outer`` of the emitted ``<height>`` are set to this value, so
+            the sidewalk surface sits flat on top of the curb. Issue #469.
     """
 
     epsilon: float = 1e-10
@@ -30,6 +35,7 @@ class GeometryConstants:
     divergence_endpoint_tolerance: float = 0.5
     divergence_min_segment_length: float = 0.01
     divergence_default_lane_width: float = 3.5
+    sidewalk_height: float = 0.15
 
 
 @dataclass(frozen=True)
