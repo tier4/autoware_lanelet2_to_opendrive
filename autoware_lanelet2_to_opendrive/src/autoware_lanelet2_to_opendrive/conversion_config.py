@@ -191,6 +191,31 @@ class TrafficLightConfig:
 
 
 @dataclass
+class ParkingLotConfig:
+    """Configuration for parking-lot emission (P2-1).
+
+    Attributes:
+        enabled: Master toggle. Default True (purely additive).
+        default_stall_width: Width assigned to each <object
+            type="parkingSpace"> in metres. Defaults to 2.5 m,
+            slightly wider than the Autoware light-vehicle stall
+            standard.
+        nearest_area_threshold_m: Maximum distance between a stall
+            LineString centroid and the closest parking_lot area
+            for the stall to be associated with that area. Stalls
+            beyond this distance are dropped with a warning.
+        min_area_polygon_m2: Minimum polygon area of a parking-lot
+            polygon (m²). Areas smaller than this are skipped with a
+            warning.
+    """
+
+    enabled: bool = True
+    default_stall_width: float = 2.5
+    nearest_area_threshold_m: float = 30.0
+    min_area_polygon_m2: float = 1.0
+
+
+@dataclass
 class ConversionConfig:
     """Configuration for Lanelet2 to OpenDRIVE conversion.
 
@@ -215,6 +240,9 @@ class ConversionConfig:
         traffic_light: Configuration for traffic light actor spawn offset.
             The offsets are rotated by hdg and subtracted from positionInertial
             coordinates to adjust signal placement in CARLA.
+        parking_lot: Configuration for parking-lot emission (P2-1). Controls
+            whether parking spaces and areas are emitted as OpenDRIVE objects,
+            and the geometry parameters used for stall sizing and association.
     """
 
     output_path: Optional[Path] = None
@@ -229,6 +257,7 @@ class ConversionConfig:
     )
     stopline: StopLineConfig = field(default_factory=StopLineConfig)
     traffic_light: TrafficLightConfig = field(default_factory=TrafficLightConfig)
+    parking_lot: ParkingLotConfig = field(default_factory=ParkingLotConfig)
 
     def __post_init__(self):
         """Validate configuration after initialization."""

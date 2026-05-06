@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic Lanelet2 fixture for Task 3 (P2-1) parking-lot emission.
+
+  Layout (looking from above, world axes; long axis along world-x):
+    Parking lot Area: 20 m (x) x 10 m (y) rectangle
+       outer corners at (81720, 50180), (81740, 50180),
+                        (81740, 50190), (81720, 50190).
+    Four parking-space stalls arranged in one row inside the lot,
+    each a 2-node LineString perpendicular to the long axis (along
+    world-y).  Stalls span y in [50182, 50188] (length 6 m) and are
+    evenly placed along x at 81724, 81728, 81732, 81736.
+    Adjacent road lanelet sits ~10 m north of the lot at y=50200..50203
+    (clear of the parking lot polygon).
+
+  All nodes carry local_x/local_y/ele/mgrs_code so the MGRSProjector
+  (mgrs_grid=54SUE, offset=81655.73/50137.43) used by the
+  example_mgrs_offset map config resolves them.
+
+  Lanelet2 area encoding: a relation with type=multipolygon and
+  subtype=parking_lot.  Outer-bound members are <way>s with role=outer.
+  The parking-lot Area is split into four outer ways (one per side of
+  the rectangle) so the resulting Area.outerBound is a closed loop
+  of LineString3d segments.  parking.py's _attr_matches helper accepts
+  subtype=parking_lot, so this matches the production code path.
+
+  parking_space stalls are <way>s with type=parking_space, again per
+  parking.py's _attr_matches helper.
+-->
+<osm generator="parking_lot_mini_fixture">
+  <MetaInfo format_version="1" map_version="1"/>
+
+  <!-- ============================================================
+       Parking-lot polygon: 4 corner nodes
+       ============================================================ -->
+  <node id="6001" lat="35.68800" lon="139.69280">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50180.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6002" lat="35.68800" lon="139.69300">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81740.0"/>
+    <tag k="local_y" v="50180.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6003" lat="35.68810" lon="139.69300">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81740.0"/>
+    <tag k="local_y" v="50190.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6004" lat="35.68810" lon="139.69280">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50190.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- ============================================================
+       Stall LineString endpoints: 4 stalls x 2 nodes = 8 nodes
+       Each stall is perpendicular to the long axis (along y),
+       running from y=50182 to y=50188 at fixed x.
+       ============================================================ -->
+  <node id="6101" lat="35.68802" lon="139.69284">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81724.0"/>
+    <tag k="local_y" v="50182.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6102" lat="35.68808" lon="139.69284">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81724.0"/>
+    <tag k="local_y" v="50188.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6103" lat="35.68802" lon="139.69288">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81728.0"/>
+    <tag k="local_y" v="50182.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6104" lat="35.68808" lon="139.69288">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81728.0"/>
+    <tag k="local_y" v="50188.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6105" lat="35.68802" lon="139.69292">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81732.0"/>
+    <tag k="local_y" v="50182.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6106" lat="35.68808" lon="139.69292">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81732.0"/>
+    <tag k="local_y" v="50188.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6107" lat="35.68802" lon="139.69296">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81736.0"/>
+    <tag k="local_y" v="50182.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6108" lat="35.68808" lon="139.69296">
+    <tag k="mgrs_code" v="54SUE817501"/>
+    <tag k="local_x" v="81736.0"/>
+    <tag k="local_y" v="50188.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- ============================================================
+       Adjacent road lanelet: 4 boundary nodes at y=50200/50203
+       ============================================================ -->
+  <node id="6201" lat="35.68820" lon="139.69280">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6202" lat="35.68820" lon="139.69300">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81740.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6203" lat="35.68823" lon="139.69280">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50203.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="6204" lat="35.68823" lon="139.69300">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81740.0"/>
+    <tag k="local_y" v="50203.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- ============================================================
+       Parking-lot outer boundary: 4 ways forming a closed loop
+       ============================================================ -->
+  <!-- Bottom edge (y=50180): 6001 -> 6002 -->
+  <way id="7001">
+    <nd ref="6001"/>
+    <nd ref="6002"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Right edge (x=81740): 6002 -> 6003 -->
+  <way id="7002">
+    <nd ref="6002"/>
+    <nd ref="6003"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Top edge (y=50190): 6003 -> 6004 -->
+  <way id="7003">
+    <nd ref="6003"/>
+    <nd ref="6004"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Left edge (x=81720): 6004 -> 6001 -->
+  <way id="7004">
+    <nd ref="6004"/>
+    <nd ref="6001"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- ============================================================
+       Parking-space stall LineStrings (perpendicular to long axis)
+       ============================================================ -->
+  <way id="7101">
+    <nd ref="6101"/>
+    <nd ref="6102"/>
+    <tag k="type" v="parking_space"/>
+  </way>
+  <way id="7102">
+    <nd ref="6103"/>
+    <nd ref="6104"/>
+    <tag k="type" v="parking_space"/>
+  </way>
+  <way id="7103">
+    <nd ref="6105"/>
+    <nd ref="6106"/>
+    <tag k="type" v="parking_space"/>
+  </way>
+  <way id="7104">
+    <nd ref="6107"/>
+    <nd ref="6108"/>
+    <tag k="type" v="parking_space"/>
+  </way>
+
+  <!-- ============================================================
+       Adjacent road lanelet boundaries
+       ============================================================ -->
+  <!-- Left bound (south side, y=50200) -->
+  <way id="7201">
+    <nd ref="6201"/>
+    <nd ref="6202"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Right bound (north side, y=50203) -->
+  <way id="7202">
+    <nd ref="6203"/>
+    <nd ref="6204"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- ============================================================
+       Parking-lot Area (multipolygon relation)
+       Lanelet2 represents an Area as a relation with
+       type=multipolygon and outer/inner ways.  parking.py's
+       _attr_matches accepts subtype=parking_lot.
+       ============================================================ -->
+  <relation id="8001">
+    <member type="way" role="outer" ref="7001"/>
+    <member type="way" role="outer" ref="7002"/>
+    <member type="way" role="outer" ref="7003"/>
+    <member type="way" role="outer" ref="7004"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="subtype" v="parking_lot"/>
+    <tag k="area" v="yes"/>
+  </relation>
+
+  <!-- Adjacent road lanelet (so the file loads through the standard
+       converter pipeline alongside the parking lot). -->
+  <relation id="8002">
+    <member type="way" role="left" ref="7201"/>
+    <member type="way" role="right" ref="7202"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+  </relation>
+</osm>

@@ -45,7 +45,8 @@ flowchart TD
     O --> P[Build Junction Connections]
     P --> R[Extract Crosswalk Objects<br/>subtype=crosswalk lanelets]
     R --> S[Extract Stop Line Objects<br/>type=stop_line linestrings]
-    S --> Q[Generate OpenDRIVE XML]
+    S --> T[Build Parking Lots<br/>Area subtype=parking_lot]
+    T --> Q[Generate OpenDRIVE XML]
 
     style A fill:#e1f5ff
     style Q fill:#c8e6c9
@@ -54,6 +55,7 @@ flowchart TD
     style N fill:#f8bbd0
     style R fill:#e8f5e9
     style S fill:#f3e5f5
+    style T fill:#fff3e0
 ```
 
 ---
@@ -556,7 +558,8 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 | Tag | Source | Purpose | Mapping |
 |-----|--------|---------|---------|
-| `type` or `subtype` | Traffic light regulatory element | Signal type | `"red_yellow_green"` or `"3_lights"` → `TRAFFIC_LIGHT_3_LIGHTS`<br/>`"pedestrian"` → `TRAFFIC_LIGHT_PEDESTRIAN`<br/>`"arrow"` → `TRAFFIC_LIGHT_ARROW` |
+| `subtype` (RE attr) | Traffic light regulatory element | Signal type | `"pedestrian"` → `TRAFFIC_LIGHT_PEDESTRIAN`<br/>otherwise → `TRAFFIC_LIGHT_3_LIGHTS` |
+| `arrow` (light_bulbs point attr) | Per-bulb attribute on `light_bulbs` LineString | Signal subtype bitmask | `left=1`, `right=2`, `up=4` (OR-combined; see `signals.md`) |
 | `trafficLights` | Regulatory element | Signal geometry | LineString3d → Signal position |
 
 **Processing:**
@@ -672,6 +675,36 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 !!! info "Detailed Documentation"
     For full details on the stop line conversion algorithm, see [Stop Line Objects](stop_line_objects.md).
+
+---
+
+### Stage 8.9: Parking Lot Building
+
+**Purpose:** Convert Lanelet2 `Area` elements with `subtype="parking_lot"` (or `type="parking_lot"`) into synthetic OpenDRIVE roads, each carrying `<lane type="parking">` lanes that span the drivable width of the area and one `<object type="parkingSpace">` per individual stall. Unlike Stages 8.5 and 8.6, which attach objects to pre-existing roads, this stage creates brand-new synthetic roads that represent the parking-lot geometry rather than traffic-flow paths.
+
+**Tags Used:**
+
+| Tag | Purpose |
+|-----|---------|
+| `type="parking_lot"` or `subtype="parking_lot"` (on `Area`) | Identifies parking-lot polygons |
+| `type="parking_space"` or `subtype="parking_space"` (on `LineString`) | Identifies individual stalls within a parking lot |
+
+**Processing:**
+
+1. Filter all `Area`s in `areaLayer` whose `type` or `subtype` attribute equals `"parking_lot"`. Skip areas whose polygon area is smaller than `min_area_polygon_m2` (default 1.0 m²) and emit a warning.
+2. Filter all `LineString`s in `lineStringLayer` whose `type` or `subtype` attribute equals `"parking_space"`. Assign each stall to the nearest parking-lot area within `nearest_area_threshold_m` (default 30 m); stalls that have no qualifying area within this radius are dropped with a warning.
+3. For each parking-lot area, derive an oriented bounding box (OBB) by running 2-D PCA over the polygon vertices. The PCA yields a centre point, a principal long axis, an along-axis length, and an across-axis length.
+4. Build a synthetic `Road` with:
+   - A single `<geometry type="line">` placed along the OBB long axis, starting at one end of the bounding box.
+   - One `<laneSection>` containing a centre lane (id=0, `type=none`) plus two parking lanes (id=-1 and id=+1, both `<lane type="parking">`) each with constant width equal to across-axis length / 2.
+5. For each stall belonging to the area: project the stall `LineString` centroid onto the new road's reference line via Frenet projection to obtain `(s, t)`; compute `hdg` as the angle between the stall `LineString` direction and the reference-line tangent; set `length` to the stall `LineString`'s polyline length and `width` to `default_stall_width` (default 2.5 m).
+6. Append the `ParkingSpaceObject` instances to `road.objects`; append the synthetic road to `all_roads`.
+
+**Output:** `all_roads` extended with synthetic parking roads, each carrying its associated `ParkingSpaceObject` list.
+
+**Code Location:** [`opendrive/parking.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/opendrive/parking.py), [`main.py` – Step 6.9 in `_Lanelet2ToOpenDRIVEConverter.convert()`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/src/autoware_lanelet2_to_opendrive/main.py)
+
+**Scope notes:** Per spec §2.2, the following are intentionally out of scope for this stage: curved geometry along the road reference line (only straight-line OBB axis is used), multi-row decomposition within a single parking-lot area, multi-level or stacked parking structures, predecessor/successor road linkage connecting synthetic parking roads to adjacent traffic roads, and export of the parking-lot polygon outline as an OpenDRIVE outline element.
 
 ---
 

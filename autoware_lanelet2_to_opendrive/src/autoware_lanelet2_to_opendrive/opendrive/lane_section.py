@@ -36,7 +36,12 @@ class LaneSection:
 
         # Lanes are stored by ID: negative for right, positive for left, 0 for center
         self.left_lanes: Dict[int, "Lane"] = {}  # Positive IDs
-        self.center_lane: Optional[ReferenceLine] = None  # ID = 0
+        # The centre slot accepts either a ``ReferenceLine`` (the lanelet-driven
+        # path wraps a ``Lane`` inside it) or a bare ``Lane`` (the synthetic
+        # parking-lot road path needs no fitted spline).  Both expose
+        # ``lane_id`` and ``to_xml``; ``get_all_lanes`` unwraps the
+        # ``ReferenceLine`` form via ``_lane`` when present.
+        self.center_lane: Optional[Union[ReferenceLine, "Lane"]] = None  # ID = 0
         self.right_lanes: Dict[int, "Lane"] = {}  # Negative IDs
 
         # Lane offset for single lane sections
@@ -260,9 +265,11 @@ class LaneSection:
         for lane_id in sorted(self.left_lanes.keys()):
             all_lanes.append(self.left_lanes[lane_id])
 
-        # Add center lane
-        if self.center_lane:
-            all_lanes.append(self.center_lane._lane)
+        # Add center lane.  ``ReferenceLine`` wraps the underlying ``Lane`` in
+        # ``_lane``; the parking-lot path stores a bare ``Lane`` directly.
+        if self.center_lane is not None:
+            inner = getattr(self.center_lane, "_lane", None)
+            all_lanes.append(inner if inner is not None else self.center_lane)
 
         # Add right lanes (sorted)
         for lane_id in sorted(self.right_lanes.keys(), reverse=True):

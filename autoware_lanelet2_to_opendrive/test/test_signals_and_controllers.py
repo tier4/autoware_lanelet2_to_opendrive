@@ -483,3 +483,37 @@ def test_dedup_all_empty_skipped():
 
     assert len(result.signals) == 0
     assert len(result.controllers) == 0
+
+
+def test_real_data_emits_arrow_subtypes(lanelet_map):
+    """Real Autoware data drives the constructor's subtype path to non-trivial values.
+
+    Exercises `_compute_signal_subtype_from_traffic_light` — the helper the
+    `Signal.construct_from_lanelet2_traffic_signal` constructor calls — against
+    the `AutowareTrafficLight` regulatory elements in `nishishinjuku.osm`.
+    Going through the RE-level aggregator (rather than just
+    `_compute_signal_subtype_from_bulbs` on individual LineStrings) is the test
+    that would have caught wiring bugs where the constructor reads from the
+    geometry LineString instead of `lightBulbs()`.
+    """
+    import autoware_lanelet2_extension_python.regulatory_elements as ll2_ext_reg
+
+    from autoware_lanelet2_to_opendrive.opendrive.signal import (
+        _compute_signal_subtype_from_traffic_light,
+    )
+
+    subtypes_seen: set = set()
+    for reg_elem in lanelet_map.regulatoryElementLayer:
+        if not isinstance(reg_elem, ll2_ext_reg.AutowareTrafficLight):
+            continue
+        subtypes_seen.add(_compute_signal_subtype_from_traffic_light(reg_elem))
+
+    # The dataset has both pure 3-aspect REs and arrow-bearing REs.
+    assert 0 in subtypes_seen, (
+        "Expected at least one pure 3-aspect RE (subtype=0) but only saw "
+        f"{sorted(subtypes_seen)}"
+    )
+    assert any(s >= 1 for s in subtypes_seen), (
+        "Expected at least one arrow-bearing RE (subtype>=1) but only saw "
+        f"{sorted(subtypes_seen)}"
+    )
