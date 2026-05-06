@@ -1252,11 +1252,17 @@ This section summarizes which Lanelet2 tags are used by the converter and which 
 
 ### Tags NOT Used by Converter
 
+The Lanelet2 `participant:*` attribute family
+(`participant:vehicle`, `participant:pedestrian`, `participant:bicycle`,
+`participant:bus`, `participant:taxi`, `participant:truck`,
+`participant:motorcycle`) is mapped to OpenDRIVE 1.4
+`<lane><access>` elements (#468). See
+`carla_opendrive_lanelet2_mapping.md` for the per-attribute matrix.
+
 The following Lanelet2 tags are commonly found in maps but are **not currently used** by this converter:
 
 | Tag | Scope | Typical Use | Reason Not Used | Future Consideration |
 |-----|-------|-------------|-----------------|----------------------|
-| **`participant`** | Lanelet | Specifies allowed users (vehicle, pedestrian, bicycle) | Not mapped to OpenDRIVE lane access restrictions | Could enhance lane `<access>` elements |
 | **`one_way`** | Lanelet | Indicates one-way streets | Lanelet2 directionality already encoded in geometry | Redundant with Lanelet2 semantics |
 | **`vehicle`** | Lanelet | Vehicle type restrictions (car, bus, truck) | Not mapped to OpenDRIVE lane restrictions | Could enhance lane `<access>` rules |
 | **`region`** | Lanelet | Administrative region or area type | Not relevant to OpenDRIVE geometry | Out of scope for geometric conversion |
@@ -1390,7 +1396,6 @@ To ensure optimal conversion results:
 Potential improvements to tag handling:
 
 1. **Extended Tag Support:**
-   - Support `participant` tag for lane access restrictions
    - Support `vehicle` tag for vehicle type restrictions
    - Support general `traffic_sign` regulatory elements
 
