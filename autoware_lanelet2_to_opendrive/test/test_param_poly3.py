@@ -353,3 +353,76 @@ class TestReplaceSubnormal:
         assert poly3_elem.get("bV") == "0.01"
         assert poly3_elem.get("cV") == "-0.02"
         assert poly3_elem.get("dV") == "0.003"
+
+
+class TestEvaluatePlanViewWorldArc:
+    """Tests for arc evaluation in evaluate_plan_view_world (#466)."""
+
+    def test_unit_circle_quarter_arc(self):
+        """κ=1, length=π/2, start at origin heading +x → end at (1, 1)."""
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            evaluate_plan_view_world,
+        )
+
+        wx, wy = evaluate_plan_view_world(
+            x=0.0, y=0.0, hdg=0.0, p=np.pi / 2.0, arc_curvature=1.0
+        )
+        assert wx == pytest.approx(1.0, abs=1e-9)
+        assert wy == pytest.approx(1.0, abs=1e-9)
+
+    def test_negative_curvature_quarter_arc(self):
+        """κ=-1, length=π/2, start at origin heading +x → end at (1, -1)."""
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            evaluate_plan_view_world,
+        )
+
+        wx, wy = evaluate_plan_view_world(
+            x=0.0, y=0.0, hdg=0.0, p=np.pi / 2.0, arc_curvature=-1.0
+        )
+        assert wx == pytest.approx(1.0, abs=1e-9)
+        assert wy == pytest.approx(-1.0, abs=1e-9)
+
+    def test_zero_curvature_falls_back_to_line(self):
+        """κ below epsilon must match the straight-line fallback path."""
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            evaluate_plan_view_world,
+        )
+
+        wx_arc, wy_arc = evaluate_plan_view_world(
+            x=10.0, y=20.0, hdg=np.pi / 4.0, p=5.0, arc_curvature=0.0
+        )
+        wx_line, wy_line = evaluate_plan_view_world(
+            x=10.0, y=20.0, hdg=np.pi / 4.0, p=5.0
+        )
+        assert wx_arc == pytest.approx(wx_line, abs=1e-12)
+        assert wy_arc == pytest.approx(wy_line, abs=1e-12)
+
+    def test_translated_rotated_arc(self):
+        """Origin and heading offsets compose correctly with arc evaluation."""
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            evaluate_plan_view_world,
+        )
+
+        # κ=1, p=π → 180° turn, end is 2 units to the "left" of start tangent.
+        wx, wy = evaluate_plan_view_world(
+            x=5.0, y=-3.0, hdg=np.pi / 2.0, p=np.pi, arc_curvature=1.0
+        )
+        # heading +y, turn left → end at (5 - 2, -3)
+        assert wx == pytest.approx(3.0, abs=1e-9)
+        assert wy == pytest.approx(-3.0, abs=1e-9)
+
+    def test_rejects_both_arc_and_paramPoly3(self):
+        """Mutually exclusive kwargs must raise ValueError."""
+        from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+            evaluate_plan_view_world,
+        )
+
+        with pytest.raises(ValueError):
+            evaluate_plan_view_world(
+                x=0.0,
+                y=0.0,
+                hdg=0.0,
+                p=1.0,
+                param_poly3_coeffs=(0, 1, 0, 0, 0, 0, 0, 0),
+                arc_curvature=0.5,
+            )

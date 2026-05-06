@@ -21,32 +21,53 @@ def evaluate_plan_view_world(
     param_poly3_coeffs: Optional[
         Tuple[float, float, float, float, float, float, float, float]
     ] = None,
+    arc_curvature: Optional[float] = None,
 ) -> Tuple[float, float]:
     """Evaluate a planView geometry at parameter ``p`` in the world XY frame.
 
-    This is the shared pure kernel used by both the dataclass-based path
-    (``road.py``) and the lxml-based path (``evaluate_road_endpoints``).
-
-    Only ``<paramPoly3>`` and ``<line>`` geometries are supported today.
-    If ``param_poly3_coeffs`` is ``None`` the function falls back to a
-    straight line along ``hdg`` (equivalent to an OpenDRIVE ``<line/>``).
-    Arc and spiral geometries would require extending this helper.
+    Supports ``<line/>``, ``<paramPoly3>`` and ``<arc>`` geometries. The
+    ``arc_curvature`` and ``param_poly3_coeffs`` arguments are mutually
+    exclusive; passing both raises ``ValueError``. With both set to
+    ``None`` the function falls back to a straight line along ``hdg``
+    (``<line/>`` semantics). ``arc_curvature`` magnitudes below
+    ``DEFAULT_CONFIG.geometry.epsilon`` are also treated as a straight
+    line to avoid 1/κ singularity.
 
     Args:
         x: Geometry start X (world frame).
         y: Geometry start Y (world frame).
         hdg: Geometry heading at start (radians).
-        p: Arc-length parameter at which to evaluate (``0`` gives the start,
-            ``length`` gives the end).
-        param_poly3_coeffs: Optional ``(aU, bU, cU, dU, aV, bV, cV, dV)``
-            cubic coefficients.  When ``None`` the geometry is treated as a
-            straight line.
+        p: Arc-length parameter at which to evaluate (``0`` gives the
+            start, ``length`` gives the end).
+        param_poly3_coeffs: Optional ``(aU, bU, cU, dU, aV, bV, cV, dV)``.
+        arc_curvature: Optional constant curvature κ (1/m). Positive κ
+            curves to the left of the start heading; negative to the right.
 
     Returns:
         Tuple ``(wx, wy)`` with the evaluated world coordinates.
     """
+    from ..config import DEFAULT_CONFIG
+
+    if param_poly3_coeffs is not None and arc_curvature is not None:
+        raise ValueError(
+            "evaluate_plan_view_world: param_poly3_coeffs and arc_curvature "
+            "are mutually exclusive"
+        )
+
     cos_hdg = np.cos(hdg)
     sin_hdg = np.sin(hdg)
+
+    if (
+        arc_curvature is not None
+        and abs(arc_curvature) > DEFAULT_CONFIG.geometry.epsilon
+    ):
+        kappa = arc_curvature
+        dhdg = kappa * p
+        local_u = np.sin(dhdg) / kappa
+        local_v = (1.0 - np.cos(dhdg)) / kappa
+        wx = x + local_u * cos_hdg - local_v * sin_hdg
+        wy = y + local_u * sin_hdg + local_v * cos_hdg
+        return (wx, wy)
 
     if param_poly3_coeffs is not None:
         aU, bU, cU, dU, aV, bV, cV, dV = param_poly3_coeffs
@@ -133,8 +154,8 @@ def _eval_geometry_world(
     """Evaluate a lxml planView ``<geometry>`` element at arc-length ``p``.
 
     Thin lxml-attribute adapter around :func:`evaluate_plan_view_world`.
-    Only ``<paramPoly3>`` and ``<line>`` geometries are supported today —
-    arc and spiral would need the shared kernel extended.
+    Supports ``<paramPoly3>``, ``<line>`` and ``<arc>`` geometries; spiral
+    would need the shared kernel further extended.
     """
     try:
         x = float(geom_elem.get("x"))
