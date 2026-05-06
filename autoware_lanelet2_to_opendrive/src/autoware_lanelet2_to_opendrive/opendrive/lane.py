@@ -1,5 +1,6 @@
 """Lane implementation for OpenDRIVE conversion."""
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 import lanelet2
 import lxml.etree as ET
@@ -19,6 +20,19 @@ from .opendrive_dataclass import (
     LaneAccess,
     SpeedUnit,
 )
+
+logger = logging.getLogger(__name__)
+
+
+_PARTICIPANT_TO_RESTRICTION: Dict[str, str] = {
+    "vehicle": "passengerCar",
+    "pedestrian": "pedestrian",
+    "bicycle": "bicycle",
+    "bus": "bus",
+    "taxi": "taxi",
+    "truck": "truck",
+    "motorcycle": "motorcycle",
+}
 
 
 class Lane:
@@ -266,6 +280,40 @@ class Lane:
             except (ValueError, TypeError):
                 # If speed limit cannot be parsed, skip it
                 pass
+
+        # Translate participant:* attributes into <access> entries (#468).
+        # Lanelet2 conventions:
+        #   participant:X=yes -> allow X
+        #   participant:X=no  -> deny X
+        # Only OpenDRIVE 1.4 e_accessRestrictionType values are emitted;
+        # unknown participants and non-yes/no values are skipped (debug log).
+        for key, value in lanelet.attributes.items():
+            if not key.startswith("participant:"):
+                continue
+            participant = key[len("participant:") :]
+            restriction = _PARTICIPANT_TO_RESTRICTION.get(participant)
+            if restriction is None:
+                logger.debug(
+                    "Skipping unknown participant '%s' on lanelet %d",
+                    participant,
+                    lanelet.id,
+                )
+                continue
+            if value == "yes":
+                rule = "allow"
+            elif value == "no":
+                rule = "deny"
+            else:
+                logger.debug(
+                    "Skipping participant '%s'='%s' (not yes/no) on lanelet %d",
+                    participant,
+                    value,
+                    lanelet.id,
+                )
+                continue
+            lane._add_access(
+                LaneAccess(s_offset=0.0, rule=rule, restriction=restriction)
+            )
 
         return lane
 
