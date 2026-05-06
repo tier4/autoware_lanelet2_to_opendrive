@@ -217,6 +217,7 @@ if TYPE_CHECKING:
     from .lane import Lane
     from .junction import Junction
     from .objects import CrosswalkObject, StopLineObject
+    from .parking import ParkingSpaceObject
 
 
 @dataclass
@@ -235,7 +236,9 @@ class Road:
     signals: Optional[List["Signal"]] = None
     elevation_offset: float = 0.0  # Absolute elevation at road start (s=0)
     road_types: Optional[List[RoadTypeDefinition]] = None
-    objects: Optional[List[Union["CrosswalkObject", "StopLineObject"]]] = None
+    objects: Optional[
+        List[Union["CrosswalkObject", "StopLineObject", "ParkingSpaceObject"]]
+    ] = None
     # World-frame 3D endpoints of the reference line (s=0 and s=length).
     # Populated by ``construct_from_lanelet_groups`` so the junction phase
     # can propagate these as overrides into connecting roads (P0-2).
