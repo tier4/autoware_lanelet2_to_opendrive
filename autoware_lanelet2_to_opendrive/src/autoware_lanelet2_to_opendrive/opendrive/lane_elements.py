@@ -246,6 +246,29 @@ class LaneSpeed:
 
 
 @dataclass
+class LaneAccess:
+    """OpenDRIVE 1.4 lane access restriction.
+
+    Corresponds to a single ``<lane><access>`` element. ``restriction``
+    must be a value from the OpenDRIVE 1.4 ``e_accessRestrictionType``
+    enumeration (e.g. ``passengerCar``, ``pedestrian``, ``bicycle``,
+    ``bus``, ``taxi``, ``truck``, ``motorcycle``).
+    """
+
+    s_offset: float
+    rule: str
+    restriction: str
+
+    def to_xml(self) -> ET.Element:
+        """Convert to XML element."""
+        elem = ET.Element("access")
+        elem.set("sOffset", str(self.s_offset))
+        elem.set("rule", self.rule)
+        elem.set("restriction", self.restriction)
+        return elem
+
+
+@dataclass
 class RoadTypeSpeed:
     """Road type speed limit definition.
 
