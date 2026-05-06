@@ -1242,6 +1242,7 @@ This section summarizes which Lanelet2 tags are used by the converter and which 
 | **`turn_direction`** | Lanelet | Junction detection | Identifies intersection lanelets | Yes (for junctions) |
 | **`type`** / **`subtype`** | Traffic light | Signal type mapping | Maps to OpenDRIVE signal types | No (defaults available) |
 | **`trafficLights`** | Regulatory element | Signal positioning | Provides signal geometry | Yes (for signals) |
+| **`participant:vehicle\|pedestrian\|bicycle\|bus\|taxi\|truck\|motorcycle`** | Lanelet | Lane access restriction | Emits `<lane><access>` (#468) | No (additive metadata) |
 
 !!! note "Tag Extraction Priority"
     - **Lane level:** `subtype`, `speed_limit` are read per-lanelet
@@ -1251,13 +1252,6 @@ This section summarizes which Lanelet2 tags are used by the converter and which 
 ---
 
 ### Tags NOT Used by Converter
-
-The Lanelet2 `participant:*` attribute family
-(`participant:vehicle`, `participant:pedestrian`, `participant:bicycle`,
-`participant:bus`, `participant:taxi`, `participant:truck`,
-`participant:motorcycle`) is mapped to OpenDRIVE 1.4
-`<lane><access>` elements (#468). See
-`carla_opendrive_lanelet2_mapping.md` for the per-attribute matrix.
 
 The following Lanelet2 tags are commonly found in maps but are **not currently used** by this converter:
 
