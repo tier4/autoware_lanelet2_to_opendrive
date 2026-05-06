@@ -461,7 +461,7 @@ class Signal:
 class SignalType:
     """Common signal type IDs for OpenDRIVE signals."""
 
-    # Traffic lights (type 1000001-1000003 commonly used with country="DE")
+    # Traffic lights (type 1000001 vehicle, 1000002 pedestrian; country="DE")
     TRAFFIC_LIGHT_3_LIGHTS = (
         1000001  # Standard 3-light traffic signal (red, yellow, green)
     )
