@@ -58,9 +58,10 @@ class Lane:
 
         Args:
             lane_id: Lane ID. Negative for right lanes, positive for left lanes,
-                ``0`` for the centre/reference lane. May be ``None`` during
-                multi-step construction; the value MUST be resolved before
-                ``to_xml()`` is called or the lane is added to a ``LaneSection``.
+                ``0`` for the centre/reference lane. ``None`` is accepted as a
+                sentinel for partially-constructed lanes (e.g. test fixtures);
+                the value MUST be resolved to an ``int`` before ``to_xml()`` is
+                called or the lane is added to a ``LaneSection``.
             lane_type: Type of the lane
             level: Whether the lane is level
             predecessor: Link to predecessor lane
