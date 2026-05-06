@@ -107,8 +107,10 @@ The encoding is a bitmask:
 
 Sentinel values:
 
-- `-1`: the converter could not analyse a `light_bulbs` LineString (none
-  attached, or empty).
+- `-1`: the converter could not analyse `light_bulbs` for this regulatory
+  element. This happens when the RE is a vanilla `lanelet2.TrafficLight`
+  (no `lightBulbs` accessor), when `AutowareTrafficLight.lightBulbs()`
+  returns an empty list, or when every bulb LineString it returns is empty.
 - `0`: bulbs were analysed and none carry an `arrow` attribute (the standard
   three-aspect signal case).
 - `1`–`7`: bitwise OR of the bits above. For example, `subtype="3"` means

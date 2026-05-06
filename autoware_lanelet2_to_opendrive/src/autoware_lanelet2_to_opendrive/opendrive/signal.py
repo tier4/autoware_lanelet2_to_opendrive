@@ -400,7 +400,11 @@ class Signal:
         if signal_type == SignalType.TRAFFIC_LIGHT_PEDESTRIAN:
             signal_subtype = TrafficLightArrowBit.NO_BULB_INFO
         else:
-            signal_subtype = _compute_signal_subtype_from_bulbs(light_linestring)
+            # Source the arrow bitmask from `light_bulbs` LineStrings (per-bulb
+            # `arrow` attributes), NOT from `light_linestring` — the latter is
+            # the geometry/physical-shape LineString from `traffic_light.trafficLights`
+            # and never carries arrow attributes.
+            signal_subtype = _compute_signal_subtype_from_traffic_light(traffic_light)
 
         # Determine signal dimensions (width x height)
         # Default dimensions for a standard traffic light
@@ -571,3 +575,55 @@ def _compute_signal_subtype_from_bulbs(light_linestring: Any) -> int:
             continue
         mask |= bit
     return mask
+
+
+def _compute_signal_subtype_from_traffic_light(traffic_light: Any) -> int:
+    """Aggregate the arrow bitmask across all `light_bulbs` LineStrings on a RE.
+
+    The OpenDRIVE `<signal>` represents a regulatory element, not a single
+    physical fixture. An `AutowareTrafficLight` RE may carry several
+    `light_bulbs` LineStrings (e.g. a primary signal plus a repeater); this
+    helper ORs the bits from every non-empty bulb LineString so the emitted
+    `@subtype` reflects every direction the RE governs.
+
+    Args:
+        traffic_light: A Lanelet2 traffic-light regulatory element. Vanilla
+            `lanelet2.lanelet2_core.TrafficLight` instances do not expose
+            bulb points; only the Autoware-specific `AutowareTrafficLight`
+            subclass (from `autoware_lanelet2_extension_python`) does, via
+            its `lightBulbs` accessor (callable in current Autoware
+            releases; tolerated as a property here for forward compat).
+
+    Returns:
+        `TrafficLightArrowBit.NO_BULB_INFO` (-1) if the RE exposes no bulb
+        LineStrings, or only empty ones, or the accessor raises.
+        `TrafficLightArrowBit.NO_ARROWS` (0) if at least one non-empty
+        bulb LineString is present and none carry `arrow` attributes.
+        Otherwise the bitwise OR of `TrafficLightArrowBit.LEFT/RIGHT/STRAIGHT`.
+    """
+    accessor = getattr(traffic_light, "lightBulbs", None)
+    if accessor is None:
+        return TrafficLightArrowBit.NO_BULB_INFO
+    try:
+        bulbs = accessor() if callable(accessor) else accessor
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "lightBulbs accessor on RE %s raised %r; treating as NO_BULB_INFO",
+            getattr(traffic_light, "id", "?"),
+            exc,
+        )
+        return TrafficLightArrowBit.NO_BULB_INFO
+    if not bulbs:
+        return TrafficLightArrowBit.NO_BULB_INFO
+
+    aggregate = TrafficLightArrowBit.NO_BULB_INFO
+    for ls in bulbs:
+        if ls is None or len(ls) == 0:
+            continue
+        bits = _compute_signal_subtype_from_bulbs(ls)
+        if bits == TrafficLightArrowBit.NO_BULB_INFO:
+            continue
+        aggregate = (
+            bits if aggregate == TrafficLightArrowBit.NO_BULB_INFO else aggregate | bits
+        )
+    return aggregate
