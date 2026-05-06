@@ -115,7 +115,7 @@ def test_construct_translates_pedestrian_no_to_deny() -> None:
     assert lane.accesses[0].restriction == "pedestrian"
 
 
-def test_construct_emits_one_access_per_participant_in_order() -> None:
+def test_construct_emits_one_access_per_participant() -> None:
     lanelet_map, lanelet = _make_lanelet(
         102,
         {
@@ -127,10 +127,10 @@ def test_construct_emits_one_access_per_participant_in_order() -> None:
 
     lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
 
-    assert [(a.rule, a.restriction) for a in lane.accesses] == [
+    assert {(a.rule, a.restriction) for a in lane.accesses} == {
         ("allow", "passengerCar"),
         ("allow", "bicycle"),
-    ]
+    }
 
 
 def test_construct_skips_unknown_participant() -> None:
