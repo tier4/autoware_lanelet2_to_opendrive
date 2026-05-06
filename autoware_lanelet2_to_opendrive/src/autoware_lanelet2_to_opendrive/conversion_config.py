@@ -78,6 +78,40 @@ class ParamPoly3Config:
 
 
 @dataclass
+class ArcSpiralConfig:
+    """User-facing configuration for arc / spiral primitive detection.
+
+    Issue #466. When ``enabled`` is True the converter classifies the
+    fitted reference line into <line> / <arc> / <paramPoly3> primitives
+    instead of always emitting a paramPoly3 chain. ``spiral_enabled`` is
+    reserved for follow-up issue #466b and is currently a no-op.
+
+    Attributes:
+        enabled: Master switch. False (default) preserves byte-exact
+            paramPoly3 output for backward compatibility.
+        arc_enabled: Detect constant-curvature arcs.
+        spiral_enabled: Reserved (no-op until #466b lands).
+        line_curvature_tol: |κ| below this is classified as a line (1/m).
+        arc_curvature_tol: Window-relative |κ - κ_const| tolerance during
+            arc growth (1/m).
+        arc_position_tol: Maximum allowed deviation between the analytic
+            arc model and the spline samples within a candidate window (m).
+        min_line_length: Minimum line-run length to accept (m); shorter
+            candidates roll into the arc / paramPoly3 fallback.
+        min_arc_length: Minimum arc-run length to accept (m).
+    """
+
+    enabled: bool = False
+    arc_enabled: bool = True
+    spiral_enabled: bool = False
+    line_curvature_tol: float = 1e-4
+    arc_curvature_tol: float = 5e-4
+    arc_position_tol: float = 0.05
+    min_line_length: float = 5.0
+    min_arc_length: float = 5.0
+
+
+@dataclass
 class WidthEstimationConfig:
     """Configuration for lanelet width estimation.
 
@@ -198,6 +232,8 @@ class ConversionConfig:
         traffic_rule: Traffic rule for lanes (RHT: Right-Hand Traffic,
             LHT: Left-Hand Traffic). Defaults to "RHT"
         parampoly3: Configuration for ParamPoly3 segment generation
+        arcspiral: Configuration for arc/spiral primitive detection (#466).
+            Default is disabled — preserves existing paramPoly3-only output.
         width_estimation: Configuration for width spline sampling
         stopline: Configuration for stop line object generation.
             Set stopline.carla_stop_line=True to enable CARLA Stencil_STOP format
@@ -215,6 +251,7 @@ class ConversionConfig:
     junction_id_offset: int = 1000
     traffic_rule: Optional[str] = "RHT"
     parampoly3: ParamPoly3Config = field(default_factory=ParamPoly3Config)
+    arcspiral: ArcSpiralConfig = field(default_factory=ArcSpiralConfig)
     width_estimation: WidthEstimationConfig = field(
         default_factory=WidthEstimationConfig
     )

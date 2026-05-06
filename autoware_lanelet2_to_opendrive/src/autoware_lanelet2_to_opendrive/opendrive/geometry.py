@@ -21,32 +21,53 @@ def evaluate_plan_view_world(
     param_poly3_coeffs: Optional[
         Tuple[float, float, float, float, float, float, float, float]
     ] = None,
+    arc_curvature: Optional[float] = None,
 ) -> Tuple[float, float]:
     """Evaluate a planView geometry at parameter ``p`` in the world XY frame.
 
-    This is the shared pure kernel used by both the dataclass-based path
-    (``road.py``) and the lxml-based path (``evaluate_road_endpoints``).
-
-    Only ``<paramPoly3>`` and ``<line>`` geometries are supported today.
-    If ``param_poly3_coeffs`` is ``None`` the function falls back to a
-    straight line along ``hdg`` (equivalent to an OpenDRIVE ``<line/>``).
-    Arc and spiral geometries would require extending this helper.
+    Supports ``<line/>``, ``<paramPoly3>`` and ``<arc>`` geometries. The
+    ``arc_curvature`` and ``param_poly3_coeffs`` arguments are mutually
+    exclusive; passing both raises ``ValueError``. With both set to
+    ``None`` the function falls back to a straight line along ``hdg``
+    (``<line/>`` semantics). ``arc_curvature`` magnitudes below
+    ``DEFAULT_CONFIG.geometry.epsilon`` are also treated as a straight
+    line to avoid 1/κ singularity.
 
     Args:
         x: Geometry start X (world frame).
         y: Geometry start Y (world frame).
         hdg: Geometry heading at start (radians).
-        p: Arc-length parameter at which to evaluate (``0`` gives the start,
-            ``length`` gives the end).
-        param_poly3_coeffs: Optional ``(aU, bU, cU, dU, aV, bV, cV, dV)``
-            cubic coefficients.  When ``None`` the geometry is treated as a
-            straight line.
+        p: Arc-length parameter at which to evaluate (``0`` gives the
+            start, ``length`` gives the end).
+        param_poly3_coeffs: Optional ``(aU, bU, cU, dU, aV, bV, cV, dV)``.
+        arc_curvature: Optional constant curvature κ (1/m). Positive κ
+            curves to the left of the start heading; negative to the right.
 
     Returns:
         Tuple ``(wx, wy)`` with the evaluated world coordinates.
     """
+    from ..config import DEFAULT_CONFIG
+
+    if param_poly3_coeffs is not None and arc_curvature is not None:
+        raise ValueError(
+            "evaluate_plan_view_world: param_poly3_coeffs and arc_curvature "
+            "are mutually exclusive"
+        )
+
     cos_hdg = np.cos(hdg)
     sin_hdg = np.sin(hdg)
+
+    if (
+        arc_curvature is not None
+        and abs(arc_curvature) > DEFAULT_CONFIG.geometry.epsilon
+    ):
+        kappa = arc_curvature
+        dhdg = kappa * p
+        local_u = np.sin(dhdg) / kappa
+        local_v = (1.0 - np.cos(dhdg)) / kappa
+        wx = x + local_u * cos_hdg - local_v * sin_hdg
+        wy = y + local_u * sin_hdg + local_v * cos_hdg
+        return (wx, wy)
 
     if param_poly3_coeffs is not None:
         aU, bU, cU, dU, aV, bV, cV, dV = param_poly3_coeffs
@@ -133,8 +154,8 @@ def _eval_geometry_world(
     """Evaluate a lxml planView ``<geometry>`` element at arc-length ``p``.
 
     Thin lxml-attribute adapter around :func:`evaluate_plan_view_world`.
-    Only ``<paramPoly3>`` and ``<line>`` geometries are supported today —
-    arc and spiral would need the shared kernel extended.
+    Supports ``<paramPoly3>``, ``<line>`` and ``<arc>`` geometries; spiral
+    would need the shared kernel further extended.
     """
     try:
         x = float(geom_elem.get("x"))
@@ -143,7 +164,16 @@ def _eval_geometry_world(
     except (TypeError, ValueError):
         return None
 
+    arc = geom_elem.find("arc")
     param_poly3 = geom_elem.find("paramPoly3")
+
+    arc_curvature: Optional[float] = None
+    if arc is not None:
+        try:
+            arc_curvature = float(arc.get("curvature"))
+        except (TypeError, ValueError):
+            arc_curvature = None
+
     coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
         None
     )
@@ -159,7 +189,7 @@ def _eval_geometry_world(
             float(param_poly3.get("dV", "0.0")),
         )
 
-    return evaluate_plan_view_world(x, y, hdg, p, coeffs)
+    return evaluate_plan_view_world(x, y, hdg, p, coeffs, arc_curvature)
 
 
 def _eval_elevation_at_s(elevation_profile: Optional[ET._Element], s: float) -> float:
@@ -219,6 +249,25 @@ class Line(GeometryBase):
         ET.SubElement(elem, "line")
         return elem
 
+    @classmethod
+    def from_spline_window(
+        cls, spline: "Splines", s_start: float, s_end: float
+    ) -> "Line":
+        """Build a Line covering arc-length [s_start, s_end] of ``spline``.
+
+        Heading is taken from the spline tangent at ``s_start`` so that
+        adjacent primitives are G1-continuous when their bounds match.
+        """
+        start = spline.evaluate(s_start, derivative=0)
+        tangent = spline.evaluate(s_start, derivative=1)
+        return cls(
+            s=s_start,
+            x=float(start[0]),
+            y=float(start[1]),
+            hdg=float(np.arctan2(tangent[1], tangent[0])),
+            length=float(s_end - s_start),
+        )
+
 
 @dataclass
 class Arc(GeometryBase):
@@ -233,6 +282,31 @@ class Arc(GeometryBase):
         arc_elem = ET.SubElement(elem, "arc")
         arc_elem.set("curvature", str(self.curvature))
         return elem
+
+    @classmethod
+    def from_spline_window(
+        cls,
+        spline: "Splines",
+        s_start: float,
+        s_end: float,
+        curvature: float,
+    ) -> "Arc":
+        """Build an Arc covering arc-length [s_start, s_end] of ``spline``.
+
+        ``curvature`` must be the constant κ chosen by the classifier
+        (typically ``Splines.evaluate(s_start, derivative=2)`` projected
+        appropriately). Heading and start position come from the spline.
+        """
+        start = spline.evaluate(s_start, derivative=0)
+        tangent = spline.evaluate(s_start, derivative=1)
+        return cls(
+            s=s_start,
+            x=float(start[0]),
+            y=float(start[1]),
+            hdg=float(np.arctan2(tangent[1], tangent[0])),
+            length=float(s_end - s_start),
+            curvature=float(curvature),
+        )
 
 
 @dataclass
@@ -446,6 +520,76 @@ class ParamPoly3(GeometryBase):
         return True, ""
 
     @classmethod
+    def from_spline_window(
+        cls,
+        spline: "Splines",
+        s_start: float,
+        s_end: float,
+        coefficient_epsilon: Optional[float] = None,
+    ) -> "ParamPoly3":
+        """Build a single ParamPoly3 covering [s_start, s_end] of ``spline``.
+
+        Uses cubic Hermite interpolation between spline-derived position
+        and tangent at the two endpoints. The caller is responsible for
+        upstream length / segment-validity checks.
+        """
+        from ..config import DEFAULT_CONFIG
+
+        if coefficient_epsilon is None:
+            coefficient_epsilon = DEFAULT_CONFIG.parampoly3.coefficient_epsilon
+
+        L = float(s_end - s_start)
+        start_pos = spline.evaluate(s_start, derivative=0)
+        start_tan = spline.evaluate(s_start, derivative=1)
+        end_pos = spline.evaluate(s_end, derivative=0)
+        end_tan = spline.evaluate(s_end, derivative=1)
+
+        x0, y0 = float(start_pos[0]), float(start_pos[1])
+        hdg = float(np.arctan2(start_tan[1], start_tan[0]))
+        cos_hdg, sin_hdg = np.cos(hdg), np.sin(hdg)
+
+        dx = end_pos[0] - x0
+        dy = end_pos[1] - y0
+        u_end = dx * cos_hdg + dy * sin_hdg
+        v_end = -dx * sin_hdg + dy * cos_hdg
+
+        du_start = start_tan[0] * cos_hdg + start_tan[1] * sin_hdg
+        dv_start = -start_tan[0] * sin_hdg + start_tan[1] * cos_hdg
+        du_end = end_tan[0] * cos_hdg + end_tan[1] * sin_hdg
+        dv_end = -end_tan[0] * sin_hdg + end_tan[1] * cos_hdg
+
+        aU = 0.0
+        bU = float(du_start)
+        cU = (3.0 * u_end - 2.0 * du_start * L - du_end * L) / (L * L)
+        dU = (-2.0 * u_end + (du_start + du_end) * L) / (L * L * L)
+
+        aV = 0.0
+        bV = float(dv_start)
+        cV = (3.0 * v_end - 2.0 * dv_start * L - dv_end * L) / (L * L)
+        dV = (-2.0 * v_end + (dv_start + dv_end) * L) / (L * L * L)
+
+        aU, bU, cU, dU, aV, bV, cV, dV = cls._normalize_coefficients(
+            aU, bU, cU, dU, aV, bV, cV, dV, epsilon=coefficient_epsilon
+        )
+
+        return cls(
+            s=float(s_start),
+            x=x0,
+            y=y0,
+            hdg=hdg,
+            length=L,
+            aU=aU,
+            bU=bU,
+            cU=cU,
+            dU=dU,
+            aV=aV,
+            bV=bV,
+            cV=cV,
+            dV=dV,
+            pRange="arcLength",
+        )
+
+    @classmethod
     def from_spline(
         cls,
         spline: "Splines",
@@ -507,6 +651,8 @@ class ParamPoly3(GeometryBase):
         # Divide the spline into segments
         segment_length = total_length / num_segments
 
+        import warnings
+
         for i in range(num_segments):
             # Arc length bounds for this segment
             s_start = i * segment_length
@@ -517,12 +663,9 @@ class ParamPoly3(GeometryBase):
                 continue
 
             # Skip segments that are too short
-            import warnings
-
             min_length = config.min_segment_length
 
             if actual_segment_length < min_length:
-                # Log warning for debugging
                 warnings.warn(
                     f"Skipping segment with length {actual_segment_length:.6f}m "
                     f"(below minimum {min_length}m) at s={s_start:.3f}",
@@ -530,86 +673,12 @@ class ParamPoly3(GeometryBase):
                 )
                 continue
 
-            # Get position and derivatives at segment start
-            start_pos = spline.evaluate(s_start, derivative=0)
-            start_tangent = spline.evaluate(s_start, derivative=1)
-
-            # Get position and derivatives at segment end
-            end_pos = spline.evaluate(s_end, derivative=0)
-            end_tangent = spline.evaluate(s_end, derivative=1)
-
-            # Extract 2D coordinates (assuming z is constant or negligible for road geometry)
-            x0, y0 = start_pos[0], start_pos[1]
-
-            # Calculate heading from tangent vector
-            hdg = np.arctan2(start_tangent[1], start_tangent[0])
-
-            # Transform to local coordinate system
-            # Local u-axis is along the tangent, v-axis is perpendicular
-            cos_hdg = np.cos(hdg)
-            sin_hdg = np.sin(hdg)
-
-            # Transform end position to local coordinates
-            dx = end_pos[0] - x0
-            dy = end_pos[1] - y0
-            u_end = dx * cos_hdg + dy * sin_hdg
-            v_end = -dx * sin_hdg + dy * cos_hdg
-
-            # Transform tangent vectors to local coordinates
-            # Start tangent in local coords (should be [1, 0] ideally)
-            du_start = start_tangent[0] * cos_hdg + start_tangent[1] * sin_hdg
-            dv_start = -start_tangent[0] * sin_hdg + start_tangent[1] * cos_hdg
-
-            # End tangent in local coords
-            du_end = end_tangent[0] * cos_hdg + end_tangent[1] * sin_hdg
-            dv_end = -end_tangent[0] * sin_hdg + end_tangent[1] * cos_hdg
-
-            # Fit cubic polynomials using boundary conditions
-            # For paramPoly3: u(p) = aU + bU*p + cU*p^2 + dU*p^3
-            #                 v(p) = aV + bV*p + cV*p^2 + dV*p^3
-            # where p is the parameter (arc length in this case)
-
-            # Boundary conditions:
-            # u(0) = 0, u(L) = u_end
-            # u'(0) = du_start, u'(L) = du_end
-            # v(0) = 0, v(L) = v_end
-            # v'(0) = dv_start, v'(L) = dv_end
-
-            L = actual_segment_length
-
-            # Solve for u coefficients using cubic Hermite interpolation
-            aU = 0.0
-            bU = du_start
-            cU = (3 * u_end - 2 * du_start * L - du_end * L) / (L * L)
-            dU = (-2 * u_end + (du_start + du_end) * L) / (L * L * L)
-
-            # Solve for v coefficients
-            aV = 0.0
-            bV = dv_start
-            cV = (3 * v_end - 2 * dv_start * L - dv_end * L) / (L * L)
-            dV = (-2 * v_end + (dv_start + dv_end) * L) / (L * L * L)
-
-            # Normalize coefficients to prevent numerical instability
-            aU, bU, cU, dU, aV, bV, cV, dV = cls._normalize_coefficients(
-                aU, bU, cU, dU, aV, bV, cV, dV, epsilon=config.coefficient_epsilon
-            )
-
-            # Create ParamPoly3 segment
-            segment = cls(
-                s=s_start,
-                x=x0,
-                y=y0,
-                hdg=hdg,
-                length=actual_segment_length,
-                aU=aU,
-                bU=bU,
-                cU=cU,
-                dU=dU,
-                aV=aV,
-                bV=bV,
-                cV=cV,
-                dV=dV,
-                pRange="arcLength",
+            # Build the segment via the single-window helper.
+            segment = cls.from_spline_window(
+                spline,
+                s_start=s_start,
+                s_end=s_end,
+                coefficient_epsilon=config.coefficient_epsilon,
             )
 
             # Validate segment before adding
