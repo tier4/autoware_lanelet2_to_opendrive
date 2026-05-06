@@ -183,13 +183,13 @@ class LaneSection:
             lane = Lane.construct_from_lanelet(
                 lanelet_map,
                 lanelet,
+                lane_id=lane_id,
                 rule=traffic_rule_normalized,
                 width_config=width_config,
                 reference_line_spline=reference_line_spline,
                 anchor_start_override=(start_xyz_override if is_outermost else None),
                 anchor_end_override=(end_xyz_override if is_outermost else None),
             )
-            lane.lane_id = lane_id
             if is_lht:
                 lane_section._add_left_lane(lane)
             else:

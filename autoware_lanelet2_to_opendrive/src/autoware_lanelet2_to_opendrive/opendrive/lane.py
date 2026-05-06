@@ -162,6 +162,8 @@ class Lane:
     def construct_from_lanelet(
         lanelet_map: lanelet2.core.LaneletMap,
         lanelet: lanelet2.core.Lanelet,
+        *,
+        lane_id: int,
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         reference_line_spline: Optional["Splines"] = None,
@@ -174,6 +176,10 @@ class Lane:
         Args:
             lanelet_map: The Lanelet2 map containing the lanelet
             lanelet: The lanelet to convert to Lane
+            lane_id: Pre-computed OpenDRIVE lane ID. The caller is responsible
+                for assigning a value consistent with the section's traffic rule
+                (RHT: negative, starting at -1 from the inside out; LHT: positive,
+                starting at +1 from the inside out).
             rule: Traffic rule for the lane (RHT or LHT)
             width_config: Configuration for width spline sampling
             reference_line_spline: Road reference line spline for s-coordinate alignment.
@@ -190,9 +196,6 @@ class Lane:
         Returns:
             Lane instance constructed from the lanelet
         """
-        # TODO: Determine lane ID based on lanelet position and direction
-        lane_id = 0
-
         # Determine lane type from lanelet attributes
         if "subtype" in lanelet.attributes:
             subtype = lanelet.attributes["subtype"]

@@ -13,7 +13,7 @@ def test_lane_has_lanelet_id(lanelet_map):
     lanelet = lanelet_map.laneletLayer.get(3002094)
 
     # Create a lane from this lanelet
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet)
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     # Check that the lanelet_id is set
     assert lane.lanelet_id == 3002094
