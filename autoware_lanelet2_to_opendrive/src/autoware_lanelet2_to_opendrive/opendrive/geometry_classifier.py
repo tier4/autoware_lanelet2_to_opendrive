@@ -6,7 +6,7 @@ when disabled the existing paramPoly3-only path remains.
 """
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import List, Tuple
 
 import numpy as np
 
@@ -200,3 +200,53 @@ def _grow_arc(
             return (s_start, 0.0)
 
     return (s_end, kappa_const)
+
+
+def _grow_paramPoly3(
+    s_start: float,
+    s_max: float,
+    constants: ArcSpiralConstants,
+) -> float:
+    """Advance s_start by ``lookahead_steps * classification_step`` (or to
+    ``s_max``). The classifier will retry line / arc detection at the
+    returned end-s.
+    """
+    advance = constants.lookahead_steps * constants.classification_step
+    return min(s_max, s_start + advance)
+
+
+def classify_spline(
+    spline: Splines,
+    config: ArcSpiralConfig,
+    constants: ArcSpiralConstants,
+) -> List[ClassifiedSegment]:
+    """Walk ``spline`` from s=0 and produce a contiguous list of
+    classified segments covering [0, total_length]. Greedy growth in
+    priority order: line → arc → paramPoly3 fallback.
+    """
+    L = float(spline.total_length)
+    s = 0.0
+    out: List[ClassifiedSegment] = []
+    while s < L - 1e-9:
+        s_line_end = _grow_line(spline, s, L, config, constants)
+        if s_line_end - s >= config.min_line_length:
+            out.append(LineRun(s_start=s, s_end=s_line_end))
+            s = s_line_end
+            continue
+
+        if config.arc_enabled:
+            s_arc_end, kappa = _grow_arc(spline, s, L, config, constants)
+            if s_arc_end - s >= config.min_arc_length:
+                out.append(ArcRun(s_start=s, s_end=s_arc_end, curvature=kappa))
+                s = s_arc_end
+                continue
+
+        s_pp3_end = _grow_paramPoly3(s, L, constants)
+        # Coalesce consecutive paramPoly3 runs to avoid micro-fragmentation.
+        if out and isinstance(out[-1], ParamPoly3Run):
+            prev = out[-1]
+            out[-1] = ParamPoly3Run(s_start=prev.s_start, s_end=s_pp3_end)
+        else:
+            out.append(ParamPoly3Run(s_start=s, s_end=s_pp3_end))
+        s = s_pp3_end
+    return out
