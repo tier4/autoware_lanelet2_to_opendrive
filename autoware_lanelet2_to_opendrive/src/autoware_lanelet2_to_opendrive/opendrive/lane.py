@@ -7,6 +7,7 @@ import lxml.etree as ET
 from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
 from ..spline import Splines
 from ..conversion_config import WidthEstimationConfig, WidthReference
+from ..config import DEFAULT_CONFIG
 
 from .opendrive_dataclass import (
     LaneType,
@@ -18,6 +19,44 @@ from .opendrive_dataclass import (
     LaneSpeed,
     SpeedUnit,
 )
+
+
+_CURB_LINESTRING_TYPES = frozenset({"curbstone", "road_border"})
+
+
+def _compute_sidewalk_height(
+    lanelet: lanelet2.core.Lanelet,
+    rule: Optional[str],
+    lane_type: LaneType,
+) -> Optional[LaneHeight]:
+    """Return a ``LaneHeight`` for sidewalk/shoulder lanes whose inner
+    boundary is a curb LineString, otherwise ``None``.
+
+    Inner side selection follows the same RHT/LHT convention used for width
+    anchoring in :meth:`Lane.construct_from_lanelet`: under RHT the
+    reference line is at the left edge of the road, so the lanelet's
+    ``leftBound`` is the inner (road-facing) side; under LHT it is the
+    ``rightBound``.
+
+    See Issue #469. The sidewalk surface is modelled as flat — both
+    ``inner`` and ``outer`` of the emitted ``<height>`` are set to
+    ``DEFAULT_CONFIG.geometry.sidewalk_height``.
+    """
+    if lane_type not in (LaneType.SIDEWALK, LaneType.SHOULDER):
+        return None
+
+    is_lht = (rule or "RHT").upper() == "LHT"
+    inner_bound = lanelet.rightBound if is_lht else lanelet.leftBound
+
+    if "type" not in inner_bound.attributes:
+        return None
+
+    inner_type = inner_bound.attributes["type"]
+    if inner_type not in _CURB_LINESTRING_TYPES:
+        return None
+
+    height = DEFAULT_CONFIG.geometry.sidewalk_height
+    return LaneHeight(s_offset=0.0, inner=height, outer=height)
 
 
 class Lane:
@@ -260,6 +299,11 @@ class Lane:
             except (ValueError, TypeError):
                 # If speed limit cannot be parsed, skip it
                 pass
+
+        # Sidewalk / shoulder lifted onto a curb (issue #469).
+        height = _compute_sidewalk_height(lanelet, rule, lane_type)
+        if height is not None:
+            lane._add_height(height)
 
         return lane
 
