@@ -167,14 +167,11 @@ class ArcSpiralConstants:
             before emitting one run.
         arc_fit_max_bisect: Number of window-shrink retries when arc fit
             validation fails.
-        arc_endpoint_kappa_tol: Maximum |κ_const - κ(s_end)| allowed at the
-            tail of an accepted arc window (1/m).
     """
 
     classification_step: float = 0.5
     lookahead_steps: int = 4
     arc_fit_max_bisect: int = 8
-    arc_endpoint_kappa_tol: float = 1e-3
 
 
 @dataclass(frozen=True)
