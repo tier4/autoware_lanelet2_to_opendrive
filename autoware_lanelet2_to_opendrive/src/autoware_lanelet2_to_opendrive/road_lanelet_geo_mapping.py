@@ -873,7 +873,7 @@ def _resolve_conflicts(
 
 
 def build_mapping(
-    lanelet_map,
+    lanelet_map: "lanelet2.core.LaneletMap",
     roads: list["ConverterRoad"],
     mgrs_offset: tuple[float, float],
     xodr_sha256: str,
