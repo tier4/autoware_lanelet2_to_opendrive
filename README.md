@@ -24,10 +24,10 @@ The repository is a [`uv`](https://docs.astral.sh/uv/) workspace with two packag
 
 ## Quick start (Docker)
 
-The Docker route mirrors CI exactly and avoids host build issues with the `lanelet2-python-api-for-autoware` C++ wrapper. A GitHub Personal Access Token with `repo` scope is required at build time so the private dependency can be cloned.
+The Docker route mirrors CI exactly and avoids host build issues with the `lanelet2-python-api-for-autoware` C++ wrapper. The dependency is cloned from a public repository, so no GitHub token is needed for the default build; if you want to authenticate (for example, to lift unauthenticated rate limits or to substitute a private fork), export `GH_PAT` before building — `Dockerfile` mounts it as an optional BuildKit secret.
 
 ```bash
-export GH_PAT=ghp_xxx
+# Optional: export GH_PAT=ghp_xxx  # only needed for authenticated/forked clones
 
 # Build the slim conversion image (only needed once, or after dependency changes)
 docker compose --profile convert build convert
@@ -54,7 +54,8 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
   input_map_path=/path/to/map.osm \
   map=nishishinjuku target=carla
 
-# Run a CARLA scenario (requires a running CARLA server)
+# Run a CARLA scenario (requires CARLA installed via an extra and a running server)
+uv sync --dev --extra carla     # or --extra carla-0-9-16 for the legacy build
 uv run scenario scenario=intersection_passing/straight
 ```
 

@@ -7,7 +7,7 @@ This package is a workspace member of the [`autoware_lanelet2_to_opendrive` repo
 ## Features
 
 - Lanelet2 → OpenDRIVE 1.4 conversion targeted at CARLA (with a `target=carla` overlay).
-- [Hydra](https://hydra.cc/)-based CLI (`convert`) composed from `conf/config.yaml`, `conf/map/*.yaml`, and `conf/target/*.yaml`.
+- [Hydra](https://hydra.cc/)-based CLI (`convert`) composed from `config.yaml`, `map/*.yaml`, and `target/*.yaml` under [`src/autoware_lanelet2_to_opendrive/conf/`](src/autoware_lanelet2_to_opendrive/conf/).
 - Optional Lanelet2 preprocessing pipeline (merge / replace / remove / move-point / delete-point / remove-turn-direction / validate) configurable from the same YAML.
 - Reference-line geometry emitted as `<paramPoly3>` chains, optionally classified into `<line>` / `<arc>` / `<paramPoly3>` runs (`arcspiral.enabled`).
 - Crosswalk lanelets emitted as `<object type="crosswalk">` with closed outlines.

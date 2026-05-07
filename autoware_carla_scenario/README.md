@@ -22,14 +22,15 @@ This package is a workspace member of [`autoware_lanelet2_to_opendrive`](../READ
 Python 3.10 is required (`>=3.10,<3.11`, locked by CARLA's bindings). Install via the workspace root:
 
 ```bash
-# From the repository root
+# From the repository root — installs the workspace without the optional CARLA bindings
 uv sync --dev
 ```
 
-This pulls the default `carla==0.10.0` extra and the local CARLA wheels under `carla_wheels/`. To use the legacy CARLA 0.9.16 build instead:
+CARLA Python bindings are exposed as optional extras and must be requested explicitly. Use the local wheels under `carla_wheels/` for either the default UE5 build or the legacy UE4 build:
 
 ```bash
-uv sync --dev --extra carla-0-9-16
+uv sync --dev --extra carla            # CARLA 0.10.0 (default, UE5)
+uv sync --dev --extra carla-0-9-16     # CARLA 0.9.16 (legacy, UE4)
 ```
 
 The two CARLA extras are declared as conflicting and cannot be installed simultaneously. CARLA's simulator binary itself must be installed separately — see the [CARLA installation guide](https://carla.readthedocs.io/) and the per-package [installation docs](docs/installation.md).
