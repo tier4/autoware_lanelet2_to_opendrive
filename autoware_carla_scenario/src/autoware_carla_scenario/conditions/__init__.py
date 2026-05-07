@@ -10,7 +10,7 @@ from .base import (
     find_actor_in_list,
 )
 from .collision import CollisionCondition
-from .comparison import ComparisonRule, ScalarComparisonRule
+from .comparison import ComparisonRule, ScalarComparisonRule, compare
 from .composition import (
     EntityInAreaCondition,
     EntityLanePositionCondition,
@@ -36,8 +36,9 @@ __all__ = [
     "AndCondition",
     "BaseCondition",
     "CollisionCondition",
-    "ConditionStatus",
     "ComparisonRule",
+    "ConditionStatus",
+    "compare",
     "ElapsedTimeCondition",
     "EntityExistenceCondition",
     "EntityInAreaCondition",

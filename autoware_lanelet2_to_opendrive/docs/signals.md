@@ -84,12 +84,19 @@ signal = Signal(
 
 ## Signal Types
 
-The `SignalType` class provides constants for common signal types:
+The `SignalType` class (in
+[`opendrive/signal.py`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/signal.py))
+provides constants for the signal types this converter currently emits:
 
-- **`TRAFFIC_LIGHT_3_LIGHTS`** (1000001): Standard 3-light traffic signal (red, yellow, green)
-- **`TRAFFIC_LIGHT_PEDESTRIAN`** (1000002): Pedestrian traffic light
+- **`TRAFFIC_LIGHT_3_LIGHTS`** (1000001) — standard 3-light vehicle traffic signal (red / yellow / green); `country="DE"`
+- **`TRAFFIC_LIGHT_PEDESTRIAN`** (1000002) — pedestrian traffic light; `country="DE"`
+- **`YIELD_SIGN`** (205) — German StVO 205 ("Vorfahrt gewähren"); emitted alongside a `STOP_LINE` for stop lines that come from a `road_marking` regulatory element
+- **`STOP_SIGN`** (206) — German StVO 206 ("Halt! Vorfahrt gewähren"); emitted for stop lines associated with a `traffic_sign` regulatory element whose `refers` member has `subtype="stop_sign"`
+- **`STOP_LINE`** (294) — German StVO 294 (painted stop line); emitted for stop lines that have a traffic-light, stop-sign, or yield-sign association, and carries `<dependency>` elements pointing at the controlling signal(s)
 
-These types use `country="DE"` (German StVO). For other national regulations, use appropriate country codes (e.g., "US", "JP").
+Pedestrian traffic lights always emit `country="DE"` and `@subtype=-1`.
+For other national regulations, callers using the `Signal` constructor
+directly may choose appropriate country codes (e.g. "US", "JP").
 
 ## Subtype Encoding for Vehicle Traffic Lights
 
@@ -288,10 +295,36 @@ signal = Signal.construct_from_lanelet2_traffic_signal(
 )
 ```
 
+## Stop Line ↔ Traffic Light Linking (`<dependency>` / `<reference>`)
+
+The converter establishes bidirectional links between a stop line and
+the traffic light(s) that control it (when the Lanelet2 regulatory
+element exposes a `stopLine`):
+
+- The `Signal` of `@type=294` (StopLine) emits a child
+  `<dependency id="<TL signal id>" type="trafficLight"/>` for every
+  associated traffic light.
+- Each linked traffic-light `Signal` gets a child
+  `<reference id="<StopLine signal id>" elementType="signal" type="stopLine"/>`
+  added back to it after the stop line is emitted.
+
+The same `<dependency>` mechanism is used to link a road-marking stop
+line to its companion `YieldSign` (205) signal.
+
+These elements are produced by
+[`_extract_and_assign_stop_lines`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
+in `main.py` using the `Dependency` and `Reference` dataclasses defined
+in `opendrive/signal.py`.
+
 ## Future Enhancements
 
 Potential future enhancements:
-- Signal dependencies and relationships
-- ✅ Signal references (signalReference element) - Implemented in Issue #135
-- More signal type constants for different countries
-- Signal controllers for coordinated traffic light control
+
+- More signal type constants for additional national regulations
+- Richer signal controllers for coordinated traffic light phases
+- Direct support for non-traffic-light regulatory elements
+  (general traffic-sign export beyond StopSign / YieldSign)
+- ✅ Signal references (`<signalReference>` element) — implemented in
+  issue #135
+- ✅ Stop line / traffic light dependency-and-back-reference linking —
+  implemented (see "Stop Line ↔ Traffic Light Linking" above)

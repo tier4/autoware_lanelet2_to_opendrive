@@ -74,6 +74,29 @@ uv run scenario scenario='*/*'
 - Results are written to `outputs/YYYY-MM-DD/HH-MM-SS/batch_results.json`
 - A summary table is printed at the end with per-scenario pass/fail status
 
+### Lanelet Constraint Sweeping
+
+The package ships a Hydra `Sweeper` plugin
+(`hydra/sweeper=lanelet_constraint`) that expands a single scenario
+config into one job per lanelet that matches a set of constraints,
+optionally deriving per-job parameters via "bindings". Each scenario
+YAML may declare its own `sweep:` section (see
+`traffic_light_compliance.yaml` for an example).
+
+```bash
+# Run a Hydra multirun over every lanelet whose `ego.spawn_lanelet_id`
+# satisfies the scenario's `sweep.constraints`.
+uv run scenario --multirun scenario=traffic_light_compliance/traffic_light_compliance \
+  hydra/sweeper=lanelet_constraint
+
+# Resume a sweep from job number N (1-indexed; 0 disables).
+uv run scenario --multirun scenario=traffic_light_compliance/traffic_light_compliance \
+  hydra/sweeper=lanelet_constraint sweep.resume_from=10
+```
+
+Sweeps write results under `multirun/YYYY-MM-DD/HH-MM-SS/<job-index>/`,
+not `outputs/`. The result viewer scans both directories.
+
 ### Resume from a Specific Scenario
 
 When running large batches, you can skip already-completed scenarios:

@@ -139,7 +139,7 @@ This section provides a comprehensive reference of OpenDRIVE tags, showing how t
 | [ControllerParser](#controllerparser) | [`controller@sequence`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html) | Controller sequence, Signal phase sequence number | [`ControllerParser.cpp` L29](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L29) | Not in Lanelet2 specification | ⛔ | Lanelet2 has no phase sequence data | Signal phase sequence: affects NPC waiting time at lights | [TrafficLightStage.cpp L45-75](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75) |
 | [ControllerParser](#controllerparser) | [`controller/control@signalId`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html) | Controlled signal ID, References signal under control | [`ControllerParser.cpp` L39](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L39) | Lanelet2 traffic_light IDs in group | ✅ | Map traffic_light refs to signal IDs | Groups signals for coordinated NPC traffic flow | [TrafficLightStage.cpp L45-75](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/trafficmanager/TrafficLightStage.cpp#L45-L75) |
 | [ControllerParser](#controllerparser) | [`controller/control@type`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/14_signals/14_01_introduction.html) | Control type, Type of controller (not yet used in CARLA) | [`ControllerParser.cpp` L41](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ControllerParser.cpp#L41) | Optional | ⚠️ | Currently not used by CARLA | - | - |
-| [ObjectParser](#objectparser) | [`road/objects/object@type`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html) | Object type classification, Type of road object (crosswalk, etc.) | [`ObjectParser.cpp` L34](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L34) | Lanelet2 area/polygon type | ⚠️ | crosswalk only (speed sign, stop line not implemented) | Crosswalk: used for pedestrian pathfinding only; NPC vehicles do NOT yield to pedestrians at crosswalks | - |
+| [ObjectParser](#objectparser) | [`road/objects/object@type`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html) | Object type classification, Type of road object (crosswalk, etc.) | [`ObjectParser.cpp` L34](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L34) | Lanelet2 area/polygon type, lanelet2 stop line linestring, parking_lot area | ✅ | `crosswalk` (from `subtype="crosswalk"` lanelets), `stopLine` (from `type="stop_line"` linestrings) and CARLA's `Stencil_STOP` (`type="-1"`, `name="Stencil_STOP"` when `stopline.carla_stop_line=true`), and `parkingSpace` (from `parking_space` linestrings inside `parking_lot` areas) | Crosswalk used for pedestrian pathfinding (vehicles don't auto-yield); CARLA does not consume `<object type="stopLine">` (see [Stop Line Position](limitations/stop-line-position.md)); CARLA reads `Stencil_STOP` and `parkingSpace` directly | - |
 | [ObjectParser](#objectparser) | [`road/objects/object@name`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html) | Object name, Object identification name | [`ObjectParser.cpp` L35](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L35) | Lanelet2 area/polygon ID or name | ✅ | Speed_*, Stencil_STOP patterns | - | - |
 | [ObjectParser](#objectparser) | [`road/objects/object@id`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html) | Object identifier, Unique object identification | [`ObjectParser.cpp` L78](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L78) | Lanelet2 area/polygon ID | ✅ | Direct ID mapping | - | - |
 | [ObjectParser](#objectparser) | [`road/objects/object@s`](https://publications.pages.asam.net/standards/ASAM_OpenDRIVE/ASAM_OpenDRIVE_Specification/latest/specification/13_objects/13_01_introduction.html) | Object S position, Longitudinal position along road | [`ObjectParser.cpp` L79](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp#L79) | Project crosswalk centroid onto nearest road reference line | ✅ | Arc-length position from road start; computed via ParamPoly3 sampling | - | - |
@@ -311,9 +311,10 @@ Controllers are parsed but signal phase timing logic is not fully integrated in 
 
 CARLA recognizes specific object types for autonomous driving scenarios:
 
-- **`crosswalk`**: Pedestrian crossing areas with detailed outline geometry
-- **Speed signs**: Objects named `Speed_*` (e.g., `Speed_30`, `Speed_50`)
-- **Stop lines**: Objects named `Stencil_STOP` for stop sign markings
+- **`crosswalk`**: Pedestrian crossing areas with detailed outline geometry — emitted by this converter from `subtype="crosswalk"` lanelets
+- **Stop lines**: CARLA reads objects with `type="-1"` and `name="Stencil_STOP"`. The converter emits these when `stopline.carla_stop_line=true` (the default with `target=carla`); otherwise it emits the OpenDRIVE-standard `type="stopLine"` form, which CARLA does **not** consume
+- **Parking spaces**: Objects with `type="parkingSpace"` — emitted by the parking-lot pipeline (see `opendrive/parking.py`)
+- **Speed signs**: CARLA also recognizes `Speed_*` objects (e.g. `Speed_30`, `Speed_50`), but this converter does not currently emit them — speed limits are encoded as `<road><type><speed @max>` / `<lane><speed @max>` instead
 
 ##### Object Geometry
 
@@ -327,10 +328,21 @@ CARLA recognizes specific object types for autonomous driving scenarios:
   - `leftBound` direction relative to road heading → `hdg`
   - Boundary geometry → `width`, `length`, `<outline><cornerLocal>` polygon
   - See [Crosswalk Objects](crosswalk_objects.md) for full algorithm details
-- **Speed signs**: Generate from `speed_limit` regulatory_elements
-- **Stop lines**: Map from `stop_line` regulatory_elements
-- Object position: Project lanelet/element center onto road to get s,t coordinates
-- Object outline: Transform polygon vertices to local U,V coordinates
+- **Stop lines**: Map from Lanelet2 linestrings with `type="stop_line"`. By
+  default the converter emits `<object type="stopLine">`. With
+  `target=carla` (or `stopline.carla_stop_line=true`) it instead emits
+  CARLA's `<object type="-1" name="Stencil_STOP">` which CARLA actually
+  consumes. See [Stop Line Objects](stop_line_objects.md) and
+  [Stop Line Position](limitations/stop-line-position.md).
+- **Parking spaces**: Map from `parking_space` linestrings inside
+  `parking_lot` `Area`s; emitted as `<object type="parkingSpace">` on a
+  synthetic parking road carrying `<lane type="parking">`. See
+  `opendrive/parking.py` and [Conversion Process](conversion-process.md).
+- **Speed signs**: Not emitted as `<object>`s. Speed limits are written
+  as `<road><type><speed @max>` and `<lane><speed @max>` instead.
+- Object position: Project lanelet/linestring centroid onto the nearest
+  road to get `s`, `t` coordinates.
+- Object outline: Transform polygon vertices to local U,V coordinates.
 
 ##### RoadRunner Integration
 
@@ -454,21 +466,31 @@ Before converting Lanelet2 maps to OpenDRIVE format, the following preprocessing
 - Geometry interpolation errors in CARLA
 - Visual artifacts and vehicle positioning issues
 
-**Required Operations**:
+**Available preprocessing operations** (configured per map under
+`conf/map/<name>.yaml`; see
+[Conversion Process — Preprocessing Operations](conversion-process.md#13-preprocessing-operations-optional)
+for the full reference):
 
-To address boundary length mismatches, apply combinations of the following Lanelet2 preprocessing operations:
+1. **Merge / Replace** (`merge_operations`, `replace_operations`)
+   — combine multiple lanelets into one, optionally validating boundary
+   continuity first; reduces unnecessary segmentation
+2. **Move Point** (`move_point_operations`)
+   — nudge an individual `Point` to align an offending diagonal boundary
+   with its neighbour without changing lanelet topology
+3. **Delete Point** (`delete_point_operations`)
+   — drop redundant points from a `LineString` while keeping at least 2
+   points per linestring
+4. **Remove Lanelet** / **Remove (legacy)** (`remove_lanelet_operations`,
+   `remove_operations`)
+   — drop unwanted or isolated lanelets entirely
+5. **Remove Turn Direction** (`remove_turn_direction_operations`)
+   — strip the `turn_direction` attribute so a lanelet is treated as a
+   regular road instead of part of a junction
+6. **Validate** (`validate_operations`)
+   — report-only continuity check between two lanelets
 
-1. **Merge Operations** (`merge`)
-   - Combine multiple short lanelets into longer segments to match adjacent lane lengths
-   - Reduces unnecessary segmentation and improves geometric consistency
-
-2. **Split Operations** (`split`)
-   - Divide long lanelets into smaller segments to align with shorter adjacent lanes
-   - Ensures proper correspondence between lane boundaries
-
-3. **Delete Operations** (`delete`)
-   - Remove redundant or problematic lanelet segments that cannot be normalized
-   - Use cautiously and only when other operations are insufficient
+There is no in-place "split" operation; splitting must be done in the
+upstream Lanelet2 map editor.
 
 **Implementation Guidelines**:
 

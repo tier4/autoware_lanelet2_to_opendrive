@@ -1,12 +1,29 @@
-# Priority-Based Right-of-Way Control Not Supported
+# Priority-Based Right-of-Way Control Not Used by CARLA
 
 ## Issue
 
-Priority tags (`priority` attribute in regulatory elements) for controlling intersection entry order are **not implemented** in the converter.
+Priority tags (`priority` attribute on the `<junction>` element of the
+OpenDRIVE 1.4 schema) for controlling intersection entry order are
+**emitted by this converter but ignored by CARLA**.
 
-## Cause
+## What the converter currently does
 
-While **technically feasible** to implement in the converter, this feature is not supported because **CARLA simulator does not recognize or utilize priority attributes** for traffic management at junctions.
+The converter exports `<junction><priority>` records derived from
+Lanelet2 `right_of_way` regulatory elements (issue #438). For each
+`right_of_way` element, the road carrying the *yielding* lanelets is
+written as `low` and the road carrying the *right_of_way* lanelets as
+`high`. The implementation lives in
+[`opendrive/junction.py:Junction.build_priorities_from_regulatory_elements`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/junction.py)
+and is wired into the main converter in `main.py`.
+
+This means downstream tools that *do* consume `<junction><priority>`
+(e.g. RoadRunner-style simulators, esmini, custom planners) get correct
+right-of-way information.
+
+## Why CARLA still ignores it
+
+While the OpenDRIVE 1.4 schema defines `<junction><priority>`, CARLA's
+parser and traffic manager simply do not consume it.
 
 ### CARLA's Complete Ignorance of Priority Attributes
 
@@ -51,11 +68,15 @@ CARLA's Traffic Manager uses a simple FIFO (First-In-First-Out) queue for juncti
 
 ## Impact
 
-When converting Lanelet2 maps with `priority` regulatory elements:
+When converting Lanelet2 maps with `right_of_way` regulatory elements:
 
-- Priority information is **completely discarded** during conversion
-- Intersection right-of-way behavior will **not match** the original Lanelet2 specification
-- All vehicles will follow **FIFO queue behavior** in CARLA, regardless of intended priority
+- Priority information **is preserved** in the OpenDRIVE output as
+  `<junction><priority>` records
+- Intersection right-of-way behavior **will not match** the original
+  Lanelet2 specification when running in CARLA — all vehicles follow
+  FIFO queue behavior regardless of the emitted priorities
+- Other OpenDRIVE consumers that read `<junction><priority>` will get
+  the correct right-of-way information
 
 ## Workaround
 
