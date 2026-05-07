@@ -52,7 +52,12 @@ runs:
       uses: astral-sh/setup-uv@v4
       with:
         version: "latest"
-        enable-cache: true
+        # Only enable the uv cache when we are actually going to populate it.
+        # When 'install-dev-deps' is "false" (e.g. release.yml's early
+        # 'Setup base environment' step on a no-bump-label push), 'uv sync'
+        # never runs, the cache dir stays empty, and setup-uv@v4's post-step
+        # save fails the job with 'Cache path ... does not exist on disk'.
+        enable-cache: ${{ inputs.install-dev-deps }}
         cache-dependency-glob: "**/uv.lock"
         cache-suffix: ${{ inputs.cache-suffix }}
 
