@@ -184,7 +184,7 @@ remove_turn_direction_operations:
   - lanelet_ids: []   # empty list = strip turn_direction from all lanelets
 ```
 
-See [Conversion Process](conversion-process.md#preprocessing-operations-optional)
+See [Conversion Process](conversion-process.md#14-preprocessing-operations-optional)
 for the full operation reference.
 
 ## Tunable Conversion Parameters

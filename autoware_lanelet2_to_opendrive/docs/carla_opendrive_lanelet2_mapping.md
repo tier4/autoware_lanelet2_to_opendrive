@@ -468,7 +468,7 @@ Before converting Lanelet2 maps to OpenDRIVE format, the following preprocessing
 
 **Available preprocessing operations** (configured per map under
 `conf/map/<name>.yaml`; see
-[Conversion Process — Preprocessing Operations](conversion-process.md#13-preprocessing-operations-optional)
+[Conversion Process — Preprocessing Operations](conversion-process.md#14-preprocessing-operations-optional)
 for the full reference):
 
 1. **Merge / Replace** (`merge_operations`, `replace_operations`)
