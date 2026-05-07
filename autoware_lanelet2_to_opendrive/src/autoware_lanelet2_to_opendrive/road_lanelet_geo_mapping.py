@@ -28,7 +28,7 @@ from .opendrive.enums import TrafficRule
 from .opendrive.geometry import ParamPoly3
 
 if TYPE_CHECKING:
-    import lanelet2
+    import lanelet2.core
 
     from .opendrive.road import Road as ConverterRoad
 

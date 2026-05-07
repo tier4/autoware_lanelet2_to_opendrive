@@ -8,9 +8,9 @@ The package provides three CLI commands:
 
 | Command | Framework | Purpose |
 |---------|-----------|---------|
-| [`scenario`](#scenario---scenario-runner) | Hydra | Run autonomous driving scenario tests in CARLA |
-| [`detect-no-3d-model`](#detect-no-3d-model---3d-model-detection) | argparse | Detect lanelets without a matching 3D ground model in CARLA |
-| [`viewer`](#viewer---scenario-result-viewer) | FastAPI + Uvicorn | Web UI for browsing and monitoring scenario test results |
+| [`scenario`](#scenario-scenario-runner) | Hydra | Run autonomous driving scenario tests in CARLA |
+| [`detect-no-3d-model`](#detect-no-3d-model-3d-model-detection) | argparse | Detect lanelets without a matching 3D ground model in CARLA |
+| [`viewer`](#viewer-scenario-result-viewer) | FastAPI + Uvicorn | Web UI for browsing and monitoring scenario test results |
 
 ---
 
