@@ -28,6 +28,8 @@ from .opendrive.enums import TrafficRule
 from .opendrive.geometry import ParamPoly3
 
 if TYPE_CHECKING:
+    import lanelet2
+
     from .opendrive.road import Road as ConverterRoad
 
 logger = logging.getLogger(__name__)
@@ -871,7 +873,7 @@ def _resolve_conflicts(
 
 
 def build_mapping(
-    lanelet_map,
+    lanelet_map: "lanelet2.core.LaneletMap",
     roads: list["ConverterRoad"],
     mgrs_offset: tuple[float, float],
     xodr_sha256: str,
@@ -1392,7 +1394,7 @@ def save_mapping_json(
 
 def validate_and_save_mapping(
     lanelet_to_road_and_lane: dict[int, tuple[int, int]],
-    lanelet_map,
+    lanelet_map: "lanelet2.core.LaneletMap",
     roads: list["ConverterRoad"],
     xodr_path: Path,
     osm_path: Path,
