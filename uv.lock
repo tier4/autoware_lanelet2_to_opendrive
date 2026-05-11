@@ -141,7 +141,7 @@ requires-dist = [
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6317c1c3dfe5f666e09b1a108defc0b407a3f338" },
+    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6bd27ff7ab3eed326422b960a2694dff605bdb9a" },
     { name = "numpy", specifier = ">=1.21" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "opencv-python", specifier = ">=4.8" },
@@ -175,7 +175,7 @@ dependencies = [
 requires-dist = [
     { name = "asam-qc-opendrive", git = "https://github.com/tier4/qc-opendrive.git?rev=f8b186ba7408f56d26ef6552643cc09d43c0d253" },
     { name = "hydra-core", specifier = ">=1.3.2" },
-    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6317c1c3dfe5f666e09b1a108defc0b407a3f338" },
+    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6bd27ff7ab3eed326422b960a2694dff605bdb9a" },
     { name = "lxml", specifier = ">=5.2.2" },
     { name = "mgrs", specifier = ">=1.5.0" },
     { name = "pyxodr", specifier = ">=0.1.3" },
@@ -717,7 +717,7 @@ wheels = [
 [[package]]
 name = "lanelet2-python-api-for-autoware"
 version = "0.1.0"
-source = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6317c1c3dfe5f666e09b1a108defc0b407a3f338#6317c1c3dfe5f666e09b1a108defc0b407a3f338" }
+source = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6bd27ff7ab3eed326422b960a2694dff605bdb9a#6bd27ff7ab3eed326422b960a2694dff605bdb9a" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
