@@ -91,7 +91,7 @@ wheels = [
 [[package]]
 name = "asam-qc-opendrive"
 version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/tier4/qc-opendrive.git?rev=f8b186ba7408f56d26ef6552643cc09d43c0d253#f8b186ba7408f56d26ef6552643cc09d43c0d253" }
 dependencies = [
     { name = "asam-qc-baselib" },
     { name = "lxml" },
@@ -101,10 +101,6 @@ dependencies = [
     { name = "semver" },
     { name = "transforms3d" },
     { name = "xmlschema" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/46/4a/93d9067aed6004febbe345ffde18d8e49a5827cf6c473a450723b3054ba3/asam_qc_opendrive-1.0.0.tar.gz", hash = "sha256:4e9d45def613c318d126a9c1c911f145094fe8ef8cf9062f569e028b5b3f5518", size = 147448, upload-time = "2024-12-02T15:04:05.444Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/e0/3b5e73ee8c5d636ce7431df71cb67a5b063fa099faf7cfedee575b66cf2f/asam_qc_opendrive-1.0.0-py3-none-any.whl", hash = "sha256:147cf2702d61fb284d03e5485b2a76b1dec0eb6a7eb3567562d3b4e4f87a873c", size = 202447, upload-time = "2024-12-02T15:04:03.591Z" },
 ]
 
 [[package]]
@@ -145,7 +141,7 @@ requires-dist = [
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
+    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6317c1c3dfe5f666e09b1a108defc0b407a3f338" },
     { name = "numpy", specifier = ">=1.21" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "opencv-python", specifier = ">=4.8" },
@@ -161,7 +157,7 @@ provides-extras = ["carla", "carla-0-9-16"]
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "2.59.0"
+version = "2.59.6"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },
@@ -177,9 +173,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asam-qc-opendrive", specifier = ">=1.0.0" },
+    { name = "asam-qc-opendrive", git = "https://github.com/tier4/qc-opendrive.git?rev=f8b186ba7408f56d26ef6552643cc09d43c0d253" },
     { name = "hydra-core", specifier = ">=1.3.2" },
-    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753" },
+    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6317c1c3dfe5f666e09b1a108defc0b407a3f338" },
     { name = "lxml", specifier = ">=5.2.2" },
     { name = "mgrs", specifier = ">=1.5.0" },
     { name = "pyxodr", specifier = ">=0.1.3" },
@@ -721,7 +717,7 @@ wheels = [
 [[package]]
 name = "lanelet2-python-api-for-autoware"
 version = "0.1.0"
-source = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=7745347645fd04aa8e4230cfa8793e253aad6753#7745347645fd04aa8e4230cfa8793e253aad6753" }
+source = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6317c1c3dfe5f666e09b1a108defc0b407a3f338#6317c1c3dfe5f666e09b1a108defc0b407a3f338" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },

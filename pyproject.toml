@@ -8,7 +8,9 @@ members = [
 ]
 
 [tool.uv.sources]
-lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", rev = "7745347645fd04aa8e4230cfa8793e253aad6753" }
+lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", rev = "6317c1c3dfe5f666e09b1a108defc0b407a3f338" }
+# Use tier4 fork with relaxed numpy upper bound (upstream PR: asam-ev/qc-opendrive#138)
+asam-qc-opendrive = { git = "https://github.com/tier4/qc-opendrive.git", rev = "f8b186ba7408f56d26ef6552643cc09d43c0d253" }
 
 [dependency-groups]
 dev = [
