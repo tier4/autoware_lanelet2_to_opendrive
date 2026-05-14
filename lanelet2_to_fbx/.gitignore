@@ -1,0 +1,11 @@
+godot_based_autoware_planning_simulator/
+map/
+.DS_Store
+__pycache__/
+*.pyc
+out/
+.venv/
+.venv-linux/
+*.egg-info/
+build/
+dist/

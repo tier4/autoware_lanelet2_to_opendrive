@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ll2tofbx"
+version = "0.1.0"
+description = "Lanelet2 OSM to FBX exporter for Carla"
+requires-python = ">=3.11"
+
+[project.scripts]
+ll2tofbx = "ll2tofbx.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
