@@ -326,16 +326,32 @@ def _evaluate_geometry_world(geom: GeometryBase, p: float) -> tuple[float, float
 def _sample_reference_line_from_road(
     road: "ConverterRoad", num_samples_per_segment: int = 10
 ) -> np.ndarray:
-    """Sample 2D reference line points from a converter Road's planView.
+    """Sample a converter Road's planView into a uniform reference polyline.
 
-    Evaluates every planView geometry at evenly-spaced arc-length values
-    using its own analytic model (``<line>``, ``<arc>`` and ``<paramPoly3>``)
-    so that arc primitives are traced along their curve rather than along
-    the straight chord between their endpoints.
+    Sample points are spaced uniformly by arc-length across the *whole*
+    planView, independent of how it is split into ``<line>``, ``<arc>`` and
+    ``<paramPoly3>`` segments. Each geometry is still evaluated with its own
+    analytic model (so arcs are traced along their curve, not their chord),
+    but the points are distributed by global arc-length rather than by a
+    fixed count per segment.
+
+    This keeps the sampled polyline — and therefore the geometric matching
+    distances computed from it — invariant to the planView segmentation.
+    Without it, enabling arc-primitive detection (#466) re-segments a road
+    into a few long arcs plus short paramPoly3 runs; a fixed count per
+    segment then bunches samples onto the short segments, skewing the
+    mean-distance metric and flipping which lanelet a road maps to (#499).
+
+    The total sample count is ``num_samples_per_segment`` times the number of
+    geometry segments. For the paramPoly3-only planViews produced when arc
+    detection is disabled the segments are equal-length, so this reproduces
+    the previous evenly-spaced sampling exactly.
 
     Args:
         road: Converter Road object with ``plan_view`` containing geometries.
-        num_samples_per_segment: Number of sample points per geometry segment.
+        num_samples_per_segment: Sample-count multiplier; the reference line
+            is sampled with ``num_samples_per_segment * len(geometries) + 1``
+            points spaced uniformly by arc-length.
 
     Returns:
         NumPy array of shape ``(N, 2)`` with global (x, y) coordinates.
@@ -343,17 +359,24 @@ def _sample_reference_line_from_road(
     if road.plan_view is None or not road.plan_view.geometries:
         return np.empty((0, 2))
 
-    points: list[list[float]] = []
-    for geom in road.plan_view.geometries:
-        for i in range(num_samples_per_segment):
-            p = geom.length * i / num_samples_per_segment
-            x, y = _evaluate_geometry_world(geom, p)
-            points.append([x, y])
+    geometries = road.plan_view.geometries
 
-    # Add endpoint of the last segment.
-    last = road.plan_view.geometries[-1]
-    x, y = _evaluate_geometry_world(last, last.length)
-    points.append([x, y])
+    # Cumulative arc-length at the start of each geometry; the final entry
+    # is the total planView length.
+    segment_starts = np.concatenate([[0.0], np.cumsum([g.length for g in geometries])])
+    total_length = float(segment_starts[-1])
+    if total_length <= 0.0:
+        return np.empty((0, 2))
+
+    num_samples = num_samples_per_segment * len(geometries)
+    points: list[list[float]] = []
+    for k in range(num_samples + 1):
+        s = total_length * k / num_samples
+        # Locate the geometry that contains global arc-length ``s``.
+        idx = int(np.searchsorted(segment_starts, s, side="right")) - 1
+        idx = min(max(idx, 0), len(geometries) - 1)
+        x, y = _evaluate_geometry_world(geometries[idx], s - segment_starts[idx])
+        points.append([x, y])
 
     return np.array(points)
 

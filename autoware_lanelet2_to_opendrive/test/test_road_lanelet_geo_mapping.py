@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.geometry import (
@@ -380,3 +381,35 @@ class TestSampleReferenceLineFromRoad:
             p = length * i / 5
             assert pts[i] == pytest.approx((p, 0.1 * p * p), abs=1e-6)
         assert pts[-1] == pytest.approx((length, 0.1 * length * length), abs=1e-6)
+
+    def test_sampling_is_uniform_across_uneven_segments(self) -> None:
+        """Samples are spaced uniformly by arc-length regardless of how the
+        planView is split into segments (#499).
+
+        Arc-primitive detection re-segments a road into a few long arcs plus
+        short paramPoly3 runs. A fixed sample count per segment would bunch
+        points onto the short segments and skew the mean-distance metric used
+        for road-lanelet matching, flipping which lanelet a road maps to.
+        Two collinear straight segments of very different lengths must still
+        yield evenly-spaced samples.
+        """
+        # A 4 m line followed by a collinear 16 m line (total 20 m, heading +x).
+        road = Road(
+            id=1,
+            plan_view=PlanView(
+                geometries=[
+                    Line(s=0.0, x=0.0, y=0.0, hdg=0.0, length=4.0),
+                    Line(s=4.0, x=4.0, y=0.0, hdg=0.0, length=16.0),
+                ]
+            ),
+        )
+
+        pts = _sample_reference_line_from_road(road, num_samples_per_segment=10)
+
+        # 10 samples * 2 segments + 1 closing point, uniform over 20 m.
+        assert len(pts) == 21
+        spacings = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+        assert spacings.max() - spacings.min() < 1e-9
+        assert spacings[0] == pytest.approx(1.0)
+        assert pts[0] == pytest.approx((0.0, 0.0), abs=1e-9)
+        assert pts[-1] == pytest.approx((20.0, 0.0), abs=1e-9)
