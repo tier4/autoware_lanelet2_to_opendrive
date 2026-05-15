@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    Arc,
+    Line,
+    ParamPoly3,
+    PlanView,
+)
+from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     GeoRoadLaneletMapping,
     MappingMismatchError,
     _RoadCandidates,
     _resolve_conflicts,
+    _sample_reference_line_from_road,
     save_mapping_json,
     validate_mapping_consistency,
 )
@@ -264,3 +273,110 @@ class TestResolveConflicts:
         result = _resolve_conflicts([rc_a, rc_b])
         # Winner (100) has no alt, loser (200) has alt -> advance loser
         assert result == {0: 0, 1: 1}
+
+
+# ---------------------------------------------------------------------------
+# _sample_reference_line_from_road  (issue #495)
+# ---------------------------------------------------------------------------
+
+
+class TestSampleReferenceLineFromRoad:
+    """A road's planView must be sampled with each geometry's analytic model.
+
+    Regression test for #495: with arc-primitive detection enabled, an
+    ``<arc>`` segment must be sampled along its curve, not as the straight
+    chord between its endpoints — chord sampling inflated road↔lanelet
+    distances and aborted conversion with a ``MappingMismatchError``.
+    """
+
+    def test_arc_geometry_is_sampled_along_its_curve(self) -> None:
+        # Quarter circle of radius 10 m: starts at the origin heading +x,
+        # curves left (positive curvature), ends at (10, 10) heading +y.
+        radius = 10.0
+        curvature = 1.0 / radius
+        length = radius * math.pi / 2.0
+        road = Road(
+            id=1,
+            plan_view=PlanView(
+                geometries=[
+                    Arc(
+                        s=0.0,
+                        x=0.0,
+                        y=0.0,
+                        hdg=0.0,
+                        length=length,
+                        curvature=curvature,
+                    )
+                ]
+            ),
+        )
+
+        pts = _sample_reference_line_from_road(road, num_samples_per_segment=8)
+
+        # Every sample must lie on the analytic arc, not the straight chord
+        # (chord sampling keeps y == 0, which is the bug being fixed).
+        for i in range(8):
+            p = length * i / 8
+            expected = (
+                math.sin(curvature * p) / curvature,
+                (1.0 - math.cos(curvature * p)) / curvature,
+            )
+            assert pts[i] == pytest.approx(expected, abs=1e-6)
+        # Closing endpoint: the quarter circle ends exactly at (radius, radius).
+        assert pts[-1] == pytest.approx((radius, radius), abs=1e-6)
+
+    def test_line_geometry_is_sampled_as_a_straight_line(self) -> None:
+        # A 20 m line heading 30 degrees, starting at (1, 2).
+        hdg = math.radians(30.0)
+        length = 20.0
+        road = Road(
+            id=2,
+            plan_view=PlanView(
+                geometries=[Line(s=0.0, x=1.0, y=2.0, hdg=hdg, length=length)]
+            ),
+        )
+
+        pts = _sample_reference_line_from_road(road, num_samples_per_segment=4)
+
+        for i in range(4):
+            p = length * i / 4
+            expected = (1.0 + p * math.cos(hdg), 2.0 + p * math.sin(hdg))
+            assert pts[i] == pytest.approx(expected, abs=1e-6)
+        assert pts[-1] == pytest.approx(
+            (1.0 + length * math.cos(hdg), 2.0 + length * math.sin(hdg)),
+            abs=1e-6,
+        )
+
+    def test_param_poly3_geometry_is_sampled_with_cubic_model(self) -> None:
+        # A paramPoly3 heading +x from the origin with a quadratic lateral
+        # offset v = 0.1 * u**2.
+        length = 10.0
+        road = Road(
+            id=3,
+            plan_view=PlanView(
+                geometries=[
+                    ParamPoly3(
+                        s=0.0,
+                        x=0.0,
+                        y=0.0,
+                        hdg=0.0,
+                        length=length,
+                        aU=0.0,
+                        bU=1.0,
+                        cU=0.0,
+                        dU=0.0,
+                        aV=0.0,
+                        bV=0.0,
+                        cV=0.1,
+                        dV=0.0,
+                    )
+                ]
+            ),
+        )
+
+        pts = _sample_reference_line_from_road(road, num_samples_per_segment=5)
+
+        for i in range(5):
+            p = length * i / 5
+            assert pts[i] == pytest.approx((p, 0.1 * p * p), abs=1e-6)
+        assert pts[-1] == pytest.approx((length, 0.1 * length * length), abs=1e-6)
