@@ -9,7 +9,11 @@ from lanelet2.routing import RoutingGraph
 
 from .signal import Signal, Controller, ControlEntry, PositionInertial
 from .enums import TrafficRule
-from ..util import RoadLaneletMapping, create_routing_graph, filter_regulatory_element_by_type
+from ..util import (
+    RoadLaneletMapping,
+    create_routing_graph,
+    filter_regulatory_element_by_type,
+)
 from ..config import COORDINATE_OFFSET
 from ..conversion_config import TrafficLightConfig
 

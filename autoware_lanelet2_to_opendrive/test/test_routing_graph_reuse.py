@@ -30,9 +30,7 @@ def routing_graph(lanelet_map):
 @pytest.fixture(scope="session")
 def adjacent_groups(lanelet_map, routing_graph):
     """All adjacent road-lanelet groups for the test map."""
-    road_lanelets = filter_lanelets_by_subtype(
-        list(lanelet_map.laneletLayer), ["road"]
-    )
+    road_lanelets = filter_lanelets_by_subtype(list(lanelet_map.laneletLayer), ["road"])
     return find_adjacent_groups(lanelet_map, set(road_lanelets), routing_graph)
 
 
@@ -143,9 +141,7 @@ def test_connecting_roads_reuse_single_routing_graph(
     )
     from autoware_lanelet2_to_opendrive.opendrive.road import Road
 
-    junction_lanelets = _filter_lanelets_inside_junction(
-        list(lanelet_map.laneletLayer)
-    )
+    junction_lanelets = _filter_lanelets_inside_junction(list(lanelet_map.laneletLayer))
     junction_groups = find_junction_groups(junction_lanelets)
 
     real = util_mod.create_routing_graph
@@ -185,9 +181,7 @@ def test_calculate_signal_position_forwards_routing_graph():
     linestring.__getitem__ = Mock(return_value=point)
     traffic_light.trafficLights = [linestring]
 
-    spline = Splines(
-        np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]])
-    )
+    spline = Splines(np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]]))
     lanelet_map = Mock()
     lanelet_map.laneletLayer.get.return_value = Mock()
     mapping = Mock()
