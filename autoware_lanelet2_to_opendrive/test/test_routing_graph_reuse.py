@@ -55,3 +55,25 @@ def test_reference_line_reuses_supplied_routing_graph(
             lanelet_map, sample_group, routing_graph=routing_graph
         )
     assert spy.call_count == 0
+
+
+def test_road_forwards_routing_graph_to_reference_line(
+    lanelet_map, routing_graph, sample_group
+):
+    """Road.construct_from_lanelet_groups must pass its graph to ReferenceLine."""
+    from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+    original = ReferenceLine.construct_from_lanelet_groups
+    with patch.object(
+        ReferenceLine, "construct_from_lanelet_groups", wraps=original
+    ) as spy:
+        Road.construct_from_lanelet_groups(
+            lanelet_map=lanelet_map,
+            lanelet_group=sample_group,
+            road_id=0,
+            routing_graph=routing_graph,
+        )
+    # The first ReferenceLine call is the direct one in Road; later calls come
+    # from LaneSection (fixed separately in Task 3).
+    first_call = spy.call_args_list[0]
+    assert first_call.kwargs.get("routing_graph") is routing_graph

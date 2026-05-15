@@ -1022,6 +1022,7 @@ class Road:
             lanelet_map,
             lanelet_list,
             traffic_rule=traffic_rule,
+            routing_graph=routing_graph,
             start_xyz_override=start_xyz_override,
             end_xyz_override=end_xyz_override,
         )
