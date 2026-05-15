@@ -214,3 +214,36 @@ def test_calculate_signal_position_forwards_routing_graph():
         mock_rl.construct_from_lanelet_groups.call_args.kwargs.get("routing_graph")
         is sentinel
     )
+
+
+@pytest.fixture(scope="session")
+def adjacent_pair(adjacent_groups):
+    """A complete adjacent group of exactly two lanelets.
+
+    A two-member group is, by construction, two lanelets joined by a single
+    left/right adjacency -- exactly the directly-adjacent pair that
+    ``extract_centerline_as_spline_from_two_lanelets`` and
+    ``sort_adjacent_groups`` require. An arbitrary 2-element subset of a
+    larger group is NOT guaranteed to be two direct neighbours.
+    """
+    for group in adjacent_groups:
+        if len(group) == 2:
+            return set(group)
+    pytest.skip("test map has no 2-lanelet adjacent group")
+
+
+def test_extract_centerline_reuses_supplied_routing_graph(
+    lanelet_map, routing_graph, adjacent_pair
+):
+    """extract_centerline_as_spline_from_two_lanelets must reuse a graph."""
+    from autoware_lanelet2_to_opendrive.centerline import (
+        extract_centerline_as_spline_from_two_lanelets,
+    )
+
+    with patch.object(
+        util_mod, "create_routing_graph", wraps=util_mod.create_routing_graph
+    ) as spy:
+        extract_centerline_as_spline_from_two_lanelets(
+            lanelet_map, adjacent_pair, routing_graph=routing_graph
+        )
+    assert spy.call_count == 0
