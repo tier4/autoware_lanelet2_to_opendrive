@@ -25,7 +25,7 @@ import numpy as np
 from tqdm import tqdm
 
 from .opendrive.enums import TrafficRule
-from .opendrive.geometry import ParamPoly3
+from .opendrive.geometry import Arc, GeometryBase, ParamPoly3, evaluate_plan_view_world
 
 if TYPE_CHECKING:
     import lanelet2.core
@@ -291,13 +291,47 @@ def _same_direction(line_a: np.ndarray, line_b: np.ndarray) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _evaluate_geometry_world(geom: GeometryBase, p: float) -> tuple[float, float]:
+    """Evaluate a single planView geometry at local arc-length ``p``.
+
+    Dispatches to :func:`evaluate_plan_view_world` with the geometry's own
+    analytic model — ``ParamPoly3`` -> cubic coefficients, ``Arc`` ->
+    constant curvature, anything else (``Line``) -> straight line. This
+    keeps non-``ParamPoly3`` primitives, emitted only when arc-primitive
+    detection (#466) is enabled, from being mis-sampled as straight
+    chords between their endpoints (#495).
+    """
+    if isinstance(geom, ParamPoly3):
+        coeffs = (
+            geom.aU,
+            geom.bU,
+            geom.cU,
+            geom.dU,
+            geom.aV,
+            geom.bV,
+            geom.cV,
+            geom.dV,
+        )
+        return evaluate_plan_view_world(
+            geom.x, geom.y, geom.hdg, p, param_poly3_coeffs=coeffs
+        )
+    if isinstance(geom, Arc):
+        return evaluate_plan_view_world(
+            geom.x, geom.y, geom.hdg, p, arc_curvature=geom.curvature
+        )
+    # Line geometry (and any other primitive): straight along the heading.
+    return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p)
+
+
 def _sample_reference_line_from_road(
     road: "ConverterRoad", num_samples_per_segment: int = 10
 ) -> np.ndarray:
-    """Sample 2D reference line points from a converter Road's ParamPoly3 geometries.
+    """Sample 2D reference line points from a converter Road's planView.
 
-    Evaluates the parametric cubic polynomial at evenly-spaced parameter values
-    within each geometry segment and transforms local (u, v) to global (x, y).
+    Evaluates every planView geometry at evenly-spaced arc-length values
+    using its own analytic model (``<line>``, ``<arc>`` and ``<paramPoly3>``)
+    so that arc primitives are traced along their curve rather than along
+    the straight chord between their endpoints.
 
     Args:
         road: Converter Road object with ``plan_view`` containing geometries.
@@ -311,36 +345,15 @@ def _sample_reference_line_from_road(
 
     points: list[list[float]] = []
     for geom in road.plan_view.geometries:
-        cos_hdg = np.cos(geom.hdg)
-        sin_hdg = np.sin(geom.hdg)
         for i in range(num_samples_per_segment):
             p = geom.length * i / num_samples_per_segment
-            if isinstance(geom, ParamPoly3):
-                u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
-                v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
-                x = geom.x + cos_hdg * u - sin_hdg * v
-                y = geom.y + sin_hdg * u + cos_hdg * v
-            else:
-                # Line (or other simple straight) geometry: u = p, v = 0.
-                x = geom.x + cos_hdg * p
-                y = geom.y + sin_hdg * p
+            x, y = _evaluate_geometry_world(geom, p)
             points.append([x, y])
 
-    # Add endpoint of last segment
-    if road.plan_view.geometries:
-        last = road.plan_view.geometries[-1]
-        p = last.length
-        cos_hdg = np.cos(last.hdg)
-        sin_hdg = np.sin(last.hdg)
-        if isinstance(last, ParamPoly3):
-            u = last.aU + last.bU * p + last.cU * p**2 + last.dU * p**3
-            v = last.aV + last.bV * p + last.cV * p**2 + last.dV * p**3
-            x = last.x + cos_hdg * u - sin_hdg * v
-            y = last.y + sin_hdg * u + cos_hdg * v
-        else:
-            x = last.x + cos_hdg * p
-            y = last.y + sin_hdg * p
-        points.append([x, y])
+    # Add endpoint of the last segment.
+    last = road.plan_view.geometries[-1]
+    x, y = _evaluate_geometry_world(last, last.length)
+    points.append([x, y])
 
     return np.array(points)
 
