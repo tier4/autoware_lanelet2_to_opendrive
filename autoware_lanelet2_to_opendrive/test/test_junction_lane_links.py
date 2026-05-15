@@ -24,7 +24,7 @@ def _make_inputs(
     incoming_road_id=10,
     connecting_road_id=20,
 ):
-    """Build the four dict inputs ``_enumerate_lane_pairs`` consumes.
+    """Build the three dict inputs ``_enumerate_lane_pairs`` consumes.
 
     ``junction_lanelets`` and ``incoming_lanelets`` are lists of
     ``(lanelet_id, lane_id)``; ``edges`` is a list of
@@ -33,7 +33,6 @@ def _make_inputs(
     junction_to_predecessors = {
         connecting_lid: list(prev_ids) for connecting_lid, prev_ids in edges
     }
-    junction_lanelet_ids = {lid for lid, _ in junction_lanelets}
     lanelet_to_road_id = {lid: connecting_road_id for lid, _ in junction_lanelets}
     lanelet_to_road_id.update({lid: incoming_road_id for lid, _ in incoming_lanelets})
     road_id_to_lanelet_to_lane = {
@@ -42,7 +41,6 @@ def _make_inputs(
     }
     return (
         junction_to_predecessors,
-        junction_lanelet_ids,
         lanelet_to_road_id,
         road_id_to_lanelet_to_lane,
     )
@@ -92,25 +90,39 @@ def test_one_into_two_split_emits_two_lane_links():
     assert pairs == {(10, 20): [(-1, -2), (-1, -1)]}
 
 
-def test_predecessor_inside_junction_is_skipped():
-    """A predecessor that is itself a junction lanelet is not an entry edge."""
-    inputs = _make_inputs(
-        junction_lanelets=[(101, -1), (102, -1)],
-        incoming_lanelets=[(201, -1)],
-        # 102's predecessor is 101 (another junction lanelet) - dropped.
-        edges=[(101, [201]), (102, [101])],
+def test_chained_connector_links_to_upstream_connecting_road():
+    """A connector fed only by another in-junction connector still links (#492).
+
+    Regression for #492: regular road 10 -> connecting road 20
+    (lanelet 201 -> 101) -> connecting road 21 (lanelet 101 -> 102).
+    The chained connector 21 has no predecessor outside the junction, so
+    its incoming road is the upstream connecting road 20.  Previously the
+    101 -> 102 edge was dropped as an in-junction predecessor, leaving
+    connecting road 21 absent from every junction ``<connection>``.
+    """
+    junction_to_predecessors = {101: [201], 102: [101]}
+    lanelet_to_road_id = {101: 20, 102: 21, 201: 10}
+    road_id_to_lanelet_to_lane = {
+        20: {101: -1},
+        21: {102: -1},
+        10: {201: -1},
+    }
+
+    pairs = _enumerate_lane_pairs(
+        junction_to_predecessors,
+        lanelet_to_road_id,
+        road_id_to_lanelet_to_lane,
     )
 
-    pairs = _enumerate_lane_pairs(*inputs)
-
-    # Only (10, 20) -> (-1, -1) for the 201 -> 101 edge.
-    assert pairs == {(10, 20): [(-1, -1)]}
+    assert pairs == {
+        (10, 20): [(-1, -1)],
+        (20, 21): [(-1, -1)],
+    }
 
 
 def test_missing_lane_mapping_drops_pair():
     """A lanelet without a lane mapping is dropped, not silently faked."""
     junction_to_predecessors = {101: [201]}
-    junction_lanelet_ids = {101}
     lanelet_to_road_id = {101: 20, 201: 10}
     # Connecting lanelet 101 has no lane mapping -> the pair must be dropped.
     road_id_to_lanelet_to_lane = {
@@ -120,7 +132,6 @@ def test_missing_lane_mapping_drops_pair():
 
     pairs = _enumerate_lane_pairs(
         junction_to_predecessors,
-        junction_lanelet_ids,
         lanelet_to_road_id,
         road_id_to_lanelet_to_lane,
     )
@@ -144,7 +155,6 @@ def test_duplicate_edges_are_deduplicated():
 def test_separate_incoming_roads_get_separate_keys():
     """Two incoming roads feeding the same connecting road -> two keys."""
     junction_to_predecessors = {101: [201, 301]}
-    junction_lanelet_ids = {101}
     lanelet_to_road_id = {101: 20, 201: 10, 301: 11}
     road_id_to_lanelet_to_lane = {
         20: {101: -1},
@@ -154,7 +164,6 @@ def test_separate_incoming_roads_get_separate_keys():
 
     pairs = _enumerate_lane_pairs(
         junction_to_predecessors,
-        junction_lanelet_ids,
         lanelet_to_road_id,
         road_id_to_lanelet_to_lane,
     )
