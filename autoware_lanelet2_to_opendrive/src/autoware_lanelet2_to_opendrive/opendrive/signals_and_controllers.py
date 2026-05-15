@@ -360,6 +360,9 @@ class SignalsAndControllers:
             lanelet_map: Lanelet2 map containing the lanelets
             road_lanelet_mapping: Mapping between roads and lanelets
             road: Optional Road object for computing lane width at s
+            routing_graph: Optional pre-built routing graph for the same
+                lanelet_map. Reused when supplied so the graph is not rebuilt
+                per signal; a fresh graph is built only when None.
 
         Returns:
             Tuple of (s, t) coordinates where:

@@ -72,7 +72,8 @@ def test_road_forwards_routing_graph_to_reference_line(
             routing_graph=routing_graph,
         )
     # The first ReferenceLine call is the direct one in Road; later calls come
-    # from LaneSection (fixed separately in Task 3).
+    # from LaneSection (covered by
+    # test_lane_section_forwards_routing_graph_to_reference_line).
     first_call = spy.call_args_list[0]
     assert first_call.kwargs.get("routing_graph") is routing_graph
 
