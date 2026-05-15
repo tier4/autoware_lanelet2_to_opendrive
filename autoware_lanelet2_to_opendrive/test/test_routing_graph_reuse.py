@@ -121,3 +121,46 @@ def test_construct_from_lanelet_map_reuses_single_routing_graph(
     monkeypatch.setattr(util_mod, "create_routing_graph", counting)
     Road.construct_from_lanelet_map(lanelet_map)
     assert count <= 10, f"create_routing_graph called {count} times (expected <=10)"
+
+
+@pytest.fixture(scope="session")
+def regular_roads_result(lanelet_map):
+    """Regular roads + lanelet->road map, built once for the junction test."""
+    from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+    return Road.construct_from_lanelet_map(lanelet_map)
+
+
+@pytest.mark.slow
+def test_connecting_roads_reuse_single_routing_graph(
+    lanelet_map, regular_roads_result, monkeypatch
+):
+    """Building connecting roads (incl. _lane_aware_endpoint) must not rebuild
+    the graph per call. Before the fix this reached the hundreds."""
+    from autoware_lanelet2_to_opendrive.junction import (
+        _filter_lanelets_inside_junction,
+        find_junction_groups,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+    junction_lanelets = _filter_lanelets_inside_junction(
+        list(lanelet_map.laneletLayer)
+    )
+    junction_groups = find_junction_groups(junction_lanelets)
+
+    real = util_mod.create_routing_graph
+    count = 0
+
+    def counting(lanelet_map_arg):
+        nonlocal count
+        count += 1
+        return real(lanelet_map_arg)
+
+    monkeypatch.setattr(util_mod, "create_routing_graph", counting)
+    Road.construct_connecting_roads_from_junctions(
+        lanelet_map=lanelet_map,
+        junction_groups=junction_groups[:5],
+        regular_roads=regular_roads_result.roads,
+        lanelet_to_road_id=regular_roads_result.lanelet_to_road,
+    )
+    assert count <= 30, f"create_routing_graph called {count} times (expected <=30)"

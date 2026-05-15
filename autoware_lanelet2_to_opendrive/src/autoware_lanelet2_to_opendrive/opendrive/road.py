@@ -1452,7 +1452,7 @@ class Road:
             from ..util import sort_adjacent_groups
 
             try:
-                sorted_lls = sort_adjacent_groups(lanelet_map, group)
+                sorted_lls = sort_adjacent_groups(lanelet_map, group, routing_graph)
             except Exception:
                 return None
             if not sorted_lls:
