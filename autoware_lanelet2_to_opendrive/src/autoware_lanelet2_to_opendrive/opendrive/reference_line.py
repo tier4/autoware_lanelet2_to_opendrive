@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List, Optional, Set, Tuple, Union
 import lanelet2
 import lxml.etree as ET
 import numpy as np
+from lanelet2.routing import RoutingGraph
 
 from ..cubic_spline_1d import CubicSpline1D
 from ..spline import Splines
@@ -71,6 +72,7 @@ class ReferenceLine:
             lanelet2.core.LaneletLayer,
         ],
         traffic_rule: Optional[str] = None,
+        routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
         end_xyz_override: Optional[Tuple[float, float, float]] = None,
     ) -> "ReferenceLine":
@@ -84,6 +86,9 @@ class ReferenceLine:
                          Defaults to "RHT" if not specified.
                          Both RHT and LHT use leftmost lanelet's left boundary as reference line.
                          The road@rule attribute indicates the traffic direction.
+            routing_graph: Optional pre-built routing graph for the same
+                ``lanelet_map``. Reused when supplied; a fresh graph is built
+                only when ``None``.
             start_xyz_override: Optional (x, y, z) world-frame coordinate that
                 replaces the first sampled point of the reference line before
                 spline fitting.  Used by the junction phase to pin a
@@ -104,7 +109,9 @@ class ReferenceLine:
         # Sort the lanelets from left to right
         from ..util import sort_adjacent_groups
 
-        sorted_lanelets = sort_adjacent_groups(lanelet_map, lanelet_group)
+        sorted_lanelets = sort_adjacent_groups(
+            lanelet_map, lanelet_group, routing_graph
+        )
 
         # Normalize traffic_rule to uppercase, default to RHT
         traffic_rule_normalized = (traffic_rule or "RHT").upper()
