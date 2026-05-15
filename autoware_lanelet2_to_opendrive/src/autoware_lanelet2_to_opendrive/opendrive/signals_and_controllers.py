@@ -5,10 +5,11 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Set, Optional, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
+from lanelet2.routing import RoutingGraph
 
 from .signal import Signal, Controller, ControlEntry, PositionInertial
 from .enums import TrafficRule
-from ..util import RoadLaneletMapping, filter_regulatory_element_by_type
+from ..util import RoadLaneletMapping, create_routing_graph, filter_regulatory_element_by_type
 from ..config import COORDINATE_OFFSET
 from ..conversion_config import TrafficLightConfig
 
@@ -118,6 +119,10 @@ class SignalsAndControllers:
         """
         result = SignalsAndControllers()
 
+        # Build the map-wide routing graph once and reuse it for every
+        # signal's ReferenceLine construction (avoids ~1 rebuild per signal).
+        signal_routing_graph = create_routing_graph(lanelet_map)
+
         # Validate parameters
         if exclude_non_junction_signals and junction_lanelet_ids is None:
             junction_lanelet_ids = set()  # Empty set means no junctions
@@ -209,6 +214,7 @@ class SignalsAndControllers:
                     lanelet_map=lanelet_map,
                     road_lanelet_mapping=road_lanelet_mapping,
                     road=matching_road,
+                    routing_graph=signal_routing_graph,
                 )
 
                 # Calculate physical position from linestring centroid
@@ -333,6 +339,7 @@ class SignalsAndControllers:
         lanelet_map: lanelet2.core.LaneletMap,
         road_lanelet_mapping: RoadLaneletMapping,
         road: Optional["Road"] = None,
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> tuple[float, float]:
         """
         Calculate logical s,t coordinates for a traffic signal on a road.
@@ -404,7 +411,7 @@ class SignalsAndControllers:
 
         try:
             reference_line = ReferenceLine.construct_from_lanelet_groups(
-                lanelet_map, lanelets
+                lanelet_map, lanelets, routing_graph=routing_graph
             )
             spline = reference_line.centerline_2d
 
