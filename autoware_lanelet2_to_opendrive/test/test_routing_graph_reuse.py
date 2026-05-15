@@ -77,3 +77,47 @@ def test_road_forwards_routing_graph_to_reference_line(
     # from LaneSection (fixed separately in Task 3).
     first_call = spy.call_args_list[0]
     assert first_call.kwargs.get("routing_graph") is routing_graph
+
+
+def test_lane_section_forwards_routing_graph_to_reference_line(
+    lanelet_map, routing_graph, sample_group
+):
+    """LaneSection.construct_from_lanelet_groups must pass its graph onward."""
+    from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+
+    original = ReferenceLine.construct_from_lanelet_groups
+    with patch.object(
+        ReferenceLine, "construct_from_lanelet_groups", wraps=original
+    ) as spy:
+        LaneSection.construct_from_lanelet_groups(
+            lanelet_map,
+            sample_group,
+            routing_graph=routing_graph,
+        )
+    assert spy.call_args_list[0].kwargs.get("routing_graph") is routing_graph
+
+
+@pytest.mark.slow
+def test_construct_from_lanelet_map_reuses_single_routing_graph(
+    lanelet_map, monkeypatch
+):
+    """End-to-end: building all regular roads rebuilds the graph <=10 times.
+
+    Before the fix this exceeded 1500 (one rebuild per ReferenceLine /
+    LaneSection construction). ``Road.construct_from_lanelet_map`` builds its
+    own graph via the ``RoutingGraph`` constructor directly, so a correct run
+    should reach ``create_routing_graph`` only via incidental fallbacks.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+    real = util_mod.create_routing_graph
+    count = 0
+
+    def counting(lanelet_map_arg):
+        nonlocal count
+        count += 1
+        return real(lanelet_map_arg)
+
+    monkeypatch.setattr(util_mod, "create_routing_graph", counting)
+    Road.construct_from_lanelet_map(lanelet_map)
+    assert count <= 10, f"create_routing_graph called {count} times (expected <=10)"
