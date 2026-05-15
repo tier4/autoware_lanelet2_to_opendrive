@@ -344,6 +344,10 @@ def test_multiple_linestrings_deduplicated_to_one_per_road():
             return_value=traffic_light_map,
         ),
         patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.create_routing_graph",
+            return_value=MagicMock(),
+        ),
+        patch(
             "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
             return_value=(10.0, -4.0),
         ),
@@ -393,6 +397,10 @@ def test_dedup_single_linestring_unchanged():
             return_value=traffic_light_map,
         ),
         patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.create_routing_graph",
+            return_value=MagicMock(),
+        ),
+        patch(
             "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
             return_value=(5.0, -3.0),
         ),
@@ -435,6 +443,10 @@ def test_dedup_first_empty_uses_second():
             return_value=traffic_light_map,
         ),
         patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.create_routing_graph",
+            return_value=MagicMock(),
+        ),
+        patch(
             "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
             return_value=(1.0, -2.0),
         ),
@@ -471,9 +483,15 @@ def test_dedup_all_empty_skipped():
     mapping = _make_mapping()
     roads = _make_mock_roads()
 
-    with patch(
-        "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
-        return_value=traffic_light_map,
+    with (
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+            return_value=traffic_light_map,
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.create_routing_graph",
+            return_value=MagicMock(),
+        ),
     ):
         result = SignalsAndControllers.construct_from_lanelet_map(
             lanelet_map=mock_lanelet_map,

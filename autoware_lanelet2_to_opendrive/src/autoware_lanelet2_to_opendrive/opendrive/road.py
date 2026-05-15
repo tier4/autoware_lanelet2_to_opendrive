@@ -1022,6 +1022,7 @@ class Road:
             lanelet_map,
             lanelet_list,
             traffic_rule=traffic_rule,
+            routing_graph=routing_graph,
             start_xyz_override=start_xyz_override,
             end_xyz_override=end_xyz_override,
         )
@@ -1451,7 +1452,7 @@ class Road:
             from ..util import sort_adjacent_groups
 
             try:
-                sorted_lls = sort_adjacent_groups(lanelet_map, group)
+                sorted_lls = sort_adjacent_groups(lanelet_map, group, routing_graph)
             except Exception:
                 return None
             if not sorted_lls:
