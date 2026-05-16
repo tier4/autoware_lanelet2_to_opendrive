@@ -44,18 +44,6 @@ class ParamPoly3Run(ClassifiedSegment):
     s_end: float
 
 
-def _kappa_at(spline: Splines, s: float) -> float:
-    """Return scalar curvature magnitude estimate at arc-length ``s``.
-
-    Uses the second derivative of the unit-speed parametrisation, whose
-    norm equals |κ| in 2D. Z component is ignored — the classifier
-    operates on the XY projection.
-    """
-    accel = spline.evaluate(s, derivative=2)
-    # In an arc-length parameterisation, ||T'(s)|| = |κ|.
-    return float(np.hypot(accel[0], accel[1]))
-
-
 def _signed_kappa_at(spline: Splines, s: float) -> float:
     """Return signed curvature κ at arc-length ``s`` (XY projection).
 
@@ -74,21 +62,74 @@ def _grow_line(
     config: ArcSpiralConfig,
     constants: ArcSpiralConstants,
 ) -> float:
-    """Return the largest s in [s_start, s_max] for which |κ| stays below
-    ``config.line_curvature_tol``. Returns ``s_start`` if the start
-    itself fails the predicate.
+    """Return the largest s in [s_start, s_max] over which the spline is a
+    straight line, or ``s_start`` if no line of at least
+    ``config.min_line_length`` qualifies.
+
+    The straightness decision is noise-robust (#496), mirroring _grow_arc:
+
+    1. Greedy walk while the *median* signed curvature of the window stays
+       below ``config.line_curvature_tol`` in magnitude. The median
+       ignores the isolated curvature spikes a B-spline fit introduces on
+       an otherwise straight road; a point-wise threshold (the previous
+       design) terminated on the first spike and so almost never reached
+       ``min_line_length``. The test is applied only once the window is at
+       least ``min_line_length`` long, so the median is taken over enough
+       samples to be robust to the spikes at the spline endpoints.
+    2. Validate with a straight-line (κ = 0) position-tolerance check,
+       binary-searching the largest sub-window within
+       ``config.arc_position_tol``. The position error grows monotonically
+       with window length, so the search converges on the exact boundary.
     """
+    if s_max - s_start < config.min_line_length:
+        return s_start
+
     step = constants.classification_step
+
+    # Phase 1: greedy walk while the window stays robustly straight.
+    kappa_samples: List[float] = [_signed_kappa_at(spline, s_start)]
     s = s_start
+    s_end = s_start
     while s + step <= s_max:
         s_next = s + step
-        if _kappa_at(spline, s_next) >= config.line_curvature_tol:
-            return s
+        kappa_samples.append(_signed_kappa_at(spline, s_next))
+        if (
+            s_next - s_start >= config.min_line_length
+            and abs(float(np.median(kappa_samples))) >= config.line_curvature_tol
+        ):
+            break
         s = s_next
-    # Final partial step
-    if s < s_max and _kappa_at(spline, s_max) < config.line_curvature_tol:
-        return s_max
-    return s
+        s_end = s_next
+    else:
+        # Reached s_max without hitting curvature — snap the final
+        # sub-step gap so the run does not leave a sliver too short for
+        # the paramPoly3 fallback to emit (which would shorten the
+        # planView and move the road endpoint). Phase 2 still validates.
+        s_end = s_max
+
+    if s_end - s_start < config.min_line_length:
+        return s_start
+
+    # Phase 2: straight-line position-tolerance check with binary search.
+    if (
+        _arc_position_error(spline, s_start, s_end, 0.0, constants)
+        > config.arc_position_tol
+    ):
+        lo, hi = s_start, s_end
+        for _ in range(constants.arc_fit_max_bisect):
+            mid = 0.5 * (lo + hi)
+            if (
+                _arc_position_error(spline, s_start, mid, 0.0, constants)
+                <= config.arc_position_tol
+            ):
+                lo = mid
+            else:
+                hi = mid
+        s_end = lo
+
+    if s_end - s_start < config.min_line_length:
+        return s_start
+    return s_end
 
 
 def _arc_position_error(
