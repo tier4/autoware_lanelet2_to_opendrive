@@ -452,7 +452,9 @@ class TestParseRoadsFromXodr:
         )
 
         assert len(roads) == 1
-        geometries = roads[0].plan_view.geometries
+        plan_view = roads[0].plan_view
+        assert plan_view is not None
+        geometries = plan_view.geometries
         assert [type(g).__name__ for g in geometries] == [
             "Line",
             "Arc",
