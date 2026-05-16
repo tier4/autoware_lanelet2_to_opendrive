@@ -438,7 +438,7 @@ def parse_roads_from_xodr(
     import lxml.etree as ET
 
     from .opendrive.enums import LaneType
-    from .opendrive.geometry import ParamPoly3, PlanView
+    from .opendrive.geometry import Arc, Line, ParamPoly3, PlanView
     from .opendrive.lane import Lane
     from .opendrive.lane_section import LaneSection
     from .opendrive.lane_sections import Lanes
@@ -455,20 +455,26 @@ def parse_roads_from_xodr(
         road_id = int(road_elem.get("id", "0"))
         junction = int(road_elem.get("junction", "-1"))
 
-        # Parse planView geometries
-        geometries = []
+        # Parse planView geometries (line, arc and paramPoly3).
+        geometries: list[GeometryBase] = []
         plan_view_elem = road_elem.find("planView")
         if plan_view_elem is not None:
             for geom_elem in plan_view_elem.findall("geometry"):
+                s = float(geom_elem.get("s", "0"))
+                x = float(geom_elem.get("x", "0"))
+                y = float(geom_elem.get("y", "0"))
+                hdg = float(geom_elem.get("hdg", "0"))
+                length = float(geom_elem.get("length", "0"))
                 pp3_elem = geom_elem.find("paramPoly3")
+                arc_elem = geom_elem.find("arc")
                 if pp3_elem is not None:
                     geometries.append(
                         ParamPoly3(
-                            s=float(geom_elem.get("s", "0")),
-                            x=float(geom_elem.get("x", "0")),
-                            y=float(geom_elem.get("y", "0")),
-                            hdg=float(geom_elem.get("hdg", "0")),
-                            length=float(geom_elem.get("length", "0")),
+                            s=s,
+                            x=x,
+                            y=y,
+                            hdg=hdg,
+                            length=length,
                             aU=float(pp3_elem.get("aU", "0")),
                             bU=float(pp3_elem.get("bU", "0")),
                             cU=float(pp3_elem.get("cU", "0")),
@@ -479,6 +485,25 @@ def parse_roads_from_xodr(
                             dV=float(pp3_elem.get("dV", "0")),
                             pRange=pp3_elem.get("pRange", "arcLength"),
                         )
+                    )
+                elif arc_elem is not None:
+                    geometries.append(
+                        Arc(
+                            s=s,
+                            x=x,
+                            y=y,
+                            hdg=hdg,
+                            length=length,
+                            curvature=float(arc_elem.get("curvature", "0")),
+                        )
+                    )
+                elif geom_elem.find("line") is not None:
+                    geometries.append(Line(s=s, x=x, y=y, hdg=hdg, length=length))
+                else:
+                    logger.warning(
+                        "parse_roads_from_xodr: road %d has an unsupported "
+                        "planView geometry; skipped",
+                        road_id,
                     )
 
         if not geometries:
