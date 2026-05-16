@@ -354,6 +354,18 @@ class _Lanelet2ToOpenDRIVEConverter:
             junctions=junctions,
         )
 
+        # Set junction links for outgoing roads (issue #494 Part A). The
+        # OpenDRIVE <connection> table records only the incoming road, so a
+        # road leaving a junction otherwise gets no junction link at all.
+        # Must run before set_all_lane_links so the restored road link
+        # unblocks the lane-level predecessor links.
+        print("\n=== Setting junction links for outgoing roads ===")
+        Road.set_outgoing_road_junction_links(
+            lanelet_map=self.lanelet_map,
+            roads=all_roads,
+            road_to_lanelet_ids=road_to_lanelet_ids,
+        )
+
         # Set lane links for all roads
         print("\n=== Building lane links for all roads ===")
         lanelet_to_road_and_lane = Road.set_all_lane_links(self.lanelet_map, all_roads)
