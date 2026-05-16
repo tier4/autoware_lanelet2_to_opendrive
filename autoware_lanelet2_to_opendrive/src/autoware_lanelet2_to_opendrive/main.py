@@ -23,6 +23,7 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import autoware_lanelet2_extension_python.regulatory_elements as _ll2_ext_reg  # noqa: F401
 import lanelet2
+from lanelet2.routing import RoutingGraph
 
 from autoware_lanelet2_to_opendrive.projection import (
     mgrs_to_lanelet2_origin,
@@ -324,6 +325,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_to_lanelet_ids: Dict[int, List[int]],
         lanelet_to_road_id: Dict[int, int],
         junctions: List[Junction],
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> Dict[int, Tuple[int, int]]:
         """
         Set up predecessor/successor connections for roads and lanes.
@@ -334,6 +336,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
             lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
             junctions: All junctions
+            routing_graph: Pre-built vehicle routing graph reused for the
+                outgoing-junction-link pass; built on demand when omitted.
 
         Returns:
             Mapping from lanelet ID to (road_id, lane_id) for all lanes.
@@ -352,6 +356,19 @@ class _Lanelet2ToOpenDRIVEConverter:
         Road.set_incoming_road_junction_links(
             roads=all_roads,
             junctions=junctions,
+        )
+
+        # Set junction links for outgoing roads (issue #494 Part A). The
+        # OpenDRIVE <connection> table records only the incoming road, so a
+        # road leaving a junction otherwise gets no junction link at all.
+        # Must run before set_all_lane_links so the restored road link
+        # unblocks the lane-level predecessor links.
+        print("\n=== Setting junction links for outgoing roads ===")
+        Road.set_outgoing_road_junction_links(
+            lanelet_map=self.lanelet_map,
+            roads=all_roads,
+            road_to_lanelet_ids=road_to_lanelet_ids,
+            routing_graph=routing_graph,
         )
 
         # Set lane links for all roads
@@ -1096,13 +1113,17 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
         )
 
-        # Step 4: Set up road and lane connections
+        # Step 4: Set up road and lane connections. Reuse the routing graph
+        # already built by Road.construct_from_lanelet_map (the lanelet map is
+        # not mutated after construction) so the outgoing-junction-link pass
+        # does not rebuild it — same reuse the divergence pass relies on.
         lanelet_to_road_and_lane = self._setup_connections(
             all_roads,
             connecting_roads,
             mapping.road_to_lanelets,
             lanelet_to_road_id,
             junctions,
+            routing_graph=regular_result.routing_graph,
         )
 
         # Step 5: Extract and assign signals
