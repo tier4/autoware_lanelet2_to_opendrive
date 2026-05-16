@@ -323,19 +323,34 @@ def _evaluate_geometry_world(geom: GeometryBase, p: float) -> tuple[float, float
     return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p)
 
 
-def _sample_reference_line_from_road(
-    road: "ConverterRoad", num_samples_per_segment: int = 10
-) -> np.ndarray:
-    """Sample 2D reference line points from a converter Road's planView.
+#: Target arc-length spacing (m) between reference-line sample points.
+#: The reference line is sampled at this fixed density regardless of how the
+#: planView is split into <line>/<arc>/<paramPoly3> segments, so the geometric
+#: matching distance does not depend on the segmentation (#499).
+_REFERENCE_LINE_SAMPLE_SPACING: float = 0.5
 
-    Evaluates every planView geometry at evenly-spaced arc-length values
-    using its own analytic model (``<line>``, ``<arc>`` and ``<paramPoly3>``)
-    so that arc primitives are traced along their curve rather than along
-    the straight chord between their endpoints.
+
+def _sample_reference_line_from_road(
+    road: "ConverterRoad", sample_spacing: float = _REFERENCE_LINE_SAMPLE_SPACING
+) -> np.ndarray:
+    """Sample a converter Road's planView into a uniform reference polyline.
+
+    Sample points are spaced uniformly by arc-length across the whole
+    planView at a fixed density of one point per ``sample_spacing`` metres,
+    independent of how the planView is split into ``<line>``, ``<arc>`` and
+    ``<paramPoly3>`` segments. Each geometry is evaluated with its own
+    analytic model, so arcs are traced along their curve, not their chord.
+
+    Both the sample count and the sample positions depend only on the
+    reference *curve* — its total length and shape — not on its
+    segmentation. The sampled polyline, and therefore the geometric matching
+    distances computed from it, are invariant to the planView segmentation,
+    so enabling arc-primitive detection (#466) cannot change which lanelet a
+    road maps to (#499).
 
     Args:
         road: Converter Road object with ``plan_view`` containing geometries.
-        num_samples_per_segment: Number of sample points per geometry segment.
+        sample_spacing: Target arc-length spacing (m) between sample points.
 
     Returns:
         NumPy array of shape ``(N, 2)`` with global (x, y) coordinates.
@@ -343,17 +358,27 @@ def _sample_reference_line_from_road(
     if road.plan_view is None or not road.plan_view.geometries:
         return np.empty((0, 2))
 
-    points: list[list[float]] = []
-    for geom in road.plan_view.geometries:
-        for i in range(num_samples_per_segment):
-            p = geom.length * i / num_samples_per_segment
-            x, y = _evaluate_geometry_world(geom, p)
-            points.append([x, y])
+    geometries = road.plan_view.geometries
 
-    # Add endpoint of the last segment.
-    last = road.plan_view.geometries[-1]
-    x, y = _evaluate_geometry_world(last, last.length)
-    points.append([x, y])
+    # Cumulative arc-length at the start of each geometry; the final entry
+    # is the total planView length.
+    segment_starts = np.concatenate([[0.0], np.cumsum([g.length for g in geometries])])
+    total_length = float(segment_starts[-1])
+    if total_length <= 0.0:
+        return np.empty((0, 2))
+
+    # Number of evenly spaced intervals along the whole planView. Derived
+    # from the total length only, so two planViews tracing the same curve
+    # with different segmentations yield the same sample points.
+    num_intervals = max(1, round(total_length / sample_spacing))
+    points: list[list[float]] = []
+    for k in range(num_intervals + 1):
+        s = total_length * k / num_intervals
+        # Locate the geometry that contains global arc-length ``s``.
+        idx = int(np.searchsorted(segment_starts, s, side="right")) - 1
+        idx = min(max(idx, 0), len(geometries) - 1)
+        x, y = _evaluate_geometry_world(geometries[idx], s - segment_starts[idx])
+        points.append([x, y])
 
     return np.array(points)
 
@@ -415,7 +440,7 @@ def parse_roads_from_xodr(
     import lxml.etree as ET
 
     from .opendrive.enums import LaneType
-    from .opendrive.geometry import ParamPoly3, PlanView
+    from .opendrive.geometry import Arc, Line, ParamPoly3, PlanView
     from .opendrive.lane import Lane
     from .opendrive.lane_section import LaneSection
     from .opendrive.lane_sections import Lanes
@@ -432,20 +457,26 @@ def parse_roads_from_xodr(
         road_id = int(road_elem.get("id", "0"))
         junction = int(road_elem.get("junction", "-1"))
 
-        # Parse planView geometries
-        geometries = []
+        # Parse planView geometries (line, arc and paramPoly3).
+        geometries: list[GeometryBase] = []
         plan_view_elem = road_elem.find("planView")
         if plan_view_elem is not None:
             for geom_elem in plan_view_elem.findall("geometry"):
+                s = float(geom_elem.get("s", "0"))
+                x = float(geom_elem.get("x", "0"))
+                y = float(geom_elem.get("y", "0"))
+                hdg = float(geom_elem.get("hdg", "0"))
+                length = float(geom_elem.get("length", "0"))
                 pp3_elem = geom_elem.find("paramPoly3")
+                arc_elem = geom_elem.find("arc")
                 if pp3_elem is not None:
                     geometries.append(
                         ParamPoly3(
-                            s=float(geom_elem.get("s", "0")),
-                            x=float(geom_elem.get("x", "0")),
-                            y=float(geom_elem.get("y", "0")),
-                            hdg=float(geom_elem.get("hdg", "0")),
-                            length=float(geom_elem.get("length", "0")),
+                            s=s,
+                            x=x,
+                            y=y,
+                            hdg=hdg,
+                            length=length,
                             aU=float(pp3_elem.get("aU", "0")),
                             bU=float(pp3_elem.get("bU", "0")),
                             cU=float(pp3_elem.get("cU", "0")),
@@ -456,6 +487,25 @@ def parse_roads_from_xodr(
                             dV=float(pp3_elem.get("dV", "0")),
                             pRange=pp3_elem.get("pRange", "arcLength"),
                         )
+                    )
+                elif arc_elem is not None:
+                    geometries.append(
+                        Arc(
+                            s=s,
+                            x=x,
+                            y=y,
+                            hdg=hdg,
+                            length=length,
+                            curvature=float(arc_elem.get("curvature", "0")),
+                        )
+                    )
+                elif geom_elem.find("line") is not None:
+                    geometries.append(Line(s=s, x=x, y=y, hdg=hdg, length=length))
+                else:
+                    logger.warning(
+                        "parse_roads_from_xodr: road %d has an unsupported "
+                        "planView geometry; skipped",
+                        road_id,
                     )
 
         if not geometries:
