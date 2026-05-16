@@ -323,35 +323,34 @@ def _evaluate_geometry_world(geom: GeometryBase, p: float) -> tuple[float, float
     return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p)
 
 
+#: Target arc-length spacing (m) between reference-line sample points.
+#: The reference line is sampled at this fixed density regardless of how the
+#: planView is split into <line>/<arc>/<paramPoly3> segments, so the geometric
+#: matching distance does not depend on the segmentation (#499).
+_REFERENCE_LINE_SAMPLE_SPACING: float = 0.5
+
+
 def _sample_reference_line_from_road(
-    road: "ConverterRoad", num_samples_per_segment: int = 10
+    road: "ConverterRoad", sample_spacing: float = _REFERENCE_LINE_SAMPLE_SPACING
 ) -> np.ndarray:
     """Sample a converter Road's planView into a uniform reference polyline.
 
-    Sample points are spaced uniformly by arc-length across the *whole*
-    planView, independent of how it is split into ``<line>``, ``<arc>`` and
-    ``<paramPoly3>`` segments. Each geometry is still evaluated with its own
-    analytic model (so arcs are traced along their curve, not their chord),
-    but the points are distributed by global arc-length rather than by a
-    fixed count per segment.
+    Sample points are spaced uniformly by arc-length across the whole
+    planView at a fixed density of one point per ``sample_spacing`` metres,
+    independent of how the planView is split into ``<line>``, ``<arc>`` and
+    ``<paramPoly3>`` segments. Each geometry is evaluated with its own
+    analytic model, so arcs are traced along their curve, not their chord.
 
-    This keeps the sampled polyline — and therefore the geometric matching
-    distances computed from it — invariant to the planView segmentation.
-    Without it, enabling arc-primitive detection (#466) re-segments a road
-    into a few long arcs plus short paramPoly3 runs; a fixed count per
-    segment then bunches samples onto the short segments, skewing the
-    mean-distance metric and flipping which lanelet a road maps to (#499).
-
-    The total sample count is ``num_samples_per_segment`` times the number of
-    geometry segments. For the paramPoly3-only planViews produced when arc
-    detection is disabled the segments are equal-length, so this reproduces
-    the previous evenly-spaced sampling exactly.
+    Both the sample count and the sample positions depend only on the
+    reference *curve* — its total length and shape — not on its
+    segmentation. The sampled polyline, and therefore the geometric matching
+    distances computed from it, are invariant to the planView segmentation,
+    so enabling arc-primitive detection (#466) cannot change which lanelet a
+    road maps to (#499).
 
     Args:
         road: Converter Road object with ``plan_view`` containing geometries.
-        num_samples_per_segment: Sample-count multiplier; the reference line
-            is sampled with ``num_samples_per_segment * len(geometries) + 1``
-            points spaced uniformly by arc-length.
+        sample_spacing: Target arc-length spacing (m) between sample points.
 
     Returns:
         NumPy array of shape ``(N, 2)`` with global (x, y) coordinates.
@@ -368,10 +367,13 @@ def _sample_reference_line_from_road(
     if total_length <= 0.0:
         return np.empty((0, 2))
 
-    num_samples = num_samples_per_segment * len(geometries)
+    # Number of evenly spaced intervals along the whole planView. Derived
+    # from the total length only, so two planViews tracing the same curve
+    # with different segmentations yield the same sample points.
+    num_intervals = max(1, round(total_length / sample_spacing))
     points: list[list[float]] = []
-    for k in range(num_samples + 1):
-        s = total_length * k / num_samples
+    for k in range(num_intervals + 1):
+        s = total_length * k / num_intervals
         # Locate the geometry that contains global arc-length ``s``.
         idx = int(np.searchsorted(segment_starts, s, side="right")) - 1
         idx = min(max(idx, 0), len(geometries) - 1)

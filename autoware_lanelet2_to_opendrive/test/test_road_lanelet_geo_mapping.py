@@ -313,7 +313,8 @@ class TestSampleReferenceLineFromRoad:
             ),
         )
 
-        pts = _sample_reference_line_from_road(road, num_samples_per_segment=8)
+        # spacing 2.0 m over the 15.708 m quarter circle -> 8 intervals.
+        pts = _sample_reference_line_from_road(road, sample_spacing=2.0)
 
         # Every sample must lie on the analytic arc, not the straight chord
         # (chord sampling keeps y == 0, which is the bug being fixed).
@@ -338,7 +339,8 @@ class TestSampleReferenceLineFromRoad:
             ),
         )
 
-        pts = _sample_reference_line_from_road(road, num_samples_per_segment=4)
+        # spacing 5.0 m over the 20 m line -> 4 intervals.
+        pts = _sample_reference_line_from_road(road, sample_spacing=5.0)
 
         for i in range(4):
             p = length * i / 4
@@ -376,7 +378,8 @@ class TestSampleReferenceLineFromRoad:
             ),
         )
 
-        pts = _sample_reference_line_from_road(road, num_samples_per_segment=5)
+        # spacing 2.0 m over the 10 m paramPoly3 -> 5 intervals.
+        pts = _sample_reference_line_from_road(road, sample_spacing=2.0)
 
         for i in range(5):
             p = length * i / 5
@@ -405,9 +408,9 @@ class TestSampleReferenceLineFromRoad:
             ),
         )
 
-        pts = _sample_reference_line_from_road(road, num_samples_per_segment=10)
+        pts = _sample_reference_line_from_road(road, sample_spacing=1.0)
 
-        # 10 samples * 2 segments + 1 closing point, uniform over 20 m.
+        # 1.0 m spacing over 20 m -> 20 intervals, 21 points, uniform.
         assert len(pts) == 21
         spacings = np.linalg.norm(np.diff(pts, axis=0), axis=1)
         assert spacings.max() - spacings.min() < 1e-9
