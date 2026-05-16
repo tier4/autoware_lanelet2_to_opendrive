@@ -8,9 +8,7 @@ Nishishinjuku conversion).  ``Road.set_outgoing_road_junction_links`` walks
 the routing graph to restore the missing junction predecessor link.
 """
 
-import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 import lxml.etree as ET
@@ -129,12 +127,16 @@ def test_apply_leaves_an_existing_successor_untouched():
 # --- end-to-end regression --------------------------------------------------
 
 
-def _nishishinjuku_xodr() -> Path:
-    """Build (or reuse) the Nishishinjuku XODR via ``uv run convert``.
+@pytest.fixture(scope="session")
+def nishishinjuku_xodr(tmp_path_factory) -> Path:
+    """Convert the Nishishinjuku fixture once per session and return the XODR.
 
-    Mirrors the on-demand build pattern in ``test_junction_endpoint_fidelity``
-    and ``test_main``: only an end-to-end conversion exercises the
-    ``_setup_connections`` pipeline this fix lives in.
+    Only an end-to-end conversion exercises the ``_setup_connections``
+    pipeline this fix lives in. The output is written into a fresh
+    session-scoped temp directory rather than a fixed cached path: a
+    regression test must exercise the *current* conversion code, never an
+    XODR left behind by an earlier checkout. ``scope="session"`` still keeps
+    the (expensive) conversion to one run shared by every test below.
     """
     fixture = Path(
         "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
@@ -142,13 +144,7 @@ def _nishishinjuku_xodr() -> Path:
     if not fixture.is_file():
         pytest.skip(f"{fixture} not available; cannot build XODR")
 
-    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    xodr_path = (
-        Path(tempfile.gettempdir()) / f"nishishinjuku_issue_494_{worker_id}.xodr"
-    )
-    if xodr_path.exists():
-        return xodr_path
-
+    xodr_path = tmp_path_factory.mktemp("issue_494") / "nishishinjuku.xodr"
     cmd = [
         "uv",
         "run",
@@ -174,9 +170,35 @@ def _is_driving_road(road: ET._Element) -> bool:
     )
 
 
-def test_no_driving_road_is_emitted_topologically_orphaned():
+def _real_junction_ids(tree: ET._ElementTree) -> set:
+    """Ids of real junctions — those below the synthetic-divergence id floor.
+
+    Synthetic divergence/merge junctions use ``junction_id_offset + 10_000``;
+    the offset keeps real ids well under 10k.
+    """
+    return {
+        j.get("id") for j in tree.iterfind(".//junction") if int(j.get("id")) < 10_000
+    }
+
+
+def _roads_with_real_junction_predecessor(tree: ET._ElementTree):
+    """Yield ``(road, junction_id)`` for regular roads with a real-junction predecessor."""
+    real = _real_junction_ids(tree)
+    for road in tree.iterfind(".//road"):
+        if road.get("junction") != "-1":
+            continue
+        pred = road.find("link/predecessor")
+        if (
+            pred is not None
+            and pred.get("elementType") == "junction"
+            and pred.get("elementId") in real
+        ):
+            yield road, pred.get("elementId")
+
+
+def test_no_driving_road_is_emitted_topologically_orphaned(nishishinjuku_xodr):
     """Issue #494 Part A: no drivable non-junction road may lack both links."""
-    tree = ET.parse(str(_nishishinjuku_xodr()))
+    tree = ET.parse(str(nishishinjuku_xodr))
 
     orphans = []
     for road in tree.iterfind(".//road"):
@@ -194,27 +216,50 @@ def test_no_driving_road_is_emitted_topologically_orphaned():
     )
 
 
-def test_roads_leaving_a_junction_carry_a_real_junction_predecessor():
-    """A regular road that exits a real junction links back to it as predecessor."""
-    tree = ET.parse(str(_nishishinjuku_xodr()))
+def test_every_real_junction_has_an_outgoing_road_linked_back(nishishinjuku_xodr):
+    """Every real junction must be referenced as a <predecessor> by an outgoing road.
 
-    # Real junctions are emitted below the synthetic-divergence id floor
-    # (junction_id_offset + 10_000); the offset keeps real ids well under 10k.
-    real_junction_ids = {
-        j.get("id") for j in tree.iterfind(".//junction") if int(j.get("id")) < 10_000
-    }
-    assert real_junction_ids, "fixture is expected to contain real junctions"
+    Asserting only that *some* road is linked would still pass if most
+    junction-outgoing roads regressed; requiring every real junction to be
+    covered catches a partial regression.
+    """
+    tree = ET.parse(str(nishishinjuku_xodr))
+    real = _real_junction_ids(tree)
+    assert real, "fixture is expected to contain real junctions"
 
-    linked = []
-    for road in tree.iterfind(".//road"):
-        if road.get("junction") != "-1":
-            continue
-        pred = road.find("link/predecessor")
-        if (
-            pred is not None
-            and pred.get("elementType") == "junction"
-            and pred.get("elementId") in real_junction_ids
+    referenced = {jid for _road, jid in _roads_with_real_junction_predecessor(tree)}
+    missing = sorted(real - referenced, key=int)
+    assert missing == [], (
+        f"real junctions with no outgoing road linking back as predecessor: "
+        f"{missing}"
+    )
+
+
+def test_lane_predecessor_links_restored_for_junction_outgoing_roads(
+    nishishinjuku_xodr,
+):
+    """Running the pass before set_all_lane_links must restore lane links.
+
+    ``_set_single_lane_links`` skips lane-level ``<predecessor>`` creation
+    when the road has no predecessor link, so a fix that set only the
+    road-level link would leave the lanes unlinked. Every junction-outgoing
+    road's driving lanes must therefore carry a lane ``<predecessor>``.
+    """
+    tree = ET.parse(str(nishishinjuku_xodr))
+
+    without_lane_link = []
+    for road, _jid in _roads_with_real_junction_predecessor(tree):
+        driving_lanes = [
+            lane
+            for lane in road.iterfind(".//lane[@type]")
+            if lane.get("type") == "driving"
+        ]
+        if driving_lanes and not any(
+            lane.find("link/predecessor") is not None for lane in driving_lanes
         ):
-            linked.append(road.get("id"))
+            without_lane_link.append(road.get("id"))
 
-    assert linked, "no regular road carries a real-junction <predecessor> link"
+    assert without_lane_link == [], (
+        f"junction-outgoing roads whose driving lanes lack a lane-level "
+        f"<predecessor>: {without_lane_link}"
+    )
