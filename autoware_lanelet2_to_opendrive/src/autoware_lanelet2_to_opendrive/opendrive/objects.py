@@ -12,7 +12,7 @@ import lxml.etree as ET
 import numpy as np
 
 from ..util import extract_points
-from .geometry import ParamPoly3
+from .geometry import Arc, ParamPoly3, evaluate_plan_view_world
 
 if TYPE_CHECKING:
     from .road import Road
@@ -238,6 +238,16 @@ def _sample_road_points(road: Road) -> List[tuple]:
                 tx = du * cos_hdg - dv * sin_hdg
                 ty = du * sin_hdg + dv * cos_hdg
                 local_hdg = math.atan2(ty, tx)
+            elif isinstance(geom, Arc):
+                # Arc geometry: constant curvature — sample along the curve.
+                # Treating an arc as its start tangent skews the projected
+                # (s, t) of objects placed on curved roads (#504).
+                ax, ay = evaluate_plan_view_world(
+                    geom.x, geom.y, geom.hdg, p, arc_curvature=geom.curvature
+                )
+                wx = float(ax)
+                wy = float(ay)
+                local_hdg = geom.hdg + geom.curvature * p
             else:
                 # Line or other simple geometry: straight-line along heading
                 wx = geom.x + p * cos_hdg

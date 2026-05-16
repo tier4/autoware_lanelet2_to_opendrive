@@ -146,6 +146,91 @@ class TestSaveMappingJson:
         assert restored.xodr_sha256 == original.xodr_sha256
         assert restored.osm_sha256 == original.osm_sha256
 
+    def test_round_trip_preserves_skipped_synthetic_roads(self, tmp_path: Path) -> None:
+        """#493: synthetic divergence connectors are recorded in the mapping
+        JSON so consumers can tell them apart from real mapping failures."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            skipped_synthetic_roads=[274, 290, 303],
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["skipped_synthetic_roads"] == [274, 290, 303]
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.skipped_synthetic_roads == [274, 290, 303]
+
+
+# ---------------------------------------------------------------------------
+# _compute_all_candidates — synthetic divergence connector handling (#493)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeAllCandidatesSyntheticSkip:
+    """#493: synthetic divergence/merge connecting roads (junction != -1,
+    sub-0.5m total geometry) must be excluded from geometric matching *and*
+    reported separately, not counted as 0-candidate matching failures."""
+
+    def test_synthetic_connector_is_skipped_and_recorded(self) -> None:
+        import lxml.etree as ET
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _compute_all_candidates,
+        )
+
+        # A degenerate divergence connecting road: junction != -1, total
+        # planView length far below the synthetic-connector threshold.
+        xodr = (
+            "<OpenDRIVE><road id='100' junction='11000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road></OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+        all_rc, no_candidate_diag, skipped = _compute_all_candidates(
+            roads, {}, {}, {}, {}
+        )
+
+        assert skipped == {100}
+        assert 100 not in {rc.road_id for rc in all_rc}
+        assert 100 not in no_candidate_diag
+
+    def test_helper_identifies_synthetic_connectors_only(self) -> None:
+        """_synthetic_connector_road_ids selects junction roads with sub-0.5m
+        geometry, leaving real connecting roads and regular roads alone."""
+        import lxml.etree as ET
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _synthetic_connector_road_ids,
+        )
+
+        xodr = (
+            "<OpenDRIVE>"
+            # synthetic connector: junction != -1, sub-0.5m total geometry
+            "<road id='100' junction='11000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road>"
+            # real connecting road: junction != -1 but several metres long
+            "<road id='200' junction='1000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='12.0'>"
+            "<line/></geometry></planView></road>"
+            # regular road: junction == -1 (short, but not a connector)
+            "<road id='300' junction='-1'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road>"
+            "</OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+        assert _synthetic_connector_road_ids(roads) == {100}
+
 
 # ---------------------------------------------------------------------------
 # MappingMismatchError

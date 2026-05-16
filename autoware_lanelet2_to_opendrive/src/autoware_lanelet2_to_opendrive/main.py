@@ -1535,7 +1535,7 @@ def preprocess_and_convert_with_hydra(
             enabled=arcspiral_dict.get("enabled", False),
             arc_enabled=arcspiral_dict.get("arc_enabled", True),
             spiral_enabled=arcspiral_dict.get("spiral_enabled", False),
-            line_curvature_tol=arcspiral_dict.get("line_curvature_tol", 1e-4),
+            line_curvature_tol=arcspiral_dict.get("line_curvature_tol", 1e-3),
             arc_curvature_tol=arcspiral_dict.get("arc_curvature_tol", 5e-4),
             arc_position_tol=arcspiral_dict.get("arc_position_tol", 0.05),
             min_line_length=arcspiral_dict.get("min_line_length", 5.0),
