@@ -133,6 +133,11 @@ class GeoRoadLaneletMapping:
     preprocessing_log: dict | None = None
     stop_line_mapping: dict[int, StopLineMappingEntry] | None = None
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None
+    #: Road IDs of synthetic divergence/merge connecting roads (#291) that
+    #: were deliberately excluded from geometric lanelet matching because
+    #: they have no source lanelet. Recorded so consumers can tell them
+    #: apart from genuine mapping failures (#493).
+    skipped_synthetic_roads: list[int] | None = None
     traffic_light_config: dict | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
@@ -171,6 +176,8 @@ class GeoRoadLaneletMapping:
             result["skipped_stop_lines"] = {
                 str(k): v.to_dict() for k, v in self.skipped_stop_lines.items()
             }
+        if self.skipped_synthetic_roads is not None:
+            result["skipped_synthetic_roads"] = list(self.skipped_synthetic_roads)
         if self.preprocessing_log is not None:
             result["preprocessing_log"] = self.preprocessing_log
         if self.traffic_light_config is not None:
@@ -205,6 +212,7 @@ class GeoRoadLaneletMapping:
             preprocessing_log=data.get("preprocessing_log"),
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
+            skipped_synthetic_roads=data.get("skipped_synthetic_roads"),
             traffic_light_config=data.get("traffic_light_config"),
         )
 
@@ -570,7 +578,7 @@ def _compute_all_candidates(
     lanelet_right: dict[int, np.ndarray],
     lanelet_left_bbox: dict[int, tuple[float, float, float, float]],
     lanelet_right_bbox: dict[int, tuple[float, float, float, float]],
-) -> tuple[list[_RoadCandidates], dict[int, dict]]:
+) -> tuple[list[_RoadCandidates], dict[int, dict], set[int]]:
     """Phase 1: compute candidate lanelet lists for every road.
 
     For each road, applies bbox -> direction -> distance filtering against
@@ -579,10 +587,12 @@ def _compute_all_candidates(
 
     Returns:
         Tuple of (candidate list, diagnostic dict keyed by road_id for
-        roads with zero candidates).
+        roads with zero candidates, set of road IDs deliberately skipped as
+        synthetic divergence/merge connectors — see ``#493``).
     """
     all_rc: list[_RoadCandidates] = []
     no_candidate_diag: dict[int, dict] = {}
+    skipped_synthetic: set[int] = set()
 
     for road in roads:
         # Skip synthetic divergence/merge connecting roads (#291): they have
@@ -596,6 +606,7 @@ def _compute_all_candidates(
         if road.junction != -1 and road.plan_view is not None:
             total_length = sum(g.length for g in road.plan_view.geometries)
             if total_length < _SYNTHETIC_CONNECTOR_MAX_LENGTH:
+                skipped_synthetic.add(road.id)
                 continue
 
         ref_line = _sample_reference_line_from_road(road)
@@ -739,7 +750,7 @@ def _compute_all_candidates(
                 "nearest_lid": best_rejected_lid,
             }
 
-    return all_rc, no_candidate_diag
+    return all_rc, no_candidate_diag, skipped_synthetic
 
 
 def _resolve_conflicts(
@@ -1068,7 +1079,7 @@ def build_mapping(
     matched_lanelets: set[int] = set()
 
     # Phase 1: compute candidate lists for every road (no exclusion)
-    all_rc, no_candidate_diag = _compute_all_candidates(
+    all_rc, no_candidate_diag, skipped_synthetic = _compute_all_candidates(
         roads,
         lanelet_left,
         lanelet_right,
@@ -1244,7 +1255,10 @@ def build_mapping(
     rc_road_ids = {rc.road_id for rc in all_rc}
     assigned_road_ids = {all_rc[rc_idx].road_id for rc_idx in assignment}
 
-    roads_no_candidates = all_road_ids - rc_road_ids
+    # Synthetic divergence/merge connectors are deliberately excluded from
+    # matching (#493) — they have no source lanelet, so they are reported
+    # separately rather than counted as 0-candidate matching failures.
+    roads_no_candidates = all_road_ids - rc_road_ids - skipped_synthetic
     roads_dropped_phase2 = rc_road_ids - assigned_road_ids
     roads_not_fully_mapped: list[tuple[int, tuple[int, ...]]] = []
     for rc_idx, cand_idx in assignment.items():
@@ -1316,6 +1330,7 @@ def build_mapping(
         xodr_sha256=xodr_sha256,
         osm_sha256=osm_sha256,
         lanelet_to_road_and_lane=mapping,
+        skipped_synthetic_roads=sorted(skipped_synthetic) or None,
     )
 
 
@@ -1472,10 +1487,13 @@ def validate_and_save_mapping(
     This is the single entry-point called at the end of conversion to:
 
     1. Compute SHA256 checksums of the XODR and OSM files.
-    2. Build a :class:`GeoRoadLaneletMapping` from the conversion-time mapping
-       and save it as ``.mapping.json`` next to the XODR file.
-    3. Build a geometric mapping from the converter's own ``Road`` objects
-       via :func:`build_mapping`, and cross-validate the two mappings.
+    2. Build a geometric mapping from the converter's own ``Road`` objects
+       via :func:`build_mapping`.
+    3. Build a :class:`GeoRoadLaneletMapping` from the conversion-time
+       mapping — carrying over the synthetic divergence/merge connectors
+       the geometric pass deliberately skipped (#493) — and save it as
+       ``.mapping.json`` next to the XODR file.
+    4. Cross-validate the conversion-time and geometric mappings.
 
     Args:
         lanelet_to_road_and_lane: Mapping produced during conversion.
@@ -1504,7 +1522,14 @@ def validate_and_save_mapping(
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
 
-    # 2. Save mapping JSON
+    # 2. Build the geometric mapping first, so the saved conversion-time
+    #    mapping JSON can record which synthetic divergence/merge connectors
+    #    were excluded from geometric matching (#493).
+    geo_mapping = build_mapping(
+        lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256
+    )
+
+    # 3. Save mapping JSON
     conv_mapping = GeoRoadLaneletMapping(
         xodr_sha256=xodr_sha256,
         osm_sha256=osm_sha256,
@@ -1512,15 +1537,13 @@ def validate_and_save_mapping(
         preprocessing_log=preprocessing_log,
         stop_line_mapping=stop_line_mapping,
         skipped_stop_lines=skipped_stop_lines,
+        skipped_synthetic_roads=geo_mapping.skipped_synthetic_roads,
         traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)
 
-    # 3. Cross-validate with geometric mapping using converter Roads
-    geo_mapping = build_mapping(
-        lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256
-    )
+    # 4. Cross-validate the conversion-time and geometric mappings.
     validate_mapping_consistency(
         lanelet_to_road_and_lane, geo_mapping, preprocessing_log
     )
