@@ -581,11 +581,14 @@ def _evaluate_road_xy(
 ) -> tuple[float, float] | None:
     """Evaluate global (x, y) on a road at Frenet coordinate (*s*, *t*).
 
-    Uses the ParamPoly3 geometry segments in the road's plan view.
+    Uses the line, arc and paramPoly3 geometry segments in the road's plan
+    view, each evaluated with its own analytic model.
     *t* is the lateral offset: positive = left of the reference line.
     Returns ``None`` if the road has no geometry.
     """
     import math
+
+    from .opendrive.geometry import Arc, ParamPoly3, evaluate_plan_view_world
 
     if road.plan_view is None or not road.plan_view.geometries:
         return None
@@ -598,24 +601,45 @@ def _evaluate_road_xy(
             break
 
     p = s - geom.s
-    u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
-    v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
-    cos_h = math.cos(geom.hdg)
-    sin_h = math.sin(geom.hdg)
-    x_ref = geom.x + cos_h * u - sin_h * v
-    y_ref = geom.y + sin_h * u + cos_h * v
+
+    # Reference-line point and tangent heading, per geometry type.
+    if isinstance(geom, ParamPoly3):
+        x_ref, y_ref = evaluate_plan_view_world(
+            geom.x,
+            geom.y,
+            geom.hdg,
+            p,
+            param_poly3_coeffs=(
+                geom.aU,
+                geom.bU,
+                geom.cU,
+                geom.dU,
+                geom.aV,
+                geom.bV,
+                geom.cV,
+                geom.dV,
+            ),
+        )
+        du = geom.bU + 2.0 * geom.cU * p + 3.0 * geom.dU * p**2
+        dv = geom.bV + 2.0 * geom.cV * p + 3.0 * geom.dV * p**2
+        tangent_hdg = geom.hdg + math.atan2(dv, du)
+    elif isinstance(geom, Arc):
+        x_ref, y_ref = evaluate_plan_view_world(
+            geom.x, geom.y, geom.hdg, p, arc_curvature=geom.curvature
+        )
+        tangent_hdg = geom.hdg + geom.curvature * p
+    else:  # Line, or any other straight primitive.
+        x_ref, y_ref = evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p)
+        tangent_hdg = geom.hdg
 
     if t == 0.0:
-        return (x_ref, y_ref)
+        return (float(x_ref), float(y_ref))
 
-    # Apply lateral offset: compute tangent direction at p, then go
-    # perpendicular by t.  Positive t = left of travel direction.
-    du = geom.bU + 2.0 * geom.cU * p + 3.0 * geom.dU * p**2
-    dv = geom.bV + 2.0 * geom.cV * p + 3.0 * geom.dV * p**2
-    tangent_hdg = geom.hdg + math.atan2(dv, du)
+    # Apply the lateral offset perpendicular to the tangent.
+    # Positive t = left of travel direction.
     return (
-        x_ref - t * math.sin(tangent_hdg),
-        y_ref + t * math.cos(tangent_hdg),
+        float(x_ref - t * math.sin(tangent_hdg)),
+        float(y_ref + t * math.cos(tangent_hdg)),
     )
 
 
