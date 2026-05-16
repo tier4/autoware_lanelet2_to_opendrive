@@ -261,7 +261,6 @@ def _extract_right_of_way_records(
 
 def _enumerate_lane_pairs(
     junction_to_predecessors: Dict[int, List[int]],
-    junction_lanelet_ids: Set[int],
     lanelet_to_road_id: Dict[int, int],
     road_id_to_lanelet_to_lane: Dict[int, Dict[int, int]],
 ) -> Dict[tuple[int, int], List[tuple[int, int]]]:
@@ -271,12 +270,19 @@ def _enumerate_lane_pairs(
     one ``(incoming_lane_id, connecting_lane_id)`` entry per direct
     lane-level predecessor edge implied by ``junction_to_predecessors``.
 
+    A predecessor that is itself a connecting lanelet of the same
+    junction (a *chained* connector) is resolved transitively: its
+    in-junction predecessor chain is walked until lanelets outside the
+    junction are reached, and those external lanelets' roads become the
+    ``incomingRoad``.  Dropping these edges previously left the connecting
+    road out of the ``<connection>`` table entirely (#492); pointing
+    ``incomingRoad`` at the upstream connecting road instead crashes
+    CARLA's OpenDRIVE parser (#500) — so the external road is used.
+
     Args:
         junction_to_predecessors: ``junction_lanelet_id -> [predecessor
             lanelet ids]`` from the routing graph (direct longitudinal
             predecessors only, lane changes excluded).
-        junction_lanelet_ids: All lanelet ids inside the junction; used
-            to drop predecessors that are themselves connecting lanelets.
         lanelet_to_road_id: Global ``lanelet_id -> road_id`` mapping.
         road_id_to_lanelet_to_lane: ``road_id -> (lanelet_id -> lane_id)``.
 
@@ -286,6 +292,27 @@ def _enumerate_lane_pairs(
         by ``(incoming_lane_id, connecting_lane_id)`` so the emitted XML
         is deterministic.
     """
+
+    def _resolve_incoming_lanelets(prev_id: int, visited: Set[int]) -> List[int]:
+        """Resolve a predecessor to its external (non-junction) lanelet(s).
+
+        A predecessor that is itself a connecting lanelet of this junction
+        — a key in ``junction_to_predecessors`` — is a chained connector;
+        its in-junction predecessor chain is walked until lanelets outside
+        the junction are reached.  Returns those external lanelet ids so
+        the ``<connection>`` resolves to a non-junction ``incomingRoad``
+        (a connecting-road ``incomingRoad`` crashes CARLA's parser, #500).
+        """
+        if prev_id not in junction_to_predecessors:
+            return [prev_id]  # outside the junction — a real incoming lanelet
+        if prev_id in visited:
+            return []  # cycle guard for malformed routing graphs
+        visited.add(prev_id)
+        resolved: List[int] = []
+        for upstream_id in junction_to_predecessors[prev_id]:
+            resolved.extend(_resolve_incoming_lanelets(upstream_id, visited))
+        return resolved
+
     pairs: Dict[tuple[int, int], Set[tuple[int, int]]] = defaultdict(set)
 
     for connecting_lanelet_id, predecessor_ids in junction_to_predecessors.items():
@@ -299,20 +326,19 @@ def _enumerate_lane_pairs(
             continue
 
         for prev_id in predecessor_ids:
-            if prev_id in junction_lanelet_ids:
-                continue
-            incoming_road_id = lanelet_to_road_id.get(prev_id)
-            if incoming_road_id is None:
-                continue
-            incoming_lane_id = road_id_to_lanelet_to_lane.get(incoming_road_id, {}).get(
-                prev_id
-            )
-            if incoming_lane_id is None:
-                continue
+            for incoming_lanelet_id in _resolve_incoming_lanelets(prev_id, set()):
+                incoming_road_id = lanelet_to_road_id.get(incoming_lanelet_id)
+                if incoming_road_id is None:
+                    continue
+                incoming_lane_id = road_id_to_lanelet_to_lane.get(
+                    incoming_road_id, {}
+                ).get(incoming_lanelet_id)
+                if incoming_lane_id is None:
+                    continue
 
-            pairs[(incoming_road_id, connecting_road_id)].add(
-                (incoming_lane_id, connecting_lane_id)
-            )
+                pairs[(incoming_road_id, connecting_road_id)].add(
+                    (incoming_lane_id, connecting_lane_id)
+                )
 
     return {key: sorted(value) for key, value in pairs.items()}
 
@@ -593,8 +619,6 @@ class Junction:
         if roads is not None:
             road_id_to_road = {road.id: road for road in roads}
 
-        junction_lanelet_ids = {ll.id for ll in junction_lanelet_group}
-
         # Walk the routing graph once and collect direct longitudinal
         # predecessor lanelet ids per connecting (junction) lanelet.  The
         # tuple-of-int view feeds the pure ``_enumerate_lane_pairs`` helper
@@ -611,15 +635,16 @@ class Junction:
         # one of its lanelets.  ``Road.get_lanelet_to_lane_mapping()``
         # walks every lane section, so for large maps it would otherwise
         # be O(total_roads) per junction even though most roads never
-        # participate.
+        # participate.  In-junction predecessors are kept here so the
+        # intermediate connecting roads on a chained connector's
+        # predecessor chain have their lane mappings available when
+        # ``_enumerate_lane_pairs`` walks that chain (#492).
         participating_road_ids: Set[int] = set()
         for connecting_lid, prev_ids in junction_to_predecessors.items():
             connecting_rid = lanelet_to_road_id.get(connecting_lid)
             if connecting_rid is not None:
                 participating_road_ids.add(connecting_rid)
             for prev_id in prev_ids:
-                if prev_id in junction_lanelet_ids:
-                    continue
                 incoming_rid = lanelet_to_road_id.get(prev_id)
                 if incoming_rid is not None:
                     participating_road_ids.add(incoming_rid)
@@ -636,7 +661,6 @@ class Junction:
         # a single laneLink.
         lane_pairs_per_connection = _enumerate_lane_pairs(
             junction_to_predecessors=junction_to_predecessors,
-            junction_lanelet_ids=junction_lanelet_ids,
             lanelet_to_road_id=lanelet_to_road_id,
             road_id_to_lanelet_to_lane=road_id_to_lanelet_to_lane,
         )
@@ -644,7 +668,34 @@ class Junction:
         # ContactPoint is fixed to START of the connecting road;
         # geometry-aware contact-point selection is tracked separately
         # and out of scope for #439.
-        return _build_connections_from_lane_pairs(lane_pairs_per_connection)
+        connections = _build_connections_from_lane_pairs(lane_pairs_per_connection)
+
+        # #492: every connecting road must appear as the connectingRoad of
+        # a <connection>; one left out is topologically unreachable — no
+        # road-level <link> and referenced by no connection.  Warn so a
+        # regression, or a genuinely disconnected turn lanelet in the
+        # source map, is visible instead of silently emitting orphan
+        # junction geometry.
+        uncovered = sorted(
+            set(connecting_road_ids) - {c.connecting_road for c in connections}
+        )
+        if uncovered:
+            # The connecting lanelet has no routing-graph predecessor, so no
+            # incoming road can be resolved.  This is typically a source-map
+            # issue — the turn lanelet is not joined to any incoming lane —
+            # rather than a converter fault.  Warn rather than fail: the road
+            # is still emitted, just unreachable.
+            log.warning(
+                "Junction %d: %d connecting road(s) have no <connection> "
+                "entry; their connecting lanelet has no routing-graph "
+                "predecessor (disconnected turn lanelet in the source map): "
+                "%s",
+                junction_id,
+                len(uncovered),
+                uncovered,
+            )
+
+        return connections
 
     @staticmethod
     def build_priorities_from_regulatory_elements(
