@@ -572,6 +572,27 @@ def parse_roads_from_xodr(
 # ---------------------------------------------------------------------------
 
 
+def _synthetic_connector_road_ids(roads: list["ConverterRoad"]) -> set[int]:
+    """Road IDs of synthetic divergence/merge connecting roads (#291, #493).
+
+    A connecting road (``junction != -1``) whose total planView length is
+    below ``_SYNTHETIC_CONNECTOR_MAX_LENGTH`` is a synthetic stub from the
+    divergence/merge synthesis pass — it has no backing lanelet. Real
+    ``turn_direction`` connecting roads are at least several metres long.
+
+    The check depends only on ``junction`` and planView length, so callers
+    can identify these roads with a lightweight pass — without running the
+    full geometric mapping.
+    """
+    skipped: set[int] = set()
+    for road in roads:
+        if road.junction != -1 and road.plan_view is not None:
+            total_length = sum(g.length for g in road.plan_view.geometries)
+            if total_length < _SYNTHETIC_CONNECTOR_MAX_LENGTH:
+                skipped.add(road.id)
+    return skipped
+
+
 def _compute_all_candidates(
     roads: list["ConverterRoad"],
     lanelet_left: dict[int, np.ndarray],
@@ -592,22 +613,17 @@ def _compute_all_candidates(
     """
     all_rc: list[_RoadCandidates] = []
     no_candidate_diag: dict[int, dict] = {}
-    skipped_synthetic: set[int] = set()
+
+    # Synthetic divergence/merge connecting roads (#291) have no backing
+    # lanelets, so geometric matching would either drop them silently or
+    # claim a regular lanelet from the divergence-point neighbourhood —
+    # poisoning Phase 2 conflict resolution and the Phase 3 adjacency walk.
+    # Exclude them up front and report them separately (#493).
+    skipped_synthetic = _synthetic_connector_road_ids(roads)
 
     for road in roads:
-        # Skip synthetic divergence/merge connecting roads (#291): they have
-        # no backing lanelets, so geometric matching would either drop them
-        # silently or claim a regular lanelet from the divergence-point
-        # neighbourhood (poisoning Phase 2 conflict resolution and Phase 3
-        # adjacency walk for the affected source road). Identify them by
-        # junction membership combined with sub-minimum total geometry
-        # length: real connecting roads built from ``turn_direction``
-        # lanelets are at least several metres long.
-        if road.junction != -1 and road.plan_view is not None:
-            total_length = sum(g.length for g in road.plan_view.geometries)
-            if total_length < _SYNTHETIC_CONNECTOR_MAX_LENGTH:
-                skipped_synthetic.add(road.id)
-                continue
+        if road.id in skipped_synthetic:
+            continue
 
         ref_line = _sample_reference_line_from_road(road)
         if len(ref_line) < 2:
@@ -1487,13 +1503,13 @@ def validate_and_save_mapping(
     This is the single entry-point called at the end of conversion to:
 
     1. Compute SHA256 checksums of the XODR and OSM files.
-    2. Build a geometric mapping from the converter's own ``Road`` objects
-       via :func:`build_mapping`.
-    3. Build a :class:`GeoRoadLaneletMapping` from the conversion-time
-       mapping — carrying over the synthetic divergence/merge connectors
-       the geometric pass deliberately skipped (#493) — and save it as
-       ``.mapping.json`` next to the XODR file.
-    4. Cross-validate the conversion-time and geometric mappings.
+    2. Build a :class:`GeoRoadLaneletMapping` from the conversion-time
+       mapping — recording the synthetic divergence/merge connecting roads
+       (#493), identified by a lightweight pass independent of the
+       geometric mapping — and save it as ``.mapping.json`` next to the
+       XODR file.
+    3. Build a geometric mapping from the converter's own ``Road`` objects
+       via :func:`build_mapping`, and cross-validate the two mappings.
 
     Args:
         lanelet_to_road_and_lane: Mapping produced during conversion.
@@ -1522,14 +1538,10 @@ def validate_and_save_mapping(
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
 
-    # 2. Build the geometric mapping first, so the saved conversion-time
-    #    mapping JSON can record which synthetic divergence/merge connectors
-    #    were excluded from geometric matching (#493).
-    geo_mapping = build_mapping(
-        lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256
-    )
-
-    # 3. Save mapping JSON
+    # 2. Save mapping JSON. The synthetic divergence/merge connectors
+    #    (#493) are identified by a lightweight pass over ``roads``, so the
+    #    JSON artifact is still written — and stays available for
+    #    post-mortem debugging — even if the geometric mapping below raises.
     conv_mapping = GeoRoadLaneletMapping(
         xodr_sha256=xodr_sha256,
         osm_sha256=osm_sha256,
@@ -1537,13 +1549,16 @@ def validate_and_save_mapping(
         preprocessing_log=preprocessing_log,
         stop_line_mapping=stop_line_mapping,
         skipped_stop_lines=skipped_stop_lines,
-        skipped_synthetic_roads=geo_mapping.skipped_synthetic_roads,
+        skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
         traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)
 
-    # 4. Cross-validate the conversion-time and geometric mappings.
+    # 3. Cross-validate with geometric mapping using converter Roads
+    geo_mapping = build_mapping(
+        lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256
+    )
     validate_mapping_consistency(
         lanelet_to_road_and_lane, geo_mapping, preprocessing_log
     )

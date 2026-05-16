@@ -201,6 +201,36 @@ class TestComputeAllCandidatesSyntheticSkip:
         assert 100 not in {rc.road_id for rc in all_rc}
         assert 100 not in no_candidate_diag
 
+    def test_helper_identifies_synthetic_connectors_only(self) -> None:
+        """_synthetic_connector_road_ids selects junction roads with sub-0.5m
+        geometry, leaving real connecting roads and regular roads alone."""
+        import lxml.etree as ET
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _synthetic_connector_road_ids,
+        )
+
+        xodr = (
+            "<OpenDRIVE>"
+            # synthetic connector: junction != -1, sub-0.5m total geometry
+            "<road id='100' junction='11000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road>"
+            # real connecting road: junction != -1 but several metres long
+            "<road id='200' junction='1000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='12.0'>"
+            "<line/></geometry></planView></road>"
+            # regular road: junction == -1 (short, but not a connector)
+            "<road id='300' junction='-1'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road>"
+            "</OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+        assert _synthetic_connector_road_ids(roads) == {100}
+
 
 # ---------------------------------------------------------------------------
 # MappingMismatchError
