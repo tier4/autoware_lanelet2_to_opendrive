@@ -28,7 +28,6 @@ jobs:
       uses: ./.github/actions/setup-env
       with:
         python-version: ${{ matrix.python-version }}
-        gh-pat: ${{ secrets.GH_PAT }}
         install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
@@ -51,7 +50,6 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        gh-pat: ${{ secrets.GH_PAT }}
         install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "true"
@@ -79,7 +77,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
-          gh-pat: ${{ secrets.GH_PAT }}
           install-system-deps: "true"
           install-dev-deps: "true"
           run-precommit: "false"
@@ -111,7 +108,6 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        gh-pat: ${{ secrets.GH_PAT }}
         install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
@@ -171,7 +167,6 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        gh-pat: ${{ secrets.GH_PAT }}
         install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
@@ -220,7 +215,6 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        gh-pat: ${{ secrets.GH_PAT }}
         install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"

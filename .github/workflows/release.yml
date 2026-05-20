@@ -191,7 +191,6 @@ jobs:
         if: steps.pr-labels.outputs.bump_type != 'none'
         uses: ./.github/actions/setup-env
         with:
-          gh-pat: ${{ secrets.GH_PAT }}
           install-system-deps: "true"
           install-dev-deps: "true"
           carla-extra: "carla"
@@ -304,7 +303,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
-          gh-pat: ${{ secrets.GH_PAT }}
           install-system-deps: "true"
           install-dev-deps: "true"
           carla-extra: "carla"
