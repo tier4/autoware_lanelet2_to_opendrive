@@ -94,10 +94,7 @@ docker compose --profile test run --rm pytest
 docker compose --profile lint run --rm lint
 ```
 
-A `GH_PAT` environment variable with `repo` scope is required at image
-build time because the project depends on the private repository
-`tier4/lanelet2_python_api_for_autoware`. See
-[`docs/docker.md`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
+See [`docs/docker.md`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
 in the repository root for the full reference.
 
 ## Environment Configuration

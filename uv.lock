@@ -141,7 +141,7 @@ requires-dist = [
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6bd27ff7ab3eed326422b960a2694dff605bdb9a" },
+    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=21cafbf9a855afbc4b89d4dfc3d299a411b64dde" },
     { name = "numpy", specifier = ">=1.21" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "opencv-python", specifier = ">=4.8" },
@@ -157,7 +157,7 @@ provides-extras = ["carla", "carla-0-9-16"]
 
 [[package]]
 name = "autoware-lanelet2-to-opendrive"
-version = "2.59.9"
+version = "2.59.13"
 source = { editable = "autoware_lanelet2_to_opendrive" }
 dependencies = [
     { name = "asam-qc-opendrive" },
@@ -175,7 +175,7 @@ dependencies = [
 requires-dist = [
     { name = "asam-qc-opendrive", git = "https://github.com/tier4/qc-opendrive.git?rev=f8b186ba7408f56d26ef6552643cc09d43c0d253" },
     { name = "hydra-core", specifier = ">=1.3.2" },
-    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6bd27ff7ab3eed326422b960a2694dff605bdb9a" },
+    { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=21cafbf9a855afbc4b89d4dfc3d299a411b64dde" },
     { name = "lxml", specifier = ">=5.2.2" },
     { name = "mgrs", specifier = ">=1.5.0" },
     { name = "pyxodr", specifier = ">=0.1.3" },
@@ -717,7 +717,7 @@ wheels = [
 [[package]]
 name = "lanelet2-python-api-for-autoware"
 version = "0.1.0"
-source = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=6bd27ff7ab3eed326422b960a2694dff605bdb9a#6bd27ff7ab3eed326422b960a2694dff605bdb9a" }
+source = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=21cafbf9a855afbc4b89d4dfc3d299a411b64dde#21cafbf9a855afbc4b89d4dfc3d299a411b64dde" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
