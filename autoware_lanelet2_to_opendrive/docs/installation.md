@@ -43,10 +43,6 @@ multi-stage `Dockerfile` and `docker-compose.yml` that pin Ubuntu 22.04 with
 Boost 1.74 — the same environment used in CI.
 
 ```bash
-# Build once. GH_PAT must have `repo` scope (the build pulls from
-# tier4/lanelet2_python_api_for_autoware).
-export GH_PAT=<your-pat>
-
 # Open an interactive shell with the workspace bind-mounted.
 docker compose --profile dev run --rm dev
 
@@ -152,16 +148,6 @@ Usually caused by a stale `lanelet2` from PyPI co-installed with
 ```bash
 rm -rf .venv
 uv sync --dev
-```
-
-### `gh_pat` secret missing during `docker compose build`
-
-The image build pulls a private repository and requires
-`GH_PAT` (with `repo` scope) to be set in your shell:
-
-```bash
-export GH_PAT=<your-token>
-docker compose --profile dev build
 ```
 
 ## Next Steps

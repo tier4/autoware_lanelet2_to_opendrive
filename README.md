@@ -24,11 +24,9 @@ The repository is a [`uv`](https://docs.astral.sh/uv/) workspace with two packag
 
 ## Quick start (Docker)
 
-The Docker route mirrors CI exactly and avoids host build issues with the `lanelet2-python-api-for-autoware` C++ wrapper. The dependency is cloned from a public repository, so no GitHub token is needed for the default build; if you want to authenticate (for example, to lift unauthenticated rate limits or to substitute a private fork), export `GH_PAT` before building — `Dockerfile` mounts it as an optional BuildKit secret.
+The Docker route mirrors CI exactly and avoids host build issues with the `lanelet2-python-api-for-autoware` C++ wrapper. The dependency is cloned from a public repository, so no GitHub token is needed.
 
 ```bash
-# Optional: export GH_PAT=ghp_xxx  # only needed for authenticated/forked clones
-
 # Build the slim conversion image (only needed once, or after dependency changes)
 docker compose --profile convert build convert
 
