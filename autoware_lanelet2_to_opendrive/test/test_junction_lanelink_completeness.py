@@ -72,9 +72,11 @@ def _scan_missing_lane_links(
     """
     root = tree.getroot()
 
-    # incomingRoad -> set(from_lane ids referenced in any laneLink, across
-    # any junction). The same incoming road never appears as incomingRoad
-    # for two different junctions, so we don't need to key on junction id.
+    # (incomingRoad, from_lane) -> hit count across every <laneLink> in
+    # every <connection> of every <junction>. The same incoming road
+    # never appears as incomingRoad for two different junctions, so we
+    # don't need to key on junction id — any hit means the lane is
+    # covered.
     covered: Dict[Tuple[int, int], int] = defaultdict(int)
     for j in root.iterfind("junction"):
         for conn in j.iterfind("connection"):

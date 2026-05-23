@@ -131,7 +131,11 @@ def complete_direct_junction_lanelinks(
                     continue
                 ll = lanelet_map.laneletLayer.get(ll_id)
 
-                follower_match = None
+                # ``routing_graph.following`` ordering is not specified
+                # by lanelet2; collect eligible followers and pick the
+                # deterministic minimum so the emitted XML is stable
+                # across runs and platforms.
+                eligible_followers: List[Tuple[int, int, int]] = []
                 for follower in routing_graph.following(ll):
                     if follower.id in junction_lanelet_ids:
                         # A real connector exists for this follower path —
@@ -152,12 +156,14 @@ def complete_direct_junction_lanelinks(
                     out_lane = road_lanelet_to_lane.get(out_rid, {}).get(follower.id)
                     if out_lane is None:
                         continue
-                    follower_match = (out_rid, out_lane)
-                    break
-                if follower_match is None:
+                    eligible_followers.append((out_rid, out_lane, follower.id))
+                if not eligible_followers:
                     continue
-
-                out_rid, out_lane = follower_match
+                # Sort by (road_id, lane_id, lanelet_id) — the lanelet id
+                # is the final tiebreaker for the rare case of two
+                # lanelets sharing a (road, lane) pair.
+                eligible_followers.sort()
+                out_rid, out_lane, _follower_lanelet_id = eligible_followers[0]
                 out_road = road_by_id.get(out_rid)
                 if out_road is None:
                     continue
