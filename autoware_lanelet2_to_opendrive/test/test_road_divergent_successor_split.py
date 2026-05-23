@@ -54,9 +54,7 @@ def test_split_groups_is_a_refinement(lanelet_map):
     """The split-aware grouper never moves a lanelet across pre-existing
     lateral boundaries — it only subdivides."""
     groups, routing_graph = _road_lanelet_groups(lanelet_map)
-    refined = split_groups_by_divergent_connections(
-        lanelet_map, groups, routing_graph
-    )
+    refined = split_groups_by_divergent_connections(lanelet_map, groups, routing_graph)
 
     original_ids = [frozenset(ll.id for ll in g) for g in groups]
     refined_ids = [frozenset(ll.id for ll in g) for g in refined]
@@ -82,13 +80,9 @@ def test_split_groups_unifies_successor_signature(lanelet_map):
     the invariant that prevents the road-level successor from silently
     dropping a lane's downstream road."""
     groups, routing_graph = _road_lanelet_groups(lanelet_map)
-    refined = split_groups_by_divergent_connections(
-        lanelet_map, groups, routing_graph
-    )
+    refined = split_groups_by_divergent_connections(lanelet_map, groups, routing_graph)
 
-    ll_to_gid = {
-        ll.id: gid for gid, group in enumerate(refined) for ll in group
-    }
+    ll_to_gid = {ll.id: gid for gid, group in enumerate(refined) for ll in group}
 
     for gid, group in enumerate(refined):
         signatures = {
@@ -111,9 +105,7 @@ def test_split_groups_actually_splits_nishishinjuku(lanelet_map):
     must trigger at least one split, otherwise the test above is
     vacuously satisfied by the input grouping."""
     groups, routing_graph = _road_lanelet_groups(lanelet_map)
-    refined = split_groups_by_divergent_connections(
-        lanelet_map, groups, routing_graph
-    )
+    refined = split_groups_by_divergent_connections(lanelet_map, groups, routing_graph)
     assert len(refined) > len(groups), (
         "Nishishinjuku is expected to contain at least one divergent group; "
         "if split count is unchanged the helper is a no-op on real data"
@@ -123,10 +115,7 @@ def test_split_groups_actually_splits_nishishinjuku(lanelet_map):
 def test_split_groups_empty_input(lanelet_map):
     """Empty input must round-trip to empty output."""
     routing_graph = create_routing_graph(lanelet_map)
-    assert (
-        split_groups_by_divergent_connections(lanelet_map, [], routing_graph)
-        == []
-    )
+    assert split_groups_by_divergent_connections(lanelet_map, [], routing_graph) == []
 
 
 def test_split_groups_singleton_lanelet_groups_unchanged(lanelet_map):
@@ -152,11 +141,9 @@ def test_split_groups_preserves_lanelet_types(lanelet_map):
     ids — the consumer (``Road.construct_from_lanelet_groups``) calls
     ``ll.id`` and other Lanelet methods on each element."""
     groups, routing_graph = _road_lanelet_groups(lanelet_map)
-    refined = split_groups_by_divergent_connections(
-        lanelet_map, groups, routing_graph
-    )
+    refined = split_groups_by_divergent_connections(lanelet_map, groups, routing_graph)
     for group in refined:
         for lanelet in group:
-            assert _is_lanelet(lanelet), (
-                f"split must return Lanelet instances, got {type(lanelet)}"
-            )
+            assert _is_lanelet(
+                lanelet
+            ), f"split must return Lanelet instances, got {type(lanelet)}"
