@@ -379,6 +379,119 @@ def find_adjacent_groups(
     return groups
 
 
+def split_groups_by_divergent_connections(
+    lanelet_map: lanelet2.core.LaneletMap,
+    groups: List[Set[lanelet2.core.Lanelet]],
+    routing_graph: Optional[RoutingGraph] = None,
+    max_iterations: int = 20,
+) -> List[Set[lanelet2.core.Lanelet]]:
+    """Refine lateral lanelet groups so each group's lanelets share the same
+    downstream group target.
+
+    The default :func:`find_adjacent_groups` groups lanelets purely by
+    lateral adjacency, even when their longitudinal followings belong to
+    different downstream groups. That works fine in typical Manhattan-
+    style segments, but it produces silent lane-link drops in OpenDRIVE
+    when a road's lanes fan out to multiple successor roads (e.g.
+    nishishinjuku roads 17, 79, 82 — see
+    ``specs/2026-05-22-road-successor-mis-merge-design.md``).
+
+    Two lanelets ``A`` and ``B`` in the same lateral group split into
+    different roads when the set of group ids covered by
+    ``routing_graph.following(A)`` differs from the same set for ``B``.
+
+    Predecessor-side asymmetry is intentionally not split here: the
+    existing divergence/merge synthesis pass (``apply_divergence_synthesis``,
+    issue #291) already handles the N->1 merge case by synthesising a
+    junction, and splitting on both sides causes a cascade of unnecessary
+    splits in routing-graph-only-divergent cases that the synthesis pass
+    handles cleanly.
+
+    Splits are computed iteratively: a split changes the lanelet->group
+    mapping, which can change neighbouring groups' signatures and cause
+    further splits. We iterate to a fixed point (or ``max_iterations``,
+    which only guards against pathological cycles — every iteration that
+    splits strictly increases the number of groups, so termination is
+    structurally guaranteed up to ``len(all_lanelets)``).
+
+    Each partition within a group is materialised as a contiguous lateral
+    run via :func:`sort_adjacent_groups`. Non-contiguous patterns fall
+    back to set-based partitioning (and downstream geometry code already
+    tolerates non-adjacent groups via ``sorted_lanelet_ids=None``).
+
+    Args:
+        lanelet_map: Map containing the lanelets, needed by
+            :func:`sort_adjacent_groups`.
+        groups: Lateral groups from :func:`find_adjacent_groups`.
+        routing_graph: Optional pre-built routing graph; created on demand.
+        max_iterations: Safety bound for the fixed-point loop.
+
+    Returns:
+        Refined groups. Length is >= ``len(groups)``; the partition of
+        lanelets is preserved.
+    """
+    if routing_graph is None:
+        routing_graph = create_routing_graph(lanelet_map)
+
+    current_groups: List[Set[lanelet2.core.Lanelet]] = [set(g) for g in groups]
+
+    for _ in range(max_iterations):
+        ll_to_gid: Dict[int, int] = {}
+        for gid, group in enumerate(current_groups):
+            for lanelet in group:
+                ll_to_gid[lanelet.id] = gid
+
+        def signature(lanelet: lanelet2.core.Lanelet) -> frozenset:
+            return frozenset(
+                ll_to_gid[s.id]
+                for s in routing_graph.following(lanelet)
+                if s.id in ll_to_gid
+            )
+
+        new_groups: List[Set[lanelet2.core.Lanelet]] = []
+        any_split = False
+        for group in current_groups:
+            sigs = {ll.id: signature(ll) for ll in group}
+            distinct = set(sigs.values())
+            if len(distinct) <= 1:
+                new_groups.append(group)
+                continue
+
+            any_split = True
+            try:
+                sorted_lls = sort_adjacent_groups(lanelet_map, group, routing_graph)
+            except ValueError:
+                # Non-adjacent input — fall back to set-based partitioning.
+                buckets: Dict[frozenset, Set[lanelet2.core.Lanelet]] = {}
+                for ll in group:
+                    buckets.setdefault(sigs[ll.id], set()).add(ll)
+                new_groups.extend(buckets.values())
+                continue
+
+            run: List[lanelet2.core.Lanelet] = []
+            run_sig: Optional[frozenset] = None
+            for lanelet in sorted_lls:
+                sig = sigs[lanelet.id]
+                if run and sig != run_sig:
+                    new_groups.append(set(run))
+                    run = []
+                run.append(lanelet)
+                run_sig = sig
+            if run:
+                new_groups.append(set(run))
+
+        if not any_split:
+            return new_groups
+        current_groups = new_groups
+
+    logger.warning(
+        "split_groups_by_divergent_connections: hit max_iterations=%d; "
+        "returning latest grouping anyway",
+        max_iterations,
+    )
+    return current_groups
+
+
 def filter_lanelets_by_subtype(
     lanelets: LaneletInput,
     subtypes: List[str],
