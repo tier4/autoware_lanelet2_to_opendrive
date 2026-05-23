@@ -1047,6 +1047,12 @@ class _Lanelet2ToOpenDRIVEConverter:
         from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
+        traffic_rule_value = (
+            TrafficRule.LHT
+            if (self.config.traffic_rule or "RHT").upper() == "LHT"
+            else TrafficRule.RHT
+        )
+
         divergence_sites = collect_divergence_sites(
             deferred_predecessor_candidates=regular_result.deferred_predecessor_candidates,
             deferred_successor_candidates=regular_result.deferred_successor_candidates,
@@ -1059,11 +1065,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             # Reuse the routing graph built by Road.construct_from_lanelet_map
             # rather than paying the cost a second time (#291 review).
             divergence_routing_graph = regular_result.routing_graph
-            traffic_rule_value = (
-                TrafficRule.LHT
-                if (self.config.traffic_rule or "RHT").upper() == "LHT"
-                else TrafficRule.RHT
-            )
             divergence_result = apply_divergence_synthesis(
                 sites=divergence_sites,
                 roads_by_id={r.id: r for r in regular_roads},
@@ -1103,6 +1104,32 @@ class _Lanelet2ToOpenDRIVEConverter:
         # ``set_all_lane_links``.
         connecting_roads = connecting_roads + synthetic_connecting_roads
         junctions = junctions + synthetic_junctions
+
+        # Step 2.7: Materialise zero-length connecting roads for the lanes
+        # whose routing-graph follower is an external lanelet (no
+        # ``turn_direction`` connector). Without this, ~4% of
+        # junction-bound driving lanes carry no ``<laneLink>`` and stall
+        # in odrviewer/CARLA (spec 2026-05-22-junction-lanelink-omission).
+        from autoware_lanelet2_to_opendrive.direct_junction_completion import (
+            complete_direct_junction_lanelinks,
+        )
+
+        junction_lanelet_id_set: Set[int] = {ll.id for ll in junction_lanelets}
+        existing_road_ids = [r.id for r in (regular_roads + connecting_roads)]
+        completion_start_id = (max(existing_road_ids) + 1) if existing_road_ids else 0
+
+        completion_roads, _completion_next_id = complete_direct_junction_lanelinks(
+            lanelet_map=self.lanelet_map,
+            routing_graph=regular_result.routing_graph,
+            all_roads=regular_roads + connecting_roads,
+            junctions=junctions,
+            lanelet_to_road_id=lanelet_to_road_id,
+            junction_lanelet_ids=junction_lanelet_id_set,
+            starting_road_id=completion_start_id,
+            traffic_rule=traffic_rule_value,
+            min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
+        )
+        connecting_roads = connecting_roads + completion_roads
 
         # Step 3: Create bidirectional mappings
         mapping = self._build_road_lanelet_mappings(lanelet_to_road_id)
