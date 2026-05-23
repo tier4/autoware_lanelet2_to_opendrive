@@ -1193,7 +1193,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         if tl_signal_to_stop_line_signal_ids:
             from autoware_lanelet2_to_opendrive.opendrive.signal import Dependency
 
-            ref_count = 0
+            augmented_signal_count = 0
             for signal in signals_and_controllers.signals:
                 stop_line_signal_ids = tl_signal_to_stop_line_signal_ids.get(
                     signal.id, []
@@ -1205,10 +1205,13 @@ class _Lanelet2ToOpenDRIVEConverter:
                     for sl_sig_id in stop_line_signal_ids
                 ]
                 signal.dependencies = (signal.dependencies or []) + new_deps
-                ref_count += 1
-            print(f"Added stop line dependencies to {ref_count} traffic light signals")
+                augmented_signal_count += 1
+            print(
+                f"Added stop line dependencies to {augmented_signal_count} "
+                "traffic light signals"
+            )
 
-        # Step 6.7: Validate no duplicate road IDs (safety check for ID assignment bugs)
+        # Step 6.9: Validate no duplicate road IDs (safety check for ID assignment bugs)
         from autoware_lanelet2_to_opendrive.opendrive.validation import (
             validate_no_duplicate_road_ids,
         )
