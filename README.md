@@ -80,9 +80,9 @@ Static checks that do not import the workspace (`ruff`, `ruff-format`, `mypy --i
 
 ## Documentation
 
-- Per-package guides served by MkDocs:
-  - `autoware_lanelet2_to_opendrive/docs/` — installation, usage, configuration reference, signals, signs, junctions, geometry classification.
-  - `autoware_carla_scenario/docs/` — installation, usage, architecture, API reference, development guide.
+- Per-package guides served by MkDocs and published to GitHub Pages:
+  - [Autoware Lanelet2 to OpenDRIVE](https://tier4.github.io/autoware_lanelet2_to_opendrive/) — installation, usage, configuration reference, signals, signs, junctions, geometry classification.
+  - [Autoware CARLA Scenario](https://tier4.github.io/autoware_lanelet2_to_opendrive/carla-scenario/) — installation, usage, architecture, API reference, development guide.
 - Repository-level references:
   - [`docs/docker.md`](docs/docker.md) — Docker build & test environment.
   - [`examples/README_cartesian_to_frenet.md`](examples/README_cartesian_to_frenet.md) — Cartesian ↔ Frenet conversion example.
