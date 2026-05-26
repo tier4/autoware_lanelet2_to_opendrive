@@ -12,44 +12,23 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Dependency:
-    """Dependency reference from a stop line signal to a controlling traffic light.
+    """Cross-link between related signals (e.g. traffic light <-> stop line).
 
-    Per ASAM OpenDRIVE specification, stop line signals shall have a dependency
-    to each of the corresponding traffic lights.
+    Emitted as a `<dependency id type>` child of `<signal>`. OpenDRIVE 1.4's
+    schema (`t_road_signals_signal`) accepts `<dependency>` but not
+    `<reference>`, so this is the schema-legal mechanism for either direction
+    of the traffic-light/stop-line link.
 
     Reference: ASAM OpenDRIVE Junction Guideline - Section 9: Traffic Lights
     """
 
-    id: int  # ID of the dependent signal (e.g., traffic light signal ID)
-    type: str  # Type of dependency (e.g., "trafficLight")
+    id: int  # ID of the related signal (e.g., traffic light or stop line signal ID)
+    type: str  # Free-form qualifier (e.g., "trafficLight", "stopLine")
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
         elem = ET.Element("dependency")
         elem.set("id", str(self.id))
-        elem.set("type", self.type)
-        return elem
-
-
-@dataclass
-class Reference:
-    """Reference from a traffic light signal to its associated stop line.
-
-    Per ASAM OpenDRIVE specification, traffic light signals should reference
-    their associated stop lines.
-
-    Reference: ASAM OpenDRIVE Junction Guideline - Section 9: Traffic Lights
-    """
-
-    id: int  # ID of the referenced signal (e.g., stop line signal ID)
-    element_type: str  # Type of referenced element (e.g., "signal")
-    type: str  # Type qualifier (e.g., "stopLine")
-
-    def to_xml(self) -> ET.Element:
-        """Convert to XML element."""
-        elem = ET.Element("reference")
-        elem.set("id", str(self.id))
-        elem.set("elementType", self.element_type)
         elem.set("type", self.type)
         return elem
 
@@ -204,10 +183,7 @@ class Signal:
     validities: Optional[List[Validity]] = None  # Lane validity definitions
     user_data: Optional[SignalUserData] = None  # Custom user data
     dependencies: Optional[List[Dependency]] = (
-        None  # Dependencies on other signals (e.g., stop line -> traffic light)
-    )
-    references: Optional[List[Reference]] = (
-        None  # References to related signals (e.g., traffic light -> stop line)
+        None  # Cross-links to other signals (e.g., stop line <-> traffic light)
     )
     position_inertial: Optional[PositionInertial] = (
         None  # Physical position in inertial coordinates
@@ -241,15 +217,11 @@ class Signal:
             for validity in self.validities:
                 elem.append(validity.to_xml())
 
-        # Add dependencies if present (e.g., stop line -> traffic light)
+        # Add dependencies if present (cross-links between related signals,
+        # e.g. stop line -> traffic light or traffic light -> stop line)
         if self.dependencies:
             for dependency in self.dependencies:
                 elem.append(dependency.to_xml())
-
-        # Add references if present (e.g., traffic light -> stop line)
-        if self.references:
-            for reference in self.references:
-                elem.append(reference.to_xml())
 
         # Add positionInertial if present (physical position in world coordinates)
         if self.position_inertial is not None:

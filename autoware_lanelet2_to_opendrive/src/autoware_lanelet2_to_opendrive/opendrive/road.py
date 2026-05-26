@@ -1822,13 +1822,26 @@ class Road:
             if not road_lanelet_ids:
                 continue
 
+            # ``lid in laneletLayer`` is always False for an int id — the
+            # layer's __contains__ does not key on id; ``exists`` does. Using
+            # the broken test left ``road_lanelets`` empty for every road, so
+            # no connecting road ever received predecessor/successor links.
             road_lanelets = [
                 lanelet_map.laneletLayer.get(lid)
                 for lid in road_lanelet_ids
-                if lid in lanelet_map.laneletLayer
+                if lanelet_map.laneletLayer.exists(lid)
             ]
             if not road_lanelets:
                 continue
+
+            # Resolve links from the reference-line lanelet first. A
+            # connecting road may bundle several lanes; when those lanes
+            # diverge to different outgoing roads, ``_find_connected_road``
+            # (first match wins) must follow the lane the road's reference
+            # line is built from -- the one adjacent to it, ``|lane id| ==
+            # 1`` -- or the road-level link contradicts the geometry.
+            lane_of = road.get_lanelet_to_lane_mapping()
+            road_lanelets.sort(key=lambda ll: abs(lane_of.get(ll.id, 99)))
 
             own_lanelet_ids = set(road_lanelet_ids)
 
