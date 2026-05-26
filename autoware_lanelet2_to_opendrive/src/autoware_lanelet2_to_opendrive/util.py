@@ -383,7 +383,6 @@ def split_groups_by_divergent_connections(
     lanelet_map: lanelet2.core.LaneletMap,
     groups: List[Set[lanelet2.core.Lanelet]],
     routing_graph: Optional[RoutingGraph] = None,
-    max_iterations: int = 20,
 ) -> List[Set[lanelet2.core.Lanelet]]:
     """Refine lateral lanelet groups so each group's lanelets share the same
     downstream group target.
@@ -409,22 +408,27 @@ def split_groups_by_divergent_connections(
 
     Splits are computed iteratively: a split changes the lanelet->group
     mapping, which can change neighbouring groups' signatures and cause
-    further splits. We iterate to a fixed point (or ``max_iterations``,
-    which only guards against pathological cycles — every iteration that
-    splits strictly increases the number of groups, so termination is
-    structurally guaranteed up to ``len(all_lanelets)``).
+    further splits. Each iteration that splits strictly increases the
+    number of groups, and the maximum number of groups is the number of
+    distinct lanelets in the input, so we cap the loop at
+    ``len(all_lanelets) + 1`` — a provable upper bound that guarantees
+    convergence without an externally-tunable knob that could silently
+    degrade behaviour.
 
     Each partition within a group is materialised as a contiguous lateral
-    run via :func:`sort_adjacent_groups`. Non-contiguous patterns fall
-    back to set-based partitioning (and downstream geometry code already
-    tolerates non-adjacent groups via ``sorted_lanelet_ids=None``).
+    run via :func:`sort_adjacent_groups`. Non-contiguous inputs fall back
+    to (signature, lateral-connected-component) partitioning so every
+    emitted group is itself laterally adjacency-connected — otherwise
+    :func:`sort_adjacent_groups`, which is invoked unconditionally on the
+    refined groups by ``LaneSection.construct_from_lanelet_groups``,
+    would fail later and drop the whole road in
+    ``Road.construct_from_lanelet_map``.
 
     Args:
         lanelet_map: Map containing the lanelets, needed by
             :func:`sort_adjacent_groups`.
         groups: Lateral groups from :func:`find_adjacent_groups`.
         routing_graph: Optional pre-built routing graph; created on demand.
-        max_iterations: Safety bound for the fixed-point loop.
 
     Returns:
         Refined groups. Length is >= ``len(groups)``; the partition of
@@ -435,7 +439,12 @@ def split_groups_by_divergent_connections(
 
     current_groups: List[Set[lanelet2.core.Lanelet]] = [set(g) for g in groups]
 
-    for _ in range(max_iterations):
+    # Provable upper bound: every iteration that splits strictly grows the
+    # group count, and the absolute maximum is one group per lanelet.
+    total_lanelets = sum(len(g) for g in current_groups)
+    iteration_cap = total_lanelets + 1
+
+    for _ in range(iteration_cap):
         ll_to_gid: Dict[int, int] = {}
         for gid, group in enumerate(current_groups):
             for lanelet in group:
@@ -461,11 +470,18 @@ def split_groups_by_divergent_connections(
             try:
                 sorted_lls = sort_adjacent_groups(lanelet_map, group, routing_graph)
             except ValueError:
-                # Non-adjacent input — fall back to set-based partitioning.
+                # Non-adjacent input: partition by signature, then split each
+                # signature-bucket into laterally-connected components so the
+                # downstream sort_adjacent_groups call cannot fail on our
+                # output. find_adjacent_groups restricted to a target set is
+                # exactly that: lateral-only DFS over the subset.
                 buckets: Dict[frozenset, Set[lanelet2.core.Lanelet]] = {}
                 for ll in group:
                     buckets.setdefault(sigs[ll.id], set()).add(ll)
-                new_groups.extend(buckets.values())
+                for bucket in buckets.values():
+                    new_groups.extend(
+                        find_adjacent_groups(lanelet_map, bucket, routing_graph)
+                    )
                 continue
 
             run: List[lanelet2.core.Lanelet] = []
@@ -484,12 +500,17 @@ def split_groups_by_divergent_connections(
             return new_groups
         current_groups = new_groups
 
-    logger.warning(
-        "split_groups_by_divergent_connections: hit max_iterations=%d; "
-        "returning latest grouping anyway",
-        max_iterations,
+    # Unreachable under the provable bound above; treat as an internal
+    # invariant violation rather than silently returning a non-fixed-point
+    # grouping (which would reintroduce the lane-link drop this helper
+    # exists to prevent).
+    raise RuntimeError(
+        "split_groups_by_divergent_connections did not converge within "
+        f"{iteration_cap} iterations on {total_lanelets} lanelets; this "
+        "indicates a cycle in the lateral grouping refinement, which "
+        "should be impossible because each split strictly increases the "
+        "group count"
     )
-    return current_groups
 
 
 def filter_lanelets_by_subtype(
