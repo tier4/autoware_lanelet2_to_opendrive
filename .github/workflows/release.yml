@@ -283,6 +283,12 @@ jobs:
           # Set latest as default version
           uv run mike set-default --push --config-file autoware_lanelet2_to_opendrive/mkdocs.yml latest
 
+          # Deploy carla-scenario docs under /carla-scenario/ prefix
+          uv run mike deploy --push --update-aliases --prefix carla-scenario --config-file autoware_carla_scenario/mkdocs.yml ${{ steps.bump-version.outputs.new_version }} latest
+
+          # Set latest as default version for carla-scenario
+          uv run mike set-default --push --prefix carla-scenario --config-file autoware_carla_scenario/mkdocs.yml latest
+
       - name: No version bump needed
         if: steps.pr-labels.outputs.bump_type == 'none'
         run: |
