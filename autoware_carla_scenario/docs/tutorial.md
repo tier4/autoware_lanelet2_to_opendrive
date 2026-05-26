@@ -1,8 +1,64 @@
 # Tutorial: Writing Your First Scenario
 
-This tutorial walks you through creating an abstract scenario, pairing it
-with a concrete YAML config, and verifying the result in the viewer — all
-in under 15 minutes.
+This tutorial shows two paths to creating a scenario:
+
+1. **Quick Start (recommended)** — Use the bundled Claude Code plugin.
+   Describe what you want in plain text and let Claude generate all files.
+2. **Manual walkthrough** — Understand every file by building one yourself.
+
+---
+
+## Quick Start with Claude Code Plugin
+
+This repository ships a **`write-scenario` plugin** inside
+`.claude/local-marketplace/`. It is pre-enabled in `.claude/settings.json`
+— **no extra setup is needed**. Just open Claude Code in the repository root
+and the plugin is ready to use.
+
+### How It Works
+
+Type `/write-scenario` followed by a natural-language description of the
+test you want. Claude walks you through a 7-stage workflow automatically:
+
+| Stage | What Claude does |
+|---|---|
+| 1. Understand | Parses your description, asks clarifying questions |
+| 2. Discover | Scans the codebase for available Conditions, Actions, Constraints, and Bindings |
+| 3. Write | Generates all four files: Python class, config dataclass, YAML, and `run.py` registration |
+| 4. Debug | Runs the scenario in CARLA, reads logs, fixes failures iteratively |
+| 5. Review | Analyzes parameter orthogonality and sweeper compatibility |
+| 6. Sweep | Adds `sweep.constraints` / `bindings` to the YAML for parametric testing |
+| 7. Multirun | Provides the exact command to execute the logical scenario across the map |
+
+### Example
+
+```
+> /write-scenario I want to test that the ego stops at a stop sign,
+  waits 3 seconds, then proceeds through the intersection.
+```
+
+Claude will:
+
+1. Identify `StandstillCondition` and `TimeoutCondition` from the codebase
+2. Generate `my_scenario.py`, update `configs.py`, create YAML, register in `run.py`
+3. Run the scenario, analyze the result, and iterate until it passes
+4. Propose sweep constraints so the test generalizes to every stop sign on the map
+
+You do not need to memorize the framework API — the plugin discovers
+everything dynamically.
+
+### Other Plugin Commands
+
+| Command | When to use |
+|---|---|
+| `/write-scenario` | Create a new scenario from scratch |
+| `/debug-concrete-scenario` | An existing scenario fails — analyze logs and fix |
+| `/review-scenario` | Before adding sweep — check parameter design |
+
+---
+
+The rest of this page explains the manual process. Read on if you want to
+understand what the plugin generates under the hood.
 
 ---
 
@@ -252,48 +308,3 @@ uv run scenario --multirun scenario=my_scenario/default \
 
 The sweeper evaluates constraints against the Lanelet2 map and generates one
 job per matching lanelet. Results appear under `multirun/` in the viewer.
-
----
-
-## Writing Scenarios with Claude Code
-
-This repository ships a **`write-scenario` Claude Code plugin** that
-streamlines the entire workflow. If you use
-[Claude Code](https://claude.ai/code), the plugin is automatically
-available.
-
-### Slash Commands
-
-| Command | Description |
-|---|---|
-| `/write-scenario` | Interactive 7-step guide: concept, discover conditions/actions, write code, debug, add sweep, run |
-| `/debug-concrete-scenario` | Execute a scenario, analyze logs, and iterate until it passes |
-| `/review-scenario` | Review parameter design for orthogonality and sweeper compatibility |
-
-### Example Session
-
-```
-You: /write-scenario
-
-Claude: What scenario do you want to create?
-
-You: I want to test that the ego stops at a stop sign,
-     waits 3 seconds, then proceeds.
-
-Claude: (walks you through each step — discovering StandstillCondition,
-        writing the Python class, generating the YAML, registering it,
-        running it, and debugging any failures)
-```
-
-The plugin automatically discovers available **Conditions**, **Actions**,
-**Constraints**, and **Bindings** from the codebase — you do not need to
-memorize them.
-
-### Tips
-
-- Start with `/write-scenario` for new scenarios — it handles all four files
-  (config, class, YAML, registration) in one session.
-- Use `/debug-concrete-scenario` when a scenario fails — it reads CARLA logs
-  and suggests targeted fixes.
-- Use `/review-scenario` before adding sweep — it checks that parameters are
-  orthogonal and sweeper-compatible.
