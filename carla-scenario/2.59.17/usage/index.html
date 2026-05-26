@@ -1,0 +1,3028 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="CARLA scenario testing framework for Autoware autonomous driving software">
+      
+      
+      
+        <link rel="canonical" href="https://tier4.github.io/autoware_lanelet2_to_opendrive/carla-scenario/2.59.17/usage/">
+      
+      
+        <link rel="prev" href="../installation/">
+      
+      
+        <link rel="next" href="../architecture/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Usage - Autoware CARLA Scenario</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../css/timeago.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#usage-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Autoware CARLA Scenario" class="md-header__button md-logo" aria-label="Autoware CARLA Scenario" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Autoware CARLA Scenario
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Usage
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../development/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Development
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Autoware CARLA Scenario" class="md-nav__button md-logo" aria-label="Autoware CARLA Scenario" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Autoware CARLA Scenario
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cli-commands-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Commands Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scenario-scenario-runner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scenario - Scenario Runner
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="scenario - Scenario Runner">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-execution-with-glob-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch Execution with Glob Patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet-constraint-sweeping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet Constraint Sweeping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resume-from-a-specific-scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resume from a Specific Scenario
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#overriding-configuration-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overriding Configuration Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hydra-configuration-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hydra Configuration System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hydra Configuration System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#root-configuration-configyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Root Configuration (config.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ego-vehicle-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ego Vehicle Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entity-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entity Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traffic-manager-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traffic Manager Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#map-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Map Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supported-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Scenarios
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported Scenarios">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#intersection-passing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intersection Passing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lane-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lane Change
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traffic-light-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traffic Light Compliance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporary-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporary Stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit Codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detect-no-3d-model-3d-model-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detect-no-3d-model - 3D Model Detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="detect-no-3d-model - 3D Model Detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#command-line-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-Line Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#input-yaml-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input YAML Requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-with-scenario-runner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration with Scenario Runner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#viewer-scenario-result-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        viewer - Scenario Result Viewer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="viewer - Scenario Result Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-ui-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Pages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rest-api-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST API Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Use Cases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Use Cases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#use-case-1-run-a-single-scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 1: Run a Single Scenario
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-2-run-all-scenarios-for-a-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 2: Run All Scenarios for a Map
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-3-test-on-a-remote-carla-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 3: Test on a Remote CARLA Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-4-detect-missing-3d-models-before-running-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 4: Detect Missing 3D Models Before Running Scenarios
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-5-browse-results-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 5: Browse Results in the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-6-resume-a-failed-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 6: Resume a Failed Batch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connection-refused-or-timeout-when-connecting-to-carla" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Connection refused" or timeout when connecting to CARLA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-scenarios-must-share-the-same-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "batch scenarios must share the same map"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ego-vehicle-falls-through-the-ground" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ego vehicle falls through the ground
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-times-out-unexpectedly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario times out unexpectedly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unknown-scenario-name-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Unknown scenario name" error
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cli-commands-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Commands Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scenario-scenario-runner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scenario - Scenario Runner
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="scenario - Scenario Runner">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-execution-with-glob-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch Execution with Glob Patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lanelet-constraint-sweeping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet Constraint Sweeping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resume-from-a-specific-scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resume from a Specific Scenario
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#overriding-configuration-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overriding Configuration Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hydra-configuration-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hydra Configuration System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hydra Configuration System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#root-configuration-configyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Root Configuration (config.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ego-vehicle-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ego Vehicle Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entity-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entity Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traffic-manager-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traffic Manager Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#map-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Map Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supported-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Scenarios
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported Scenarios">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#intersection-passing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intersection Passing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lane-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lane Change
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traffic-light-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traffic Light Compliance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporary-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporary Stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit Codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detect-no-3d-model-3d-model-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detect-no-3d-model - 3D Model Detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="detect-no-3d-model - 3D Model Detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#command-line-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-Line Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#input-yaml-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input YAML Requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-with-scenario-runner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration with Scenario Runner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#viewer-scenario-result-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        viewer - Scenario Result Viewer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="viewer - Scenario Result Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-ui-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Pages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rest-api-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST API Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Use Cases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Use Cases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#use-case-1-run-a-single-scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 1: Run a Single Scenario
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-2-run-all-scenarios-for-a-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 2: Run All Scenarios for a Map
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-3-test-on-a-remote-carla-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 3: Test on a Remote CARLA Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-4-detect-missing-3d-models-before-running-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 4: Detect Missing 3D Models Before Running Scenarios
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-5-browse-results-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 5: Browse Results in the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-case-6-resume-a-failed-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Case 6: Resume a Failed Batch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connection-refused-or-timeout-when-connecting-to-carla" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Connection refused" or timeout when connecting to CARLA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-scenarios-must-share-the-same-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "batch scenarios must share the same map"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ego-vehicle-falls-through-the-ground" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ego vehicle falls through the ground
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-times-out-unexpectedly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario times out unexpectedly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unknown-scenario-name-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Unknown scenario name" error
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="usage-guide">Usage Guide<a class="headerlink" href="#usage-guide" title="Permanent link">&para;</a></h1>
+<p>This guide explains how to use the <code>autoware-carla-scenario</code> package to run autonomous driving scenario tests in CARLA simulator.</p>
+<h2 id="cli-commands-overview">CLI Commands Overview<a class="headerlink" href="#cli-commands-overview" title="Permanent link">&para;</a></h2>
+<p>The package provides three CLI commands:</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Framework</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#scenario-scenario-runner"><code>scenario</code></a></td>
+<td>Hydra</td>
+<td>Run autonomous driving scenario tests in CARLA</td>
+</tr>
+<tr>
+<td><a href="#detect-no-3d-model-3d-model-detection"><code>detect-no-3d-model</code></a></td>
+<td>argparse</td>
+<td>Detect lanelets without a matching 3D ground model in CARLA</td>
+</tr>
+<tr>
+<td><a href="#viewer-scenario-result-viewer"><code>viewer</code></a></td>
+<td>FastAPI + Uvicorn</td>
+<td>Web UI for browsing and monitoring scenario test results</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="scenario-scenario-runner"><code>scenario</code> - Scenario Runner<a class="headerlink" href="#scenario-scenario-runner" title="Permanent link">&para;</a></h2>
+<p>Runs autonomous driving scenario tests in CARLA. Uses <a href="https://hydra.cc/">Hydra</a> for configuration management. Requires a running CARLA server.</p>
+<h3 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Parses the <code>scenario=...</code> argument (supports glob patterns for batch execution)</li>
+<li>Composes a Hydra config from map, server, ego, entity, and scenario configs</li>
+<li>Connects to the CARLA server and loads the specified map (OpenDRIVE or built-in)</li>
+<li>Spawns the ego vehicle at the configured Lanelet2 position (converted to CARLA coordinates)</li>
+<li>Enables synchronous mode (fixed 20 Hz tick rate) and starts the native CARLA recorder</li>
+<li>Runs a warm-up phase (5 ticks for physics stabilization)</li>
+<li>Enables autopilot and applies initial speeds</li>
+<li>Executes the main tick loop, checking pass/fail conditions each tick</li>
+<li>Writes results as JSON and optionally renders a video from the recording</li>
+<li>Reloads the CARLA world for clean state between scenarios</li>
+</ol>
+<h3 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run a single scenario</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/straight
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Run a left-turn variant</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/left_turn
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Run traffic light compliance scenario</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>traffic_light_compliance/traffic_light_compliance
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># Run a lane change scenario</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>lane_change/left
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># Run a temporary stop scenario</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>temporary_stop/temporary_stop
+</code></pre></div>
+<h3 id="batch-execution-with-glob-patterns">Batch Execution with Glob Patterns<a class="headerlink" href="#batch-execution-with-glob-patterns" title="Permanent link">&para;</a></h3>
+<p>When the <code>scenario=</code> value contains glob metacharacters (<code>*</code>, <code>?</code>, <code>[</code>), all matching scenario configs are executed sequentially in a single CARLA session:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Run all intersection-passing variants</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;intersection_passing/*&#39;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Run all scenarios matching a partial pattern</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;intersection_passing/left_*&#39;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Run all lane-change scenarios</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;lane_change/*&#39;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Run everything</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;*/*&#39;</span>
+</code></pre></div>
+<p><strong>Batch constraints:</strong></p>
+<ul>
+<li>All scenarios in a batch <strong>must share the same map</strong> (CARLA loads one map per session)</li>
+<li>Results are written to <code>outputs/YYYY-MM-DD/HH-MM-SS/batch_results.json</code></li>
+<li>A summary table is printed at the end with per-scenario pass/fail status</li>
+</ul>
+<h3 id="lanelet-constraint-sweeping">Lanelet Constraint Sweeping<a class="headerlink" href="#lanelet-constraint-sweeping" title="Permanent link">&para;</a></h3>
+<p>The package ships a Hydra <code>Sweeper</code> plugin
+(<code>hydra/sweeper=lanelet_constraint</code>) that expands a single scenario
+config into one job per lanelet that matches a set of constraints,
+optionally deriving per-job parameters via "bindings". Each scenario
+YAML may declare its own <code>sweep:</code> section (see
+<code>traffic_light_compliance.yaml</code> for an example).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Run a Hydra multirun over every lanelet whose `ego.spawn_lanelet_id`</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># satisfies the scenario&#39;s `sweep.constraints`.</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span>--multirun<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>traffic_light_compliance/traffic_light_compliance<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>hydra/sweeper<span class="o">=</span>lanelet_constraint
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Resume a sweep from job number N (1-indexed; 0 disables).</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span>--multirun<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>traffic_light_compliance/traffic_light_compliance<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>hydra/sweeper<span class="o">=</span>lanelet_constraint<span class="w"> </span>sweep.resume_from<span class="o">=</span><span class="m">10</span>
+</code></pre></div>
+<p>Sweeps write results under <code>multirun/YYYY-MM-DD/HH-MM-SS/&lt;job-index&gt;/</code>,
+not <code>outputs/</code>. The result viewer scans both directories.</p>
+<h3 id="resume-from-a-specific-scenario">Resume from a Specific Scenario<a class="headerlink" href="#resume-from-a-specific-scenario" title="Permanent link">&para;</a></h3>
+<p>When running large batches, you can skip already-completed scenarios:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Resume from the 3rd scenario (0-based index)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;intersection_passing/*&#39;</span><span class="w"> </span>--resume-from<span class="w"> </span><span class="m">2</span>
+</code></pre></div>
+<h3 id="overriding-configuration-parameters">Overriding Configuration Parameters<a class="headerlink" href="#overriding-configuration-parameters" title="Permanent link">&para;</a></h3>
+<p>Any nested Hydra parameter can be overridden from the command line:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Select a different map</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/straight<span class="w"> </span><span class="nv">map</span><span class="o">=</span>nishishinjuku
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Connect to a remote CARLA server</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/straight<span class="w"> </span>server.host<span class="o">=</span><span class="m">192</span>.168.1.100<span class="w"> </span>server.port<span class="o">=</span><span class="m">3000</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Change ego vehicle type and speed</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/straight<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span>ego.vehicle_type<span class="o">=</span>vehicle.tesla.model3<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span>ego.initial_speed_kmh<span class="o">=</span><span class="m">30</span>.0
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="c1"># Override scenario-specific parameters</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/straight<span class="w"> </span>scenario.timeout_seconds<span class="o">=</span><span class="m">15</span>.0
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="c1"># Change Traffic Manager port</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/straight<span class="w"> </span>traffic_manager.port<span class="o">=</span><span class="m">8200</span>
+</code></pre></div>
+<h3 id="hydra-configuration-system">Hydra Configuration System<a class="headerlink" href="#hydra-configuration-system" title="Permanent link">&para;</a></h3>
+<p>Configuration files are located in <code>src/autoware_carla_scenario/examples/conf/</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>conf/
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── config.yaml              # Root config (defines defaults and top-level overrides)
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── server/
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>│   └── localhost.yaml       # Server connection settings
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>├── ego/
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>│   └── default.yaml         # Ego vehicle settings
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>├── entity/
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>│   └── default.yaml         # Entity spawn and ground projection settings
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>├── traffic_manager/
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>│   └── default.yaml         # CARLA Traffic Manager settings
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>├── map/
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>│   └── nishishinjuku.yaml   # Map file paths and excluded lanelet IDs
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>└── scenario/
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>    ├── intersection_passing/
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>    │   ├── straight.yaml
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>    │   ├── left_turn.yaml
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    │   ├── right_turn.yaml
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>    │   └── straight_3npc.yaml
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>    ├── lane_change/
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>    │   ├── left.yaml
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    │   └── right.yaml
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>    ├── lane_change_fail/
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>    │   ├── left.yaml
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>    │   └── right.yaml
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>    ├── temporary_stop/
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>    │   └── temporary_stop.yaml
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>    └── traffic_light_compliance/
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>        └── traffic_light_compliance.yaml
+</code></pre></div>
+<h4 id="root-configuration-configyaml">Root Configuration (<code>config.yaml</code>)<a class="headerlink" href="#root-configuration-configyaml" title="Permanent link">&para;</a></h4>
+<p>Defines the default config group composition:</p>
+<table>
+<thead>
+<tr>
+<th>Default Group</th>
+<th>Default Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>server</code></td>
+<td><code>localhost</code></td>
+<td>CARLA server connection</td>
+</tr>
+<tr>
+<td><code>ego</code></td>
+<td><code>default</code></td>
+<td>Ego vehicle configuration</td>
+</tr>
+<tr>
+<td><code>entity</code></td>
+<td><code>default</code></td>
+<td>Entity spawn and ground projection</td>
+</tr>
+<tr>
+<td><code>traffic_manager</code></td>
+<td><code>default</code></td>
+<td>CARLA Traffic Manager</td>
+</tr>
+<tr>
+<td><code>scenario</code></td>
+<td><code>intersection_passing/left_turn</code></td>
+<td>Scenario to run</td>
+</tr>
+<tr>
+<td><code>map</code></td>
+<td><code>nishishinjuku</code></td>
+<td>Map to load</td>
+</tr>
+</tbody>
+</table>
+<h4 id="server-configuration">Server Configuration<a class="headerlink" href="#server-configuration" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>server.host</code></td>
+<td>str</td>
+<td><code>localhost</code></td>
+<td>CARLA server hostname</td>
+</tr>
+<tr>
+<td><code>server.port</code></td>
+<td>int</td>
+<td><code>2000</code></td>
+<td>CARLA server port</td>
+</tr>
+<tr>
+<td><code>server.cooldown_seconds</code></td>
+<td>float</td>
+<td><code>2.0</code></td>
+<td>Wait time between consecutive scenario runs</td>
+</tr>
+<tr>
+<td><code>server.cooldown_max_retries</code></td>
+<td>int</td>
+<td><code>0</code></td>
+<td>Maximum retries on failure</td>
+</tr>
+</tbody>
+</table>
+<h4 id="ego-vehicle-configuration">Ego Vehicle Configuration<a class="headerlink" href="#ego-vehicle-configuration" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ego.vehicle_type</code></td>
+<td>str</td>
+<td><code>vehicle.mini.cooper</code></td>
+<td>CARLA blueprint ID for ego vehicle</td>
+</tr>
+<tr>
+<td><code>ego.initial_speed_kmh</code></td>
+<td>float</td>
+<td><code>0.0</code></td>
+<td>Initial speed of ego vehicle (km/h)</td>
+</tr>
+<tr>
+<td><code>ego.spawn_lanelet_id</code></td>
+<td>int</td>
+<td><code>242</code></td>
+<td>Lanelet ID for spawn position</td>
+</tr>
+<tr>
+<td><code>ego.spawn_s</code></td>
+<td>float</td>
+<td><code>25.0</code></td>
+<td>Longitudinal offset along lanelet centerline (meters)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="entity-configuration">Entity Configuration<a class="headerlink" href="#entity-configuration" title="Permanent link">&para;</a></h4>
+<p>Controls ground projection (ray casting) and spawn retry behavior:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>entity.ground_projection_ray_distance_upper</code></td>
+<td>float</td>
+<td><code>5.0</code></td>
+<td>Ray search range above estimated z (meters)</td>
+</tr>
+<tr>
+<td><code>entity.ground_projection_ray_distance_lower</code></td>
+<td>float</td>
+<td><code>10.0</code></td>
+<td>Ray search range below estimated z (meters)</td>
+</tr>
+<tr>
+<td><code>entity.spawn_retry_max_count</code></td>
+<td>int</td>
+<td><code>10</code></td>
+<td>Maximum retry attempts for spawn</td>
+</tr>
+<tr>
+<td><code>entity.spawn_retry_t_step</code></td>
+<td>float</td>
+<td><code>0.1</code></td>
+<td>Lateral offset shift per retry (meters)</td>
+</tr>
+<tr>
+<td><code>entity.spawn_retry_z_step</code></td>
+<td>float</td>
+<td><code>0.5</code></td>
+<td>Vertical shift per retry (meters)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="traffic-manager-configuration">Traffic Manager Configuration<a class="headerlink" href="#traffic-manager-configuration" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>traffic_manager.port</code></td>
+<td>int</td>
+<td><code>8100</code></td>
+<td>CARLA Traffic Manager RPC port</td>
+</tr>
+</tbody>
+</table>
+<h4 id="map-configuration">Map Configuration<a class="headerlink" href="#map-configuration" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>map.name</code></td>
+<td>str</td>
+<td><strong>required</strong></td>
+<td>CARLA map name (e.g., <code>NishishinjukuMap</code>)</td>
+</tr>
+<tr>
+<td><code>map.xodr_path</code></td>
+<td>str | null</td>
+<td><code>null</code></td>
+<td>Path to custom OpenDRIVE file. If <code>null</code>, loads built-in CARLA map by name</td>
+</tr>
+<tr>
+<td><code>map.lanelet2_path</code></td>
+<td>str | null</td>
+<td><code>null</code></td>
+<td>Path to Lanelet2 .osm file (required for lanelet-based spawn)</td>
+</tr>
+<tr>
+<td><code>map.no_3d_model_lanelet_ids</code></td>
+<td>list[int]</td>
+<td><code>[]</code></td>
+<td>Lanelet IDs to exclude from sweeps (no ground geometry)</td>
+</tr>
+</tbody>
+</table>
+<p>Map paths can use environment variables with Hydra's OmegaConf resolver:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">xodr_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${oc.env:NISHISHINJUKU_XODR_PATH,path/to/default.xodr}</span>
+</code></pre></div>
+<h3 id="supported-scenarios">Supported Scenarios<a class="headerlink" href="#supported-scenarios" title="Permanent link">&para;</a></h3>
+<h4 id="intersection-passing">Intersection Passing<a class="headerlink" href="#intersection-passing" title="Permanent link">&para;</a></h4>
+<p>Tests ego vehicle traversal through an intersection. Verifies that the ego passes through the expected OpenDRIVE road sequence.</p>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Turn Direction</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>intersection_passing/straight</code></td>
+<td>none</td>
+<td>Drive straight through intersection</td>
+</tr>
+<tr>
+<td><code>intersection_passing/left_turn</code></td>
+<td>left</td>
+<td>Left turn at intersection</td>
+</tr>
+<tr>
+<td><code>intersection_passing/right_turn</code></td>
+<td>right</td>
+<td>Right turn at intersection</td>
+</tr>
+<tr>
+<td><code>intersection_passing/straight_3npc</code></td>
+<td>none</td>
+<td>Straight with 3 NPC vehicles</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scenario-specific parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scenario.expected_route_lanelet_ids</code></td>
+<td>list[int]</td>
+<td>varies</td>
+<td>Lanelet IDs the ego must traverse</td>
+</tr>
+<tr>
+<td><code>scenario.timeout_seconds</code></td>
+<td>float</td>
+<td><code>5.0</code></td>
+<td>Maximum scenario duration</td>
+</tr>
+<tr>
+<td><code>scenario.min_speed_kmh</code></td>
+<td>float | null</td>
+<td>null</td>
+<td>Minimum ego speed (fail if below). <code>null</code> disables check</td>
+</tr>
+<tr>
+<td><code>scenario.speed_check_delay_seconds</code></td>
+<td>float</td>
+<td><code>0.3</code></td>
+<td>Grace period before speed check starts</td>
+</tr>
+<tr>
+<td><code>scenario.turn_direction</code></td>
+<td>str | null</td>
+<td>null</td>
+<td><code>"left"</code>, <code>"right"</code>, or <code>null</code> for straight</td>
+</tr>
+<tr>
+<td><code>scenario.npc_vehicles</code></td>
+<td>list</td>
+<td><code>[]</code></td>
+<td>NPC vehicle configurations (see below)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>NPC vehicle configuration:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">npc_vehicles</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">spawn_lanelet_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">spawn_s</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">vehicle_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vehicle.mini.cooper</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">initial_speed_kmh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+</code></pre></div>
+<p><strong>Behavior:</strong>
+- Sets all traffic lights to GREEN
+- Registers a TurnAction for left/right turns (applies steering via CARLA autopilot route)
+- Pass condition: ego traverses all expected OpenDRIVE road IDs (checked via StickyCondition + AndCondition)
+- Fail conditions: timeout, ego destroyed, speed below threshold</p>
+<h4 id="lane-change">Lane Change<a class="headerlink" href="#lane-change" title="Permanent link">&para;</a></h4>
+<p>Tests ego vehicle lane change maneuvers. Can test both successful lane changes and expected failures.</p>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>Direction</th>
+<th>Expected Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lane_change/left</code></td>
+<td>left</td>
+<td>success</td>
+</tr>
+<tr>
+<td><code>lane_change/right</code></td>
+<td>right</td>
+<td>success</td>
+</tr>
+<tr>
+<td><code>lane_change_fail/left</code></td>
+<td>left</td>
+<td>fail (no adjacent lane)</td>
+</tr>
+<tr>
+<td><code>lane_change_fail/right</code></td>
+<td>right</td>
+<td>fail (no adjacent lane)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scenario-specific parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scenario.direction</code></td>
+<td>str</td>
+<td><code>"left"</code></td>
+<td>Lane change direction: <code>"left"</code> or <code>"right"</code></td>
+</tr>
+<tr>
+<td><code>scenario.expect</code></td>
+<td>str</td>
+<td><code>"success"</code></td>
+<td>Expected outcome: <code>"success"</code> or <code>"fail"</code></td>
+</tr>
+<tr>
+<td><code>scenario.timeout_seconds</code></td>
+<td>float</td>
+<td><code>10.0</code></td>
+<td>Maximum scenario duration</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Behavior:</strong>
+- Sets all traffic lights to GREEN
+- Immediately registers a LaneChangeAction
+- Derives the target lane from the current spawn position and direction
+- Pass condition: <code>expect=success</code> requires both <code>road_id</code> and <code>lane_id</code> to change; <code>expect=fail</code> passes when timeout is reached without a lane change
+- Checks via EntityLanePositionCondition</p>
+<h4 id="traffic-light-compliance">Traffic Light Compliance<a class="headerlink" href="#traffic-light-compliance" title="Permanent link">&para;</a></h4>
+<p>Tests that the ego vehicle correctly stops at a red light and proceeds after green.</p>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>traffic_light_compliance/traffic_light_compliance</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scenario-specific parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scenario.light_switch_delay_seconds</code></td>
+<td>float</td>
+<td><code>5.0</code></td>
+<td>Delay before switching red to green</td>
+</tr>
+<tr>
+<td><code>scenario.merging_time_seconds</code></td>
+<td>float</td>
+<td><code>3.0</code></td>
+<td>Margin subtracted from red phase duration</td>
+</tr>
+<tr>
+<td><code>scenario.timeout_seconds</code></td>
+<td>float</td>
+<td><code>8.0</code></td>
+<td>Maximum scenario duration</td>
+</tr>
+<tr>
+<td><code>scenario.moving_speed_kmh</code></td>
+<td>float</td>
+<td><code>1.0</code></td>
+<td>Speed threshold to detect "moving" (km/h)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Behavior:</strong>
+- Sets all traffic lights to RED initially
+- Registers a TrafficSignalAction to switch to GREEN after <code>light_switch_delay_seconds</code>
+- Pass conditions: ego is at standstill during red AND moves above <code>moving_speed_kmh</code> during green
+- Uses StickyCondition + AndCondition for combined checks</p>
+<h4 id="temporary-stop">Temporary Stop<a class="headerlink" href="#temporary-stop" title="Permanent link">&para;</a></h4>
+<p>Tests that the ego vehicle stops at a designated stop line for a minimum duration, then restarts.</p>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>temporary_stop/temporary_stop</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scenario-specific parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scenario.s_margin</code></td>
+<td>float</td>
+<td><code>5.0</code></td>
+<td>Arc-length margin around stop position (meters)</td>
+</tr>
+<tr>
+<td><code>scenario.speed_threshold</code></td>
+<td>float</td>
+<td><code>0.1</code></td>
+<td>Max speed considered as "stopped" (m/s)</td>
+</tr>
+<tr>
+<td><code>scenario.stop_duration</code></td>
+<td>float</td>
+<td><code>0.3</code></td>
+<td>Minimum consecutive seconds to remain stopped</td>
+</tr>
+<tr>
+<td><code>scenario.restart_speed_kmh</code></td>
+<td>float</td>
+<td><code>3.0</code></td>
+<td>Speed threshold for restart detection (km/h)</td>
+</tr>
+<tr>
+<td><code>scenario.timeout_seconds</code></td>
+<td>float</td>
+<td><code>5.0</code></td>
+<td>Maximum scenario duration</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Behavior:</strong>
+- Sets all traffic lights to GREEN
+- Registers a TemporaryStopCondition at the configured stop position
+- Pass condition: ego stays within <code>s_margin</code> of stop line at speed below <code>speed_threshold</code> for at least <code>stop_duration</code> seconds, then accelerates above <code>restart_speed_kmh</code></p>
+<h3 id="scenario-evaluation">Scenario Evaluation<a class="headerlink" href="#scenario-evaluation" title="Permanent link">&para;</a></h3>
+<p>Each scenario registers <strong>pass conditions</strong> and <strong>fail conditions</strong>. The tick loop evaluates them every frame:</p>
+<ul>
+<li><strong>First pass condition satisfied</strong> → scenario passes</li>
+<li><strong>First fail condition triggered</strong> → scenario fails</li>
+<li>Common fail conditions: <code>TimeoutCondition</code> (exceeded time limit), <code>EntityExistenceCondition</code> (ego destroyed)</li>
+</ul>
+<h3 id="output-files">Output Files<a class="headerlink" href="#output-files" title="Permanent link">&para;</a></h3>
+<p>Each scenario run generates output in <code>outputs/YYYY-MM-DD/HH-MM-SS/</code>:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{ScenarioName}.log</code></td>
+<td>CARLA native recording (replay format)</td>
+</tr>
+<tr>
+<td><code>{ScenarioName}_result.json</code></td>
+<td>Machine-readable result with condition statuses</td>
+</tr>
+<tr>
+<td><code>{ScenarioName}.mp4</code></td>
+<td>Rendered video from recording (optional, if spectator is configured)</td>
+</tr>
+<tr>
+<td><code>batch_results.json</code></td>
+<td>Batch summary (glob/batch mode only)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Result JSON format:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">&quot;scenario&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;intersection_passing/straight&quot;</span><span class="p">,</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">&quot;passed&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;All pass conditions satisfied&quot;</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="nt">&quot;elapsed_seconds&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.42</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="nt">&quot;condition_statuses&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Road 5 visited&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;satisfied&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">},</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Road 12 visited&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;satisfied&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">}</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="exit-codes">Exit Codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>All scenarios passed</td>
+</tr>
+<tr>
+<td>1</td>
+<td>One or more scenarios failed, or configuration/runtime error</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="detect-no-3d-model-3d-model-detection"><code>detect-no-3d-model</code> - 3D Model Detection<a class="headerlink" href="#detect-no-3d-model-3d-model-detection" title="Permanent link">&para;</a></h2>
+<p>Detects lanelets that do not have a matching 3D ground model in CARLA. Useful for identifying areas where vehicle ground-projection ray casting will fail. Requires a running CARLA server with the target map loaded.</p>
+<h3 id="how-it-works_1">How It Works<a class="headerlink" href="#how-it-works_1" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Reads the map configuration YAML to resolve <code>xodr_path</code> and <code>lanelet2_path</code></li>
+<li>Connects to the CARLA server</li>
+<li>For each lanelet's center point, casts a vertical ray (upward and downward from estimated z) to detect ground geometry</li>
+<li>Reports lanelets where the ray does not hit any 3D surface</li>
+<li>Writes the detected IDs to the YAML configuration's <code>no_3d_model_lanelet_ids</code> field</li>
+</ol>
+<h3 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Basic detection using map config YAML</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>uv<span class="w"> </span>run<span class="w"> </span>detect-no-3d-model<span class="w"> </span>conf/map/nishishinjuku.yaml
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Connect to a remote CARLA server</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>uv<span class="w"> </span>run<span class="w"> </span>detect-no-3d-model<span class="w"> </span>conf/map/nishishinjuku.yaml<span class="w"> </span>--host<span class="w"> </span><span class="m">192</span>.168.1.100<span class="w"> </span>--port<span class="w"> </span><span class="m">3000</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># Increase ray search range for hilly terrain</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>uv<span class="w"> </span>run<span class="w"> </span>detect-no-3d-model<span class="w"> </span>conf/map/nishishinjuku.yaml<span class="w"> </span>--ray-upper<span class="w"> </span><span class="m">10</span>.0<span class="w"> </span>--ray-lower<span class="w"> </span><span class="m">10</span>.0
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1"># Longer timeout for slow connections</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>uv<span class="w"> </span>run<span class="w"> </span>detect-no-3d-model<span class="w"> </span>conf/map/nishishinjuku.yaml<span class="w"> </span>--timeout<span class="w"> </span><span class="m">30</span>.0
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="c1"># Debug logging</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>uv<span class="w"> </span>run<span class="w"> </span>detect-no-3d-model<span class="w"> </span>conf/map/nishishinjuku.yaml<span class="w"> </span>-v
+</code></pre></div>
+<h3 id="command-line-options">Command-Line Options<a class="headerlink" href="#command-line-options" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Short</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>yaml_path</code></td>
+<td>-</td>
+<td>Yes</td>
+<td>-</td>
+<td>Path to map configuration YAML (must contain <code>map.name</code>, <code>xodr_path</code>, <code>lanelet2_path</code>)</td>
+</tr>
+<tr>
+<td><code>--host</code></td>
+<td>-</td>
+<td>No</td>
+<td><code>localhost</code></td>
+<td>CARLA server hostname</td>
+</tr>
+<tr>
+<td><code>--port</code></td>
+<td>-</td>
+<td>No</td>
+<td><code>2000</code></td>
+<td>CARLA server port</td>
+</tr>
+<tr>
+<td><code>--ray-upper</code></td>
+<td>-</td>
+<td>No</td>
+<td><code>5.0</code></td>
+<td>Ray search range above z estimate (meters)</td>
+</tr>
+<tr>
+<td><code>--ray-lower</code></td>
+<td>-</td>
+<td>No</td>
+<td><code>5.0</code></td>
+<td>Ray search range below z estimate (meters)</td>
+</tr>
+<tr>
+<td><code>--timeout</code></td>
+<td>-</td>
+<td>No</td>
+<td><code>10.0</code></td>
+<td>CARLA client timeout (seconds)</td>
+</tr>
+<tr>
+<td><code>--verbose</code></td>
+<td><code>-v</code></td>
+<td>No</td>
+<td>false</td>
+<td>Enable DEBUG logging</td>
+</tr>
+</tbody>
+</table>
+<h3 id="input-yaml-requirements">Input YAML Requirements<a class="headerlink" href="#input-yaml-requirements" title="Permanent link">&para;</a></h3>
+<p>The YAML file must contain at minimum:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NishishinjukuMap</span><span class="w">        </span><span class="c1"># CARLA map name</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nt">xodr_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">path/to/map.xodr</span><span class="w">  </span><span class="c1"># Path to OpenDRIVE file</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="nt">lanelet2_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">path/to/map.osm</span><span class="w">  </span><span class="c1"># Path to Lanelet2 file</span>
+</code></pre></div>
+<h3 id="integration-with-scenario-runner">Integration with Scenario Runner<a class="headerlink" href="#integration-with-scenario-runner" title="Permanent link">&para;</a></h3>
+<p>The detected lanelet IDs are stored in the map config's <code>no_3d_model_lanelet_ids</code> field. The scenario runner's sweep feature uses this list to exclude problematic lanelets from automatic spawn point selection.</p>
+<hr />
+<h2 id="viewer-scenario-result-viewer"><code>viewer</code> - Scenario Result Viewer<a class="headerlink" href="#viewer-scenario-result-viewer" title="Permanent link">&para;</a></h2>
+<p>Web UI for browsing and monitoring scenario test results. Starts a FastAPI server with Uvicorn.</p>
+<h3 id="how-it-works_2">How It Works<a class="headerlink" href="#how-it-works_2" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Scans the base path directory for scenario output files (<code>outputs/YYYY-MM-DD/HH-MM-SS/</code>)</li>
+<li>Serves a web interface for browsing sessions, viewing individual scenario results, and watching recorded videos</li>
+<li>Provides an API for triggering scenario runs and monitoring progress in real time</li>
+</ol>
+<h3 id="usage_1">Usage<a class="headerlink" href="#usage_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Start with default settings (0.0.0.0:9000, current directory)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>uv<span class="w"> </span>run<span class="w"> </span>viewer
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Custom host and port</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="nv">VIEWER_HOST</span><span class="o">=</span><span class="m">127</span>.0.0.1<span class="w"> </span><span class="nv">VIEWER_PORT</span><span class="o">=</span><span class="m">8080</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>viewer
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Specify results directory</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="nv">VIEWER_BASE_PATH</span><span class="o">=</span>/path/to/scenario/outputs<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>viewer
+</code></pre></div>
+<p>Then open <code>http://localhost:9000</code> (or the configured host/port) in a browser.</p>
+<h3 id="environment-variables">Environment Variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VIEWER_BASE_PATH</code></td>
+<td>Current working directory</td>
+<td>Base path for scanning scenario result files</td>
+</tr>
+<tr>
+<td><code>VIEWER_HOST</code></td>
+<td><code>0.0.0.0</code></td>
+<td>Server bind address</td>
+</tr>
+<tr>
+<td><code>VIEWER_PORT</code></td>
+<td><code>9000</code></td>
+<td>Server listen port</td>
+</tr>
+</tbody>
+</table>
+<h3 id="web-ui-pages">Web UI Pages<a class="headerlink" href="#web-ui-pages" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td>Session list — displays all test sessions grouped by date/time</td>
+</tr>
+<tr>
+<td><code>/session/{type}/{date}/{time}</code></td>
+<td>Session detail — shows all scenarios in a session with pass/fail status</td>
+</tr>
+<tr>
+<td><code>/session/{type}/{date}/{time}/{index}</code></td>
+<td>Scenario detail — condition tree, per-condition status, and video playback</td>
+</tr>
+<tr>
+<td><code>/video/{type}/{date}/{time}/{index}/{filename}</code></td>
+<td>Video file serving for MP4 playback</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rest-api-endpoints">REST API Endpoints<a class="headerlink" href="#rest-api-endpoints" title="Permanent link">&para;</a></h3>
+<p>The viewer also provides API endpoints for programmatic use and the web UI's interactive features:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/refresh</code></td>
+<td>Clear result cache and return updated session table HTML</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/scenarios</code></td>
+<td>List all available scenario config names</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/run/preview</code></td>
+<td>Preview the CLI command that would be executed</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/run</code></td>
+<td>Start a scenario execution in the background</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/run/status</code></td>
+<td>Get current run status (non-streaming)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/run/progress</code></td>
+<td>SSE (Server-Sent Events) stream for real-time progress</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Run request body format:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">&quot;scenario&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;*/*&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">&quot;extra_overrides&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;server.host=192.168.1.100&quot;</span><span class="p">],</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span><span class="nt">&quot;sweeper&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="p">}</span>
+</code></pre></div>
+<p><strong>Progress SSE event format:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">&quot;current&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">&quot;scenario_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;intersection_passing/straight&quot;</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;running&quot;</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="p">}</span>
+</code></pre></div>
+<p>Where <code>status</code> is one of: <code>"running"</code>, <code>"idle"</code>, or <code>"done"</code>.</p>
+<hr />
+<h2 id="environment-variables_1">Environment Variables<a class="headerlink" href="#environment-variables_1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Used By</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CARLA_EXECUTABLE</code></td>
+<td>scenario runner</td>
+<td>Path to CARLA binary executable</td>
+</tr>
+<tr>
+<td><code>NISHISHINJUKU_XODR_PATH</code></td>
+<td>map config</td>
+<td>Override default OpenDRIVE file path for nishishinjuku</td>
+</tr>
+<tr>
+<td><code>NISHISHINJUKU_LANELET2_PATH</code></td>
+<td>map config</td>
+<td>Override default Lanelet2 file path for nishishinjuku</td>
+</tr>
+<tr>
+<td><code>VIEWER_BASE_PATH</code></td>
+<td>viewer</td>
+<td>Base path for scenario results</td>
+</tr>
+<tr>
+<td><code>VIEWER_HOST</code></td>
+<td>viewer</td>
+<td>Viewer server bind address</td>
+</tr>
+<tr>
+<td><code>VIEWER_PORT</code></td>
+<td>viewer</td>
+<td>Viewer server listen port</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="common-use-cases">Common Use Cases<a class="headerlink" href="#common-use-cases" title="Permanent link">&para;</a></h2>
+<h3 id="use-case-1-run-a-single-scenario">Use Case 1: Run a Single Scenario<a class="headerlink" href="#use-case-1-run-a-single-scenario" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Start CARLA server first, then:</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/straight
+</code></pre></div>
+<h3 id="use-case-2-run-all-scenarios-for-a-map">Use Case 2: Run All Scenarios for a Map<a class="headerlink" href="#use-case-2-run-all-scenarios-for-a-map" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;*/*&#39;</span><span class="w"> </span><span class="nv">map</span><span class="o">=</span>nishishinjuku
+</code></pre></div>
+<h3 id="use-case-3-test-on-a-remote-carla-server">Use Case 3: Test on a Remote CARLA Server<a class="headerlink" href="#use-case-3-test-on-a-remote-carla-server" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span>intersection_passing/left_turn<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span>server.host<span class="o">=</span><span class="m">192</span>.168.1.100<span class="w"> </span>server.port<span class="o">=</span><span class="m">2000</span>
+</code></pre></div>
+<h3 id="use-case-4-detect-missing-3d-models-before-running-scenarios">Use Case 4: Detect Missing 3D Models Before Running Scenarios<a class="headerlink" href="#use-case-4-detect-missing-3d-models-before-running-scenarios" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># 1. Detect lanelets without ground geometry</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>uv<span class="w"> </span>run<span class="w"> </span>detect-no-3d-model<span class="w"> </span>conf/map/nishishinjuku.yaml
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># 2. The detected IDs are written to no_3d_model_lanelet_ids in the YAML</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="c1"># 3. Now run scenarios — sweep will skip these lanelets</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;intersection_passing/*&#39;</span><span class="w"> </span><span class="nv">map</span><span class="o">=</span>nishishinjuku
+</code></pre></div>
+<h3 id="use-case-5-browse-results-in-the-web-ui">Use Case 5: Browse Results in the Web UI<a class="headerlink" href="#use-case-5-browse-results-in-the-web-ui" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># 1. Run scenarios</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;*/*&#39;</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># 2. Launch the viewer pointing to the outputs directory</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="nv">VIEWER_BASE_PATH</span><span class="o">=</span>outputs<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>viewer
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="c1"># 3. Open http://localhost:9000 in a browser</span>
+</code></pre></div>
+<h3 id="use-case-6-resume-a-failed-batch">Use Case 6: Resume a Failed Batch<a class="headerlink" href="#use-case-6-resume-a-failed-batch" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Original batch run (5 scenarios, failed at index 3)</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;intersection_passing/*&#39;</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># Resume from the 4th scenario (0-based index 3)</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>uv<span class="w"> </span>run<span class="w"> </span>scenario<span class="w"> </span><span class="nv">scenario</span><span class="o">=</span><span class="s1">&#39;intersection_passing/*&#39;</span><span class="w"> </span>--resume-from<span class="w"> </span><span class="m">3</span>
+</code></pre></div>
+<hr />
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="connection-refused-or-timeout-when-connecting-to-carla">"Connection refused" or timeout when connecting to CARLA<a class="headerlink" href="#connection-refused-or-timeout-when-connecting-to-carla" title="Permanent link">&para;</a></h3>
+<p><strong>Cause</strong>: CARLA server is not running, or host/port is incorrect.</p>
+<p><strong>Solution</strong>:
+- Verify the CARLA server is started and accessible
+- Check <code>server.host</code> and <code>server.port</code> overrides match the server
+- Increase <code>--timeout</code> for <code>detect-no-3d-model</code></p>
+<h3 id="batch-scenarios-must-share-the-same-map">"batch scenarios must share the same map"<a class="headerlink" href="#batch-scenarios-must-share-the-same-map" title="Permanent link">&para;</a></h3>
+<p><strong>Cause</strong>: Glob pattern matched scenarios configured for different maps.</p>
+<p><strong>Solution</strong>:
+- Use <code>map=&lt;name&gt;</code> override to force all scenarios to use the same map
+- Or narrow the glob pattern to match scenarios for one map only</p>
+<h3 id="ego-vehicle-falls-through-the-ground">Ego vehicle falls through the ground<a class="headerlink" href="#ego-vehicle-falls-through-the-ground" title="Permanent link">&para;</a></h3>
+<p><strong>Cause</strong>: The spawn lanelet has no corresponding 3D ground geometry in CARLA.</p>
+<p><strong>Solution</strong>:
+- Run <code>detect-no-3d-model</code> to identify problematic lanelets
+- Add them to <code>no_3d_model_lanelet_ids</code> in the map config
+- Increase <code>entity.ground_projection_ray_distance_lower</code> for deeper ray casting
+- Increase <code>entity.spawn_retry_max_count</code> for more spawn attempts</p>
+<h3 id="scenario-times-out-unexpectedly">Scenario times out unexpectedly<a class="headerlink" href="#scenario-times-out-unexpectedly" title="Permanent link">&para;</a></h3>
+<p><strong>Cause</strong>: <code>scenario.timeout_seconds</code> is too short, or the ego vehicle is stuck.</p>
+<p><strong>Solution</strong>:
+- Increase <code>scenario.timeout_seconds</code>
+- Check <code>ego.initial_speed_kmh</code> — a value of <code>0.0</code> requires autopilot to start moving
+- Enable verbose logging and check condition statuses in the result JSON</p>
+<h3 id="unknown-scenario-name-error">"Unknown scenario name" error<a class="headerlink" href="#unknown-scenario-name-error" title="Permanent link">&para;</a></h3>
+<p><strong>Cause</strong>: The <code>scenario.name</code> field in the YAML does not match any registered scenario class.</p>
+<p><strong>Solution</strong>:
+- Supported scenario names: <code>intersection_passing</code>, <code>lane_change</code>, <code>traffic_light_compliance</code>, <code>temporary_stop</code>
+- Check the <code>name</code> field in your scenario YAML config</p>
+<hr />
+<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../api/">API Reference</a> — Detailed API documentation for programmatic usage</li>
+<li><a href="../development/">Development Guide</a> — Contributing and development setup</li>
+</ul>
+
+
+
+
+
+
+
+  
+    
+  
+  
+    
+  
+
+
+  <aside class="md-source-file">
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Last update">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="May 7, 2026 02:49:50 UTC"><span class="timeago" datetime="2026-05-07T02:49:50+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="May 7, 2026 02:49:50 UTC">2026-05-07</span>
+  </span>
+
+    
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Created">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 27, 2026 06:59:17 UTC"><span class="timeago" datetime="2026-03-27T06:59:17+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 27, 2026 06:59:17 UTC">2026-03-27</span>
+  </span>
+
+    
+    
+    
+  </aside>
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../js/timeago.min.js"></script>
+      
+        <script src="../js/timeago_mkdocs_material.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+      
+    
+  </body>
+</html>

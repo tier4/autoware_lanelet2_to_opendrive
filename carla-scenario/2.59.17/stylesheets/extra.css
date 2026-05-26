@@ -1,0 +1,33 @@
+/* Custom styles for Autoware CARLA Scenario documentation */
+
+/* Use full viewport width for content */
+.md-grid {
+    max-width: none;
+    margin-left: 1rem;
+    margin-right: 1rem;
+}
+
+/* Adjust main content container to use available space */
+.md-main__inner {
+    margin-top: 0;
+}
+
+/* Fix table width overflow issues */
+.md-typeset table:not([class]) {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+/* Enable text wrapping in table cells */
+.md-typeset table:not([class]) td {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+}
+
+/* Ensure code elements in tables also wrap */
+.md-typeset table:not([class]) td code {
+    white-space: normal;
+    word-break: break-all;
+}
