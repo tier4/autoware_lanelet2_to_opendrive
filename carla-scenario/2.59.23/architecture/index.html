@@ -1,0 +1,2515 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="CARLA scenario testing framework for Autoware autonomous driving software">
+      
+      
+      
+        <link rel="canonical" href="https://tier4.github.io/autoware_lanelet2_to_opendrive/carla-scenario/2.59.23/architecture/">
+      
+      
+        <link rel="prev" href="../usage/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Architecture - Autoware CARLA Scenario</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../css/timeago.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#software-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Autoware CARLA Scenario" class="md-header__button md-logo" aria-label="Autoware CARLA Scenario" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Autoware CARLA Scenario
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../usage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../development/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Development
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Autoware CARLA Scenario" class="md-nav__button md-logo" aria-label="Autoware CARLA Scenario" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Autoware CARLA Scenario
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tier4/autoware_lanelet2_to_opendrive
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#system-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scenario-execution-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario Execution System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scenario Execution System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#component-responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tick-loop-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tick Loop Detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenarioqueue-batch-execution-and-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ScenarioQueue: Batch Execution and Retry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#video-recording-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Video Recording Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#condition-and-action-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition and Action System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Condition and Action System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#condition-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#action-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#result-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result Viewer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Result Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture-diagram_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#component-responsibilities_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result-directory-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result Directory Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-execution-from-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario Execution from Viewer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#condition-tree-display" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition Tree Display
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caching-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caching Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coordinate-transform-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coordinate Transform System
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entity-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entity Management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lanelet-constraint-sweeper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet Constraint Sweeper
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ports-and-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports and Environment Variables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ports and Environment Variables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#network-ports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network Ports
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Variables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dynamic-map-path-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Map Path Variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#process-isolation-for-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Process Isolation for Viewer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synchronous-simulation-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synchronous Simulation Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#two-pass-video-recording" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Pass Video Recording
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#condition-composition-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition Composition Pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-reload-for-clean-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        World Reload for Clean State
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#system-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scenario-execution-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario Execution System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scenario Execution System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#component-responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tick-loop-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tick Loop Detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenarioqueue-batch-execution-and-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ScenarioQueue: Batch Execution and Retry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#video-recording-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Video Recording Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#condition-and-action-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition and Action System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Condition and Action System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#condition-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#action-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#result-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result Viewer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Result Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture-diagram_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#component-responsibilities_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result-directory-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result Directory Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-execution-from-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario Execution from Viewer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#condition-tree-display" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition Tree Display
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caching-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caching Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coordinate-transform-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coordinate Transform System
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entity-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entity Management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lanelet-constraint-sweeper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanelet Constraint Sweeper
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ports-and-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports and Environment Variables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ports and Environment Variables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#network-ports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network Ports
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Variables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dynamic-map-path-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Map Path Variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Design Decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key Design Decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#process-isolation-for-viewer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Process Isolation for Viewer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synchronous-simulation-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synchronous Simulation Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#two-pass-video-recording" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Pass Video Recording
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#condition-composition-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Condition Composition Pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-reload-for-clean-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        World Reload for Clean State
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="software-architecture">Software Architecture<a class="headerlink" href="#software-architecture" title="Permanent link">&para;</a></h1>
+<p>This document describes the software architecture of the <code>autoware-carla-scenario</code> package, with a focus on the <strong>scenario execution system</strong> and the <strong>result viewer</strong>.</p>
+<h2 id="system-overview">System Overview<a class="headerlink" href="#system-overview" title="Permanent link">&para;</a></h2>
+<p>The package consists of four major subsystems:</p>
+<pre class="mermaid"><code>graph TB
+    subgraph CLI["CLI Entry Points"]
+        scenario["scenario command&lt;br/&gt;(Hydra)"]
+        viewer_cmd["viewer command&lt;br/&gt;(FastAPI + Uvicorn)"]
+        detect["detect-no-3d-model&lt;br/&gt;(argparse)"]
+    end
+
+    subgraph Execution["Scenario Execution System"]
+        queue["ScenarioQueue"]
+        runner["ScenarioRunner"]
+        base["BaseScenario"]
+        server["CarlaServerManager"]
+    end
+
+    subgraph Evaluation["Condition &amp; Action System"]
+        conditions["Conditions"]
+        actions["Actions"]
+    end
+
+    subgraph Viewer["Result Viewer"]
+        app["FastAPI App"]
+        scan["Scanner"]
+        ui_runner["Runner (subprocess)"]
+        sweep_res["Sweep Resolver"]
+    end
+
+    subgraph Support["Support Modules"]
+        coord["Coordinate Transforms"]
+        entity["Entity Management"]
+        kin["Kinematics"]
+        sweeper["Lanelet Constraint Sweeper"]
+        recorder["Camera Recorder"]
+    end
+
+    scenario --&gt; queue
+    viewer_cmd --&gt; app
+    queue --&gt; runner
+    queue --&gt; server
+    runner --&gt; base
+    runner --&gt; conditions
+    runner --&gt; actions
+    runner --&gt; recorder
+    base --&gt; entity
+    base --&gt; coord
+    app --&gt; scan
+    app --&gt; ui_runner
+    app --&gt; sweep_res
+    ui_runner --&gt;|"uv run scenario&lt;br/&gt;(subprocess)"| scenario</code></pre>
+<hr />
+<h2 id="scenario-execution-system">Scenario Execution System<a class="headerlink" href="#scenario-execution-system" title="Permanent link">&para;</a></h2>
+<p>The scenario execution system is responsible for the full lifecycle of a CARLA scenario test: server management, map loading, actor spawning, tick-loop execution, condition evaluation, recording, and cleanup.</p>
+<h3 id="architecture-diagram">Architecture Diagram<a class="headerlink" href="#architecture-diagram" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>graph TB
+    subgraph Entry["Entry Layer"]
+        main["main()&lt;br/&gt;examples/run.py"]
+        hydra["Hydra Config&lt;br/&gt;Compose API"]
+    end
+
+    subgraph Orchestration["Orchestration Layer"]
+        SQ["ScenarioQueue"]
+        SR["ScenarioRunner"]
+        CSM["CarlaServerManager"]
+    end
+
+    subgraph Scenario["Scenario Layer"]
+        BS["BaseScenario (ABC)"]
+        IP["IntersectionPassingScenario"]
+        LC["LaneChangeScenario"]
+        TLC["TrafficLightComplianceScenario"]
+        TS["TemporaryStopScenario"]
+    end
+
+    subgraph CARLA["CARLA Simulator"]
+        world["carla.World"]
+        tm["TrafficManager"]
+        rec["Native Recorder"]
+    end
+
+    main --&gt; hydra
+    hydra --&gt; SQ
+    SQ --&gt; CSM
+    SQ --&gt; SR
+    SR --&gt; BS
+    BS --&gt; IP &amp; LC &amp; TLC &amp; TS
+    SR --&gt; world
+    SR --&gt; tm
+    SR --&gt; rec</code></pre>
+<h3 id="component-responsibilities">Component Responsibilities<a class="headerlink" href="#component-responsibilities" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>CarlaServerManager</code></strong></td>
+<td><code>server.py</code></td>
+<td>Start/stop/reuse the CARLA UE5 process. Manages lifecycle via process groups.</td>
+</tr>
+<tr>
+<td><strong><code>ScenarioQueue</code></strong></td>
+<td><code>scenario_queue.py</code></td>
+<td>Batch execution of multiple scenarios. Owns server and runner lifecycle. Context manager.</td>
+</tr>
+<tr>
+<td><strong><code>ScenarioRunner</code></strong></td>
+<td><code>scenario_runner.py</code></td>
+<td>Single-scenario execution: sync mode, tick loop, condition evaluation, recording, cleanup.</td>
+</tr>
+<tr>
+<td><strong><code>BaseScenario</code></strong></td>
+<td><code>scenario_base.py</code></td>
+<td>Abstract base. Subclasses implement <code>setup()</code> and <code>is_done()</code>. Registers conditions, actions, entities.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="execution-lifecycle">Execution Lifecycle<a class="headerlink" href="#execution-lifecycle" title="Permanent link">&para;</a></h3>
+<p>The following sequence diagram shows the complete lifecycle of a single scenario execution:</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant CLI as CLI (main)
+    participant SQ as ScenarioQueue
+    participant CSM as CarlaServerManager
+    participant SR as ScenarioRunner
+    participant BS as BaseScenario
+    participant W as carla.World
+    participant TM as TrafficManager
+
+    CLI-&gt;&gt;SQ: add(scenario)
+    CLI-&gt;&gt;SQ: __enter__() / start()
+    SQ-&gt;&gt;CSM: start()
+    Note over CSM: Reuse existing server&lt;br/&gt;or launch new process
+    SQ-&gt;&gt;SR: new ScenarioRunner(server, ...)
+    SQ-&gt;&gt;SR: load_map_by_name() or&lt;br/&gt;load_map_by_overwriting_xodr()
+    SQ-&gt;&gt;SR: Initialize MapManager&lt;br/&gt;(Lanelet2 + OpenDRIVE)
+
+    CLI-&gt;&gt;SQ: run_all()
+    loop For each scenario
+        SQ-&gt;&gt;SR: run_scenario(scenario)
+
+        rect rgb(240, 248, 255)
+            Note over SR: Phase 1: Setup
+            SR-&gt;&gt;W: apply_settings(sync=True, dt=0.05)
+            SR-&gt;&gt;TM: set_synchronous_mode(True)
+            SR-&gt;&gt;TM: set_random_device_seed(seed)
+            SR-&gt;&gt;BS: set_client(client, tm_port)
+            SR-&gt;&gt;BS: setup()
+            Note over BS: Spawn NPCs, register&lt;br/&gt;conditions &amp; actions
+            SR-&gt;&gt;W: Spawn ego vehicle
+            SR-&gt;&gt;BS: register_fail_condition(EntityExistence)
+        end
+
+        rect rgb(255, 248, 240)
+            Note over SR: Phase 2: Warm-up (5 ticks)
+            loop 5 times
+                SR-&gt;&gt;W: tick()
+            end
+            SR-&gt;&gt;W: set_autopilot(True) on all vehicles
+            SR-&gt;&gt;BS: set_initial_speed(ego)
+        end
+
+        rect rgb(240, 255, 240)
+            Note over SR: Phase 3: Recording &amp; Tick Loop
+            SR-&gt;&gt;W: start_recorder(path)
+            SR-&gt;&gt;BS: register_fail_condition(Timeout)
+            loop Until done or condition met
+                SR-&gt;&gt;BS: pre_tick_actions.tick(world, elapsed)
+                SR-&gt;&gt;BS: pre_tick_callbacks(world)
+                SR-&gt;&gt;W: tick()
+                SR-&gt;&gt;BS: post_tick_actions.tick(world, elapsed)
+                SR-&gt;&gt;BS: post_tick_callbacks(world)
+                SR-&gt;&gt;BS: Check pass_conditions
+                Note over SR: If any pass condition&lt;br/&gt;returns ScenarioResult → PASS
+                SR-&gt;&gt;BS: Check fail_conditions
+                Note over SR: If any fail condition&lt;br/&gt;returns ScenarioResult → FAIL
+                SR-&gt;&gt;BS: is_done()?
+                Note over SR: If True → PASS (default)
+            end
+        end
+
+        rect rgb(255, 240, 240)
+            Note over SR: Phase 4: Cleanup
+            SR-&gt;&gt;W: Destroy ego
+            SR-&gt;&gt;W: stop_recorder()
+            SR-&gt;&gt;TM: shut_down()
+            SR-&gt;&gt;SR: Render video from recording
+            SR-&gt;&gt;W: reload_world()
+        end
+
+        SR--&gt;&gt;SQ: ScenarioResult
+    end
+
+    CLI-&gt;&gt;SQ: __exit__() / stop()
+    SQ-&gt;&gt;CSM: stop() (if owned)</code></pre>
+<h3 id="tick-loop-detail">Tick Loop Detail<a class="headerlink" href="#tick-loop-detail" title="Permanent link">&para;</a></h3>
+<p>The tick loop runs at a fixed 20 Hz (0.05 s per tick) in CARLA synchronous mode. Each tick follows a strict evaluation order:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│                    Single Tick Cycle                     │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─────────────────────────────────────────────────────────┤
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  1. Pre-tick actions   → action.tick(world, elapsed)    │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│  2. Pre-tick callbacks → callback(world)                │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  3. world.tick()       → advance simulation by 0.05 s   │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  4. Post-tick actions  → action.tick(world, elapsed)    │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  5. Post-tick callbacks→ callback(world)                │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│  6. Periodic logging   → ego OpenDRIVE position (1/s)   │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│  7. Pass conditions    → first satisfied → PASS &amp; exit  │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│  8. Fail conditions    → first triggered → FAIL &amp; exit  │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│  9. is_done() check    → True → PASS &amp; exit             │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>└─────────────────────────────────────────────────────────┘
+</code></pre></div>
+<p><strong>Evaluation semantics:</strong></p>
+<ul>
+<li><strong>Pass conditions</strong> are checked first. The <strong>first</strong> condition to return a non-<code>None</code> <code>ScenarioResult</code> terminates the loop with a pass.</li>
+<li><strong>Fail conditions</strong> are checked only if no pass condition was satisfied. The <strong>first</strong> triggered fail condition terminates the loop with a failure.</li>
+<li>If the loop exits via <code>is_done()</code> returning <code>True</code> with no condition triggered, the scenario is treated as <strong>passed</strong>.</li>
+</ul>
+<h3 id="scenarioqueue-batch-execution-and-retry">ScenarioQueue: Batch Execution and Retry<a class="headerlink" href="#scenarioqueue-batch-execution-and-retry" title="Permanent link">&para;</a></h3>
+<p><code>ScenarioQueue</code> wraps <code>ScenarioRunner</code> to support sequential execution of multiple scenarios:</p>
+<pre class="mermaid"><code>graph LR
+    subgraph ScenarioQueue
+        direction TB
+        A[Scenario 1] --&gt; B[Cooldown]
+        B --&gt; C[Scenario 2]
+        C --&gt; D[Cooldown]
+        D --&gt; E[Scenario N]
+    end
+
+    subgraph Retry["Retry Logic"]
+        direction TB
+        R1["Attempt 1"] --&gt;|fail| R2["Cooldown"]
+        R2 --&gt; R3["Attempt 2"]
+        R3 --&gt;|fail| R4["..."]
+        R4 --&gt; R5["Attempt N"]
+        R5 --&gt;|fail| R6["RuntimeError"]
+    end</code></pre>
+<p>Key features:</p>
+<ul>
+<li><strong>Cooldown</strong>: Configurable wait time (<code>cooldown_seconds</code>) between consecutive scenarios to allow CARLA server cleanup.</li>
+<li><strong>Retry</strong>: Failed scenarios are retried up to <code>cooldown_max_retries</code> times before raising an error.</li>
+<li><strong>Server ownership</strong>: Accepts an external <code>CarlaServerManager</code> or creates and owns one internally.</li>
+<li><strong>pytest integration</strong>: <code>as_fixture()</code> generates a session-scoped pytest fixture with automatic skip when <code>CARLA_EXECUTABLE</code> is not set.</li>
+</ul>
+<h3 id="video-recording-pipeline">Video Recording Pipeline<a class="headerlink" href="#video-recording-pipeline" title="Permanent link">&para;</a></h3>
+<p>Video recording uses a two-pass approach:</p>
+<pre class="mermaid"><code>graph LR
+    subgraph Pass1["Pass 1: Native Recording (during scenario)"]
+        T1["world.tick()"] --&gt; R1["CARLA Native Recorder"]
+        R1 --&gt; L1["scenario.log file"]
+    end
+
+    subgraph Pass2["Pass 2: Video Rendering (after scenario)"]
+        L1 --&gt; RP["client.replay_file()"]
+        RP --&gt; CAM["RGB Camera Sensor&lt;br/&gt;(attached to ego)"]
+        CAM --&gt; FF["ffmpeg (H.264)"]
+        FF --&gt; MP4["scenario.mp4"]
+    end</code></pre>
+<ol>
+<li><strong>During execution</strong>: CARLA's native recorder captures all actor states to a <code>.log</code> file.</li>
+<li><strong>After execution</strong>: The recording is replayed in synchronous mode. An RGB camera sensor is attached to the ego vehicle at the same offset as the spectator camera. Frames are streamed to an <code>ffmpeg</code> subprocess for H.264 encoding via <code>CameraRecorder</code>.</li>
+</ol>
+<p><code>CameraRecorder</code> uses a frame queue (maxsize=2) to decouple sensor callbacks from the encoding thread, and writes frames synchronously after each <code>world.tick()</code> to avoid dropped frames.</p>
+<hr />
+<h2 id="condition-and-action-system">Condition and Action System<a class="headerlink" href="#condition-and-action-system" title="Permanent link">&para;</a></h2>
+<h3 id="condition-architecture">Condition Architecture<a class="headerlink" href="#condition-architecture" title="Permanent link">&para;</a></h3>
+<p>Conditions evaluate scenario pass/fail criteria. All conditions inherit from <code>BaseCondition</code>:</p>
+<pre class="mermaid"><code>classDiagram
+    class BaseCondition {
+        &lt;&lt;abstract&gt;&gt;
+        +label: str
+        +check(world, elapsed) ScenarioResult | None
+        +get_details() dict
+        +to_summary_dict() dict
+    }
+
+    class ScenarioResult {
+        +passed: bool
+        +message: str
+        +elapsed_seconds: float
+        +condition_statuses: list
+    }
+
+    class TimeoutCondition
+    class ElapsedTimeCondition
+    class CollisionCondition
+    class EntityExistenceCondition
+    class TrafficSignalCondition
+
+    class EntityLanePositionCondition
+    class EntityInAreaCondition
+    class SpeedCondition
+    class StandstillCondition
+    class TemporaryStopCondition
+    class WaypointCondition
+
+    class AndCondition
+    class OrCondition
+    class NotCondition
+    class StickyCondition
+    class PersistentCondition
+    class AlwaysTrueCondition
+
+    BaseCondition &lt;|-- TimeoutCondition
+    BaseCondition &lt;|-- ElapsedTimeCondition
+    BaseCondition &lt;|-- CollisionCondition
+    BaseCondition &lt;|-- EntityExistenceCondition
+    BaseCondition &lt;|-- TrafficSignalCondition
+    BaseCondition &lt;|-- EntityLanePositionCondition
+    BaseCondition &lt;|-- EntityInAreaCondition
+    BaseCondition &lt;|-- SpeedCondition
+    BaseCondition &lt;|-- StandstillCondition
+    BaseCondition &lt;|-- TemporaryStopCondition
+    BaseCondition &lt;|-- WaypointCondition
+    BaseCondition &lt;|-- AndCondition
+    BaseCondition &lt;|-- OrCondition
+    BaseCondition &lt;|-- NotCondition
+    BaseCondition &lt;|-- StickyCondition
+    BaseCondition &lt;|-- PersistentCondition
+    BaseCondition &lt;|-- AlwaysTrueCondition
+
+    BaseCondition --&gt; ScenarioResult : returns</code></pre>
+<p><strong>Condition categories:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Conditions</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Temporal</strong></td>
+<td><code>TimeoutCondition</code>, <code>ElapsedTimeCondition</code></td>
+<td>Time-based triggers</td>
+</tr>
+<tr>
+<td><strong>Safety</strong></td>
+<td><code>CollisionCondition</code>, <code>EntityExistenceCondition</code></td>
+<td>Collision detection, actor alive checks</td>
+</tr>
+<tr>
+<td><strong>Position</strong></td>
+<td><code>EntityLanePositionCondition</code>, <code>EntityInAreaCondition</code>, <code>WaypointCondition</code></td>
+<td>Road/lane position, spatial region, waypoint crossing</td>
+</tr>
+<tr>
+<td><strong>Velocity</strong></td>
+<td><code>SpeedCondition</code>, <code>StandstillCondition</code>, <code>TemporaryStopCondition</code></td>
+<td>Speed thresholds, standstill detection, stop-and-go</td>
+</tr>
+<tr>
+<td><strong>Traffic</strong></td>
+<td><code>TrafficSignalCondition</code></td>
+<td>Traffic light state checks</td>
+</tr>
+<tr>
+<td><strong>Composition</strong></td>
+<td><code>AndCondition</code>, <code>OrCondition</code>, <code>NotCondition</code></td>
+<td>Logical combinators</td>
+</tr>
+<tr>
+<td><strong>Stateful</strong></td>
+<td><code>StickyCondition</code>, <code>PersistentCondition</code></td>
+<td>Latch once satisfied / persist across ticks</td>
+</tr>
+<tr>
+<td><strong>Utility</strong></td>
+<td><code>AlwaysTrueCondition</code></td>
+<td>Unconditional trigger (default for actions)</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>check()</code> contract:</strong></p>
+<ul>
+<li>Returns <code>ScenarioResult</code> when the condition is triggered (satisfied or violated).</li>
+<li>Returns <code>None</code> when not yet triggered.</li>
+<li><code>__init_subclass__</code> auto-wraps <code>check()</code> to track the latest result for UI display.</li>
+</ul>
+<h3 id="action-architecture">Action Architecture<a class="headerlink" href="#action-architecture" title="Permanent link">&para;</a></h3>
+<p>Actions execute side effects when their trigger condition is met:</p>
+<pre class="mermaid"><code>classDiagram
+    class BaseAction {
+        &lt;&lt;abstract&gt;&gt;
+        +label: str
+        +timing: TickTiming
+        +once: bool
+        +execute(world) void
+        +tick(world, elapsed) void
+    }
+
+    class BaseCondition {
+        &lt;&lt;abstract&gt;&gt;
+    }
+
+    class TrafficSignalAction
+    class TurnAction
+    class LaneChangeAction
+
+    BaseAction &lt;|-- TrafficSignalAction
+    BaseAction &lt;|-- TurnAction
+    BaseAction &lt;|-- LaneChangeAction
+    BaseAction --&gt; BaseCondition : trigger condition</code></pre>
+<p><strong>Action lifecycle:</strong></p>
+<ol>
+<li>Each tick, the runner calls <code>action.tick(world, elapsed)</code>.</li>
+<li><code>tick()</code> checks the internal <code>BaseCondition</code> via <code>condition.check(world, elapsed)</code>.</li>
+<li>If the condition returns a non-<code>None</code> result, <code>execute(world)</code> is called.</li>
+<li>If <code>once=True</code> (default), the action is marked as <code>done</code> and never re-evaluated.</li>
+</ol>
+<p><strong>Tick timing:</strong></p>
+<p>Actions can be registered as <strong>pre-tick</strong> (before <code>world.tick()</code>) or <strong>post-tick</strong> (after <code>world.tick()</code>) via <code>BaseScenario.register_pre_tick()</code> / <code>register_post_tick()</code>.</p>
+<hr />
+<h2 id="result-viewer">Result Viewer<a class="headerlink" href="#result-viewer" title="Permanent link">&para;</a></h2>
+<p>The result viewer is a web application for browsing, inspecting, and triggering scenario test results.</p>
+<h3 id="architecture-diagram_1">Architecture Diagram<a class="headerlink" href="#architecture-diagram_1" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>graph TB
+    subgraph Browser["Browser"]
+        HTML["HTML Pages&lt;br/&gt;(Jinja2 templates)"]
+        SSE["SSE Client&lt;br/&gt;(EventSource)"]
+        JS["JavaScript&lt;br/&gt;(htmx + vanilla)"]
+    end
+
+    subgraph FastAPI["FastAPI Application (app.py)"]
+        direction TB
+        pages["Page Routes&lt;br/&gt;GET /, /session/..., /scenario/..."]
+        api["API Routes&lt;br/&gt;POST /api/run, /api/refresh&lt;br/&gt;GET /api/scenarios, /api/run/progress"]
+        static["Static Files&lt;br/&gt;CSS, JavaScript"]
+    end
+
+    subgraph Services["Service Layer"]
+        scanner_svc["Scanner&lt;br/&gt;(scanner.py)"]
+        runner_svc["Runner&lt;br/&gt;(runner.py)"]
+        sweep_svc["Sweep Resolver&lt;br/&gt;(sweep_resolver.py)"]
+    end
+
+    subgraph Storage["File System"]
+        outputs["outputs/&lt;br/&gt;YYYY-MM-DD/HH-MM-SS/"]
+        multirun["multirun/&lt;br/&gt;YYYY-MM-DD/HH-MM-SS/{0,1,2...}/"]
+        conf["conf/scenario/&lt;br/&gt;*.yaml"]
+    end
+
+    subgraph External["External Process (uv run scenario)"]
+        subprocess["subprocess.run()"]
+        ext_main["main()&lt;br/&gt;(examples/run.py)"]
+        ext_queue["ScenarioQueue"]
+        ext_runner["ScenarioRunner"]
+        ext_carla["CARLA Simulator"]
+    end
+
+    HTML --&gt; pages
+    JS --&gt; api
+    SSE --&gt; api
+    pages --&gt; scanner_svc
+    api --&gt; scanner_svc
+    api --&gt; runner_svc
+    api --&gt; sweep_svc
+    scanner_svc --&gt; outputs
+    scanner_svc --&gt; multirun
+    scanner_svc --&gt; conf
+    runner_svc --&gt; subprocess
+    subprocess --&gt; ext_main
+    ext_main --&gt; ext_queue
+    ext_queue --&gt; ext_runner
+    ext_runner --&gt; ext_carla
+    sweep_svc --&gt; conf
+    ext_runner --&gt;|"*_result.json&lt;br/&gt;*.mp4"| outputs
+    ext_runner --&gt;|"*_result.json&lt;br/&gt;*.mp4"| multirun</code></pre>
+<h3 id="component-responsibilities_1">Component Responsibilities<a class="headerlink" href="#component-responsibilities_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>app.py</code></strong></td>
+<td><code>ui/app.py</code></td>
+<td>FastAPI routes, template rendering, SSE streaming</td>
+</tr>
+<tr>
+<td><strong><code>scanner.py</code></strong></td>
+<td><code>ui/scanner.py</code></td>
+<td>Scan <code>outputs/</code> and <code>multirun/</code> directories for result JSON files. Build session lists and condition trees.</td>
+</tr>
+<tr>
+<td><strong><code>runner.py</code></strong></td>
+<td><code>ui/runner.py</code></td>
+<td>Execute <code>uv run scenario</code> as subprocesses in a background thread. Track progress with thread-safe global state.</td>
+</tr>
+<tr>
+<td><strong><code>sweep_resolver.py</code></strong></td>
+<td><code>ui/sweep_resolver.py</code></td>
+<td>Resolve sweep constraints into concrete override lists without launching CARLA. Lightweight Hydra Compose API usage.</td>
+</tr>
+<tr>
+<td><strong><code>models.py</code></strong></td>
+<td><code>ui/models.py</code></td>
+<td>Pydantic data models for the viewer UI.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="data-models">Data Models<a class="headerlink" href="#data-models" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>classDiagram
+    class SessionSummary {
+        +date: str
+        +time: str
+        +session_type: str
+        +scenario_name: str
+        +passed_count: int
+        +total_count: int
+    }
+
+    class SessionItem {
+        +index: int
+        +scenario_name: str
+        +passed: bool | None
+        +elapsed_seconds: float | None
+        +overrides: list[str]
+        +message: str
+    }
+
+    class ScenarioResultView {
+        +passed: bool | None
+        +message: str
+        +elapsed_seconds: float | None
+        +condition_statuses: list[ConditionNode]
+        +overrides: list[str]
+        +raw_log: str
+        +video_filename: str | None
+    }
+
+    class ConditionNode {
+        +label: str
+        +satisfied: bool
+        +message: str
+        +condition_type: str
+        +role: str
+        +details: dict
+        +children: list[ConditionNode]
+    }
+
+    class RunProgress {
+        +current: int
+        +total: int
+        +scenario_name: str
+        +status: Status
+    }
+
+    SessionSummary "1" --&gt; "*" SessionItem : contains
+    SessionItem "1" --&gt; "1" ScenarioResultView : details
+    ScenarioResultView "1" --&gt; "*" ConditionNode : condition tree
+    ConditionNode "1" --&gt; "*" ConditionNode : children (recursive)</code></pre>
+<h3 id="result-directory-structure">Result Directory Structure<a class="headerlink" href="#result-directory-structure" title="Permanent link">&para;</a></h3>
+<p>The scanner discovers results from two directory layouts:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>base_path/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── outputs/                          # Single and batch runs
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│   └── YYYY-MM-DD/
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│       └── HH-MM-SS/
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│           ├── ScenarioName_result.json
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│           ├── ScenarioName.log        # CARLA native recording
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│           ├── ScenarioName.mp4        # Rendered video
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│           ├── batch_results.json      # Batch summary (batch mode only)
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>│           └── .hydra/
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│               └── overrides.yaml      # Hydra CLI overrides
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>└── multirun/                         # Sweep / multi-scenario runs
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    └── YYYY-MM-DD/
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        └── HH-MM-SS/
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>            ├── 0/                    # Job index 0
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>            │   ├── ScenarioName_result.json
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>            │   ├── ScenarioName.mp4
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>            │   ├── raw_output.log    # Subprocess stdout/stderr
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>            │   └── .hydra/
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>            │       └── overrides.yaml
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>            ├── 1/                    # Job index 1
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>            │   └── ...
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>            └── N/
+</code></pre></div>
+<p><strong>Session types:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Source</th>
+<th>Identification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>multirun</code></td>
+<td><code>multirun/</code> directory</td>
+<td>Numbered subdirectories (0, 1, 2, ...)</td>
+</tr>
+<tr>
+<td><code>batch</code></td>
+<td><code>outputs/</code> directory</td>
+<td>Contains <code>batch_results.json</code></td>
+</tr>
+<tr>
+<td><code>single</code></td>
+<td><code>outputs/</code> directory</td>
+<td>Contains <code>*_result.json</code> (no batch file)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="scenario-execution-from-viewer">Scenario Execution from Viewer<a class="headerlink" href="#scenario-execution-from-viewer" title="Permanent link">&para;</a></h3>
+<p>The viewer runs scenarios via subprocess to isolate the CARLA Python API (which can cause SIGSEGV) from the web server process:</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant B as Browser
+    participant A as FastAPI
+    participant R as Runner (thread)
+    participant S as Subprocess (uv run scenario)
+    participant SQ as ScenarioQueue
+    participant SR as ScenarioRunner
+    participant C as CARLA Simulator
+
+    B-&gt;&gt;A: POST /api/run {scenario, overrides, sweeper}
+
+    alt With sweeper
+        A-&gt;&gt;A: sweep_resolver.resolve_sweep()
+        Note over A: Expand constraints into&lt;br/&gt;concrete override lists
+    else Without sweeper
+        A-&gt;&gt;A: Expand glob to scenario names
+    end
+
+    A-&gt;&gt;R: start_run(overrides_list)
+    A--&gt;&gt;B: {"status": "started"}
+
+    B-&gt;&gt;A: GET /api/run/progress (SSE)
+
+    loop For each job
+        R-&gt;&gt;R: _set_progress(running)
+        R-&gt;&gt;S: subprocess.run(["uv", "run", "scenario", ...overrides])
+
+        rect rgb(240, 248, 255)
+            Note over S,C: Isolated process — same execution&lt;br/&gt;pipeline as the scenario CLI command
+            S-&gt;&gt;SQ: main() → build_scenario() → queue.add()
+            SQ-&gt;&gt;SR: run_scenario(scenario)
+            SR-&gt;&gt;C: Setup, tick loop, recording, cleanup
+            C--&gt;&gt;SR: ScenarioResult
+            SR-&gt;&gt;SR: Write *_result.json + *.mp4
+        end
+
+        S--&gt;&gt;R: exit code + stdout/stderr
+        R-&gt;&gt;R: Save raw_output.log
+        R-&gt;&gt;R: _set_progress(passed/failed)
+        A--&gt;&gt;B: SSE event {current, total, status}
+    end
+
+    R-&gt;&gt;R: _set_progress(done)
+    A--&gt;&gt;B: SSE event {status: "done"}</code></pre>
+<p><strong>Key design decisions:</strong></p>
+<ul>
+<li><strong>Process isolation</strong>: Each scenario runs in a separate <code>uv run scenario</code> subprocess. This prevents CARLA's C++ extension from crashing the web server.</li>
+<li><strong>Thread-safe progress</strong>: A global <code>RunProgress</code> object protected by <code>threading.Lock</code> provides progress state.</li>
+<li><strong>SSE streaming</strong>: The <code>/api/run/progress</code> endpoint uses Server-Sent Events for real-time progress updates (polled at 0.5 s intervals).</li>
+<li><strong>Multirun grouping</strong>: When running multiple scenarios, jobs share a timestamped <code>multirun/</code> directory with numbered subdirectories.</li>
+</ul>
+<h3 id="condition-tree-display">Condition Tree Display<a class="headerlink" href="#condition-tree-display" title="Permanent link">&para;</a></h3>
+<p>The viewer reconstructs the condition hierarchy from the JSON result for display:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pass[0](all_roads_visited)         ← AndCondition (top-level)
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── StickyCondition(road_5)        ← Wrapper
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>│   └── EntityLanePositionCondition  ← Leaf
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├── StickyCondition(road_12)
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   └── EntityLanePositionCondition
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>└── StickyCondition(road_8)
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    └── EntityLanePositionCondition
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>fail[0](default_timeout)           ← TimeoutCondition
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>fail[1](ego_existence)             ← EntityExistenceCondition
+</code></pre></div>
+<p>The <code>_build_condition_tree()</code> function in <code>scanner.py</code> recursively parses:</p>
+<ul>
+<li><code>children</code> key for composite conditions (<code>AndCondition</code>, <code>OrCondition</code>)</li>
+<li><code>child</code> key for wrapper conditions (<code>StickyCondition</code>, <code>PersistentCondition</code>, <code>NotCondition</code>)</li>
+</ul>
+<h3 id="caching-strategy">Caching Strategy<a class="headerlink" href="#caching-strategy" title="Permanent link">&para;</a></h3>
+<p>The scanner uses a module-level dictionary cache (<code>_cache</code>) keyed by path and session identifiers. The cache is cleared explicitly via the <code>/api/refresh</code> endpoint (triggered by the "Update" button in the UI). This avoids repeated filesystem scans while keeping results fresh on demand.</p>
+<hr />
+<h2 id="coordinate-transform-system">Coordinate Transform System<a class="headerlink" href="#coordinate-transform-system" title="Permanent link">&para;</a></h2>
+<p>Three coordinate systems are unified through <code>MapManager</code>:</p>
+<pre class="mermaid"><code>graph LR
+    L2["Lanelet2Pose&lt;br/&gt;(lanelet_id, s)"]
+    OD["OpenDrivePose&lt;br/&gt;(road_id, lane_id, s)"]
+    CW["CarlaWorldPose&lt;br/&gt;(x, y, z, yaw)"]
+
+    L2 --&gt;|"to_opendrive()"| OD
+    OD --&gt;|"to_carla_location()"| CW
+    CW --&gt;|"to_lanelet2()"| L2
+    OD --&gt;|"snap_to_carla_road()"| CW
+    CW --&gt;|"to_opendrive()"| OD</code></pre>
+<p><strong><code>MapManager</code></strong> is a singleton that holds the <code>LaneletMap</code>, <code>RoadNetwork</code>, and a precomputed z-offset (averaged from CARLA spawn points). It is initialized once per <code>ScenarioQueue.start()</code> when both <code>xodr_path</code> and <code>lanelet2_path</code> are provided.</p>
+<p><strong><code>snap_to_carla_road()</code></strong> uses CARLA's ray-cast API to project an OpenDRIVE position onto the actual 3D road surface, accounting for terrain height differences between the map definition and the rendered world.</p>
+<hr />
+<h2 id="entity-management">Entity Management<a class="headerlink" href="#entity-management" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>classDiagram
+    class VehicleEntityConfig {
+        +role_name: str
+        +spawn_location: SpawnLocation
+        +vehicle_type: str
+        +initial_speed_kmh: float
+        +spawn_retry_max_count: int
+    }
+
+    class EgoConfig {
+        +role_name = "Ego" (fixed)
+    }
+
+    class SpawnLocation {
+        &lt;&lt;interface&gt;&gt;
+    }
+
+    class SpawnTransform {
+        +transform: carla.Transform
+    }
+
+    class SpawnPointIndex {
+        +index: int
+    }
+
+    class VehicleEntity {
+        +actor: carla.Actor | None
+        +spawn(world) carla.Actor
+        +destroy()
+    }
+
+    class EgoVehicle {
+        +spawn(world, config) carla.Actor
+        +destroy()
+    }
+
+    VehicleEntityConfig &lt;|-- EgoConfig
+    SpawnLocation &lt;|.. SpawnTransform
+    SpawnLocation &lt;|.. SpawnPointIndex
+    VehicleEntityConfig --&gt; SpawnLocation
+    VehicleEntity --&gt; VehicleEntityConfig</code></pre>
+<p><strong>Spawn retry logic</strong>: When a vehicle fails to spawn (e.g., collision with existing geometry), the spawn system retries with lateral (<code>t_step</code>) and vertical (<code>z_step</code>) offsets, up to <code>spawn_retry_max_count</code> attempts.</p>
+<hr />
+<h2 id="lanelet-constraint-sweeper">Lanelet Constraint Sweeper<a class="headerlink" href="#lanelet-constraint-sweeper" title="Permanent link">&para;</a></h2>
+<p>The sweeper enables automated parameter sweeps across lanelets that match specified constraints:</p>
+<pre class="mermaid"><code>graph TB
+    subgraph Input
+        SC["Scenario Config&lt;br/&gt;(YAML)"]
+        Constraints["Sweep Constraints&lt;br/&gt;(traffic_light, direction, ...)"]
+        Bindings["Sweep Bindings&lt;br/&gt;(ego.spawn_s, npc.spawn_s, ...)"]
+    end
+
+    subgraph Processing
+        Map["Load Lanelet2 Map"]
+        RG["Create Routing Graph"]
+        Match["Find Matching Lanelets"]
+        Resolve["Resolve Bindings&lt;br/&gt;for each matched lanelet"]
+    end
+
+    subgraph Output
+        Jobs["Override Lists&lt;br/&gt;[scenario=X, ego.spawn_lanelet_id=5, ...]"]
+    end
+
+    SC --&gt; Map
+    Constraints --&gt; Match
+    Map --&gt; RG
+    RG --&gt; Match
+    Match --&gt; Resolve
+    Bindings --&gt; Resolve
+    Resolve --&gt; Jobs</code></pre>
+<p>The sweeper is registered as a Hydra plugin (<code>hydra_plugins/autoware_scenario_sweeper/</code>) and can also be invoked directly from the viewer via <code>sweep_resolver.py</code> (without CARLA, using only the Lanelet2 map).</p>
+<hr />
+<h2 id="ports-and-environment-variables">Ports and Environment Variables<a class="headerlink" href="#ports-and-environment-variables" title="Permanent link">&para;</a></h2>
+<h3 id="network-ports">Network Ports<a class="headerlink" href="#network-ports" title="Permanent link">&para;</a></h3>
+<p>The system uses three TCP ports for inter-process communication with the CARLA simulator and the viewer web server:</p>
+<pre class="mermaid"><code>graph LR
+    subgraph Viewer["Viewer Process"]
+        FastAPI["FastAPI&lt;br/&gt;(Uvicorn)"]
+    end
+
+    subgraph Scenario["Scenario Process"]
+        Client["carla.Client"]
+        TM_Client["TrafficManager&lt;br/&gt;Client"]
+    end
+
+    subgraph CARLA["CARLA Simulator"]
+        RPC["RPC Server"]
+        TM_Server["TrafficManager&lt;br/&gt;Server"]
+    end
+
+    subgraph Browser["Browser"]
+        B["User"]
+    end
+
+    B --&gt;|"TCP 9000&lt;br/&gt;(VIEWER_PORT)"| FastAPI
+    Client --&gt;|"TCP 2000&lt;br/&gt;(server.port)"| RPC
+    TM_Client --&gt;|"TCP 8100&lt;br/&gt;(traffic_manager.port)"| TM_Server</code></pre>
+<table>
+<thead>
+<tr>
+<th>Port</th>
+<th>Default</th>
+<th>Component</th>
+<th>Protocol</th>
+<th>Configured via</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>2000</strong></td>
+<td>2000</td>
+<td>CARLA RPC Server</td>
+<td>TCP</td>
+<td><code>server.port</code> (Hydra), <code>--port</code> CLI arg</td>
+<td>Main communication channel between <code>carla.Client</code> and the CARLA simulator. Used for world control, actor spawning, recording, etc.</td>
+</tr>
+<tr>
+<td><strong>8100</strong></td>
+<td>8100</td>
+<td>CARLA TrafficManager</td>
+<td>TCP</td>
+<td><code>traffic_manager.port</code> (Hydra), <code>tm_port</code> constructor arg</td>
+<td>RPC port for the TrafficManager, which controls NPC vehicle autopilot behavior. The CARLA default is 8000, but this project uses 8100 to avoid conflicts with other services (e.g., VS Code).</td>
+</tr>
+<tr>
+<td><strong>9000</strong></td>
+<td>9000</td>
+<td>Viewer Web Server</td>
+<td>HTTP</td>
+<td><code>VIEWER_PORT</code> env var</td>
+<td>FastAPI/Uvicorn server for the result viewer web UI. Serves HTML pages, REST API, and SSE progress stream.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The CARLA RPC port and TrafficManager port are used within the <strong>scenario subprocess</strong>, not the viewer process. The viewer communicates with CARLA only indirectly through <code>subprocess.run(["uv", "run", "scenario", ...])</code>.</p>
+</div>
+<h3 id="environment-variables">Environment Variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Required</th>
+<th>Default</th>
+<th>Used by</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>CARLA_EXECUTABLE</code></strong></td>
+<td>Yes (if launching server)</td>
+<td>—</td>
+<td><code>CarlaServerManager</code></td>
+<td>Absolute path to the CARLA UE5 executable (<code>CarlaUE5.sh</code>). Required to launch a new CARLA server. When a server is already running and <code>reuse_if_running=True</code>, this variable is not needed. Also used as a gate for pytest: tests are skipped when this variable is unset.</td>
+</tr>
+<tr>
+<td><strong><code>NISHISHINJUKU_MAP_PATH</code></strong></td>
+<td>Yes (if using xodr overwrite)</td>
+<td>—</td>
+<td><code>ScenarioRunner.load_map_by_overwriting_xodr()</code></td>
+<td>Path to the internal <code>.xodr</code> file inside the CARLA installation for the NishishinjukuMap. Used to overwrite the built-in OpenDRIVE file with a custom version while retaining full CARLA map assets (meshes, textures). The variable name is derived from the map name via CamelCase → <code>UPPER_SNAKE_CASE_PATH</code> conversion.</td>
+</tr>
+<tr>
+<td><strong><code>NISHISHINJUKU_XODR_PATH</code></strong></td>
+<td>No</td>
+<td><code>autoware_lanelet2_to_opendrive/test/data/nishishinjuku_carla.xodr</code></td>
+<td>Map config YAML (<code>${oc.env:...}</code>)</td>
+<td>Path to the custom OpenDRIVE file for the Nishishinjuku map. Resolved by OmegaConf's <code>oc.env</code> interpolation in <code>conf/map/nishishinjuku.yaml</code>.</td>
+</tr>
+<tr>
+<td><strong><code>NISHISHINJUKU_LANELET2_PATH</code></strong></td>
+<td>No</td>
+<td><code>autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm</code></td>
+<td>Map config YAML (<code>${oc.env:...}</code>)</td>
+<td>Path to the Lanelet2 <code>.osm</code> file for the Nishishinjuku map. Resolved by OmegaConf's <code>oc.env</code> interpolation.</td>
+</tr>
+<tr>
+<td><strong><code>VIEWER_BASE_PATH</code></strong></td>
+<td>No</td>
+<td>Current working directory</td>
+<td>Viewer (<code>ui/__init__.py</code>)</td>
+<td>Base directory that the viewer scans for <code>outputs/</code> and <code>multirun/</code> result directories.</td>
+</tr>
+<tr>
+<td><strong><code>VIEWER_HOST</code></strong></td>
+<td>No</td>
+<td><code>0.0.0.0</code></td>
+<td>Viewer (<code>ui/__init__.py</code>)</td>
+<td>Bind address for the Uvicorn HTTP server.</td>
+</tr>
+<tr>
+<td><strong><code>VIEWER_PORT</code></strong></td>
+<td>No</td>
+<td><code>9000</code></td>
+<td>Viewer (<code>ui/__init__.py</code>)</td>
+<td>Listen port for the Uvicorn HTTP server.</td>
+</tr>
+<tr>
+<td><strong><code>SWEEP_RESUME_FROM</code></strong></td>
+<td>No</td>
+<td><code>0</code></td>
+<td>Sweeper (<code>lanelet_constraint_sweeper.py</code>)</td>
+<td>Internal variable set by the <code>--resume-from N</code> CLI flag. Passed via environment because Hydra's CLI parser rejects unknown overrides. Tells the sweeper to skip the first N jobs.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="dynamic-map-path-variables">Dynamic Map Path Variables<a class="headerlink" href="#dynamic-map-path-variables" title="Permanent link">&para;</a></h4>
+<p><code>ScenarioRunner.load_map_by_overwriting_xodr()</code> derives the environment variable name from the CARLA map name using the <code>_map_name_to_env_var()</code> function:</p>
+<table>
+<thead>
+<tr>
+<th>Map Name</th>
+<th>Derived Variable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NishishinjukuMap</code></td>
+<td><code>NISHISHINJUKU_MAP_PATH</code></td>
+</tr>
+<tr>
+<td><code>Town01</code></td>
+<td><code>TOWN01_PATH</code></td>
+</tr>
+<tr>
+<td><code>Town10HD_Opt</code></td>
+<td><code>TOWN10_HD_OPT_PATH</code></td>
+</tr>
+</tbody>
+</table>
+<p>The conversion rule is: insert <code>_</code> before each uppercase letter that follows a lowercase letter or digit, convert to UPPER_SNAKE_CASE, and append <code>_PATH</code>.</p>
+<hr />
+<h2 id="key-design-decisions">Key Design Decisions<a class="headerlink" href="#key-design-decisions" title="Permanent link">&para;</a></h2>
+<h3 id="process-isolation-for-viewer">Process Isolation for Viewer<a class="headerlink" href="#process-isolation-for-viewer" title="Permanent link">&para;</a></h3>
+<p>The viewer deliberately avoids importing CARLA in its own process. All scenario execution happens via <code>subprocess.run(["uv", "run", "scenario", ...])</code>. This prevents CARLA's C++ extension from causing segmentation faults in the web server.</p>
+<h3 id="synchronous-simulation-mode">Synchronous Simulation Mode<a class="headerlink" href="#synchronous-simulation-mode" title="Permanent link">&para;</a></h3>
+<p>All scenario execution uses CARLA's synchronous mode at 20 Hz. This ensures:</p>
+<ul>
+<li>Deterministic tick ordering (actions, conditions, physics all advance together)</li>
+<li>Reproducible results with fixed random seeds</li>
+<li>No frame drops during recording</li>
+</ul>
+<h3 id="two-pass-video-recording">Two-Pass Video Recording<a class="headerlink" href="#two-pass-video-recording" title="Permanent link">&para;</a></h3>
+<p>Video is not rendered during execution but replayed afterwards. This avoids the overhead of RGB camera processing during the tick loop, keeping condition evaluation timing accurate.</p>
+<h3 id="condition-composition-pattern">Condition Composition Pattern<a class="headerlink" href="#condition-composition-pattern" title="Permanent link">&para;</a></h3>
+<p>Complex pass/fail criteria are built by composing atomic conditions:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Example: pass when ego visits all three road segments</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">pass_condition</span> <span class="o">=</span> <span class="n">AndCondition</span><span class="p">(</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">label</span><span class="o">=</span><span class="s2">&quot;all_roads_visited&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">children</span><span class="o">=</span><span class="p">[</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>        <span class="n">StickyCondition</span><span class="p">(</span><span class="n">EntityLanePositionCondition</span><span class="p">(</span><span class="n">road_id</span><span class="o">=</span><span class="s2">&quot;5&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">)),</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="n">StickyCondition</span><span class="p">(</span><span class="n">EntityLanePositionCondition</span><span class="p">(</span><span class="n">road_id</span><span class="o">=</span><span class="s2">&quot;12&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">)),</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>        <span class="n">StickyCondition</span><span class="p">(</span><span class="n">EntityLanePositionCondition</span><span class="p">(</span><span class="n">road_id</span><span class="o">=</span><span class="s2">&quot;8&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">)),</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="p">],</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="p">)</span>
+</code></pre></div>
+<p><code>StickyCondition</code> latches once its child is satisfied, so each road only needs to be visited once. <code>AndCondition</code> requires all children to be satisfied simultaneously.</p>
+<h3 id="world-reload-for-clean-state">World Reload for Clean State<a class="headerlink" href="#world-reload-for-clean-state" title="Permanent link">&para;</a></h3>
+<p>After each scenario, <code>ScenarioRunner</code> calls <code>client.reload_world()</code> instead of manually destroying actors. This guarantees a completely clean state (actors, sensors, physics, Traffic Manager internal maps) and avoids "failed to destroy actor" errors from the CARLA server.</p>
+
+
+
+
+
+
+
+  
+    
+  
+  
+    
+  
+
+
+  <aside class="md-source-file">
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Last update">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="April 20, 2026 02:09:37 UTC"><span class="timeago" datetime="2026-04-20T02:09:37+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="April 20, 2026 02:09:37 UTC">2026-04-20</span>
+  </span>
+
+    
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Created">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 30, 2026 08:43:49 UTC"><span class="timeago" datetime="2026-03-30T08:43:49+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 30, 2026 08:43:49 UTC">2026-03-30</span>
+  </span>
+
+    
+    
+    
+  </aside>
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/tier4/autoware_lanelet2_to_opendrive" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../js/timeago.min.js"></script>
+      
+        <script src="../js/timeago_mkdocs_material.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+      
+    
+  </body>
+</html>
