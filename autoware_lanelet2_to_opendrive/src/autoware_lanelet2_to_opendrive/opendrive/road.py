@@ -1298,11 +1298,21 @@ class Road:
         )
 
         # Find adjacent groups of lanelets
-        from ..util import find_adjacent_groups
+        from ..util import find_adjacent_groups, split_groups_by_divergent_connections
 
         # Pass the road_lanelets set to find_adjacent_groups so it only groups these
         adjacent_groups = find_adjacent_groups(
             lanelet_map, set(road_lanelets), routing_graph
+        )
+
+        # Split groups whose lanelets fan out to more than one downstream
+        # road group. Without this, a lateral group whose lanes go to
+        # different successor roads is emitted as a single OpenDRIVE road
+        # that can only carry a road-level link to one of them, silently
+        # dropping the other lane's link.
+        # See specs/2026-05-22-road-successor-mis-merge-design.md.
+        adjacent_groups = split_groups_by_divergent_connections(
+            lanelet_map, adjacent_groups, routing_graph
         )
 
         # Create roads from adjacent groups
