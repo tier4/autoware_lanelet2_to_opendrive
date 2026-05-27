@@ -255,17 +255,53 @@ uv run viewer
 VIEWER_BASE_PATH=outputs uv run viewer
 ```
 
-Open <http://localhost:9000> in your browser:
+Open <http://localhost:9000> in your browser. The viewer has three levels of
+navigation:
 
-1. **Session list** — shows each run with pass/fail summary.
-2. **Session detail** — click a session to see every scenario's condition tree
-   and recorded video.
-3. **Trigger a new run** — use the "Run" button in the UI to launch a scenario
-   directly from the browser.
+### 1. Session list
 
-The viewer scans `outputs/` (single/batch runs) and `multirun/` (sweep runs)
-for `*_result.json` files. Click **Refresh** if you ran a scenario while the
-viewer was open.
+The top page lists every test session with its timestamp, run type
+(`multirun` / single), scenario name, and overall result.
+
+![Session list](images/scenario_result.png)
+
+Each row is color-coded: green for all-passed, red if any scenario failed.
+Click a session to drill down.
+
+### 2. Session detail
+
+Inside a session you see every concrete scenario that was executed.
+For multirun (sweep) sessions, this can be hundreds of rows — each with its
+parameter overrides, individual PASS/FAIL badge, and execution time.
+
+![Session detail — multirun sweep results](images/logical_scenarios.png)
+
+The progress bar and counter at the top (e.g. **127/127 All passed**) give an
+at-a-glance summary. Use the **PASS** / **FAIL** / **N/A** filter buttons to
+narrow the list.
+
+### 3. Concrete scenario detail
+
+Click any row to open the detail view for a single concrete scenario. Here you
+can see:
+
+- **Pass/Fail status** and elapsed time
+- **Condition tree** — the evaluated condition expression showing exactly which
+  sub-conditions were met
+- **Recording** — a video captured from CARLA during the scenario execution
+
+![Concrete scenario detail — condition tree and recording](images/concreate_scenario.png)
+
+The **Re-run** button in the top-right corner lets you re-execute the same
+scenario directly from the viewer.
+
+### Additional notes
+
+- The viewer scans `outputs/` (single/batch runs) and `multirun/` (sweep runs)
+  for `*_result.json` files. Click **Update** if you ran a scenario while the
+  viewer was open.
+- Use the **Run Scenarios** dropdown to launch a new scenario run directly from
+  the browser.
 
 ---
 
