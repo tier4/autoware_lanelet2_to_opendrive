@@ -13,9 +13,12 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
-from autoware_carla_scenario.examples.run import _CONF_DIR
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Resolved locally to avoid importing examples.run (which pulls in carla).
+_CONF_DIR = Path(__file__).resolve().parent.parent / "examples" / "conf"
 
 
 def resolve_sweep(

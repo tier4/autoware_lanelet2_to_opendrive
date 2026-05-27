@@ -25,14 +25,9 @@ def list_scenario_configs() -> list[str]:
     and returns relative paths without the ``.yaml`` suffix
     (e.g. ``"intersection_passing/left_turn"``).
     """
-    try:
-        from autoware_carla_scenario.examples.run import (  # noqa: PLC0415
-            _CONF_DIR,
-        )
-
-        scenario_dir = _CONF_DIR / "scenario"
-    except ImportError:
-        return []
+    scenario_dir = (
+        Path(__file__).resolve().parent.parent / "examples" / "conf" / "scenario"
+    )
     if not scenario_dir.is_dir():
         return []
     names: list[str] = []
