@@ -15,7 +15,7 @@ def main() -> None:
     # Allow overriding the base path via environment variable.
     env_base = os.environ.get("VIEWER_BASE_PATH")
     if env_base:
-        import autoware_carla_scenario.ui.app as app_module  # noqa: PLC0415
+        from . import app as app_module  # noqa: PLC0415
 
         app_module.BASE_PATH = Path(env_base).resolve()
 
