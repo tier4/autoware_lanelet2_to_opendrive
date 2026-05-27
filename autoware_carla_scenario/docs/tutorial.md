@@ -295,13 +295,32 @@ can see:
 The **Re-run** button in the top-right corner lets you re-execute the same
 scenario directly from the viewer.
 
+### 4. Running scenarios from the viewer
+
+You can also launch scenario runs directly from the browser without using the
+CLI. Click the **Run Scenarios** dropdown in the top-right corner to open the
+run form.
+
+![Run Scenarios form](images/run_logical_scenario.png)
+
+The form lets you configure:
+
+- **Scenario** — a glob pattern to select which scenarios to run (e.g. `*/*`
+  for all scenarios)
+- **Extra Overrides** — Hydra overrides applied to every scenario in the run
+  (one `key=value` per line, e.g. `server.host=192.168.1.100`)
+- **Sweeper** — select `lanelet_constraint` to run a multirun sweep across
+  matching lanelets
+
+Click **Start** to begin execution. The generated command is shown at the
+bottom of the form for reference. Results appear in the session list below
+once the run completes — click **Update** to refresh.
+
 ### Additional notes
 
 - The viewer scans `outputs/` (single/batch runs) and `multirun/` (sweep runs)
   for `*_result.json` files. Click **Update** if you ran a scenario while the
   viewer was open.
-- Use the **Run Scenarios** dropdown to launch a new scenario run directly from
-  the browser.
 
 ---
 
