@@ -107,7 +107,11 @@ def test_start_launches_container_when_not_running() -> None:
 
 
 def test_start_reuses_named_container_when_present() -> None:
-    """If container_name exists, start() reuses it instead of creating a new one."""
+    """If container_name exists, start() attaches without taking ownership.
+
+    A user-managed external container must NOT be destroyed by the
+    manager's stop()/atexit hook, so _reused is set to True here.
+    """
     manager = CarlaDockerServerManager(
         container_name="carla-server",
         reuse_if_running=False,
@@ -129,6 +133,55 @@ def test_start_reuses_named_container_when_present() -> None:
     fake_container.start.assert_called_once()
     fake_client.containers.run.assert_not_called()
     assert manager._container is fake_container
+    # Critical: a user-owned container must be marked as reused so that
+    # stop() leaves it alive.
+    assert manager._reused is True
+
+    # And stop() must indeed leave the container untouched.
+    manager.stop()
+    fake_container.stop.assert_not_called()
+    fake_container.remove.assert_not_called()
+
+
+def test_start_tears_down_container_when_wait_until_ready_fails() -> None:
+    """If readiness times out after we created the container, tear it down."""
+    manager = CarlaDockerServerManager(reuse_if_running=False, timeout=0.01)
+
+    fake_container = MagicMock()
+    fake_container.status = "running"
+    fake_client = MagicMock()
+    fake_client.containers.run.return_value = fake_container
+
+    with (
+        patch.object(manager, "_get_client", return_value=fake_client),
+        patch.object(manager, "_ping", return_value=False),
+    ):
+        with pytest.raises(RuntimeError, match="did not become reachable"):
+            manager.start()
+
+    # Container we just created must be cleaned up synchronously.
+    fake_container.stop.assert_called_once()
+    fake_container.remove.assert_called_once_with(force=True)
+    assert manager._container is None
+
+
+def test_lookup_container_propagates_api_error() -> None:
+    """_lookup_container must NOT swallow APIError (only NotFound)."""
+    from docker.errors import APIError
+
+    fake_client = MagicMock()
+    fake_client.containers.get.side_effect = APIError("daemon broken")
+
+    with pytest.raises(APIError):
+        CarlaDockerServerManager._lookup_container(fake_client, "any-name")
+
+
+def test_build_device_requests_zero_string_is_device_id() -> None:
+    """gpus='0' selects GPU id 0 — it must not be treated as 'disabled'."""
+    manager = CarlaDockerServerManager(gpus="0")
+    requests = manager._build_device_requests()
+    assert requests is not None
+    assert requests[0]["device_ids"] == ["0"]
 
 
 def test_stop_removes_container_when_remove_on_stop_true() -> None:

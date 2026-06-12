@@ -21,7 +21,6 @@ import os
 import time
 from typing import Any, Dict, List, Mapping, Optional, Union
 
-import carla
 from dotenv import load_dotenv
 
 try:
@@ -34,18 +33,22 @@ except ImportError as exc:  # pragma: no cover - import-time error path
         "Install it with: uv add docker"
     ) from exc
 
+# `carla` is imported lazily inside ``_ping`` so that importing this module
+# does not require the CARLA native library — see PR #521 which made the
+# viewer importable without carla / lanelet2 native libs.
+
 load_dotenv(override=False)
 
 
 class CarlaDockerServerManager:
     """Start and stop a CARLA server running inside a Docker container.
 
-    The container image defaults to :attr:`DEFAULT_IMAGE`
-    (``carlasim/carla:<version>``).  Three override mechanisms are available,
-    listed in increasing priority:
+    The container image defaults to ``carlasim/carla:<version>`` (see
+    :meth:`default_image`).  Three override mechanisms are available, listed
+    in increasing priority:
 
-    1. Override :attr:`DEFAULT_IMAGE` (or :attr:`DEFAULT_IMAGE_TAG`) by
-       subclassing or monkey-patching::
+    1. Override :attr:`DEFAULT_IMAGE_TAG` or :attr:`DEFAULT_IMAGE_REPOSITORY`
+       by subclassing or monkey-patching::
 
            CarlaDockerServerManager.DEFAULT_IMAGE_TAG = "0.9.16"
 
@@ -85,7 +88,16 @@ class CarlaDockerServerManager:
     # naming on Docker Hub: https://hub.docker.com/r/carlasim/carla/tags
     DEFAULT_IMAGE_REPOSITORY: str = "carlasim/carla"
     DEFAULT_IMAGE_TAG: str = "0.9.15"
-    DEFAULT_IMAGE: str = f"{DEFAULT_IMAGE_REPOSITORY}:{DEFAULT_IMAGE_TAG}"
+
+    @classmethod
+    def default_image(cls) -> str:
+        """Return the resolved default image string.
+
+        Built from :attr:`DEFAULT_IMAGE_REPOSITORY` and
+        :attr:`DEFAULT_IMAGE_TAG` so that subclass overrides or
+        monkey-patches of either part are reflected.
+        """
+        return f"{cls.DEFAULT_IMAGE_REPOSITORY}:{cls.DEFAULT_IMAGE_TAG}"
 
     def __init__(
         self,
@@ -152,12 +164,7 @@ class CarlaDockerServerManager:
                 image during development.
         """
         # Resolve image with this priority: explicit arg > env var > class default.
-        # The class default is rebuilt from DEFAULT_IMAGE_REPOSITORY and
-        # DEFAULT_IMAGE_TAG so that subclasses / monkey-patches of either
-        # attribute take effect even though DEFAULT_IMAGE is set at class
-        # definition time.
-        default_image = f"{self.DEFAULT_IMAGE_REPOSITORY}:{self.DEFAULT_IMAGE_TAG}"
-        self.image = image or os.environ.get(self.ENV_VAR_IMAGE) or default_image
+        self.image = image or os.environ.get(self.ENV_VAR_IMAGE) or self.default_image()
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -190,15 +197,18 @@ class CarlaDockerServerManager:
         1. If *reuse_if_running* is ``True`` and the server is already
            reachable, record that we are reusing it and return immediately.
         2. If *container_name* is provided and a container with that name
-           already exists and is running, reuse it (and verify reachability).
+           already exists, attach to it without taking ownership.  In that
+           case :meth:`stop` is a no-op so the user-managed container is
+           left alive — symmetric with the RPC-port reuse path above.
         3. Otherwise, create a new container with the configured image,
            command, and Docker options, then poll until the server accepts
-           connections.
+           connections.  If readiness times out, the just-created container
+           is torn down synchronously before the exception propagates.
 
         Raises:
             RuntimeError: If the Docker daemon is not reachable, the image
-                cannot be found, or the server does not become reachable
-                within *timeout* seconds.
+                cannot be found / started, or the server does not become
+                reachable within *timeout* seconds.
         """
         if self.reuse_if_running and self._ping():
             self._reused = True
@@ -209,11 +219,18 @@ class CarlaDockerServerManager:
         if self.container_name:
             existing = self._lookup_container(client, self.container_name)
             if existing is not None:
+                # Attach to a user-owned container — do not take ownership,
+                # so stop() / atexit will leave it running.
                 if existing.status != "running":
-                    existing.start()
+                    try:
+                        existing.start()
+                    except (APIError, DockerException) as exc:
+                        raise RuntimeError(
+                            f"Failed to start existing container "
+                            f"{self.container_name!r}: {exc}"
+                        ) from exc
                 self._container = existing
-                self._reused = False
-                atexit.register(self.stop)
+                self._reused = True
                 self._wait_until_ready()
                 return
 
@@ -258,8 +275,17 @@ class CarlaDockerServerManager:
         self._reused = False
         # Guarantee cleanup even if __exit__ / stop() is never called explicitly
         # (e.g. pytest interrupted by Ctrl-C or an unhandled exception).
+        # Register BEFORE waiting so a Ctrl-C during the readiness poll still
+        # tears the container down.
         atexit.register(self.stop)
-        self._wait_until_ready()
+        try:
+            self._wait_until_ready()
+        except Exception:
+            # Readiness timed out (or another error).  Tear down synchronously
+            # so we do not leak a running container and so the next start()
+            # does not collide on container_name / host port.
+            self.stop()
+            raise
 
     def stop(self) -> None:
         """Stop (and optionally remove) the CARLA container.
@@ -339,21 +365,32 @@ class CarlaDockerServerManager:
     def _lookup_container(
         client: docker.DockerClient, name: str
     ) -> Optional[Container]:
+        """Return the container with *name*, or ``None`` if it does not exist.
+
+        ``NotFound`` is the documented "container does not exist" signal and
+        is converted to ``None``.  Other Docker SDK errors (``APIError``,
+        ``DockerException``) indicate a daemon-level problem and propagate so
+        the caller can distinguish "absent" from "broken".
+        """
         try:
             return client.containers.get(name)
         except NotFound:
-            return None
-        except (APIError, DockerException):
             return None
 
     def _build_device_requests(self) -> Optional[List[Dict[str, Any]]]:
         """Translate the *gpus* option to Docker SDK ``device_requests``.
 
-        Returns ``None`` when GPU access is disabled, otherwise a list with
-        a single NVIDIA device request – the SDK equivalent of
-        ``docker run --gpus all`` / ``--gpus device=0,1``.
+        Returns ``None`` when GPU access is disabled (``gpus`` is ``None`` or
+        ``False``), otherwise a list with a single NVIDIA device request –
+        the SDK equivalent of ``docker run --gpus all`` / ``--gpus device=0,1``.
+
+        Note that the check uses ``is None`` / ``is False`` rather than a
+        truthiness test so that a literal device id ``"0"`` (or an accidental
+        int ``0``) is not silently treated as "disabled".
         """
-        if not self.gpus:
+        # Only the explicit "disabled" markers turn GPU off — anything else
+        # (including the string "0") is treated as a device-id selector.
+        if self.gpus is None or self.gpus is False:
             return None
         request: Dict[str, Any] = {
             "driver": "nvidia",
@@ -368,7 +405,16 @@ class CarlaDockerServerManager:
         return [request]
 
     def _ping(self) -> bool:
-        """Try to connect to the CARLA RPC port; return True on success."""
+        """Try to connect to the CARLA RPC port; return True on success.
+
+        ``carla`` is imported lazily so that this module can be imported on
+        hosts that do not have the CARLA native library available (e.g. the
+        viewer subpackage, see PR #521).
+        """
+        try:
+            import carla  # noqa: PLC0415  # lazy import — see docstring
+        except ImportError:
+            return False
         try:
             client = carla.Client(self.host, self.port)
             client.set_timeout(2.0)
