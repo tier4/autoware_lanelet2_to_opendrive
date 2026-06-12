@@ -9,6 +9,7 @@ Public API re-exported for convenience::
         ScenarioRunner,
         CarlaScenarioFixture,
         CarlaServerManager,
+        CarlaDockerServerManager,
         AndCondition,
         BaseCondition,
         BaseScenario,
@@ -158,6 +159,9 @@ if TYPE_CHECKING:
         CarlaCameraSensor as CarlaCameraSensor,
         CarlaCameraSensorConfig as CarlaCameraSensorConfig,
     )
+    from .docker_server import (
+        CarlaDockerServerManager as CarlaDockerServerManager,
+    )
     from .server import CarlaServerManager as CarlaServerManager
     from .utils import (
         find_nearest_traffic_light as find_nearest_traffic_light,
@@ -171,6 +175,7 @@ __all__ = [
     "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",
+    "CarlaDockerServerManager",
     "EntityExistenceCondition",
     "AlwaysTrueCondition",
     "AndCondition",
@@ -277,6 +282,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ScenarioRunner": (".scenario_runner", "ScenarioRunner"),
     "ScenarioQueue": (".scenario_queue", "ScenarioQueue"),
     "CarlaServerManager": (".server", "CarlaServerManager"),
+    "CarlaDockerServerManager": (".docker_server", "CarlaDockerServerManager"),
     # conditions
     "EntityExistenceCondition": (".conditions", "EntityExistenceCondition"),
     "AlwaysTrueCondition": (".conditions", "AlwaysTrueCondition"),
