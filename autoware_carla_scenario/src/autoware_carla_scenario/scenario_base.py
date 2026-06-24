@@ -94,6 +94,12 @@ class BaseScenario(ABC):
     #: TrafficManager before the main tick loop begins.
     STABILIZE_TICKS: int = 5
 
+    #: When ``True``, :class:`ScenarioRunner` skips ego spawn and instead
+    #: binds the ego wrapper to a pre-existing CARLA actor (looked up by
+    #: ``role_name='ego_vehicle'``).  Useful when ego spawn is owned by
+    #: an external integrator such as ``autoware_carla_interface``.
+    attach_to_existing_ego: bool = False
+
     def __init__(
         self,
         ego_config: EgoConfig,
@@ -104,6 +110,7 @@ class BaseScenario(ABC):
         ego_type: type[EgoVehicle] | None = None,
         initialize_with_dds: bool = False,
         domain_id: int = 0,
+        attach_to_existing_ego: bool = False,
     ) -> None:
         """Initialize the scenario with an ego vehicle configuration.
 
@@ -146,6 +153,8 @@ class BaseScenario(ABC):
         )
         self._spawn_pose = spawn_pose
         self._ground_projection = ground_projection or GroundProjectionConfig()
+        if attach_to_existing_ego:
+            self.attach_to_existing_ego = True
         self.random_seed = random_seed
         self._client: Optional["carla.Client"] = None
         self._tm_port: int = DEFAULT_TM_PORT
