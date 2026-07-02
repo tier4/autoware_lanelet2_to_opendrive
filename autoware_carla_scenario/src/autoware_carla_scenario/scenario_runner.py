@@ -476,14 +476,29 @@ class ScenarioRunner:
                 scenario.wait_for_autoware_init()
 
             scenario.setup()
-            logger.info("[%s] Spawning ego vehicle ...", scenario_name)
-            ego_actor = ego.spawn(world, scenario.ego_config)
-            logger.info(
-                "[%s] Ego spawned: id=%d blueprint=%s",
-                scenario_name,
-                ego_actor.id,
-                ego_actor.type_id,
-            )
+            if scenario.attach_to_existing_ego:
+                logger.info(
+                    "[%s] Attaching to externally-spawned ego vehicle "
+                    "(role_name='%s') ...",
+                    scenario_name,
+                    EGO_ROLE_NAME,
+                )
+                ego_actor = ego.attach(world)
+                logger.info(
+                    "[%s] Ego attached: id=%d blueprint=%s",
+                    scenario_name,
+                    ego_actor.id,
+                    ego_actor.type_id,
+                )
+            else:
+                logger.info("[%s] Spawning ego vehicle ...", scenario_name)
+                ego_actor = ego.spawn(world, scenario.ego_config)
+                logger.info(
+                    "[%s] Ego spawned: id=%d blueprint=%s",
+                    scenario_name,
+                    ego_actor.id,
+                    ego_actor.type_id,
+                )
 
             # Ensure spectator follows ego if not already configured.
             if scenario.spectator_camera_config is None:
@@ -503,7 +518,9 @@ class ScenarioRunner:
             # Set autopilot based on ego.use_autopilot.
             # AutowareEntity sets use_autopilot=False so TrafficManager
             # is explicitly disabled; EgoVehicle defaults to True.
-            if ego_actor is not None:
+            # In attach mode the actor is owned by an external integrator
+            # (e.g. autoware_carla_interface) so we leave its control alone.
+            if ego_actor is not None and not scenario.attach_to_existing_ego:
                 ego_actor.set_autopilot(ego.use_autopilot, self._tm_port)
                 logger.info(
                     "Ego (id=%d) autopilot=%s",
@@ -526,15 +543,21 @@ class ScenarioRunner:
                     scenario.STABILIZE_TICKS,
                 )
 
-            # Apply initial speeds after warm-up stabilisation
-            scenario.set_initial_speed(ego_actor)
+            # Apply initial speeds after warm-up stabilisation.
+            # Skip in attach mode since the externally-managed ego may
+            # already be in motion under autoware_carla_interface control.
+            if not scenario.attach_to_existing_ego:
+                scenario.set_initial_speed(ego_actor)
 
             _vehicle_entity_module._warmup_done = True
 
             # When the ego is an AutowareEntity, register its
             # apply_control method as a post-tick callback so that
             # DDS-received commands are forwarded to CARLA each tick.
-            if isinstance(ego, AutowareEntity):
+            # In attach mode the external integrator (e.g.
+            # autoware_carla_interface) already drives the actor, so
+            # registering apply_control would double-control it.
+            if isinstance(ego, AutowareEntity) and not scenario.attach_to_existing_ego:
                 ego.setup_dds()
                 scenario.register_post_tick(ego.apply_control)
 
