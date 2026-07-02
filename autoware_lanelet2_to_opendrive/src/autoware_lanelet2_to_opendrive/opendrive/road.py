@@ -151,6 +151,102 @@ def _resolve_candidate_road_ids(
     return seen
 
 
+def _resolve_outgoing_junction_links(
+    road_to_lanelet_ids: Dict[int, List[int]],
+    road_junction: Dict[int, int],
+    routing_previous: Dict[int, List[int]],
+) -> Dict[int, int]:
+    """Map each regular road that *exits* a junction to that junction's id.
+
+    A regular road exits a junction when one of its lanelets is reached, in
+    the routing graph, directly from a connecting lanelet of that junction.
+    The road's reference line then starts at the junction, so OpenDRIVE
+    requires its ``<link><predecessor>`` to reference the junction — the
+    mirror of the incoming side handled by
+    :meth:`Road.set_incoming_road_junction_links` (issue #494 Part A).
+
+    Pure helper (no lanelet2 dependency) so the resolution logic is unit
+    tested without a routing-graph fixture, mirroring ``_enumerate_lane_pairs``.
+
+    Args:
+        road_to_lanelet_ids: ``road_id -> [lanelet ids]`` for every road.
+        road_junction: ``road_id -> junction id`` (``-1`` for regular roads,
+            ``>= 0`` for connecting roads).
+        routing_previous: ``lanelet_id -> [direct routing-predecessor lanelet
+            ids]`` from the vehicle routing graph.
+
+    Returns:
+        ``regular_road_id -> junction_id``. A road that resolves to more than
+        one junction is omitted (and a warning logged): a single predecessor
+        link cannot reference two junctions.
+    """
+    connecting_lanelet_to_junction: Dict[int, int] = {}
+    for road_id, lanelet_ids in road_to_lanelet_ids.items():
+        if road_junction.get(road_id, -1) < 0:
+            continue
+        for lanelet_id in lanelet_ids:
+            connecting_lanelet_to_junction[lanelet_id] = road_junction[road_id]
+
+    junctions_per_road: Dict[int, Set[int]] = {}
+    for road_id, lanelet_ids in road_to_lanelet_ids.items():
+        if road_junction.get(road_id, -1) >= 0:
+            continue  # connecting road — never junction-outgoing itself
+        for lanelet_id in lanelet_ids:
+            for prev_id in routing_previous.get(lanelet_id, ()):
+                junction_id = connecting_lanelet_to_junction.get(prev_id)
+                if junction_id is not None:
+                    junctions_per_road.setdefault(road_id, set()).add(junction_id)
+
+    resolved: Dict[int, int] = {}
+    for road_id, junction_ids in junctions_per_road.items():
+        if len(junction_ids) == 1:
+            resolved[road_id] = next(iter(junction_ids))
+        else:
+            logger.warning(
+                "Road %d exits multiple junctions %s; outgoing junction link "
+                "skipped (ambiguous)",
+                road_id,
+                sorted(junction_ids),
+            )
+    return resolved
+
+
+def _apply_outgoing_junction_links(
+    roads: List["Road"],
+    outgoing_links: Dict[int, int],
+) -> None:
+    """Set ``<predecessor elementType="junction">`` on junction-outgoing roads.
+
+    ``outgoing_links`` maps a regular road id to the junction it exits (as
+    produced by :func:`_resolve_outgoing_junction_links`). A pre-existing
+    road-to-road predecessor is overwritten because the junction link is
+    authoritative — the same priority rule
+    :meth:`Road.set_incoming_road_junction_links` applies to the incoming
+    side; a predecessor that is already a junction is left untouched.
+    """
+    road_map = {road.id: road for road in roads}
+    for road_id, junction_id in outgoing_links.items():
+        road = road_map.get(road_id)
+        if road is None:
+            continue
+        existing = road.link.predecessor if road.link is not None else None
+        if existing is not None and existing.element_type == ElementType.JUNCTION:
+            continue
+        if existing is not None and existing.element_type == ElementType.ROAD:
+            logger.info(
+                "Road %d: overwriting road predecessor %d with junction %d "
+                "(junction link takes priority)",
+                road.id,
+                existing.element_id,
+                junction_id,
+            )
+        road.add_predecessor(
+            element_id=junction_id,
+            element_type=ElementType.JUNCTION,
+            contact_point=None,
+        )
+
+
 class ConstructedRoadsResult(NamedTuple):
     """Return bundle for ``Road.construct_from_lanelet_map`` (issue #291).
 
@@ -1022,6 +1118,7 @@ class Road:
             lanelet_map,
             lanelet_list,
             traffic_rule=traffic_rule,
+            routing_graph=routing_graph,
             start_xyz_override=start_xyz_override,
             end_xyz_override=end_xyz_override,
         )
@@ -1201,11 +1298,21 @@ class Road:
         )
 
         # Find adjacent groups of lanelets
-        from ..util import find_adjacent_groups
+        from ..util import find_adjacent_groups, split_groups_by_divergent_connections
 
         # Pass the road_lanelets set to find_adjacent_groups so it only groups these
         adjacent_groups = find_adjacent_groups(
             lanelet_map, set(road_lanelets), routing_graph
+        )
+
+        # Split groups whose lanelets fan out to more than one downstream
+        # road group. Without this, a lateral group whose lanes go to
+        # different successor roads is emitted as a single OpenDRIVE road
+        # that can only carry a road-level link to one of them, silently
+        # dropping the other lane's link.
+        # See specs/2026-05-22-road-successor-mis-merge-design.md.
+        adjacent_groups = split_groups_by_divergent_connections(
+            lanelet_map, adjacent_groups, routing_graph
         )
 
         # Create roads from adjacent groups
@@ -1451,7 +1558,7 @@ class Road:
             from ..util import sort_adjacent_groups
 
             try:
-                sorted_lls = sort_adjacent_groups(lanelet_map, group)
+                sorted_lls = sort_adjacent_groups(lanelet_map, group, routing_graph)
             except Exception:
                 return None
             if not sorted_lls:
@@ -1725,13 +1832,26 @@ class Road:
             if not road_lanelet_ids:
                 continue
 
+            # ``lid in laneletLayer`` is always False for an int id — the
+            # layer's __contains__ does not key on id; ``exists`` does. Using
+            # the broken test left ``road_lanelets`` empty for every road, so
+            # no connecting road ever received predecessor/successor links.
             road_lanelets = [
                 lanelet_map.laneletLayer.get(lid)
                 for lid in road_lanelet_ids
-                if lid in lanelet_map.laneletLayer
+                if lanelet_map.laneletLayer.exists(lid)
             ]
             if not road_lanelets:
                 continue
+
+            # Resolve links from the reference-line lanelet first. A
+            # connecting road may bundle several lanes; when those lanes
+            # diverge to different outgoing roads, ``_find_connected_road``
+            # (first match wins) must follow the lane the road's reference
+            # line is built from -- the one adjacent to it, ``|lane id| ==
+            # 1`` -- or the road-level link contradicts the geometry.
+            lane_of = road.get_lanelet_to_lane_mapping()
+            road_lanelets.sort(key=lambda ll: abs(lane_of.get(ll.id, 99)))
 
             own_lanelet_ids = set(road_lanelet_ids)
 
@@ -1858,3 +1978,76 @@ class Road:
                             element_type=ElementType.JUNCTION,
                             contact_point=None,
                         )
+
+    @staticmethod
+    def set_outgoing_road_junction_links(
+        lanelet_map: lanelet2.core.LaneletMap,
+        roads: List["Road"],
+        road_to_lanelet_ids: Dict[int, List[int]],
+        routing_graph: Optional[RoutingGraph] = None,
+    ) -> None:
+        """Set the junction ``<predecessor>`` on roads that *exit* a junction.
+
+        :meth:`set_incoming_road_junction_links` covers only the incoming
+        side: it walks ``junction.connections``, whose ``incomingRoad``
+        records the road feeding *into* the junction. The OpenDRIVE
+        ``<connection>`` table never records the *outgoing* road, so a
+        regular road leaving a junction received no junction link at all —
+        and was emitted as a topologically orphaned island when it had no
+        onward successor (issue #494 Part A). The missing road-level link
+        also suppressed the road's lane-level ``<predecessor>`` links, which
+        :meth:`_set_single_lane_links` only emits when the road link exists.
+
+        This pass walks the vehicle routing graph: when a regular road's
+        lanelet is reached directly from a junction connecting lanelet, that
+        road starts at the junction and gets
+        ``<predecessor elementType="junction">``. It must run before
+        :meth:`set_all_lane_links` so the restored road link unblocks the
+        lane-level predecessor links.
+
+        Args:
+            lanelet_map: Source map, used to build the routing graph and to
+                resolve lanelet ids to :class:`lanelet2` objects.
+            roads: All roads (regular and connecting).
+            road_to_lanelet_ids: ``road_id -> [lanelet ids]`` for every road.
+            routing_graph: Pre-built vehicle routing graph; one is built from
+                ``lanelet_map`` when omitted.
+        """
+        if routing_graph is None:
+            traffic_rules = lanelet2.traffic_rules.create(
+                lanelet2.traffic_rules.Locations.Germany,
+                lanelet2.traffic_rules.Participants.Vehicle,
+            )
+            routing_graph = RoutingGraph(
+                lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+            )
+
+        road_junction = {
+            road.id: (road.junction if road.junction is not None else -1)
+            for road in roads
+        }
+
+        # Collect routing-graph predecessors for every regular road's
+        # lanelets — only those lanelets can make their road junction-outgoing.
+        routing_previous: Dict[int, List[int]] = {}
+        for road in roads:
+            if road_junction[road.id] >= 0:
+                continue
+            for lanelet_id in road_to_lanelet_ids.get(road.id, []):
+                # ``id in laneletLayer`` is always False for an int id — the
+                # layer's __contains__ does not key on id; ``exists`` does.
+                if not lanelet_map.laneletLayer.exists(lanelet_id):
+                    continue
+                lanelet = lanelet_map.laneletLayer[lanelet_id]
+                routing_previous[lanelet_id] = [
+                    prev.id for prev in routing_graph.previous(lanelet)
+                ]
+
+        outgoing_links = _resolve_outgoing_junction_links(
+            road_to_lanelet_ids, road_junction, routing_previous
+        )
+        _apply_outgoing_junction_links(roads, outgoing_links)
+        print(
+            f"Set junction predecessor links for {len(outgoing_links)} "
+            "outgoing roads"
+        )

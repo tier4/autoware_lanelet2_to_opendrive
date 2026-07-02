@@ -143,6 +143,7 @@ class LaneSection:
             lanelet_map,
             lanelet_group,
             traffic_rule=traffic_rule,
+            routing_graph=routing_graph,
             start_xyz_override=start_xyz_override,
             end_xyz_override=end_xyz_override,
         )

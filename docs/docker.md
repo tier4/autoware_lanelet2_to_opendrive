@@ -11,16 +11,6 @@ system libraries directly on their host.
   on supported daemons).
 - Docker Compose v2 (`docker compose ...`, with a space — not the legacy
   `docker-compose` binary).
-- A GitHub Personal Access Token with `repo` scope, exported as `GH_PAT`:
-
-  ```bash
-  export GH_PAT=ghp_xxx
-  ```
-
-  This token is required because the project depends on the private repository
-  `tier4/lanelet2_python_api_for_autoware`. The token is passed to the Docker
-  build as a BuildKit secret and is **not** persisted in the resulting image.
-
 ## Image targets
 
 | Target | Image tag (compose) | Purpose |
@@ -112,11 +102,6 @@ container runs as root by default; on Linux you can run with `--user
 "$(id -u):$(id -g)"` to retain host ownership.
 
 ## Troubleshooting
-
-### `Failed to download and build lanelet2-python-api-for-autoware`
-
-`GH_PAT` is unset or invalid. Verify with `echo "${GH_PAT:0:8}"` — you should
-see `ghp_...` or `gho_...`. The token must have `repo` scope.
 
 ### `the --frozen flag was used but the lockfile is out of date`
 

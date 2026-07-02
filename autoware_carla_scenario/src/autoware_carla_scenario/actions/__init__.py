@@ -3,6 +3,7 @@
 from .attach_camera_sensor import AttachCameraSensorAction
 from .attach_carla_camera_sensor import AttachCarlaCameraSensorAction
 from .attach_imu_sensor import AttachIMUSensorAction, IMUSensorConfig
+from .attach_lidar_sensor import AttachLidarSensorAction
 from .base import BaseAction, TickTiming
 from .engage import EngageAction
 from .lane_change import LaneChangeAction, LaneChangeDirection
@@ -13,6 +14,7 @@ __all__ = [
     "AttachCameraSensorAction",
     "AttachCarlaCameraSensorAction",
     "AttachIMUSensorAction",
+    "AttachLidarSensorAction",
     "BaseAction",
     "EngageAction",
     "IMUSensorConfig",

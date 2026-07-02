@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import carla
 
+    from ..scenario_base import EgoConfig
+
 from ..conditions.base import find_actor_by_role_name
 from ..constants import EGO_ROLE_NAME
-from ..scenario_base import EgoConfig
 from ._spawn import spawn_vehicle_actor
 
 

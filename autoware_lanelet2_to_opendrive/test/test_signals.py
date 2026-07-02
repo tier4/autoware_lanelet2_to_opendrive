@@ -7,7 +7,6 @@ import pytest
 from autoware_lanelet2_to_opendrive.opendrive.signal import (
     Dependency,
     PositionInertial,
-    Reference,
     Signal,
     SignalType,
     SignalUserData,
@@ -559,7 +558,7 @@ def test_signal_reference_without_validities():
 
 
 # ---------------------------------------------------------------------------
-# Tests for Dependency and Reference dataclasses
+# Tests for Dependency dataclass
 # ---------------------------------------------------------------------------
 
 
@@ -571,17 +570,6 @@ def test_dependency_to_xml():
     assert xml.tag == "dependency"
     assert xml.get("id") == "102"
     assert xml.get("type") == "trafficLight"
-
-
-def test_reference_to_xml():
-    """Test Reference XML conversion."""
-    ref = Reference(id=203, element_type="signal", type="stopLine")
-    xml = ref.to_xml()
-
-    assert xml.tag == "reference"
-    assert xml.get("id") == "203"
-    assert xml.get("elementType") == "signal"
-    assert xml.get("type") == "stopLine"
 
 
 def test_signal_type_stop_line():
@@ -624,8 +612,13 @@ def test_stop_line_signal_with_dependencies():
     assert 'type="trafficLight"' in xml_string
 
 
-def test_traffic_light_signal_with_stop_line_reference():
-    """Test traffic light Signal with a stop line reference."""
+def test_traffic_light_signal_with_stop_line_dependency():
+    """Test traffic light Signal back-links to a stop line via <dependency>.
+
+    OpenDRIVE 1.4's t_road_signals_signal does not allow a <reference> child,
+    so the traffic-light -> stop-line back-link is emitted as
+    <dependency type="stopLine"> (the schema's intended cross-link mechanism).
+    """
     signal = Signal(
         id=102,
         name="TrafficLight_1000",
@@ -636,8 +629,8 @@ def test_traffic_light_signal_with_stop_line_reference():
         country="DE",
         type=SignalType.TRAFFIC_LIGHT_3_LIGHTS,
         subtype=-1,
-        references=[
-            Reference(id=203, element_type="signal", type="stopLine"),
+        dependencies=[
+            Dependency(id=203, type="stopLine"),
         ],
     )
 
@@ -646,15 +639,17 @@ def test_traffic_light_signal_with_stop_line_reference():
 
     assert xml.get("type") == "1000001"
 
-    ref_elems = xml.findall("reference")
-    assert len(ref_elems) == 1
-    assert ref_elems[0].get("id") == "203"
-    assert ref_elems[0].get("elementType") == "signal"
-    assert ref_elems[0].get("type") == "stopLine"
+    dep_elems = xml.findall("dependency")
+    assert len(dep_elems) == 1
+    assert dep_elems[0].get("id") == "203"
+    assert dep_elems[0].get("type") == "stopLine"
 
-    assert "<reference" in xml_string
-    assert 'elementType="signal"' in xml_string
+    assert "<dependency" in xml_string
     assert 'type="stopLine"' in xml_string
+
+    # Schema-invalid <reference> child must never be emitted.
+    assert xml.find("reference") is None
+    assert "<reference" not in xml_string
 
 
 def test_signal_dependency_ordering_after_validity():
@@ -684,7 +679,7 @@ def test_signal_dependency_ordering_after_validity():
 
 
 def test_signal_no_dependencies_no_elements():
-    """Test that signals without dependencies/references have no such elements."""
+    """Test that signals without dependencies have no such elements."""
     signal = Signal(
         id=10,
         name="TL_10",
@@ -699,6 +694,7 @@ def test_signal_no_dependencies_no_elements():
 
     xml = signal.to_xml()
     assert xml.find("dependency") is None
+    # Guard against regression to the schema-invalid <reference> child.
     assert xml.find("reference") is None
 
 
@@ -783,10 +779,10 @@ def test_stop_sign_signal_has_no_dependencies():
     )
 
     assert signal.dependencies is None
-    assert signal.references is None
 
     xml = signal.to_xml()
     assert len(xml.findall("dependency")) == 0
+    # Guard against regression to the schema-invalid <reference> child.
     assert len(xml.findall("reference")) == 0
 
 

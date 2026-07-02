@@ -13,8 +13,6 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from autoware_carla_scenario.examples.run import _is_glob_pattern
-
 from . import runner, scanner
 from .models import RunProgress
 
@@ -44,7 +42,7 @@ def _resolve_scenario_names(scenario: str) -> list[str]:
     If *scenario* contains glob metacharacters the pattern is matched
     against available configs.  Otherwise the name is returned as-is.
     """
-    if _is_glob_pattern(scenario):
+    if any(ch in scenario for ch in ("*", "?", "[")):
         import fnmatch  # noqa: PLC0415
 
         all_names = scanner.list_scenario_configs()

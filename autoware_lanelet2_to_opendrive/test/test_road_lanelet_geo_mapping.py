@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    Arc,
+    Line,
+    ParamPoly3,
+    PlanView,
+)
+from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     GeoRoadLaneletMapping,
     MappingMismatchError,
     _RoadCandidates,
     _resolve_conflicts,
+    _sample_reference_line_from_road,
+    parse_roads_from_xodr,
     save_mapping_json,
     validate_mapping_consistency,
 )
@@ -134,6 +145,91 @@ class TestSaveMappingJson:
         assert restored.lanelet_to_road_and_lane == original.lanelet_to_road_and_lane
         assert restored.xodr_sha256 == original.xodr_sha256
         assert restored.osm_sha256 == original.osm_sha256
+
+    def test_round_trip_preserves_skipped_synthetic_roads(self, tmp_path: Path) -> None:
+        """#493: synthetic divergence connectors are recorded in the mapping
+        JSON so consumers can tell them apart from real mapping failures."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            skipped_synthetic_roads=[274, 290, 303],
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["skipped_synthetic_roads"] == [274, 290, 303]
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.skipped_synthetic_roads == [274, 290, 303]
+
+
+# ---------------------------------------------------------------------------
+# _compute_all_candidates — synthetic divergence connector handling (#493)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeAllCandidatesSyntheticSkip:
+    """#493: synthetic divergence/merge connecting roads (junction != -1,
+    sub-0.5m total geometry) must be excluded from geometric matching *and*
+    reported separately, not counted as 0-candidate matching failures."""
+
+    def test_synthetic_connector_is_skipped_and_recorded(self) -> None:
+        import lxml.etree as ET
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _compute_all_candidates,
+        )
+
+        # A degenerate divergence connecting road: junction != -1, total
+        # planView length far below the synthetic-connector threshold.
+        xodr = (
+            "<OpenDRIVE><road id='100' junction='11000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road></OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+        all_rc, no_candidate_diag, skipped = _compute_all_candidates(
+            roads, {}, {}, {}, {}
+        )
+
+        assert skipped == {100}
+        assert 100 not in {rc.road_id for rc in all_rc}
+        assert 100 not in no_candidate_diag
+
+    def test_helper_identifies_synthetic_connectors_only(self) -> None:
+        """_synthetic_connector_road_ids selects junction roads with sub-0.5m
+        geometry, leaving real connecting roads and regular roads alone."""
+        import lxml.etree as ET
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _synthetic_connector_road_ids,
+        )
+
+        xodr = (
+            "<OpenDRIVE>"
+            # synthetic connector: junction != -1, sub-0.5m total geometry
+            "<road id='100' junction='11000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road>"
+            # real connecting road: junction != -1 but several metres long
+            "<road id='200' junction='1000'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='12.0'>"
+            "<line/></geometry></planView></road>"
+            # regular road: junction == -1 (short, but not a connector)
+            "<road id='300' junction='-1'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='0.05'>"
+            "<line/></geometry></planView></road>"
+            "</OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+        assert _synthetic_connector_road_ids(roads) == {100}
 
 
 # ---------------------------------------------------------------------------
@@ -264,3 +360,203 @@ class TestResolveConflicts:
         result = _resolve_conflicts([rc_a, rc_b])
         # Winner (100) has no alt, loser (200) has alt -> advance loser
         assert result == {0: 0, 1: 1}
+
+
+# ---------------------------------------------------------------------------
+# _sample_reference_line_from_road  (issue #495)
+# ---------------------------------------------------------------------------
+
+
+class TestSampleReferenceLineFromRoad:
+    """A road's planView must be sampled with each geometry's analytic model.
+
+    Regression test for #495: with arc-primitive detection enabled, an
+    ``<arc>`` segment must be sampled along its curve, not as the straight
+    chord between its endpoints — chord sampling inflated road↔lanelet
+    distances and aborted conversion with a ``MappingMismatchError``.
+    """
+
+    def test_arc_geometry_is_sampled_along_its_curve(self) -> None:
+        # Quarter circle of radius 10 m: starts at the origin heading +x,
+        # curves left (positive curvature), ends at (10, 10) heading +y.
+        radius = 10.0
+        curvature = 1.0 / radius
+        length = radius * math.pi / 2.0
+        road = Road(
+            id=1,
+            plan_view=PlanView(
+                geometries=[
+                    Arc(
+                        s=0.0,
+                        x=0.0,
+                        y=0.0,
+                        hdg=0.0,
+                        length=length,
+                        curvature=curvature,
+                    )
+                ]
+            ),
+        )
+
+        # spacing 2.0 m over the 15.708 m quarter circle -> 8 intervals.
+        pts = _sample_reference_line_from_road(road, sample_spacing=2.0)
+
+        # Every sample must lie on the analytic arc, not the straight chord
+        # (chord sampling keeps y == 0, which is the bug being fixed).
+        for i in range(8):
+            p = length * i / 8
+            expected = (
+                math.sin(curvature * p) / curvature,
+                (1.0 - math.cos(curvature * p)) / curvature,
+            )
+            assert pts[i] == pytest.approx(expected, abs=1e-6)
+        # Closing endpoint: the quarter circle ends exactly at (radius, radius).
+        assert pts[-1] == pytest.approx((radius, radius), abs=1e-6)
+
+    def test_line_geometry_is_sampled_as_a_straight_line(self) -> None:
+        # A 20 m line heading 30 degrees, starting at (1, 2).
+        hdg = math.radians(30.0)
+        length = 20.0
+        road = Road(
+            id=2,
+            plan_view=PlanView(
+                geometries=[Line(s=0.0, x=1.0, y=2.0, hdg=hdg, length=length)]
+            ),
+        )
+
+        # spacing 5.0 m over the 20 m line -> 4 intervals.
+        pts = _sample_reference_line_from_road(road, sample_spacing=5.0)
+
+        for i in range(4):
+            p = length * i / 4
+            expected = (1.0 + p * math.cos(hdg), 2.0 + p * math.sin(hdg))
+            assert pts[i] == pytest.approx(expected, abs=1e-6)
+        assert pts[-1] == pytest.approx(
+            (1.0 + length * math.cos(hdg), 2.0 + length * math.sin(hdg)),
+            abs=1e-6,
+        )
+
+    def test_param_poly3_geometry_is_sampled_with_cubic_model(self) -> None:
+        # A paramPoly3 heading +x from the origin with a quadratic lateral
+        # offset v = 0.1 * u**2.
+        length = 10.0
+        road = Road(
+            id=3,
+            plan_view=PlanView(
+                geometries=[
+                    ParamPoly3(
+                        s=0.0,
+                        x=0.0,
+                        y=0.0,
+                        hdg=0.0,
+                        length=length,
+                        aU=0.0,
+                        bU=1.0,
+                        cU=0.0,
+                        dU=0.0,
+                        aV=0.0,
+                        bV=0.0,
+                        cV=0.1,
+                        dV=0.0,
+                    )
+                ]
+            ),
+        )
+
+        # spacing 2.0 m over the 10 m paramPoly3 -> 5 intervals.
+        pts = _sample_reference_line_from_road(road, sample_spacing=2.0)
+
+        for i in range(5):
+            p = length * i / 5
+            assert pts[i] == pytest.approx((p, 0.1 * p * p), abs=1e-6)
+        assert pts[-1] == pytest.approx((length, 0.1 * length * length), abs=1e-6)
+
+    def test_sampling_is_uniform_across_uneven_segments(self) -> None:
+        """Samples are spaced uniformly by arc-length regardless of how the
+        planView is split into segments (#499).
+
+        Arc-primitive detection re-segments a road into a few long arcs plus
+        short paramPoly3 runs. A fixed sample count per segment would bunch
+        points onto the short segments and skew the mean-distance metric used
+        for road-lanelet matching, flipping which lanelet a road maps to.
+        Two collinear straight segments of very different lengths must still
+        yield evenly-spaced samples.
+        """
+        # A 4 m line followed by a collinear 16 m line (total 20 m, heading +x).
+        road = Road(
+            id=1,
+            plan_view=PlanView(
+                geometries=[
+                    Line(s=0.0, x=0.0, y=0.0, hdg=0.0, length=4.0),
+                    Line(s=4.0, x=4.0, y=0.0, hdg=0.0, length=16.0),
+                ]
+            ),
+        )
+
+        pts = _sample_reference_line_from_road(road, sample_spacing=1.0)
+
+        # 1.0 m spacing over 20 m -> 20 intervals, 21 points, uniform.
+        assert len(pts) == 21
+        spacings = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+        assert spacings.max() - spacings.min() < 1e-9
+        assert spacings[0] == pytest.approx(1.0)
+        assert pts[0] == pytest.approx((0.0, 0.0), abs=1e-9)
+        assert pts[-1] == pytest.approx((20.0, 0.0), abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# parse_roads_from_xodr  (issue #502)
+# ---------------------------------------------------------------------------
+
+
+class TestParseRoadsFromXodr:
+    """parse_roads_from_xodr must reconstruct every planView primitive.
+
+    Regression test for #502: the XODR re-parser used by the analyze/QC
+    path previously handled only ``<paramPoly3>`` and silently dropped
+    ``<arc>`` and ``<line>`` geometry, breaking validation of maps
+    converted with arc-primitive detection enabled.
+    """
+
+    def test_parses_line_arc_and_param_poly3(self) -> None:
+        import lxml.etree as ET
+
+        xodr = (
+            "<OpenDRIVE><road id='7' junction='-1'><planView>"
+            "<geometry s='0.0' x='1.0' y='2.0' hdg='0.5' length='10.0'>"
+            "<line/></geometry>"
+            "<geometry s='10.0' x='3.0' y='4.0' hdg='0.6' length='20.0'>"
+            "<arc curvature='0.04'/></geometry>"
+            "<geometry s='30.0' x='5.0' y='6.0' hdg='0.7' length='8.0'>"
+            "<paramPoly3 aU='0.0' bU='1.0' cU='0.0' dU='0.0'"
+            " aV='0.0' bV='0.0' cV='0.1' dV='0.0'/></geometry>"
+            "</planView></road></OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+
+        assert len(roads) == 1
+        plan_view = roads[0].plan_view
+        assert plan_view is not None
+        geometries = plan_view.geometries
+        assert [type(g).__name__ for g in geometries] == [
+            "Line",
+            "Arc",
+            "ParamPoly3",
+        ]
+
+        line, arc, pp3 = geometries
+        assert isinstance(line, Line)
+        assert (line.s, line.x, line.y, line.hdg, line.length) == (
+            0.0,
+            1.0,
+            2.0,
+            0.5,
+            10.0,
+        )
+        assert isinstance(arc, Arc)
+        assert arc.length == pytest.approx(20.0)
+        assert arc.curvature == pytest.approx(0.04)
+        assert isinstance(pp3, ParamPoly3)
+        assert pp3.cV == pytest.approx(0.1)

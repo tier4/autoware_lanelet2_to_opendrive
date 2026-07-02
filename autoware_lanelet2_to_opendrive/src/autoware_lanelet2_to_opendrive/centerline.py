@@ -1,6 +1,7 @@
 import logging
 import numpy as np
 import lanelet2
+from lanelet2.routing import RoutingGraph
 from typing import List, Optional, Set, Tuple
 from .config import DEFAULT_CONFIG
 from .spline import Splines
@@ -802,6 +803,7 @@ def extract_centerline_as_spline_from_two_lanelets(
     lanelet_map: lanelet2.core.LaneletMap,
     two_lanelets: Set[lanelet2.core.Lanelet],
     num_control_points: Optional[int] = None,
+    routing_graph: Optional[RoutingGraph] = None,
 ) -> Splines:
     """
     Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
@@ -811,6 +813,8 @@ def extract_centerline_as_spline_from_two_lanelets(
         two_lanelets: Set containing exactly two lanelets
         num_control_points: Number of control points for B-spline interpolation.
                            If None, automatically computed based on geometry complexity.
+        routing_graph: Optional pre-built routing graph for the same
+            ``lanelet_map``. Reused when supplied; built only when ``None``.
 
     Returns:
         Splines object representing the right bound of the left lanelet
@@ -822,7 +826,7 @@ def extract_centerline_as_spline_from_two_lanelets(
         raise ValueError(f"Expected exactly 2 lanelets, got {len(two_lanelets)}")
 
     # Sort the two lanelets from left to right
-    sorted_lanelets = sort_adjacent_groups(lanelet_map, two_lanelets)
+    sorted_lanelets = sort_adjacent_groups(lanelet_map, two_lanelets, routing_graph)
 
     # Get the left lanelet (first in sorted order)
     left_lanelet = sorted_lanelets[0]

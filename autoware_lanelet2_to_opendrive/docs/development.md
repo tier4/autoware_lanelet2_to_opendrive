@@ -13,8 +13,7 @@ codified in the repo-root [`CLAUDE.md`](https://github.com/tier4/autoware_lanele
 - **uv** 0.9.7 or newer
 - **Docker** with Compose (only required for end-to-end test verification;
   see "Local test verification" below)
-- **Git**, plus a GitHub Personal Access Token (`GH_PAT`) with `repo`
-  scope when building the Docker image
+- **Git**
 
 ### Cloning the repository
 
@@ -153,8 +152,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
     pins Ubuntu 22.04 with Boost 1.74, matching CI exactly.
 
 The repository ships a multi-stage `Dockerfile` and `docker-compose.yml`
-with profiles that mirror each CI job. Build once with
-`GH_PAT=<your-token>` exported, then run a profile:
+with profiles that mirror each CI job:
 
 ```bash
 # Full pytest suite (matches CI's `test` job)

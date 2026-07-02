@@ -23,6 +23,7 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 import autoware_lanelet2_extension_python.regulatory_elements as _ll2_ext_reg  # noqa: F401
 import lanelet2
+from lanelet2.routing import RoutingGraph
 
 from autoware_lanelet2_to_opendrive.projection import (
     mgrs_to_lanelet2_origin,
@@ -324,6 +325,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_to_lanelet_ids: Dict[int, List[int]],
         lanelet_to_road_id: Dict[int, int],
         junctions: List[Junction],
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> Dict[int, Tuple[int, int]]:
         """
         Set up predecessor/successor connections for roads and lanes.
@@ -334,6 +336,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
             lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
             junctions: All junctions
+            routing_graph: Pre-built vehicle routing graph reused for the
+                outgoing-junction-link pass; built on demand when omitted.
 
         Returns:
             Mapping from lanelet ID to (road_id, lane_id) for all lanes.
@@ -352,6 +356,19 @@ class _Lanelet2ToOpenDRIVEConverter:
         Road.set_incoming_road_junction_links(
             roads=all_roads,
             junctions=junctions,
+        )
+
+        # Set junction links for outgoing roads (issue #494 Part A). The
+        # OpenDRIVE <connection> table records only the incoming road, so a
+        # road leaving a junction otherwise gets no junction link at all.
+        # Must run before set_all_lane_links so the restored road link
+        # unblocks the lane-level predecessor links.
+        print("\n=== Setting junction links for outgoing roads ===")
+        Road.set_outgoing_road_junction_links(
+            lanelet_map=self.lanelet_map,
+            roads=all_roads,
+            road_to_lanelet_ids=road_to_lanelet_ids,
+            routing_graph=routing_graph,
         )
 
         # Set lane links for all roads
@@ -711,8 +728,8 @@ class _Lanelet2ToOpenDRIVEConverter:
         Returns:
             Tuple of:
             - Dictionary mapping traffic light signal ID to list of stop line signal
-              IDs, used to add back-references (Reference elements) to traffic light
-              signals.
+              IDs, used to add back-links (<dependency type="stopLine"> elements)
+              to traffic light signals.
             - Dictionary mapping linestring ID to StopLineMappingEntry for
               successfully converted stop lines.
             - Dictionary mapping linestring ID to SkippedStopLineEntry for
@@ -1030,6 +1047,12 @@ class _Lanelet2ToOpenDRIVEConverter:
         from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
+        traffic_rule_value = (
+            TrafficRule.LHT
+            if (self.config.traffic_rule or "RHT").upper() == "LHT"
+            else TrafficRule.RHT
+        )
+
         divergence_sites = collect_divergence_sites(
             deferred_predecessor_candidates=regular_result.deferred_predecessor_candidates,
             deferred_successor_candidates=regular_result.deferred_successor_candidates,
@@ -1042,11 +1065,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             # Reuse the routing graph built by Road.construct_from_lanelet_map
             # rather than paying the cost a second time (#291 review).
             divergence_routing_graph = regular_result.routing_graph
-            traffic_rule_value = (
-                TrafficRule.LHT
-                if (self.config.traffic_rule or "RHT").upper() == "LHT"
-                else TrafficRule.RHT
-            )
             divergence_result = apply_divergence_synthesis(
                 sites=divergence_sites,
                 roads_by_id={r.id: r for r in regular_roads},
@@ -1087,6 +1105,32 @@ class _Lanelet2ToOpenDRIVEConverter:
         connecting_roads = connecting_roads + synthetic_connecting_roads
         junctions = junctions + synthetic_junctions
 
+        # Step 2.7: Materialise zero-length connecting roads for the lanes
+        # whose routing-graph follower is an external lanelet (no
+        # ``turn_direction`` connector). Without this, ~4% of
+        # junction-bound driving lanes carry no ``<laneLink>`` and stall
+        # in odrviewer/CARLA (spec 2026-05-22-junction-lanelink-omission).
+        from autoware_lanelet2_to_opendrive.direct_junction_completion import (
+            complete_direct_junction_lanelinks,
+        )
+
+        junction_lanelet_id_set: Set[int] = {ll.id for ll in junction_lanelets}
+        existing_road_ids = [r.id for r in (regular_roads + connecting_roads)]
+        completion_start_id = (max(existing_road_ids) + 1) if existing_road_ids else 0
+
+        completion_roads, _completion_next_id = complete_direct_junction_lanelinks(
+            lanelet_map=self.lanelet_map,
+            routing_graph=regular_result.routing_graph,
+            all_roads=regular_roads + connecting_roads,
+            junctions=junctions,
+            lanelet_to_road_id=lanelet_to_road_id,
+            junction_lanelet_ids=junction_lanelet_id_set,
+            starting_road_id=completion_start_id,
+            traffic_rule=traffic_rule_value,
+            min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
+        )
+        connecting_roads = connecting_roads + completion_roads
+
         # Step 3: Create bidirectional mappings
         mapping = self._build_road_lanelet_mappings(lanelet_to_road_id)
 
@@ -1096,13 +1140,17 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"\nTotal roads: {len(all_roads)} ({len(regular_roads)} regular + {len(connecting_roads)} connecting)"
         )
 
-        # Step 4: Set up road and lane connections
+        # Step 4: Set up road and lane connections. Reuse the routing graph
+        # already built by Road.construct_from_lanelet_map (the lanelet map is
+        # not mutated after construction) so the outgoing-junction-link pass
+        # does not rebuild it — same reuse the divergence pass relies on.
         lanelet_to_road_and_lane = self._setup_connections(
             all_roads,
             connecting_roads,
             mapping.road_to_lanelets,
             lanelet_to_road_id,
             junctions,
+            routing_graph=regular_result.routing_graph,
         )
 
         # Step 5: Extract and assign signals
@@ -1166,28 +1214,31 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_marking_stop_line_ids=road_marking_stop_line_ids,
         )
 
-        # Step 6.8: Add back-references to traffic light signals pointing to stop lines
+        # Step 6.8: Add back-links to traffic light signals pointing to stop lines.
+        # Emitted as <dependency type="stopLine"> — the schema-legal cross-link in
+        # OpenDRIVE 1.4 (<reference> is not allowed inside <signal>).
         if tl_signal_to_stop_line_signal_ids:
-            from autoware_lanelet2_to_opendrive.opendrive.signal import Reference
+            from autoware_lanelet2_to_opendrive.opendrive.signal import Dependency
 
-            ref_count = 0
+            augmented_signal_count = 0
             for signal in signals_and_controllers.signals:
                 stop_line_signal_ids = tl_signal_to_stop_line_signal_ids.get(
                     signal.id, []
                 )
-                if stop_line_signal_ids:
-                    signal.references = [
-                        Reference(
-                            id=sl_sig_id,
-                            element_type="signal",
-                            type="stopLine",
-                        )
-                        for sl_sig_id in stop_line_signal_ids
-                    ]
-                    ref_count += 1
-            print(f"Added stop line references to {ref_count} traffic light signals")
+                if not stop_line_signal_ids:
+                    continue
+                new_deps = [
+                    Dependency(id=sl_sig_id, type="stopLine")
+                    for sl_sig_id in stop_line_signal_ids
+                ]
+                signal.dependencies = (signal.dependencies or []) + new_deps
+                augmented_signal_count += 1
+            print(
+                f"Added stop line dependencies to {augmented_signal_count} "
+                "traffic light signals"
+            )
 
-        # Step 6.7: Validate no duplicate road IDs (safety check for ID assignment bugs)
+        # Step 6.9: Validate no duplicate road IDs (safety check for ID assignment bugs)
         from autoware_lanelet2_to_opendrive.opendrive.validation import (
             validate_no_duplicate_road_ids,
         )
@@ -1514,7 +1565,7 @@ def preprocess_and_convert_with_hydra(
             enabled=arcspiral_dict.get("enabled", False),
             arc_enabled=arcspiral_dict.get("arc_enabled", True),
             spiral_enabled=arcspiral_dict.get("spiral_enabled", False),
-            line_curvature_tol=arcspiral_dict.get("line_curvature_tol", 1e-4),
+            line_curvature_tol=arcspiral_dict.get("line_curvature_tol", 1e-3),
             arc_curvature_tol=arcspiral_dict.get("arc_curvature_tol", 5e-4),
             arc_position_tol=arcspiral_dict.get("arc_position_tol", 0.05),
             min_line_length=arcspiral_dict.get("min_line_length", 5.0),

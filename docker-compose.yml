@@ -2,8 +2,6 @@ x-dev-base: &dev-base
   build:
     context: .
     target: dev
-    secrets:
-      - gh_pat
   image: l2o-dev:local
   volumes:
     - .:/workspace
@@ -67,16 +65,10 @@ services:
     build:
       context: .
       target: convert
-      secrets:
-        - gh_pat
     image: l2o-convert:local
     volumes:
       - ./io:/io
     profiles: ["convert"]
-
-secrets:
-  gh_pat:
-    environment: GH_PAT
 
 volumes:
   uv-cache:

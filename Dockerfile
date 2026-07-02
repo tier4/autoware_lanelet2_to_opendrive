@@ -36,15 +36,7 @@ COPY pyproject.toml uv.lock .python-version ./
 COPY autoware_lanelet2_to_opendrive/ autoware_lanelet2_to_opendrive/
 COPY autoware_carla_scenario/ autoware_carla_scenario/
 COPY carla_wheels/ carla_wheels/
-# The git config containing the PAT is written and removed inside the same
-# RUN layer so the token is never committed to the image filesystem. Do not
-# split this into separate RUN commands.
-RUN --mount=type=secret,id=gh_pat,required=false \
-    if [ -s /run/secrets/gh_pat ]; then \
-      git config --global url."https://$(cat /run/secrets/gh_pat)@github.com/".insteadOf "https://github.com/"; \
-    fi && \
-    uv sync --frozen --dev --extra carla && \
-    rm -f /root/.gitconfig
+RUN uv sync --frozen --dev --extra carla
 
 FROM deps AS dev
 ENV PATH="/workspace/.venv/bin:${PATH}"

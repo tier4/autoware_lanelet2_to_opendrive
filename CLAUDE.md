@@ -55,15 +55,13 @@ docker compose --profile lint run --rm lint
 docker compose --profile dev run --rm dev
 ```
 
-A `GH_PAT` environment variable with `repo` scope is required at image build time (the project depends on the private repository `tier4/lanelet2_python_api_for_autoware`).
-
 ### Instructions for Claude Code
 
 When the user asks to "run the tests", "verify locally", or otherwise validate a change end-to-end:
 
 1. **Do NOT run `uv run pytest` on the host.** It will likely fail on the Boost build step, producing noise unrelated to the change.
 2. **Use `docker compose --profile test run --rm pytest`** for the full suite, or the appropriate profile (`lint`, `qc`, `carla`) for a narrower check.
-3. If the container is unavailable in the current environment (e.g., Docker not installed, no `GH_PAT`), say so explicitly rather than running broken host commands. Defer test verification to CI in that case.
+3. If the container is unavailable in the current environment (e.g., Docker not installed), say so explicitly rather than running broken host commands. Defer test verification to CI in that case.
 4. Static checks that do **not** import the package (e.g., `ruff`, `ruff-format`, `mypy --ignore-missing-imports` on individual files) **can** still be run on the host and should be used for fast iteration.
 
 ### Rationale

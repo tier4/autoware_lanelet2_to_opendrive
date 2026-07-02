@@ -162,86 +162,75 @@ def _nishishinjuku_xodr_for_issue_291() -> Path:
     return xodr_path
 
 
-def test_issue_291_diverging_roads_emit_synthetic_junctions():
-    """Nishishinjuku must emit at least one synthetic junction for divergence (#291).
+def test_issue_291_diverging_roads_have_no_lane_drop():
+    """Diverging lanes must not silently drop their road->road successor link.
 
-    The original issue described a 1->3 divergence (Road 185 -> 186/187/188
-    in the previously generated XODR). The introduction of synthetic
-    junctions reshuffles road ID assignment so binding the assertion to a
-    specific road id is brittle. Instead, this test verifies the *general*
-    property the fix guarantees:
+    Originally tracked under #291: a single 1->N divergence (Road 185 ->
+    186/187/188 in the previously generated XODR) was emitted as one
+    multi-lane road with a single road-level successor, silently
+    discarding the lanes whose actual routing-graph successors lived on
+    other downstream roads.
 
-    - At least one regular road's road-level successor is an
-      ``elementType="junction"`` link to a synthetic junction
-      (``id >= junction_id_offset + 10_000``).
-    - That junction has at least three ``<connection>`` elements
-      (a true 1->3 divergence is present in the fixture).
-    - Each connecting road's successor points to a *distinct* outgoing
-      regular road, and the lane-link ``from`` values cover at least
-      three distinct source lanes — a permutation bug or a collapse to
-      a single successor would still fail this assertion.
+    The first fix (#291) wrapped the divergence in a synthetic junction.
+    The follow-up fix (``specs/2026-05-22-road-successor-mis-merge-design.md``,
+    Option A) supersedes that by splitting the upstream group along the
+    successor boundary so each split road has one unambiguous downstream
+    road and a complete set of ``<lane><link><successor/></link></lane>``
+    entries. The contract this regression asserts is therefore the
+    user-observable property — no silent lane drops — rather than a
+    specific synthesis-vs-split mechanism:
+
+    - Every regular road whose road-level ``<successor>`` points at
+      another regular road must give every driving lane a
+      ``<lane><link><successor/></link></lane>`` whose target lane id
+      exists in the downstream road. ``odrviewer`` logs "No connection
+      from rid X lid Y -> rid Z" whenever this fails and ego visibly
+      snaps lanes.
     """
-    from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
-
     xodr_path = _nishishinjuku_xodr_for_issue_291()
     tree = ET.parse(str(xodr_path))
 
-    synthetic_id_floor = DEFAULT_CONFIG.opendrive.junction_id_offset + 10_000
+    def driving_lane_ids(road: ET._Element) -> set[int]:
+        return {
+            int(lane.get("id"))
+            for lane in road.findall("lanes/laneSection//lane")
+            if lane.get("type") == "driving"
+        }
 
-    # Find every regular road whose road-level successor points at a
-    # synthetic junction. Each candidate site contributes its connection
-    # set so we can pick the strongest example for the assertions below.
-    diverging: list[tuple[str, str, list, set[str], set[str]]] = []
-    for road in tree.findall(".//road"):
-        succ = road.find("link/successor")
-        if succ is None or succ.get("elementType") != "junction":
-            continue
-        junction_id = succ.get("elementId")
-        if junction_id is None or int(junction_id) < synthetic_id_floor:
-            continue
-        junction = tree.find(f".//junction[@id='{junction_id}']")
-        if junction is None:
-            continue
-        connections = junction.findall("connection")
-        if len(connections) < 2:
-            continue
-        sources = {c.find("laneLink").get("from") for c in connections}
-        targets: set[str] = set()
-        for connection in connections:
-            cr = tree.find(f".//road[@id='{connection.get('connectingRoad')}']")
-            if cr is None:
+    def lane_successor_id(road: ET._Element, lane_id: int) -> int | None:
+        for lane in road.findall("lanes/laneSection//lane"):
+            if int(lane.get("id")) != lane_id:
                 continue
-            cr_succ = cr.find("link/successor")
-            if cr_succ is not None and cr_succ.get("elementType") == "road":
-                targets.add(cr_succ.get("elementId"))
-        diverging.append((road.get("id"), junction_id, connections, sources, targets))
+            succ = lane.find("link/successor")
+            return int(succ.get("id")) if succ is not None else None
+        return None
 
-    assert diverging, "Expected at least one regular road -> synthetic junction (2+ connections) for #291"
+    roads_by_id = {int(r.get("id")): r for r in tree.findall(".//road")}
+    lane_drops: list[tuple[int, int, int, str]] = []
+    for rid, road in roads_by_id.items():
+        succ = road.find("link/successor")
+        if succ is None or succ.get("elementType") != "road":
+            continue
+        sid = int(succ.get("elementId"))
+        downstream = roads_by_id.get(sid)
+        if downstream is None:
+            continue
+        dst_lanes = driving_lane_ids(downstream)
+        for lid in driving_lane_ids(road):
+            target = lane_successor_id(road, lid)
+            if target is None:
+                lane_drops.append((rid, lid, sid, "NO_LINK"))
+            elif target not in dst_lanes:
+                lane_drops.append((rid, lid, sid, f"BAD_TARGET({target})"))
 
-    # Pick the example with the most distinct outgoing roads — this is the
-    # closest analogue to the original issue's 1->3 divergence and gives
-    # the strongest assertion the fixture supports. The multi-lane
-    # divergences in nishishinjuku top out at two distinct successor
-    # roads (e.g. road 161 -> roads 26/160), so the assertions are
-    # written for "2+ distinct outgoing roads" rather than 3+.
-    diverging.sort(key=lambda item: len(item[4]), reverse=True)
-    source_road_id, junction_id, _conns, sources, targets = diverging[0]
-
-    # The fix's key contract: the source road no longer drops successors;
-    # it points at a junction whose connections cover multiple distinct
-    # outgoing roads (would have been a single road->road link before).
-    assert len(targets) >= 2, (
-        f"junction {junction_id} from road {source_road_id} must terminate at "
-        f"2+ distinct outgoing roads (got {sorted(targets)}); a permutation bug "
-        "or collapse would shrink this set"
+    assert not lane_drops, (
+        "Diverging lanes silently dropped their road->road successor link "
+        "(odrviewer would log 'No connection from rid X lid Y -> rid Z'):\n  "
+        + "\n  ".join(
+            f"road {rid} lane {lid} -> road {sid}: {reason}"
+            for rid, lid, sid, reason in lane_drops
+        )
     )
-    assert len(sources) >= 2, (
-        f"junction {junction_id}: lane-link 'from' must cover 2+ distinct source "
-        f"lanes (got {sorted(sources)})"
-    )
-    assert (
-        source_road_id not in targets
-    ), f"junction {junction_id} loops connecting roads back to source {source_road_id}"
 
 
 # ---------------------------------------------------------------------------

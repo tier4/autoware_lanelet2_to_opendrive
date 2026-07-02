@@ -43,6 +43,26 @@ def _build_circle(radius: float, arc_rad: float, n: int = 80):
     return Splines(pts)
 
 
+def _build_straightish(
+    length: float = 60.0, amp: float = 0.010, wavelength: float = 14.0, n: int = 121
+):
+    """A road that is geometrically straight to within a few centimetres
+    but whose fitted-spline curvature oscillates well above
+    ``line_curvature_tol``.
+
+    This is the real situation behind #496: B-spline fitting introduces
+    curvature (second-derivative) oscillation on an otherwise straight
+    road.  ``1 - cos`` keeps the start tangent flat and accurate while the
+    curvature swings; the path stays within ``2 * amp`` of the x-axis.
+    """
+    from autoware_lanelet2_to_opendrive.spline import Splines
+
+    x = np.linspace(0.0, length, n)
+    y = amp * (1.0 - np.cos(2.0 * np.pi * x / wavelength))
+    pts = np.column_stack([x, y, np.zeros(n)])
+    return Splines(pts)
+
+
 class TestGrowLine:
     def test_extends_to_total_length_for_pure_line(self):
         from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
@@ -82,6 +102,28 @@ class TestGrowLine:
         )
         # Curve is too tight to qualify as a line at all.
         assert end - 0.0 < 1.0
+
+    def test_spans_a_straightish_road_despite_curvature_noise(self):
+        """#496: a road that is geometrically straight within tolerance
+        must grow into a line even though its fitted curvature spikes
+        above ``line_curvature_tol`` point-wise."""
+        from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
+            _grow_line,
+        )
+        from autoware_lanelet2_to_opendrive.conversion_config import (
+            ArcSpiralConfig,
+        )
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
+        spline = _build_straightish()
+        end = _grow_line(
+            spline,
+            s_start=0.0,
+            s_max=spline.total_length,
+            config=ArcSpiralConfig(enabled=True),
+            constants=DEFAULT_CONFIG.arcspiral,
+        )
+        assert end >= 0.9 * spline.total_length
 
 
 class TestGrowArc:
@@ -216,6 +258,27 @@ class TestClassifySpline:
         assert runs[-1].s_end == pytest.approx(spline.total_length, abs=1e-6)
         for prev, nxt in zip(runs[:-1], runs[1:]):
             assert nxt.s_start == pytest.approx(prev.s_end, abs=1e-9)
+
+    def test_straightish_road_classified_as_line(self):
+        """#496: a straight-within-tolerance road is emitted overwhelmingly
+        as a line, not as low-curvature arcs / paramPoly3 fallback."""
+        from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
+            classify_spline,
+            LineRun,
+        )
+        from autoware_lanelet2_to_opendrive.conversion_config import (
+            ArcSpiralConfig,
+        )
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
+        spline = _build_straightish()
+        runs = classify_spline(
+            spline,
+            config=ArcSpiralConfig(enabled=True),
+            constants=DEFAULT_CONFIG.arcspiral,
+        )
+        line_len = sum(r.s_end - r.s_start for r in runs if isinstance(r, LineRun))
+        assert line_len >= 0.9 * spline.total_length
 
     def test_line_arc_line_emits_at_least_one_arc(self):
         from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (

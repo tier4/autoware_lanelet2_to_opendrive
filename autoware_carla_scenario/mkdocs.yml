@@ -76,6 +76,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Installation: installation.md
+  - Tutorial: tutorial.md
   - Usage: usage.md
   - Architecture: architecture.md
   - API Reference: api.md

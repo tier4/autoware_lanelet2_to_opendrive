@@ -249,11 +249,6 @@ the serializer.
       show_root_heading: true
       heading_level: 4
 
-::: autoware_lanelet2_to_opendrive.opendrive.signal.Reference
-    options:
-      show_root_heading: true
-      heading_level: 4
-
 ::: autoware_lanelet2_to_opendrive.opendrive.signal.Dependency
     options:
       show_root_heading: true

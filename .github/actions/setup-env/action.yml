@@ -8,10 +8,6 @@ inputs:
     description: Python version to set up
     required: false
     default: "3.10"
-  gh-pat:
-    description: GitHub Personal Access Token for private repositories
-    required: false
-    default: ""
   install-system-deps:
     description: Install apt system dependencies (libboost, libeigen3, etc.)
     required: false
@@ -77,14 +73,6 @@ runs:
           libboost-filesystem-dev \
           libboost-program-options-dev
 
-    - name: Configure git for private repositories
-      if: inputs.install-dev-deps == 'true' && inputs.gh-pat != ''
-      shell: bash
-      run: |
-        git config --global \
-          url."https://${{ inputs.gh-pat }}@github.com/".insteadOf \
-          "https://github.com/"
-
     - name: Install Python dependencies
       if: inputs.install-dev-deps == 'true'
       shell: bash
@@ -94,8 +82,6 @@ runs:
         else
           uv sync --dev
         fi
-      env:
-        GIT_AUTH_TOKEN: ${{ inputs.gh-pat }}
 
     - name: Run pre-commit hooks
       if: inputs.run-precommit == 'true' && inputs.precommit-continue-on-error == 'false'

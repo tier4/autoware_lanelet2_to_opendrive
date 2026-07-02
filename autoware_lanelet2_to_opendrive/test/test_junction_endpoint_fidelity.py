@@ -284,6 +284,75 @@ def _distance3(a, b) -> float:
     return float(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5)
 
 
+def _connecting_road_lane_boundaries(
+    road_elem: ET._Element,
+) -> list[Tuple[float, float, float]]:
+    """Every lane-boundary point at both ends of a road's first laneSection.
+
+    A *chained* connector — one whose routing predecessor is itself an
+    in-junction connecting lanelet (#492) — has its reference line pinned
+    by the #437 override to one of its upstream connector's lane
+    boundaries.  Enumerating every boundary (the reference line through
+    the outer edge of the outermost lane) at both ends lets the
+    incoming-side check recognise that pinning regardless of which lane
+    the chain branches from.
+    """
+    lanes_elem = road_elem.find("lanes")
+    if lanes_elem is None:
+        return []
+    section_elems = lanes_elem.findall("laneSection")
+    if not section_elems:
+        return []
+    section = section_elems[0]
+    boundaries: list[Tuple[float, float, float]] = []
+    for side_name in ("left", "right"):
+        side = section.find(side_name)
+        if side is None:
+            continue
+        lane_count = sum(1 for le in side.findall("lane") if int(le.get("id")) != 0)
+        sign = 1 if side_name == "left" else -1
+        # Lane |k|'s reference-side edge sweeps the boundaries from the
+        # reference line (|k| == 1) outward; |k| == lane_count + 1 is the
+        # outer edge of the outermost lane.
+        for k in range(1, lane_count + 2):
+            for at_start in (True, False):
+                point = _evaluate_lane_inner_edge(
+                    road_elem, sign * k, at_start=at_start
+                )
+                if point is not None:
+                    boundaries.append(point)
+    return boundaries
+
+
+def _incoming_endpoint_pinned_to_connector(
+    point: Tuple[float, float, float],
+    junction_id: int,
+    connecting_road_id: int,
+    road_by_id: dict[int, ET._Element],
+    conn_road_junction: dict[int, int],
+) -> bool:
+    """True if ``point`` lands on another connector's lane boundary.
+
+    A chained connector's ``<connection>`` resolves ``incomingRoad``
+    transitively to a regular road so CARLA's OpenDRIVE parser accepts it
+    (#500), but the connector is geometrically pinned to its *upstream
+    connector*, not that regular road.  Such a connector is excluded from
+    the regular-road incoming check — like multi-incoming connections —
+    and is recognised by its incoming endpoint coinciding with a lane
+    boundary of another connecting road in the same junction.
+    """
+    for other_id, other_junction in conn_road_junction.items():
+        if other_id == connecting_road_id or other_junction != junction_id:
+            continue
+        other_road = road_by_id.get(other_id)
+        if other_road is None:
+            continue
+        for boundary in _connecting_road_lane_boundaries(other_road):
+            if _distance3(point, boundary) <= TOLERANCE_M:
+                return True
+    return False
+
+
 def test_evaluate_road_endpoints_minimal():
     """Sanity check ``evaluate_road_endpoints`` on a synthetic XODR root."""
     xml = """
@@ -322,6 +391,13 @@ def test_junction_connection_endpoints_match_linked_roads():
     one incoming and one outgoing regular road; multi-incoming /
     multi-outgoing cases necessarily have gaps on the non-pinned sides
     and are excluded.
+
+    Chained connectors — connecting roads fed only by another connector
+    in the same junction (#492) — are likewise excluded on the incoming
+    side: their ``<connection>`` resolves ``incomingRoad`` to a regular
+    road so CARLA can parse the map (#500), but they are geometrically
+    pinned to their upstream connector, recognised here by that
+    coincidence.
     """
     xodr_path = _build_nishishinjuku_xodr()
 
@@ -402,7 +478,20 @@ def test_junction_connection_endpoints_match_linked_roads():
                     actual_in = conn_start if contact_point == "start" else conn_end
                     if expected_in is not None:
                         d_in = _distance3(expected_in, actual_in)
-                        if d_in > TOLERANCE_M:
+                        # A chained connector resolves incomingRoad to a
+                        # regular road for CARLA (#500) but is pinned to its
+                        # upstream connector — exclude it from the
+                        # regular-road check, as with multi-incoming cases.
+                        if (
+                            d_in > TOLERANCE_M
+                            and not _incoming_endpoint_pinned_to_connector(
+                                actual_in,
+                                junction_id,
+                                connecting_road_id,
+                                road_by_id,
+                                conn_road_junction,
+                            )
+                        ):
                             offenders.append(
                                 (
                                     junction_id,

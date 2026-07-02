@@ -447,3 +447,85 @@ def test_road_marking_no_overlap_with_stop_sign(lanelet_map):
         f"Road marking and stop sign stop line IDs should not overlap, "
         f"but found overlap: {overlap}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Arc geometry sampling – _sample_road_points / _project_point_onto_road (#504)
+# ---------------------------------------------------------------------------
+
+
+def _make_arc_road(curvature: float, length: float, s: float = 0.0) -> MagicMock:
+    """Build a minimal mock Road whose plan view is a single <arc> segment."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import Arc
+
+    arc = Arc(s=s, x=100.0, y=200.0, hdg=0.3, length=length, curvature=curvature)
+    plan_view = MagicMock()
+    plan_view.geometries = [arc]
+    road = MagicMock()
+    road.id = 348
+    road.plan_view = plan_view
+    return road
+
+
+def test_sample_road_points_follows_arc_geometry():
+    """_sample_road_points must sample <arc> along the curve, not the tangent.
+
+    Regression for #504: sampling an arc as a straight tangent line skews the
+    projected (s, t) of stop lines placed on curved roads.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+        evaluate_plan_view_world,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.objects import _sample_road_points
+
+    curvature, length, s0 = 0.04, 20.0, 5.0  # radius 25 m, ~46 deg of turn
+    road = _make_arc_road(curvature, length, s=s0)
+    samples = _sample_road_points(road)
+    assert samples, "expected non-empty samples for a positive-length arc"
+
+    geom = road.plan_view.geometries[0]
+    max_tangent_gap = 0.0
+    for wx, wy, s, hdg in samples:
+        p = s - s0
+        exp_x, exp_y = evaluate_plan_view_world(
+            geom.x, geom.y, geom.hdg, p, arc_curvature=curvature
+        )
+        assert (
+            math.hypot(wx - exp_x, wy - exp_y) < 1e-6
+        ), f"sample at s={s} is off the analytic arc"
+        exp_hdg = geom.hdg + curvature * p
+        assert abs(hdg - exp_hdg) < 1e-6, f"heading at s={s} not tangent to arc"
+        # Gap between the true arc point and the straight tangent at the same p.
+        tan_x = geom.x + p * math.cos(geom.hdg)
+        tan_y = geom.y + p * math.sin(geom.hdg)
+        max_tangent_gap = max(max_tangent_gap, math.hypot(exp_x - tan_x, exp_y - tan_y))
+
+    # Sanity: the arc curves far enough from its tangent that a straight-line
+    # approximation would be a real defect (the test is not vacuous).
+    assert max_tangent_gap > 1.0
+
+
+def test_project_point_onto_arc_road_recovers_s():
+    """Projecting a point on an arc recovers its s with a near-zero offset."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+        evaluate_plan_view_world,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        _project_point_onto_road,
+    )
+
+    curvature, length, s0 = 0.04, 20.0, 5.0
+    road = _make_arc_road(curvature, length, s=s0)
+    geom = road.plan_view.geometries[0]
+
+    # A point lying exactly on a sample of the arc (i = 7 of 10, p = 20*7/9).
+    p_target = length * 7 / 9
+    wx, wy = evaluate_plan_view_world(
+        geom.x, geom.y, geom.hdg, p_target, arc_curvature=curvature
+    )
+
+    result = _project_point_onto_road(np.array([wx, wy]), road)
+    assert result is not None
+    s, t, _hdg = result
+    assert abs(s - (s0 + p_target)) < 1e-6, f"recovered s={s}, expected {s0 + p_target}"
+    assert abs(t) < 1e-6, f"point on the reference line should have t~0, got {t}"

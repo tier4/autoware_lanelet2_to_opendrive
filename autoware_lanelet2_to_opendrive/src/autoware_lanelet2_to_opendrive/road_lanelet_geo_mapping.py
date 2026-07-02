@@ -25,7 +25,7 @@ import numpy as np
 from tqdm import tqdm
 
 from .opendrive.enums import TrafficRule
-from .opendrive.geometry import ParamPoly3
+from .opendrive.geometry import Arc, GeometryBase, ParamPoly3, evaluate_plan_view_world
 
 if TYPE_CHECKING:
     import lanelet2.core
@@ -133,6 +133,11 @@ class GeoRoadLaneletMapping:
     preprocessing_log: dict | None = None
     stop_line_mapping: dict[int, StopLineMappingEntry] | None = None
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None
+    #: Road IDs of synthetic divergence/merge connecting roads (#291) that
+    #: were deliberately excluded from geometric lanelet matching because
+    #: they have no source lanelet. Recorded so consumers can tell them
+    #: apart from genuine mapping failures (#493).
+    skipped_synthetic_roads: list[int] | None = None
     traffic_light_config: dict | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
@@ -171,6 +176,8 @@ class GeoRoadLaneletMapping:
             result["skipped_stop_lines"] = {
                 str(k): v.to_dict() for k, v in self.skipped_stop_lines.items()
             }
+        if self.skipped_synthetic_roads is not None:
+            result["skipped_synthetic_roads"] = list(self.skipped_synthetic_roads)
         if self.preprocessing_log is not None:
             result["preprocessing_log"] = self.preprocessing_log
         if self.traffic_light_config is not None:
@@ -205,6 +212,7 @@ class GeoRoadLaneletMapping:
             preprocessing_log=data.get("preprocessing_log"),
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
+            skipped_synthetic_roads=data.get("skipped_synthetic_roads"),
             traffic_light_config=data.get("traffic_light_config"),
         )
 
@@ -291,17 +299,66 @@ def _same_direction(line_a: np.ndarray, line_b: np.ndarray) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _sample_reference_line_from_road(
-    road: "ConverterRoad", num_samples_per_segment: int = 10
-) -> np.ndarray:
-    """Sample 2D reference line points from a converter Road's ParamPoly3 geometries.
+def _evaluate_geometry_world(geom: GeometryBase, p: float) -> tuple[float, float]:
+    """Evaluate a single planView geometry at local arc-length ``p``.
 
-    Evaluates the parametric cubic polynomial at evenly-spaced parameter values
-    within each geometry segment and transforms local (u, v) to global (x, y).
+    Dispatches to :func:`evaluate_plan_view_world` with the geometry's own
+    analytic model — ``ParamPoly3`` -> cubic coefficients, ``Arc`` ->
+    constant curvature, anything else (``Line``) -> straight line. This
+    keeps non-``ParamPoly3`` primitives, emitted only when arc-primitive
+    detection (#466) is enabled, from being mis-sampled as straight
+    chords between their endpoints (#495).
+    """
+    if isinstance(geom, ParamPoly3):
+        coeffs = (
+            geom.aU,
+            geom.bU,
+            geom.cU,
+            geom.dU,
+            geom.aV,
+            geom.bV,
+            geom.cV,
+            geom.dV,
+        )
+        return evaluate_plan_view_world(
+            geom.x, geom.y, geom.hdg, p, param_poly3_coeffs=coeffs
+        )
+    if isinstance(geom, Arc):
+        return evaluate_plan_view_world(
+            geom.x, geom.y, geom.hdg, p, arc_curvature=geom.curvature
+        )
+    # Line geometry (and any other primitive): straight along the heading.
+    return evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p)
+
+
+#: Target arc-length spacing (m) between reference-line sample points.
+#: The reference line is sampled at this fixed density regardless of how the
+#: planView is split into <line>/<arc>/<paramPoly3> segments, so the geometric
+#: matching distance does not depend on the segmentation (#499).
+_REFERENCE_LINE_SAMPLE_SPACING: float = 0.5
+
+
+def _sample_reference_line_from_road(
+    road: "ConverterRoad", sample_spacing: float = _REFERENCE_LINE_SAMPLE_SPACING
+) -> np.ndarray:
+    """Sample a converter Road's planView into a uniform reference polyline.
+
+    Sample points are spaced uniformly by arc-length across the whole
+    planView at a fixed density of one point per ``sample_spacing`` metres,
+    independent of how the planView is split into ``<line>``, ``<arc>`` and
+    ``<paramPoly3>`` segments. Each geometry is evaluated with its own
+    analytic model, so arcs are traced along their curve, not their chord.
+
+    Both the sample count and the sample positions depend only on the
+    reference *curve* — its total length and shape — not on its
+    segmentation. The sampled polyline, and therefore the geometric matching
+    distances computed from it, are invariant to the planView segmentation,
+    so enabling arc-primitive detection (#466) cannot change which lanelet a
+    road maps to (#499).
 
     Args:
         road: Converter Road object with ``plan_view`` containing geometries.
-        num_samples_per_segment: Number of sample points per geometry segment.
+        sample_spacing: Target arc-length spacing (m) between sample points.
 
     Returns:
         NumPy array of shape ``(N, 2)`` with global (x, y) coordinates.
@@ -309,37 +366,26 @@ def _sample_reference_line_from_road(
     if road.plan_view is None or not road.plan_view.geometries:
         return np.empty((0, 2))
 
-    points: list[list[float]] = []
-    for geom in road.plan_view.geometries:
-        cos_hdg = np.cos(geom.hdg)
-        sin_hdg = np.sin(geom.hdg)
-        for i in range(num_samples_per_segment):
-            p = geom.length * i / num_samples_per_segment
-            if isinstance(geom, ParamPoly3):
-                u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
-                v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
-                x = geom.x + cos_hdg * u - sin_hdg * v
-                y = geom.y + sin_hdg * u + cos_hdg * v
-            else:
-                # Line (or other simple straight) geometry: u = p, v = 0.
-                x = geom.x + cos_hdg * p
-                y = geom.y + sin_hdg * p
-            points.append([x, y])
+    geometries = road.plan_view.geometries
 
-    # Add endpoint of last segment
-    if road.plan_view.geometries:
-        last = road.plan_view.geometries[-1]
-        p = last.length
-        cos_hdg = np.cos(last.hdg)
-        sin_hdg = np.sin(last.hdg)
-        if isinstance(last, ParamPoly3):
-            u = last.aU + last.bU * p + last.cU * p**2 + last.dU * p**3
-            v = last.aV + last.bV * p + last.cV * p**2 + last.dV * p**3
-            x = last.x + cos_hdg * u - sin_hdg * v
-            y = last.y + sin_hdg * u + cos_hdg * v
-        else:
-            x = last.x + cos_hdg * p
-            y = last.y + sin_hdg * p
+    # Cumulative arc-length at the start of each geometry; the final entry
+    # is the total planView length.
+    segment_starts = np.concatenate([[0.0], np.cumsum([g.length for g in geometries])])
+    total_length = float(segment_starts[-1])
+    if total_length <= 0.0:
+        return np.empty((0, 2))
+
+    # Number of evenly spaced intervals along the whole planView. Derived
+    # from the total length only, so two planViews tracing the same curve
+    # with different segmentations yield the same sample points.
+    num_intervals = max(1, round(total_length / sample_spacing))
+    points: list[list[float]] = []
+    for k in range(num_intervals + 1):
+        s = total_length * k / num_intervals
+        # Locate the geometry that contains global arc-length ``s``.
+        idx = int(np.searchsorted(segment_starts, s, side="right")) - 1
+        idx = min(max(idx, 0), len(geometries) - 1)
+        x, y = _evaluate_geometry_world(geometries[idx], s - segment_starts[idx])
         points.append([x, y])
 
     return np.array(points)
@@ -402,7 +448,7 @@ def parse_roads_from_xodr(
     import lxml.etree as ET
 
     from .opendrive.enums import LaneType
-    from .opendrive.geometry import ParamPoly3, PlanView
+    from .opendrive.geometry import Arc, Line, ParamPoly3, PlanView
     from .opendrive.lane import Lane
     from .opendrive.lane_section import LaneSection
     from .opendrive.lane_sections import Lanes
@@ -419,20 +465,26 @@ def parse_roads_from_xodr(
         road_id = int(road_elem.get("id", "0"))
         junction = int(road_elem.get("junction", "-1"))
 
-        # Parse planView geometries
-        geometries = []
+        # Parse planView geometries (line, arc and paramPoly3).
+        geometries: list[GeometryBase] = []
         plan_view_elem = road_elem.find("planView")
         if plan_view_elem is not None:
             for geom_elem in plan_view_elem.findall("geometry"):
+                s = float(geom_elem.get("s", "0"))
+                x = float(geom_elem.get("x", "0"))
+                y = float(geom_elem.get("y", "0"))
+                hdg = float(geom_elem.get("hdg", "0"))
+                length = float(geom_elem.get("length", "0"))
                 pp3_elem = geom_elem.find("paramPoly3")
+                arc_elem = geom_elem.find("arc")
                 if pp3_elem is not None:
                     geometries.append(
                         ParamPoly3(
-                            s=float(geom_elem.get("s", "0")),
-                            x=float(geom_elem.get("x", "0")),
-                            y=float(geom_elem.get("y", "0")),
-                            hdg=float(geom_elem.get("hdg", "0")),
-                            length=float(geom_elem.get("length", "0")),
+                            s=s,
+                            x=x,
+                            y=y,
+                            hdg=hdg,
+                            length=length,
                             aU=float(pp3_elem.get("aU", "0")),
                             bU=float(pp3_elem.get("bU", "0")),
                             cU=float(pp3_elem.get("cU", "0")),
@@ -443,6 +495,25 @@ def parse_roads_from_xodr(
                             dV=float(pp3_elem.get("dV", "0")),
                             pRange=pp3_elem.get("pRange", "arcLength"),
                         )
+                    )
+                elif arc_elem is not None:
+                    geometries.append(
+                        Arc(
+                            s=s,
+                            x=x,
+                            y=y,
+                            hdg=hdg,
+                            length=length,
+                            curvature=float(arc_elem.get("curvature", "0")),
+                        )
+                    )
+                elif geom_elem.find("line") is not None:
+                    geometries.append(Line(s=s, x=x, y=y, hdg=hdg, length=length))
+                else:
+                    logger.warning(
+                        "parse_roads_from_xodr: road %d has an unsupported "
+                        "planView geometry; skipped",
+                        road_id,
                     )
 
         if not geometries:
@@ -501,13 +572,34 @@ def parse_roads_from_xodr(
 # ---------------------------------------------------------------------------
 
 
+def _synthetic_connector_road_ids(roads: list["ConverterRoad"]) -> set[int]:
+    """Road IDs of synthetic divergence/merge connecting roads (#291, #493).
+
+    A connecting road (``junction != -1``) whose total planView length is
+    below ``_SYNTHETIC_CONNECTOR_MAX_LENGTH`` is a synthetic stub from the
+    divergence/merge synthesis pass — it has no backing lanelet. Real
+    ``turn_direction`` connecting roads are at least several metres long.
+
+    The check depends only on ``junction`` and planView length, so callers
+    can identify these roads with a lightweight pass — without running the
+    full geometric mapping.
+    """
+    skipped: set[int] = set()
+    for road in roads:
+        if road.junction != -1 and road.plan_view is not None:
+            total_length = sum(g.length for g in road.plan_view.geometries)
+            if total_length < _SYNTHETIC_CONNECTOR_MAX_LENGTH:
+                skipped.add(road.id)
+    return skipped
+
+
 def _compute_all_candidates(
     roads: list["ConverterRoad"],
     lanelet_left: dict[int, np.ndarray],
     lanelet_right: dict[int, np.ndarray],
     lanelet_left_bbox: dict[int, tuple[float, float, float, float]],
     lanelet_right_bbox: dict[int, tuple[float, float, float, float]],
-) -> tuple[list[_RoadCandidates], dict[int, dict]]:
+) -> tuple[list[_RoadCandidates], dict[int, dict], set[int]]:
     """Phase 1: compute candidate lanelet lists for every road.
 
     For each road, applies bbox -> direction -> distance filtering against
@@ -516,24 +608,22 @@ def _compute_all_candidates(
 
     Returns:
         Tuple of (candidate list, diagnostic dict keyed by road_id for
-        roads with zero candidates).
+        roads with zero candidates, set of road IDs deliberately skipped as
+        synthetic divergence/merge connectors — see ``#493``).
     """
     all_rc: list[_RoadCandidates] = []
     no_candidate_diag: dict[int, dict] = {}
 
+    # Synthetic divergence/merge connecting roads (#291) have no backing
+    # lanelets, so geometric matching would either drop them silently or
+    # claim a regular lanelet from the divergence-point neighbourhood —
+    # poisoning Phase 2 conflict resolution and the Phase 3 adjacency walk.
+    # Exclude them up front and report them separately (#493).
+    skipped_synthetic = _synthetic_connector_road_ids(roads)
+
     for road in roads:
-        # Skip synthetic divergence/merge connecting roads (#291): they have
-        # no backing lanelets, so geometric matching would either drop them
-        # silently or claim a regular lanelet from the divergence-point
-        # neighbourhood (poisoning Phase 2 conflict resolution and Phase 3
-        # adjacency walk for the affected source road). Identify them by
-        # junction membership combined with sub-minimum total geometry
-        # length: real connecting roads built from ``turn_direction``
-        # lanelets are at least several metres long.
-        if road.junction != -1 and road.plan_view is not None:
-            total_length = sum(g.length for g in road.plan_view.geometries)
-            if total_length < _SYNTHETIC_CONNECTOR_MAX_LENGTH:
-                continue
+        if road.id in skipped_synthetic:
+            continue
 
         ref_line = _sample_reference_line_from_road(road)
         if len(ref_line) < 2:
@@ -676,7 +766,7 @@ def _compute_all_candidates(
                 "nearest_lid": best_rejected_lid,
             }
 
-    return all_rc, no_candidate_diag
+    return all_rc, no_candidate_diag, skipped_synthetic
 
 
 def _resolve_conflicts(
@@ -1005,7 +1095,7 @@ def build_mapping(
     matched_lanelets: set[int] = set()
 
     # Phase 1: compute candidate lists for every road (no exclusion)
-    all_rc, no_candidate_diag = _compute_all_candidates(
+    all_rc, no_candidate_diag, skipped_synthetic = _compute_all_candidates(
         roads,
         lanelet_left,
         lanelet_right,
@@ -1181,7 +1271,10 @@ def build_mapping(
     rc_road_ids = {rc.road_id for rc in all_rc}
     assigned_road_ids = {all_rc[rc_idx].road_id for rc_idx in assignment}
 
-    roads_no_candidates = all_road_ids - rc_road_ids
+    # Synthetic divergence/merge connectors are deliberately excluded from
+    # matching (#493) — they have no source lanelet, so they are reported
+    # separately rather than counted as 0-candidate matching failures.
+    roads_no_candidates = all_road_ids - rc_road_ids - skipped_synthetic
     roads_dropped_phase2 = rc_road_ids - assigned_road_ids
     roads_not_fully_mapped: list[tuple[int, tuple[int, ...]]] = []
     for rc_idx, cand_idx in assignment.items():
@@ -1253,6 +1346,7 @@ def build_mapping(
         xodr_sha256=xodr_sha256,
         osm_sha256=osm_sha256,
         lanelet_to_road_and_lane=mapping,
+        skipped_synthetic_roads=sorted(skipped_synthetic) or None,
     )
 
 
@@ -1409,8 +1503,11 @@ def validate_and_save_mapping(
     This is the single entry-point called at the end of conversion to:
 
     1. Compute SHA256 checksums of the XODR and OSM files.
-    2. Build a :class:`GeoRoadLaneletMapping` from the conversion-time mapping
-       and save it as ``.mapping.json`` next to the XODR file.
+    2. Build a :class:`GeoRoadLaneletMapping` from the conversion-time
+       mapping — recording the synthetic divergence/merge connecting roads
+       (#493), identified by a lightweight pass independent of the
+       geometric mapping — and save it as ``.mapping.json`` next to the
+       XODR file.
     3. Build a geometric mapping from the converter's own ``Road`` objects
        via :func:`build_mapping`, and cross-validate the two mappings.
 
@@ -1441,7 +1538,10 @@ def validate_and_save_mapping(
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
 
-    # 2. Save mapping JSON
+    # 2. Save mapping JSON. The synthetic divergence/merge connectors
+    #    (#493) are identified by a lightweight pass over ``roads``, so the
+    #    JSON artifact is still written — and stays available for
+    #    post-mortem debugging — even if the geometric mapping below raises.
     conv_mapping = GeoRoadLaneletMapping(
         xodr_sha256=xodr_sha256,
         osm_sha256=osm_sha256,
@@ -1449,6 +1549,7 @@ def validate_and_save_mapping(
         preprocessing_log=preprocessing_log,
         stop_line_mapping=stop_line_mapping,
         skipped_stop_lines=skipped_stop_lines,
+        skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
         traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)

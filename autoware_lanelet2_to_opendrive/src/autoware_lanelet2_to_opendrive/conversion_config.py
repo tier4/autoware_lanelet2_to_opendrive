@@ -91,7 +91,10 @@ class ArcSpiralConfig:
             paramPoly3 output for backward compatibility.
         arc_enabled: Detect constant-curvature arcs.
         spiral_enabled: Reserved (no-op until #466b lands).
-        line_curvature_tol: |κ| below this is classified as a line (1/m).
+        line_curvature_tol: median signed curvature below this (in
+            magnitude) classifies a window as a straight line (1/m). Set
+            above the B-spline fitting curvature-noise floor so a noisy
+            fit of a straight road is not mistaken for a gentle arc (#496).
         arc_curvature_tol: Window-relative |κ - κ_const| tolerance during
             arc growth (1/m).
         arc_position_tol: Maximum allowed deviation between the analytic
@@ -104,7 +107,7 @@ class ArcSpiralConfig:
     enabled: bool = False
     arc_enabled: bool = True
     spiral_enabled: bool = False
-    line_curvature_tol: float = 1e-4
+    line_curvature_tol: float = 1e-3
     arc_curvature_tol: float = 5e-4
     arc_position_tol: float = 0.05
     min_line_length: float = 5.0
