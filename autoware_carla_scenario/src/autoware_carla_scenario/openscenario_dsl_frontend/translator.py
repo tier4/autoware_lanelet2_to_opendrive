@@ -89,8 +89,13 @@ def _apply(
     node: OscDoMember,
     entry_gate: Gate,
     resolve: Callable[[str | None], str],
+    ordered: bool,
 ) -> Gate:
-    """Walk a ``do`` tree, appending specs and returning its completion gate."""
+    """Walk a ``do`` tree, appending specs and returning its completion gate.
+
+    *ordered* is ``True`` while every enclosing composition is ``serial``; it
+    marks pass-condition specs that must be satisfied in sequence.
+    """
     if isinstance(node, OscInvocation):
         actor = resolve(node.actor)
         for modifier in node.modifiers:
@@ -101,12 +106,17 @@ def _apply(
         for action in result.actions:
             action.gate = entry_gate
             plan.specs.append(action)
-        plan.specs.extend(result.passes)
+        for pass_spec in result.passes:
+            pass_spec.ordered = ordered
+            plan.specs.append(pass_spec)
         plan.specs.extend(result.fails)
         return result.completion if result.completion is not None else entry_gate
 
     if node.operator == "parallel":
-        completions = [_apply(plan, m, entry_gate, resolve) for m in node.members]
+        # Members run concurrently, so they are unordered among themselves.
+        completions = [
+            _apply(plan, m, entry_gate, resolve, ordered=False) for m in node.members
+        ]
         advancing = [
             c for c in completions if c is not entry_gate and not c.is_immediate
         ]
@@ -119,7 +129,7 @@ def _apply(
     # serial (default): thread the gate through the members in order.
     gate = entry_gate
     for member in node.members:
-        gate = _apply(plan, member, gate, resolve)
+        gate = _apply(plan, member, gate, resolve, ordered=ordered)
     return gate
 
 
@@ -155,7 +165,7 @@ def _build_plan(
         )
 
     if do_tree is not None:
-        _apply(plan, do_tree, Gate.immediate(), resolve)
+        _apply(plan, do_tree, Gate.immediate(), resolve, ordered=True)
 
     return plan
 

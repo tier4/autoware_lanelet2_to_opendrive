@@ -148,6 +148,9 @@ class Spec:
         params: Kind-specific parameters (e.g. ``{"direction": "left"}``).
         gate: Trigger condition for an action spec (ignored for pass/fail
             specs). Defaults to :meth:`Gate.immediate`.
+        ordered: For a pass-condition spec, whether it belongs to a purely
+            ``serial`` context and must therefore be satisfied in sequence
+            relative to its ordered siblings.
     """
 
     kind: SpecKind
@@ -155,6 +158,7 @@ class Spec:
     label: str
     params: dict[str, Any] = field(default_factory=dict)
     gate: Gate = field(default_factory=Gate.immediate)
+    ordered: bool = False
 
     @property
     def role(self) -> SpecRole:

@@ -173,6 +173,12 @@ ego.change_lane(right)` generates a `TurnAction` triggered only after the lights
 were set, and a `LaneChangeAction` triggered only after lanelet 460 is reached —
 rather than arming everything on the first tick.
 
+Pass-condition steps in a `serial` block are likewise ordered: multiple
+`reach_lane` / `stand_still` steps are combined with a `SequentialCondition`, so
+the scenario only passes if they are satisfied **in the written order** (visiting
+lanelet 265 before 460 does not count). In a `parallel` block the same steps are
+combined with an order-insensitive `AndCondition`.
+
 !!! note "Issued vs. physically complete"
     `ActionDoneCondition` fires when an action *issues* its command (e.g. sets
     the TrafficManager route), not when the manoeuvre has physically finished.

@@ -366,14 +366,14 @@ def test_generated_one_of_has_multiple_classes() -> None:
     assert '"choice_v1": build_scenario_v1,' in code
 
 
-def test_multiple_pass_conditions_wrapped_in_and() -> None:
-    program = OscProgram(
+def _two_reach_lanes(operator: str) -> OscProgram:
+    return OscProgram(
         scenarios=[
             OscScenario(
                 name="x",
                 fields=[OscField(name="ego", type_name="vehicle")],
                 do=OscComposition(
-                    operator="serial",
+                    operator=operator,
                     members=[
                         OscInvocation(
                             behavior="reach_lane",
@@ -390,9 +390,24 @@ def test_multiple_pass_conditions_wrapped_in_and() -> None:
             )
         ]
     )
-    code = generate_module(translate_program(program), source_name="x.osc")
+
+
+def test_serial_pass_conditions_are_ordered() -> None:
+    (plan,) = translate_program(_two_reach_lanes("serial"))
+    assert all(s.ordered for s in plan.specs if s.kind is SpecKind.REACH_LANE)
+    code = generate_module([plan], source_name="x.osc")
+    assert "SequentialCondition(" in code
+    assert "AndCondition(" not in code
+    compile(code, "generated_seq.py", "exec")
+
+
+def test_parallel_pass_conditions_are_unordered() -> None:
+    (plan,) = translate_program(_two_reach_lanes("parallel"))
+    assert all(not s.ordered for s in plan.specs if s.kind is SpecKind.REACH_LANE)
+    code = generate_module([plan], source_name="x.osc")
+    assert "SequentialCondition(" not in code
     assert "AndCondition(" in code
-    compile(code, "generated_and.py", "exec")
+    compile(code, "generated_par.py", "exec")
 
 
 # ---------------------------------------------------------------------------

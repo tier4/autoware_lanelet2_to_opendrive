@@ -225,6 +225,17 @@ class _Emitter:
             return self.standstill_expr(plan, spec)
         raise AssertionError(spec.kind)  # pragma: no cover
 
+    def sequential_expr(self, plan: ScenarioPlan, specs: list[Spec]) -> list[str]:
+        """Render an ordered pass sequence as a ``SequentialCondition``."""
+        self.imports.add("SequentialCondition")
+        lines = ["SequentialCondition(", f"{_INDENT}["]
+        for spec in specs:
+            child = _indent(self.pass_condition_expr(plan, spec), 2)
+            child[-1] = child[-1] + ","
+            lines.extend(child)
+        lines += [f"{_INDENT}],", f'{_INDENT}label="ordered_pass",', ")"]
+        return lines
+
     # -- fail conditions ----------------------------------------------
 
     def fail_condition_lines(self, plan: ScenarioPlan, spec: Spec) -> list[str]:
@@ -356,17 +367,28 @@ def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
     if pass_specs:
         body.append("")
         body.append("# Pass conditions.")
-        exprs = [emitter.pass_condition_expr(plan, s) for s in pass_specs]
-        if len(exprs) == 1:
+        ordered = [s for s in pass_specs if s.ordered]
+        unordered = [s for s in pass_specs if not s.ordered]
+
+        group_exprs: list[list[str]] = []
+        if len(ordered) >= 2:
+            # A serial run of pass steps must be satisfied in sequence.
+            group_exprs.append(emitter.sequential_expr(plan, ordered))
+        elif len(ordered) == 1:
+            # A lone ordered step carries no sequence; treat it as a plain one.
+            unordered = [ordered[0], *unordered]
+        group_exprs.extend(emitter.pass_condition_expr(plan, s) for s in unordered)
+
+        if len(group_exprs) == 1:
             body.append("self.register_pass_condition(")
-            body.extend(_indent(exprs[0], 1))
+            body.extend(_indent(group_exprs[0], 1))
             body.append(")")
         else:
             emitter.imports.add("AndCondition")
             body.append("self.register_pass_condition(")
             body.append(f"{_INDENT}AndCondition(")
             body.append(f"{_INDENT * 2}[")
-            for expr in exprs:
+            for expr in group_exprs:
                 lines = _indent(expr, 3)
                 lines[-1] = lines[-1] + ","
                 body.extend(lines)

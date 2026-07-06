@@ -28,6 +28,7 @@ from .entity_existence import EntityExistenceCondition
 from .not_condition import NotCondition
 from .or_condition import OrCondition
 from .persistent import PersistentCondition
+from .sequential import SequentialCondition
 from .sticky import StickyCondition
 from .timeout import TimeoutCondition
 from .traffic_signal import TrafficSignalCondition
@@ -50,6 +51,7 @@ __all__ = [
     "PersistentCondition",
     "ScalarComparisonRule",
     "ScenarioResult",
+    "SequentialCondition",
     "SpeedCondition",
     "SpeedCoordinateSystem",
     "SpeedDirection",
