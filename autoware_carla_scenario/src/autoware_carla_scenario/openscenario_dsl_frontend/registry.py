@@ -1,9 +1,10 @@
 """Mapping from OpenSCENARIO DSL vocabulary to framework building blocks.
 
-This is the extensible heart of the frontend: it maps DSL *behaviour* names
-(invoked inside a ``do`` directive) and *modifier* names (spawn/speed
-parameters and scenario-level conditions) onto :class:`~.plan.Spec` entries and
-:class:`~.plan.ActorPlan` fields.
+This is the extensible heart of the frontend. *Behaviour* handlers (invoked
+inside a ``do`` directive) return a :class:`~.plan.BehaviorResult` describing the
+action/condition specs they contribute plus a *completion gate* used to
+sequence serial steps. *Modifier* handlers (spawn/speed parameters and
+scenario-level conditions) mutate the plan in place.
 
 Downstream projects can register additional handlers via
 :func:`register_behavior` / :func:`register_modifier` to teach the transpiler
@@ -16,11 +17,14 @@ from typing import Callable
 
 from .ast_model import OscArgument
 from .errors import OscTranslationError
-from .plan import ScenarioPlan, Spec, SpecKind
+from .plan import BehaviorResult, Gate, ScenarioPlan, Spec, SpecKind
 from .values import FloatValue, IntValue, OscValue, PhysicalValue
 
-#: A handler mutates the plan given the resolved actor name and its arguments.
-Handler = Callable[[ScenarioPlan, str, "Arguments"], None]
+#: A behaviour handler builds specs + a completion gate from a call's arguments.
+BehaviorHandler = Callable[[str, "Arguments"], BehaviorResult]
+
+#: A modifier handler mutates the plan for the resolved actor.
+ModifierHandler = Callable[[ScenarioPlan, str, "Arguments"], None]
 
 
 class Arguments:
@@ -91,96 +95,92 @@ def _traffic_light_state(value: OscValue) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _behavior_noop(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+def _behavior_noop(actor: str, args: Arguments) -> BehaviorResult:
     """A movement behaviour with no dedicated action (e.g. ``drive``).
 
     Longitudinal movement is handled by CARLA's TrafficManager autopilot, so
     ``drive()`` / ``follow_lane()`` only serve to attach ``with:`` modifiers.
+    Completion is ``None`` so it does not advance a serial sequence.
     """
+    return BehaviorResult()
 
 
-def _behavior_turn(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+def _behavior_turn(actor: str, args: Arguments) -> BehaviorResult:
     direction = _direction(args.require("direction", index=0))
-    plan.specs.append(
-        Spec(
-            kind=SpecKind.TURN,
-            actor=actor,
-            label=f"{actor}_turn_{direction}",
-            params={"direction": direction},
-        )
+    spec = Spec(
+        kind=SpecKind.TURN,
+        actor=actor,
+        label=f"{actor}_turn_{direction}",
+        params={"direction": direction},
     )
+    return BehaviorResult(actions=[spec], completion=Gate.action_done(spec.label))
 
 
-def _behavior_lane_change(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+def _behavior_lane_change(actor: str, args: Arguments) -> BehaviorResult:
     direction = _direction(args.require("direction", index=0))
-    plan.specs.append(
-        Spec(
-            kind=SpecKind.LANE_CHANGE,
-            actor=actor,
-            label=f"{actor}_lane_change_{direction}",
-            params={"direction": direction},
-        )
+    spec = Spec(
+        kind=SpecKind.LANE_CHANGE,
+        actor=actor,
+        label=f"{actor}_lane_change_{direction}",
+        params={"direction": direction},
     )
+    return BehaviorResult(actions=[spec], completion=Gate.action_done(spec.label))
 
 
-def _behavior_traffic_signal(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+def _behavior_traffic_signal(actor: str, args: Arguments) -> BehaviorResult:
     state = _traffic_light_state(args.require("state", index=0))
-    plan.specs.append(
-        Spec(
-            kind=SpecKind.TRAFFIC_SIGNAL,
-            actor=actor,
-            label=f"set_traffic_lights_{state}",
-            params={"state": state},
-        )
+    spec = Spec(
+        kind=SpecKind.TRAFFIC_SIGNAL,
+        actor=actor,
+        label=f"set_traffic_lights_{state}",
+        params={"state": state},
     )
+    return BehaviorResult(actions=[spec], completion=Gate.action_done(spec.label))
 
 
-def _behavior_reach_lane(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+def _behavior_reach_lane(actor: str, args: Arguments) -> BehaviorResult:
     lanelet = args.require("lanelet", "lane", "road", index=0).as_int()
-    plan.specs.append(
-        Spec(
-            kind=SpecKind.REACH_LANE,
-            actor=actor,
-            label=f"{actor}_reach_lane_{lanelet}",
-            params={"lanelet_id": lanelet},
-        )
+    spec = Spec(
+        kind=SpecKind.REACH_LANE,
+        actor=actor,
+        label=f"{actor}_reach_lane_{lanelet}",
+        params={"lanelet_id": lanelet},
     )
+    return BehaviorResult(passes=[spec], completion=Gate.lane_reached(actor, lanelet))
 
 
-def _behavior_standstill(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+def _behavior_standstill(actor: str, args: Arguments) -> BehaviorResult:
     duration_value = args.get("duration", "for", index=0)
     duration = _seconds(duration_value) if duration_value is not None else 1.0
-    plan.specs.append(
-        Spec(
-            kind=SpecKind.STANDSTILL,
-            actor=actor,
-            label=f"{actor}_standstill",
-            params={"duration": duration},
-        )
+    spec = Spec(
+        kind=SpecKind.STANDSTILL,
+        actor=actor,
+        label=f"{actor}_standstill",
+        params={"duration": duration},
     )
+    return BehaviorResult(passes=[spec], completion=Gate.standstill(actor, duration))
 
 
-def _behavior_no_collision(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
-    plan.specs.append(
-        Spec(
-            kind=SpecKind.COLLISION,
-            actor=actor,
-            label=f"{actor}_no_collision",
-            params={},
-        )
+def _behavior_no_collision(actor: str, args: Arguments) -> BehaviorResult:
+    spec = Spec(
+        kind=SpecKind.COLLISION,
+        actor=actor,
+        label=f"{actor}_no_collision",
+        params={},
     )
+    # A continuous monitor: does not advance a serial sequence.
+    return BehaviorResult(fails=[spec], completion=None)
 
 
-def _behavior_min_speed(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+def _behavior_min_speed(actor: str, args: Arguments) -> BehaviorResult:
     speed = _speed_kmh(args.require("speed", "value", index=0))
-    plan.specs.append(
-        Spec(
-            kind=SpecKind.MIN_SPEED,
-            actor=actor,
-            label=f"{actor}_min_speed",
-            params={"min_speed_kmh": speed},
-        )
+    spec = Spec(
+        kind=SpecKind.MIN_SPEED,
+        actor=actor,
+        label=f"{actor}_min_speed",
+        params={"min_speed_kmh": speed},
     )
+    return BehaviorResult(fails=[spec], completion=None)
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +220,19 @@ def _modifier_timeout(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
     )
 
 
-BEHAVIOR_HANDLERS: dict[str, Handler] = {
+def _modifier_min_speed(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+    speed = _speed_kmh(args.require("speed", "value", index=0))
+    plan.specs.append(
+        Spec(
+            kind=SpecKind.MIN_SPEED,
+            actor=actor,
+            label=f"{actor}_min_speed",
+            params={"min_speed_kmh": speed},
+        )
+    )
+
+
+BEHAVIOR_HANDLERS: dict[str, BehaviorHandler] = {
     "drive": _behavior_noop,
     "follow_lane": _behavior_noop,
     "keep_lane": _behavior_noop,
@@ -243,7 +255,7 @@ BEHAVIOR_HANDLERS: dict[str, Handler] = {
     "min_speed": _behavior_min_speed,
 }
 
-MODIFIER_HANDLERS: dict[str, Handler] = {
+MODIFIER_HANDLERS: dict[str, ModifierHandler] = {
     "speed": _modifier_speed,
     "initial_speed": _modifier_speed,
     "spawn_lanelet": _modifier_spawn_lanelet,
@@ -255,22 +267,22 @@ MODIFIER_HANDLERS: dict[str, Handler] = {
     "vehicle_type": _modifier_vehicle_type,
     "model": _modifier_vehicle_type,
     "timeout": _modifier_timeout,
-    "keep_speed_above": _behavior_min_speed,
-    "min_speed": _behavior_min_speed,
+    "keep_speed_above": _modifier_min_speed,
+    "min_speed": _modifier_min_speed,
 }
 
 
-def register_behavior(name: str, handler: Handler) -> None:
+def register_behavior(name: str, handler: BehaviorHandler) -> None:
     """Register a custom behaviour handler (overrides any existing entry)."""
     BEHAVIOR_HANDLERS[name] = handler
 
 
-def register_modifier(name: str, handler: Handler) -> None:
+def register_modifier(name: str, handler: ModifierHandler) -> None:
     """Register a custom modifier handler (overrides any existing entry)."""
     MODIFIER_HANDLERS[name] = handler
 
 
-def behavior_handler(name: str) -> Handler:
+def behavior_handler(name: str) -> BehaviorHandler:
     """Look up a behaviour handler by name.
 
     Raises:
@@ -285,7 +297,7 @@ def behavior_handler(name: str) -> Handler:
     return handler
 
 
-def modifier_handler(name: str) -> Handler:
+def modifier_handler(name: str) -> ModifierHandler:
     """Look up a modifier handler by name.
 
     Raises:

@@ -24,6 +24,59 @@ DEFAULT_VEHICLE_TYPE = "vehicle.mini.cooper"
 #: mirroring the built-in example scenarios.
 DEFAULT_SPEED_CHECK_DELAY_SECONDS = 3.0
 
+#: Upper bound on generated ``one_of`` variants before truncation.
+MAX_VARIANTS = 64
+
+
+class GateKind(str, Enum):
+    """How an action is triggered / how a serial step signals completion."""
+
+    IMMEDIATE = "immediate"  # fire on the first tick (no wait)
+    ACTION_DONE = "action_done"  # wait until a referenced action has fired
+    LANE_REACHED = "lane_reached"  # wait until an actor reaches a lanelet
+    STANDSTILL = "standstill"  # wait until an actor has stood still
+    ALL_OF = "all_of"  # wait until every sub-gate is satisfied
+
+
+@dataclass(frozen=True)
+class Gate:
+    """A trigger condition for an action (also used as a completion signal).
+
+    A :class:`Gate` is a pure descriptor; :mod:`.codegen` renders it into a
+    concrete :mod:`autoware_carla_scenario` condition expression.
+    """
+
+    kind: GateKind
+    action_label: Optional[str] = None
+    actor: Optional[str] = None
+    lanelet_id: Optional[int] = None
+    duration: Optional[float] = None
+    members: tuple["Gate", ...] = ()
+
+    @staticmethod
+    def immediate() -> "Gate":
+        return Gate(kind=GateKind.IMMEDIATE)
+
+    @staticmethod
+    def action_done(action_label: str) -> "Gate":
+        return Gate(kind=GateKind.ACTION_DONE, action_label=action_label)
+
+    @staticmethod
+    def lane_reached(actor: str, lanelet_id: int) -> "Gate":
+        return Gate(kind=GateKind.LANE_REACHED, actor=actor, lanelet_id=lanelet_id)
+
+    @staticmethod
+    def standstill(actor: str, duration: float) -> "Gate":
+        return Gate(kind=GateKind.STANDSTILL, actor=actor, duration=duration)
+
+    @staticmethod
+    def all_of(members: "list[Gate]") -> "Gate":
+        return Gate(kind=GateKind.ALL_OF, members=tuple(members))
+
+    @property
+    def is_immediate(self) -> bool:
+        return self.kind is GateKind.IMMEDIATE
+
 
 class SpecKind(str, Enum):
     """The kind of framework object a :class:`Spec` maps to."""
@@ -93,16 +146,38 @@ class Spec:
         actor: The DSL name of the actor the spec applies to.
         label: A stable, human-readable label for the framework object.
         params: Kind-specific parameters (e.g. ``{"direction": "left"}``).
+        gate: Trigger condition for an action spec (ignored for pass/fail
+            specs). Defaults to :meth:`Gate.immediate`.
     """
 
     kind: SpecKind
     actor: str
     label: str
     params: dict[str, Any] = field(default_factory=dict)
+    gate: Gate = field(default_factory=Gate.immediate)
 
     @property
     def role(self) -> SpecRole:
         return SPEC_ROLES[self.kind]
+
+
+@dataclass
+class BehaviorResult:
+    """What a single behaviour invocation contributes to the plan.
+
+    Attributes:
+        actions: Action specs to register (each receives a trigger gate).
+        passes: Pass-condition specs.
+        fails: Fail-condition specs.
+        completion: How this behaviour signals completion for serial
+            sequencing, or ``None`` when it does not advance the sequence
+            (config-only or continuous-monitor behaviours).
+    """
+
+    actions: list[Spec] = field(default_factory=list)
+    passes: list[Spec] = field(default_factory=list)
+    fails: list[Spec] = field(default_factory=list)
+    completion: Optional[Gate] = None
 
 
 @dataclass
@@ -114,12 +189,17 @@ class ScenarioPlan:
         ego: The resolved ego actor.
         npcs: Resolved NPC actors, in declaration order.
         specs: Actions and conditions, in the order they were translated.
+        variant_index: 0-based index when a ``one_of`` produced several
+            variants; ``0`` for a single-variant scenario.
+        variant_count: Total number of variants produced from the scenario.
     """
 
     name: str
     ego: ActorPlan
     npcs: list[ActorPlan] = field(default_factory=list)
     specs: list[Spec] = field(default_factory=list)
+    variant_index: int = 0
+    variant_count: int = 1
 
     def actor(self, name: str) -> ActorPlan:
         """Return the actor named *name* (ego or an NPC).

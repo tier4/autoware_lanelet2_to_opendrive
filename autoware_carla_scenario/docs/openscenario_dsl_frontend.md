@@ -152,30 +152,80 @@ scenario s:
 Unrecognised behaviour or modifier names raise `OscTranslationError` listing the
 supported names, so unsupported constructs fail loudly rather than silently.
 
+## Composition: sequencing and choices
+
+`do` composition is not flattened — the operators carry meaning:
+
+### `serial` — ordered steps via trigger conditions
+
+Each step in a `serial` block is gated on the completion of the previous step,
+using the framework's condition-triggered actions
+(`BaseAction(..., condition=...)`). The completion signal depends on the step:
+
+- an issued manoeuvre (`turn`, `change_lane`, `set_traffic_lights`) completes
+  when it fires → the next action is gated on `ActionDoneCondition(that_action)`;
+- `reach_lane(N)` completes when the actor reaches the lanelet → the next action
+  is gated on that `EntityLanePositionCondition`;
+- `stand_still(Ns)` completes when the standstill condition holds.
+
+So `do serial: set_traffic_lights(green); ego.turn(left); ego.reach_lane(460);
+ego.change_lane(right)` generates a `TurnAction` triggered only after the lights
+were set, and a `LaneChangeAction` triggered only after lanelet 460 is reached —
+rather than arming everything on the first tick.
+
+!!! note "Issued vs. physically complete"
+    `ActionDoneCondition` fires when an action *issues* its command (e.g. sets
+    the TrafficManager route), not when the manoeuvre has physically finished.
+    Where physical completion matters, follow the manoeuvre with an observable
+    step (a `reach_lane` / `stand_still`) so the next action gates on that.
+
+### `parallel` — concurrent steps
+
+Members of a `parallel` block share the block's entry gate (they run
+concurrently); the block completes when *all* members complete
+(`AndCondition` of their completions).
+
+### `one_of` — exclusive choice → concrete variants
+
+A `one_of` is expanded at transpile time into **one concrete scenario per
+branch** (a Cartesian product across `serial`/`parallel` nesting, a union over
+`one_of`). The generated module then contains several classes
+(`FooScenarioV0`, `FooScenarioV1`, …) and a `SCENARIO_VARIANTS` registry mapping
+each variant name to its build function — which slots directly into the runner's
+existing multirun / batch model. Expansion is capped at 64 variants (excess is
+logged and truncated).
+
 ## Extending the mapping
 
 Downstream projects can teach the transpiler about new DSL constructs without
-editing the translator:
+editing the translator. Behaviour handlers return a `BehaviorResult`; modifier
+handlers mutate the plan:
 
 ```python
 from autoware_carla_scenario.openscenario_dsl_frontend import register_behavior
-from autoware_carla_scenario.openscenario_dsl_frontend.plan import Spec, SpecKind
+from autoware_carla_scenario.openscenario_dsl_frontend.plan import (
+    BehaviorResult,
+    Gate,
+    Spec,
+    SpecKind,
+)
 
 
-def _my_behavior(plan, actor, args):
-    plan.specs.append(Spec(kind=SpecKind.TURN, actor=actor, label="custom", params=...))
+def _my_turn(actor, args):
+    spec = Spec(kind=SpecKind.TURN, actor=actor, label=f"{actor}_custom", params=...)
+    # Register the spec and tell the sequencer how this step signals completion.
+    return BehaviorResult(actions=[spec], completion=Gate.action_done(spec.label))
 
 
-register_behavior("my_behavior", _my_behavior)
+register_behavior("my_turn", _my_turn)
 ```
 
 ## Limitations
 
-- OSC2 `do` composition (`serial` / `parallel` / `one_of`) is **flattened**:
-  behaviours are mapped to tick-loop actions and pass/fail conditions, which do
-  not model full temporal sequencing.
 - Only the subset of the OSC2 standard library listed above is translated;
   `py-osc2` is an alpha-quality parser, so exotic grammar constructs may not be
   supported.
+- `one_of` is realised as concrete-variant expansion, not runtime nondeterministic
+  choice; combinatorial blow-up is capped at 64 variants.
 - Speed values without a unit are assumed to be km/h and durations without a
   unit are assumed to be seconds.

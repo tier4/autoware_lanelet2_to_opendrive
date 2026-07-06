@@ -1,22 +1,27 @@
-"""Render a :class:`~.plan.ScenarioPlan` into readable Python scenario code.
+"""Render :class:`~.plan.ScenarioPlan` variants into readable Python code.
 
-The generated module mirrors the hand-written example scenarios (see
-``autoware_carla_scenario/examples/intersection_passing.py``): a
-:class:`~autoware_carla_scenario.BaseScenario` subclass whose ``setup`` spawns
-actors and registers actions and pass/fail conditions with explicit,
-constructor-level module calls.  Readability is the priority — the output is
-meant to be committed, reviewed and edited by hand, not treated as an opaque
-build artifact.
+The generated module mirrors the hand-written example scenarios: one
+:class:`~autoware_carla_scenario.BaseScenario` subclass per ``one_of`` variant,
+whose ``setup`` spawns actors and registers actions and pass/fail conditions
+with explicit, constructor-level module calls.
+
+Serial ordering is preserved by giving each action a ``condition=`` trigger
+(``ActionDoneCondition`` / lane / standstill / ``AndCondition``), so a later
+step only arms once the previous step has completed. Readability is the
+priority — the output is meant to be committed, reviewed and edited by hand.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Optional
 
 from .plan import (
     DEFAULT_SPEED_CHECK_DELAY_SECONDS,
     ActorPlan,
+    Gate,
+    GateKind,
     ScenarioPlan,
     Spec,
     SpecKind,
@@ -32,14 +37,37 @@ _TRAFFIC_LIGHT_STATE = {
 }
 
 
-def _class_name(scenario_name: str) -> str:
+def _sanitize(name: str) -> str:
+    return re.sub(r"\W+", "_", name).strip("_")
+
+
+def _class_name(scenario_name: str, variant_index: int, variant_count: int) -> str:
     """Turn a DSL scenario name into a ``CamelCaseScenario`` class name."""
     tail = scenario_name.split(".")[-1]
     parts = [p for p in re.split(r"[^0-9A-Za-z]+", tail) if p]
     camel = "".join(p[:1].upper() + p[1:] for p in parts) or "Osc"
     if not camel.endswith("Scenario"):
         camel += "Scenario"
+    if variant_count > 1:
+        camel += f"V{variant_index}"
     return camel
+
+
+def _registry_key(scenario_name: str, variant_index: int, variant_count: int) -> str:
+    key = _sanitize(scenario_name.split(".")[-1]).lower() or "scenario"
+    if variant_count > 1:
+        key += f"_v{variant_index}"
+    return key
+
+
+def _build_fn_name(variant_index: int, variant_count: int) -> str:
+    return (
+        "build_scenario" if variant_count == 1 else f"build_scenario_v{variant_index}"
+    )
+
+
+def _action_var(label: str) -> str:
+    return f"{_sanitize(label)}_action"
 
 
 def _indent(lines: list[str], level: int) -> list[str]:
@@ -61,6 +89,99 @@ class _Emitter:
             return "EGO_ROLE_NAME"
         self.imports.add("EntityRole")
         return f"EntityRole.npc({actor.index})"
+
+    # -- trigger gates -------------------------------------------------
+
+    def gate_expr(self, plan: ScenarioPlan, gate: Gate) -> Optional[str]:
+        """Render a :class:`Gate` into a single-line condition expression."""
+        if gate.is_immediate:
+            return None
+        if gate.kind is GateKind.ACTION_DONE:
+            self.imports.add("ActionDoneCondition")
+            var = _action_var(gate.action_label or "")
+            return f'ActionDoneCondition({var}, label="after_{gate.action_label}")'
+        if gate.kind is GateKind.LANE_REACHED:
+            self.imports.update(
+                {"EntityLanePositionCondition", "to_opendrive", "Lanelet2Pose"}
+            )
+            role = self.role_expr(plan, gate.actor or plan.ego.name)
+            return (
+                f"EntityLanePositionCondition(entity_name={role}, "
+                f"road_id=to_opendrive("
+                f"Lanelet2Pose(lanelet_id={gate.lanelet_id}, s=0.0)).road_id, "
+                f'label="after_reach_lane_{gate.lanelet_id}")'
+            )
+        if gate.kind is GateKind.STANDSTILL:
+            self.imports.add("StandstillCondition")
+            role = self.role_expr(plan, gate.actor or plan.ego.name)
+            return (
+                f"StandstillCondition(entity_name={role}, "
+                f"duration={gate.duration!r}, "
+                f'label="after_{gate.actor}_standstill")'
+            )
+        if gate.kind is GateKind.ALL_OF:
+            self.imports.add("AndCondition")
+            parts = [self.gate_expr(plan, g) for g in gate.members]
+            joined = ", ".join(p for p in parts if p)
+            return f"AndCondition([{joined}])"
+        raise AssertionError(gate.kind)  # pragma: no cover
+
+    # -- actions ------------------------------------------------------
+
+    def _action_call(self, plan: ScenarioPlan, spec: Spec) -> tuple[str, list[str]]:
+        """Return ``(ctor_name, kwarg_lines)`` for an action spec (no gate)."""
+        role = self.role_expr(plan, spec.actor)
+        if spec.kind is SpecKind.TURN:
+            self.imports.update({"TurnAction", "TurnDirection", "TickTiming"})
+            direction = spec.params["direction"].upper()
+            return "TurnAction", [
+                f"entity_name={role}",
+                f"direction=TurnDirection.{direction}",
+                "client=self.client",
+                "timing=TickTiming.PRE_TICK",
+                "tm_port=self.tm_port",
+            ]
+        if spec.kind is SpecKind.LANE_CHANGE:
+            self.imports.update(
+                {"LaneChangeAction", "LaneChangeDirection", "TickTiming"}
+            )
+            direction = spec.params["direction"].upper()
+            return "LaneChangeAction", [
+                f"entity_name={role}",
+                f"direction=LaneChangeDirection.{direction}",
+                "client=self.client",
+                "timing=TickTiming.PRE_TICK",
+                "tm_port=self.tm_port",
+            ]
+        if spec.kind is SpecKind.TRAFFIC_SIGNAL:
+            self.imports.update({"TrafficSignalAction", "TrafficLightTarget"})
+            state = _TRAFFIC_LIGHT_STATE[spec.params["state"]]
+            return "TrafficSignalAction", [
+                f"state={state}",
+                "lanelet2_traffic_light_ids=TrafficLightTarget.ALL",
+                f'label="{spec.label}"',
+            ]
+        raise AssertionError(spec.kind)  # pragma: no cover
+
+    def action_lines(self, plan: ScenarioPlan, spec: Spec, *, named: bool) -> list[str]:
+        """Render a full action registration statement (with its gate)."""
+        ctor, kwargs = self._action_call(plan, spec)
+        gate = self.gate_expr(plan, spec.gate)
+        if gate is not None:
+            kwargs = [*kwargs, f"condition={gate}"]
+
+        call = [f"{ctor}("]
+        call += [f"{_INDENT}{kw}," for kw in kwargs]
+        call += [")"]
+
+        if named:
+            var = _action_var(spec.label)
+            return [
+                f"{var} = {call[0]}",
+                *call[1:],
+                f"self.register_pre_tick({var})",
+            ]
+        return ["self.register_pre_tick(", *_indent(call, 1), ")"]
 
     # -- pass conditions ----------------------------------------------
 
@@ -152,53 +273,6 @@ class _Emitter:
             ]
         raise AssertionError(spec.kind)  # pragma: no cover
 
-    # -- actions ------------------------------------------------------
-
-    def action_lines(self, plan: ScenarioPlan, spec: Spec) -> list[str]:
-        if spec.kind is SpecKind.TURN:
-            self.imports.update({"TurnAction", "TurnDirection", "TickTiming"})
-            role = self.role_expr(plan, spec.actor)
-            direction = spec.params["direction"].upper()
-            return [
-                "self.register_pre_tick(",
-                f"{_INDENT}TurnAction(",
-                f"{_INDENT * 2}entity_name={role},",
-                f"{_INDENT * 2}direction=TurnDirection.{direction},",
-                f"{_INDENT * 2}client=self.client,",
-                f"{_INDENT * 2}timing=TickTiming.PRE_TICK,",
-                f"{_INDENT * 2}tm_port=self.tm_port,",
-                f"{_INDENT})",
-                ")",
-            ]
-        if spec.kind is SpecKind.LANE_CHANGE:
-            self.imports.update(
-                {"LaneChangeAction", "LaneChangeDirection", "TickTiming"}
-            )
-            role = self.role_expr(plan, spec.actor)
-            direction = spec.params["direction"].upper()
-            return [
-                "self.register_pre_tick(",
-                f"{_INDENT}LaneChangeAction(",
-                f"{_INDENT * 2}entity_name={role},",
-                f"{_INDENT * 2}direction=LaneChangeDirection.{direction},",
-                f"{_INDENT * 2}client=self.client,",
-                f"{_INDENT * 2}timing=TickTiming.PRE_TICK,",
-                f"{_INDENT * 2}tm_port=self.tm_port,",
-                f"{_INDENT})",
-                ")",
-            ]
-        if spec.kind is SpecKind.TRAFFIC_SIGNAL:
-            self.imports.update({"TrafficSignalAction", "TrafficLightTarget"})
-            state = _TRAFFIC_LIGHT_STATE[spec.params["state"]]
-            return [
-                "TrafficSignalAction(",
-                f"{_INDENT}state={state},",
-                f"{_INDENT}lanelet2_traffic_light_ids=TrafficLightTarget.ALL,",
-                f'{_INDENT}label="{spec.label}",',
-                ").execute(self.world)",
-            ]
-        raise AssertionError(spec.kind)  # pragma: no cover
-
     # -- npc spawning -------------------------------------------------
 
     def npc_spawn_lines(self, npc: ActorPlan) -> list[str]:
@@ -238,6 +312,21 @@ class _Emitter:
         ]
 
 
+def _referenced_action_labels(plan: ScenarioPlan) -> set[str]:
+    """Return labels of actions referenced by an ``ActionDoneCondition`` gate."""
+    refs: set[str] = set()
+
+    def scan(gate: Gate) -> None:
+        if gate.kind is GateKind.ACTION_DONE and gate.action_label:
+            refs.add(gate.action_label)
+        for member in gate.members:
+            scan(member)
+
+    for spec in plan.specs_for(SpecRole.ACTION):
+        scan(spec.gate)
+    return refs
+
+
 def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
     """Build the statements inside ``setup`` (unindented, section by section)."""
     body: list[str] = [
@@ -255,10 +344,13 @@ def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
 
     actions = plan.specs_for(SpecRole.ACTION)
     if actions:
+        referenced = _referenced_action_labels(plan)
         body.append("")
-        body.append("# Actions.")
+        body.append("# Actions (serial order preserved via trigger conditions).")
         for spec in actions:
-            body.extend(emitter.action_lines(plan, spec))
+            body.extend(
+                emitter.action_lines(plan, spec, named=spec.label in referenced)
+            )
 
     pass_specs = plan.specs_for(SpecRole.PASS)
     if pass_specs:
@@ -292,29 +384,16 @@ def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
     return body
 
 
-def _render_imports(emitter: _Emitter) -> list[str]:
-    names = sorted(emitter.imports | {"BaseScenario", "EgoConfig"})
-    lines = ["import carla", "", "from autoware_carla_scenario import ("]
-    lines.extend(f"{_INDENT}{name}," for name in names)
-    lines.append(")")
-    return lines
-
-
-def generate_module(plan: ScenarioPlan, *, source_name: str) -> str:
-    """Render *plan* into a complete, importable Python module string.
-
-    Args:
-        plan: The semantic scenario plan.
-        source_name: The originating ``.osc`` path, recorded in the docstring.
-
-    Returns:
-        The generated Python source code.
-    """
-    emitter = _Emitter()
-    class_name = _class_name(plan.name)
+def _scenario_class(
+    plan: ScenarioPlan, emitter: _Emitter
+) -> tuple[str, str, list[str]]:
+    """Render one scenario class + build function; return (key, class_name, lines)."""
+    class_name = _class_name(plan.name, plan.variant_index, plan.variant_count)
+    build_name = _build_fn_name(plan.variant_index, plan.variant_count)
+    key = _registry_key(plan.name, plan.variant_index, plan.variant_count)
 
     setup_body = _setup_body(plan, emitter)
-    import_lines = _render_imports(emitter)
+    emitter.imports.update({"SpawnTransform", "Lanelet2Pose"})
 
     ego = plan.ego
     spawn_lanelet = ego.spawn_lanelet_id if ego.spawn_lanelet_id is not None else 0
@@ -323,8 +402,67 @@ def generate_module(plan: ScenarioPlan, *, source_name: str) -> str:
         if ego.spawn_lanelet_id is not None
         else "  # NOTE: spawn lanelet not set in DSL"
     )
+    variant_note = f" (variant {plan.variant_index})" if plan.variant_count > 1 else ""
 
-    lines: list[str] = [
+    lines = [
+        f"class {class_name}(BaseScenario):",
+        f'{_INDENT}"""Transpiled scenario {plan.name!r}{variant_note}."""',
+        "",
+        f"{_INDENT}def setup(self) -> None:",
+        *_indent(setup_body, 2),
+        "",
+        f"{_INDENT}def is_done(self) -> bool:",
+        f"{_INDENT * 2}return False",
+        "",
+        "",
+        f"def {build_name}() -> {class_name}:",
+        f'{_INDENT}"""Construct the scenario with the ego spawn baked in from the DSL."""',
+        f"{_INDENT}ego_config = EgoConfig(",
+        f"{_INDENT * 2}spawn_location=SpawnTransform("
+        "carla.Transform(carla.Location())),",
+        f'{_INDENT * 2}vehicle_type="{ego.vehicle_type}",',
+        f"{_INDENT * 2}initial_speed_kmh={ego.initial_speed_kmh!r},",
+        f"{_INDENT})",
+        f"{_INDENT}spawn_pose = Lanelet2Pose("
+        f"lanelet_id={spawn_lanelet}, s={ego.spawn_s!r}){spawn_comment}",
+        f"{_INDENT}return {class_name}(ego_config, spawn_pose=spawn_pose)",
+    ]
+    return key, build_name, lines
+
+
+def _render_imports(emitter: _Emitter) -> list[str]:
+    names = sorted(emitter.imports | {"BaseScenario", "EgoConfig"})
+    lines = ["import carla", "", "from autoware_carla_scenario import ("]
+    lines.extend(f"{_INDENT}{name}," for name in names)
+    lines.append(")")
+    return lines
+
+
+def generate_module(plans: list[ScenarioPlan], *, source_name: str) -> str:
+    """Render *plans* (one per ``one_of`` variant) into a Python module string.
+
+    Args:
+        plans: The scenario variants to render. Must be non-empty.
+        source_name: The originating ``.osc`` path, recorded in the docstring.
+
+    Returns:
+        The generated Python source code.
+    """
+    if not plans:
+        raise ValueError("generate_module requires at least one plan")
+
+    emitter = _Emitter()
+
+    class_blocks: list[list[str]] = []
+    registry: list[tuple[str, str]] = []
+    for plan in plans:
+        key, build_name, block = _scenario_class(plan, emitter)
+        class_blocks.append(block)
+        registry.append((key, build_name))
+
+    import_lines = _render_imports(emitter)
+
+    header = [
         '"""Scenario transpiled from an OpenSCENARIO DSL source.',
         "",
         f"Source: {source_name}",
@@ -338,32 +476,16 @@ def generate_module(plan: ScenarioPlan, *, source_name: str) -> str:
         *import_lines,
         "",
         "",
-        f"class {class_name}(BaseScenario):",
-        f'{_INDENT}"""Transpiled scenario {plan.name!r}."""',
-        "",
-        f"{_INDENT}def setup(self) -> None:",
-        *_indent(setup_body, 2),
-        "",
-        f"{_INDENT}def is_done(self) -> bool:",
-        f"{_INDENT * 2}return False",
-        "",
-        "",
-        f"def build_scenario() -> {class_name}:",
-        f'{_INDENT}"""Construct the scenario with the ego spawn baked in from the DSL."""',
-        f"{_INDENT}ego_config = EgoConfig(",
-        f"{_INDENT * 2}spawn_location=SpawnTransform("
-        "carla.Transform(carla.Location())),",
-        f'{_INDENT * 2}vehicle_type="{ego.vehicle_type}",',
-        f"{_INDENT * 2}initial_speed_kmh={ego.initial_speed_kmh!r},",
-        f"{_INDENT})",
-        f"{_INDENT}spawn_pose = Lanelet2Pose("
-        f"lanelet_id={spawn_lanelet}, s={ego.spawn_s!r}){spawn_comment}",
-        f"{_INDENT}return {class_name}(ego_config, spawn_pose=spawn_pose)",
-        "",
     ]
-    # build_scenario relies on these symbols regardless of which specs ran.
-    emitter.imports.update({"SpawnTransform", "Lanelet2Pose"})
-    # Re-render imports now that build_scenario's needs are known.
-    lines[10 : 10 + len(import_lines)] = _render_imports(emitter)
 
-    return "\n".join(lines) + "\n"
+    body: list[str] = []
+    for block in class_blocks:
+        body.extend(block)
+        body.append("")
+        body.append("")
+
+    registry_lines = ["SCENARIO_VARIANTS = {"]
+    registry_lines += [f'{_INDENT}"{key}": {build},' for key, build in registry]
+    registry_lines.append("}")
+
+    return "\n".join([*header, *body, *registry_lines]) + "\n"

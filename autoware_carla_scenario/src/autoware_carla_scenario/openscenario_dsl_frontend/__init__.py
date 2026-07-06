@@ -32,13 +32,13 @@ from .errors import (
     OscParseError,
     OscTranslationError,
 )
-from .plan import ActorPlan, ScenarioPlan, Spec, SpecKind, SpecRole
+from .plan import ActorPlan, Gate, ScenarioPlan, Spec, SpecKind, SpecRole
 from .registry import register_behavior, register_modifier
 from .transpiler import (
     parse_program_from_file,
     parse_program_from_string,
-    plan_from_file,
-    plan_from_string,
+    plans_from_file,
+    plans_from_string,
     transpile_file,
     transpile_string,
     transpile_to_file,
@@ -46,6 +46,7 @@ from .transpiler import (
 
 __all__ = [
     "ActorPlan",
+    "Gate",
     "OscDependencyError",
     "OscError",
     "OscParseError",
@@ -56,8 +57,8 @@ __all__ = [
     "SpecRole",
     "parse_program_from_file",
     "parse_program_from_string",
-    "plan_from_file",
-    "plan_from_string",
+    "plans_from_file",
+    "plans_from_string",
     "register_behavior",
     "register_modifier",
     "transpile_file",

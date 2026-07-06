@@ -33,13 +33,19 @@ def parse_program_from_string(
     return extract_program(parse_osc_string(text, source_name=source_name))
 
 
-def plan_from_file(path: str | Path) -> ScenarioPlan:
-    """Parse, extract and translate a ``.osc`` file into a :class:`ScenarioPlan`."""
+def plans_from_file(path: str | Path) -> list[ScenarioPlan]:
+    """Parse, extract and translate a ``.osc`` file into scenario variants.
+
+    Returns one :class:`ScenarioPlan` per ``one_of`` branch combination (just
+    one for a scenario without ``one_of``).
+    """
     return translate_program(parse_program_from_file(path))
 
 
-def plan_from_string(text: str, *, source_name: str = "<string>") -> ScenarioPlan:
-    """Parse, extract and translate DSL source text into a :class:`ScenarioPlan`."""
+def plans_from_string(
+    text: str, *, source_name: str = "<string>"
+) -> list[ScenarioPlan]:
+    """Parse, extract and translate DSL source text into scenario variants."""
     return translate_program(parse_program_from_string(text, source_name=source_name))
 
 
@@ -50,18 +56,17 @@ def transpile_file(path: str | Path) -> str:
         path: Path to the ``.osc`` source.
 
     Returns:
-        The generated Python module as a string.
+        The generated Python module as a string (one class per ``one_of``
+        variant).
     """
-    program = parse_program_from_file(path)
-    plan = translate_program(program)
-    return generate_module(plan, source_name=str(path))
+    plans = plans_from_file(path)
+    return generate_module(plans, source_name=str(path))
 
 
 def transpile_string(text: str, *, source_name: str = "<string>") -> str:
     """Transpile DSL source text into readable Python scenario source."""
-    program = parse_program_from_string(text, source_name=source_name)
-    plan = translate_program(program)
-    return generate_module(plan, source_name=source_name)
+    plans = plans_from_string(text, source_name=source_name)
+    return generate_module(plans, source_name=source_name)
 
 
 def transpile_to_file(source: str | Path, destination: str | Path) -> Path:

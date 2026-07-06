@@ -1,5 +1,6 @@
 """Scenario pass/fail conditions for CARLA scenario testing."""
 
+from .action_done import ActionDoneCondition
 from .always_true import AlwaysTrueCondition
 from .and_condition import AndCondition
 from .base import (
@@ -32,6 +33,7 @@ from .timeout import TimeoutCondition
 from .traffic_signal import TrafficSignalCondition
 
 __all__ = [
+    "ActionDoneCondition",
     "AlwaysTrueCondition",
     "AndCondition",
     "BaseCondition",

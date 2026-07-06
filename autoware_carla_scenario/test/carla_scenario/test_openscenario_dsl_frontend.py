@@ -33,6 +33,7 @@ from autoware_carla_scenario.openscenario_dsl_frontend.ast_model import (
     OscScenario,
 )
 from autoware_carla_scenario.openscenario_dsl_frontend.codegen import generate_module
+from autoware_carla_scenario.openscenario_dsl_frontend.plan import GateKind
 from autoware_carla_scenario.openscenario_dsl_frontend.translator import (
     translate_program,
 )
@@ -54,7 +55,7 @@ _EXAMPLE_OSC = _PACKAGE_ROOT / "examples" / "openscenario" / "intersection_passi
 
 
 def _demo_program() -> OscProgram:
-    """Build a rich scenario IR directly (no parser required)."""
+    """Build a rich, serial scenario IR directly (no parser required)."""
     scenario = OscScenario(
         name="demo",
         fields=[
@@ -89,14 +90,14 @@ def _demo_program() -> OscProgram:
                     ],
                 ),
                 OscInvocation(
-                    behavior="turn",
-                    actor="ego",
-                    arguments=[OscArgument("direction", SymbolValue("left"))],
-                ),
-                OscInvocation(
                     behavior="set_traffic_lights",
                     actor=None,
                     arguments=[OscArgument("state", SymbolValue("green"))],
+                ),
+                OscInvocation(
+                    behavior="turn",
+                    actor="ego",
+                    arguments=[OscArgument("direction", SymbolValue("left"))],
                 ),
                 OscInvocation(
                     behavior="reach_lane",
@@ -104,11 +105,50 @@ def _demo_program() -> OscProgram:
                     arguments=[OscArgument("lanelet", IntValue(460))],
                 ),
                 OscInvocation(
+                    behavior="change_lane",
+                    actor="ego",
+                    arguments=[OscArgument("direction", SymbolValue("right"))],
+                ),
+                OscInvocation(
                     behavior="keep_speed_above",
                     actor="ego",
                     arguments=[OscArgument(None, PhysicalValue(10.0, "kmph"))],
                 ),
                 OscInvocation(behavior="no_collision", actor="ego"),
+            ],
+        ),
+    )
+    return OscProgram(scenarios=[scenario])
+
+
+def _one_of_program() -> OscProgram:
+    """A serial scenario with a single ``one_of`` branch of two turns."""
+    scenario = OscScenario(
+        name="choice",
+        fields=[OscField(name="ego", type_name="vehicle")],
+        do=OscComposition(
+            operator="serial",
+            members=[
+                OscComposition(
+                    operator="one_of",
+                    members=[
+                        OscInvocation(
+                            behavior="turn",
+                            actor="ego",
+                            arguments=[OscArgument("direction", SymbolValue("left"))],
+                        ),
+                        OscInvocation(
+                            behavior="turn",
+                            actor="ego",
+                            arguments=[OscArgument("direction", SymbolValue("right"))],
+                        ),
+                    ],
+                ),
+                OscInvocation(
+                    behavior="reach_lane",
+                    actor="ego",
+                    arguments=[OscArgument("lanelet", IntValue(460))],
+                ),
             ],
         ),
     )
@@ -143,7 +183,7 @@ def test_physical_literal_wrong_unit_raises() -> None:
 
 
 def test_translate_resolves_ego_and_npc() -> None:
-    plan = translate_program(_demo_program())
+    (plan,) = translate_program(_demo_program())
     assert plan.ego.name == "ego"
     assert plan.ego.spawn_lanelet_id == 242
     assert plan.ego.spawn_s == pytest.approx(5.0)
@@ -153,16 +193,35 @@ def test_translate_resolves_ego_and_npc() -> None:
 
 
 def test_translate_produces_expected_specs() -> None:
-    plan = translate_program(_demo_program())
+    (plan,) = translate_program(_demo_program())
     kinds = {spec.kind for spec in plan.specs}
     assert {
         SpecKind.TURN,
+        SpecKind.LANE_CHANGE,
         SpecKind.TRAFFIC_SIGNAL,
         SpecKind.REACH_LANE,
         SpecKind.MIN_SPEED,
         SpecKind.COLLISION,
         SpecKind.TIMEOUT,
     } <= kinds
+
+
+def test_serial_ordering_produces_gates() -> None:
+    (plan,) = translate_program(_demo_program())
+    by_kind = {s.kind: s for s in plan.specs}
+
+    # turn is gated on the preceding traffic-signal action having fired.
+    turn = by_kind[SpecKind.TURN]
+    assert turn.gate.kind is GateKind.ACTION_DONE
+    assert turn.gate.action_label == by_kind[SpecKind.TRAFFIC_SIGNAL].label
+
+    # the lane change waits until the ego has reached lanelet 460.
+    lane_change = by_kind[SpecKind.LANE_CHANGE]
+    assert lane_change.gate.kind is GateKind.LANE_REACHED
+    assert lane_change.gate.lanelet_id == 460
+
+    # the first action (traffic signal) fires immediately.
+    assert by_kind[SpecKind.TRAFFIC_SIGNAL].gate.kind is GateKind.IMMEDIATE
 
 
 def test_unknown_behavior_raises() -> None:
@@ -199,9 +258,76 @@ def test_unknown_actor_raises() -> None:
 
 def test_no_ego_field_synthesises_ego() -> None:
     program = OscProgram(scenarios=[OscScenario(name="empty")])
-    plan = translate_program(program)
+    (plan,) = translate_program(program)
     assert plan.ego.is_ego
     assert plan.ego.name == "ego"
+
+
+# ---------------------------------------------------------------------------
+# one_of expansion (pure)
+# ---------------------------------------------------------------------------
+
+
+def test_one_of_expands_into_variants() -> None:
+    plans = translate_program(_one_of_program())
+    assert len(plans) == 2
+    directions = {
+        spec.params["direction"]
+        for plan in plans
+        for spec in plan.specs
+        if spec.kind is SpecKind.TURN
+    }
+    assert directions == {"left", "right"}
+    assert [p.variant_index for p in plans] == [0, 1]
+    assert all(p.variant_count == 2 for p in plans)
+
+
+def test_nested_one_of_is_cartesian() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="m",
+                fields=[OscField(name="ego", type_name="vehicle")],
+                do=OscComposition(
+                    operator="serial",
+                    members=[
+                        OscComposition(
+                            operator="one_of",
+                            members=[
+                                OscInvocation(
+                                    "turn",
+                                    "ego",
+                                    [OscArgument("direction", SymbolValue("left"))],
+                                ),
+                                OscInvocation(
+                                    "turn",
+                                    "ego",
+                                    [OscArgument("direction", SymbolValue("right"))],
+                                ),
+                            ],
+                        ),
+                        OscComposition(
+                            operator="one_of",
+                            members=[
+                                OscInvocation(
+                                    "change_lane",
+                                    "ego",
+                                    [OscArgument("direction", SymbolValue("left"))],
+                                ),
+                                OscInvocation(
+                                    "change_lane",
+                                    "ego",
+                                    [OscArgument("direction", SymbolValue("right"))],
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    plans = translate_program(program)
+    assert len(plans) == 4
 
 
 # ---------------------------------------------------------------------------
@@ -210,23 +336,34 @@ def test_no_ego_field_synthesises_ego() -> None:
 
 
 def test_generated_code_is_valid_python() -> None:
-    plan = translate_program(_demo_program())
-    code = generate_module(plan, source_name="demo.osc")
+    code = generate_module(translate_program(_demo_program()), source_name="demo.osc")
     compile(code, "generated_demo.py", "exec")
     assert "class DemoScenario(BaseScenario):" in code
     assert "def build_scenario() -> DemoScenario:" in code
     assert "self._setup_ego_spawn()" in code
+    assert "SCENARIO_VARIANTS = {" in code
 
 
-def test_generated_code_contains_module_calls() -> None:
-    plan = translate_program(_demo_program())
-    code = generate_module(plan, source_name="demo.osc")
+def test_generated_code_contains_gated_module_calls() -> None:
+    code = generate_module(translate_program(_demo_program()), source_name="demo.osc")
     assert "TurnAction(" in code
     assert "TurnDirection.LEFT" in code
     assert "TrafficSignalAction(" in code
-    assert "EntityLanePositionCondition(" in code
+    # turn is triggered by the traffic-signal action having fired.
+    assert "ActionDoneCondition(set_traffic_lights_green_action" in code
+    # lane change is triggered by reaching lanelet 460.
+    assert "condition=EntityLanePositionCondition(" in code
     assert "TimeoutCondition(8.0, label=" in code
     assert "Lanelet2Pose(lanelet_id=242, s=5.0)" in code
+
+
+def test_generated_one_of_has_multiple_classes() -> None:
+    code = generate_module(translate_program(_one_of_program()), source_name="c.osc")
+    compile(code, "generated_choice.py", "exec")
+    assert "class ChoiceScenarioV0(BaseScenario):" in code
+    assert "class ChoiceScenarioV1(BaseScenario):" in code
+    assert '"choice_v0": build_scenario_v0,' in code
+    assert '"choice_v1": build_scenario_v1,' in code
 
 
 def test_multiple_pass_conditions_wrapped_in_and() -> None:
@@ -279,6 +416,20 @@ def test_parse_extract_matches_manual_ir() -> None:
     assert [f.name for f in scenario.fields] == ["ego", "npc"]
     assert scenario.do is not None
     assert any(m.name == "timeout" for m in scenario.modifiers)
+
+
+@_requires_osc2
+def test_parse_one_of_transpiles_to_variants() -> None:
+    source = (
+        "scenario junction:\n"
+        "    ego: vehicle\n"
+        "    do one_of:\n"
+        "        ego.turn(direction: left)\n"
+        "        ego.turn(direction: right)\n"
+    )
+    program = parse_program_from_string(source)
+    plans = translate_program(program)
+    assert len(plans) == 2
 
 
 @_requires_osc2

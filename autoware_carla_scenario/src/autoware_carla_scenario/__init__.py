@@ -85,6 +85,7 @@ if TYPE_CHECKING:
     )
     from .camera_recorder import CameraRecorder as CameraRecorder
     from .conditions import (
+        ActionDoneCondition as ActionDoneCondition,
         AlwaysTrueCondition as AlwaysTrueCondition,
         AndCondition as AndCondition,
         BaseCondition as BaseCondition,
@@ -172,6 +173,7 @@ __all__ = [
     "CarlaScenarioFixture",
     "CarlaServerManager",
     "EntityExistenceCondition",
+    "ActionDoneCondition",
     "AlwaysTrueCondition",
     "AndCondition",
     "BaseCondition",
@@ -279,6 +281,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "CarlaServerManager": (".server", "CarlaServerManager"),
     # conditions
     "EntityExistenceCondition": (".conditions", "EntityExistenceCondition"),
+    "ActionDoneCondition": (".conditions", "ActionDoneCondition"),
     "AlwaysTrueCondition": (".conditions", "AlwaysTrueCondition"),
     "AndCondition": (".conditions", "AndCondition"),
     "BaseCondition": (".conditions", "BaseCondition"),
