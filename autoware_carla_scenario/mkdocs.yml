@@ -78,6 +78,7 @@ nav:
   - Installation: installation.md
   - Tutorial: tutorial.md
   - Usage: usage.md
+  - OpenSCENARIO DSL Frontend: openscenario_dsl_frontend.md
   - Architecture: architecture.md
   - API Reference: api.md
   - Development: development.md

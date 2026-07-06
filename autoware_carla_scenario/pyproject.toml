@@ -27,6 +27,16 @@ dependencies = [
     "ffmpeg-python>=0.2.0",
 ]
 
+# NOTE: The openscenario_dsl_frontend subpackage uses `py-osc2` to parse
+# OpenSCENARIO DSL (.osc) sources. It is intentionally NOT declared as a
+# dependency (or optional extra) here: py-osc2 pins
+# `antlr4-python3-runtime==4.7.1`, which conflicts irreconcilably with the
+# `==4.9.*` required by hydra-core/omegaconf. py-osc2's ANTLR-generated parser
+# is also version-coupled to its 4.7.1 runtime, so the two cannot share one
+# environment. Install py-osc2 in an isolated environment to run the
+# transpiler; the frontend imports it lazily and raises OscDependencyError with
+# guidance when it is absent. See docs/openscenario_dsl_frontend.md.
+
 [project.optional-dependencies]
 carla = ["carla==0.10.0"]
 carla-0-9-16 = ["carla==0.9.16"]
@@ -53,3 +63,4 @@ packages = [
 scenario = "autoware_carla_scenario.examples.run:main"
 detect-no-3d-model = "autoware_carla_scenario.tools.detect_no_3d_model_lanelets:main"
 viewer = "autoware_carla_scenario.ui:main"
+osc-transpile = "autoware_carla_scenario.openscenario_dsl_frontend.cli:main"
