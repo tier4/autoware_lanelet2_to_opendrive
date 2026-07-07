@@ -1,0 +1,78 @@
+"""{{ scenario_class }} -- verify the ego reaches its goal roads.
+
+This module lives in a separate installable package, not inside
+``autoware_carla_scenario``.  It only depends on the framework's public API.
+
+Note: importing this module pulls in :class:`BaseScenario`, which imports CARLA
+at module scope, so it requires the framework's runtime environment.  The
+package ``__init__`` imports it lazily (inside ``register()``).  The CARLA world
+itself is only touched inside :meth:`setup`, which runs on the live server.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from autoware_carla_scenario import (
+    EGO_ROLE_NAME,
+    AndCondition,
+    BaseScenario,
+    EgoConfig,
+    EntityLanePositionCondition,
+    GroundProjectionConfig,
+    Lanelet2Pose,
+    StickyCondition,
+    TimeoutCondition,
+    to_opendrive,
+)
+
+from .configs import {{ config_class }}
+
+logger = logging.getLogger(__name__)
+
+
+class {{ scenario_class }}(BaseScenario):
+    """Pass when the ego has visited every configured goal road."""
+
+    def __init__(
+        self,
+        ego_config: EgoConfig,
+        spawn_pose: Lanelet2Pose,
+        config: {{ config_class }} | None = None,
+        ground_projection: GroundProjectionConfig | None = None,
+    ) -> None:
+        super().__init__(
+            ego_config, spawn_pose=spawn_pose, ground_projection=ground_projection
+        )
+        self._config = config or {{ config_class }}()
+
+    def setup(self) -> None:
+        """Snap the ego spawn and register the pass/fail conditions."""
+        self._setup_ego_spawn()
+        cfg = self._config
+
+        # Pass condition: the ego reaches each goal road (latched via Sticky).
+        stickies = []
+        for lanelet_id in cfg.goal_lanelet_ids:
+            od = to_opendrive(Lanelet2Pose(lanelet_id=lanelet_id, s=0.0))
+            logger.info(
+                "Goal lanelet %d -> OpenDRIVE road '%s'", lanelet_id, od.road_id
+            )
+            stickies.append(
+                StickyCondition(
+                    EntityLanePositionCondition(
+                        entity_name=EGO_ROLE_NAME,
+                        road_id=od.road_id,
+                    )
+                )
+            )
+        self.register_pass_condition(AndCondition(stickies))
+
+        # Fail-safe timeout.
+        self.register_fail_condition(
+            TimeoutCondition(cfg.timeout_seconds, label="scenario_timeout")
+        )
+
+    def is_done(self) -> bool:
+        """Termination is driven entirely by the pass/fail conditions."""
+        return False

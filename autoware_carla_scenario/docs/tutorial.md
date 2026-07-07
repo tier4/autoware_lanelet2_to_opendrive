@@ -386,6 +386,44 @@ no fork of `autoware_carla_scenario`.
 A ready-to-copy template lives at
 [`examples/scenario_package_template/`](https://github.com/tier4/autoware_lanelet2_to_opendrive/tree/master/examples/scenario_package_template).
 
+### Quickest path — generate one with `scenario-new`
+
+Instead of copying the template by hand, generate a fresh package (the files
+below are rendered from Jinja2 templates):
+
+```bash
+# scenario-new <package-name> [--scenario NAME] [--output-dir DIR]
+scenario-new reach_goal_pkg --scenario reach_goal
+```
+
+This writes a ready-to-install package:
+
+```
+reach_goal_pkg/
+├── pyproject.toml                     # name + entry point filled in
+└── src/reach_goal_pkg/
+    ├── __init__.py                    # register() wired up
+    ├── reach_goal.py                  # ReachGoalScenario
+    ├── configs.py                     # ReachGoalConfig
+    └── conf/scenario/reach_goal/default.yaml
+```
+
+```bash
+uv pip install -e reach_goal_pkg
+uv run scenario scenario=reach_goal/default map=nishishinjuku
+```
+
+The same generator is available programmatically:
+
+```python
+from autoware_carla_scenario.scaffold import create_scenario_package
+
+create_scenario_package("reach_goal_pkg", scenario_name="reach_goal",
+                        output_dir="~/pkgs")
+```
+
+The rest of this section explains what the generated files contain.
+
 ### What a scenario package needs
 
 | Piece | Where | API used |

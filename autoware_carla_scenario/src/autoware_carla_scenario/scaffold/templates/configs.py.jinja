@@ -1,0 +1,31 @@
+"""Config dataclass for the ``{{ scenario_name }}`` scenario.
+
+The scenario's parameters live with the scenario, in this package -- not inside
+``autoware_carla_scenario``.  Shared parameters (ego, map, server, ...) can be
+imported from the framework's public API instead of being redefined here.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class {{ config_class }}:
+    """Parameters for the ``{{ scenario_name }}`` scenario.
+
+    Every field is overridable from YAML (and the CLI) via Hydra, e.g.::
+
+        uv run scenario scenario={{ scenario_name }}/default \\
+            scenario.timeout_seconds=20
+    """
+
+    #: Must match the name passed to ``register_scenario`` and the
+    #: ``scenario.name`` key in the YAML config.
+    name: str = "{{ scenario_name }}"
+
+    #: Lanelet IDs whose OpenDRIVE roads the ego is expected to reach, in order.
+    goal_lanelet_ids: list[int] = field(default_factory=lambda: [460, 265])
+
+    #: Fail-safe timeout in seconds.
+    timeout_seconds: float = 10.0

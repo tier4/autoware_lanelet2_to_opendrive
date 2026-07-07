@@ -1,0 +1,38 @@
+"""{{ description }}
+
+Installing this package and running the framework CLI makes the
+``{{ scenario_name }}`` scenario available without editing
+``autoware_carla_scenario``::
+
+    uv run scenario scenario={{ scenario_name }}/default map=nishishinjuku
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from autoware_carla_scenario import register_conf_dir, register_scenario
+
+from .configs import {{ config_class }}
+
+__all__ = ["{{ config_class }}", "register"]
+
+#: Directory holding this package's Hydra config groups (scenario/, ...).
+CONF_DIR = Path(__file__).resolve().parent / "conf"
+
+
+def register() -> None:
+    """Register this package's scenarios and config directory.
+
+    Called automatically by the ``scenario`` CLI via the
+    ``autoware_carla_scenario.scenarios`` entry point.
+
+    The scenario class is imported *inside* this function on purpose: importing
+    it pulls in ``BaseScenario`` (and therefore CARLA), so deferring it keeps
+    merely importing this package -- e.g. while enumerating entry points --
+    free of the heavy CARLA import.
+    """
+    from .{{ scenario_name }} import {{ scenario_class }}
+
+    register_scenario("{{ scenario_name }}", {{ scenario_class }}, {{ config_class }})
+    register_conf_dir(CONF_DIR)

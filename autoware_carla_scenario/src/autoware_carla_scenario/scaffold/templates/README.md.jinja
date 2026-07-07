@@ -1,0 +1,39 @@
+# {{ distribution_name }}
+
+A standalone **scenario package** for the
+[`autoware-carla-scenario`](https://github.com/tier4/autoware_lanelet2_to_opendrive)
+framework, generated with `scenario-new`. Its scenario and config dataclass
+live here, outside the framework.
+
+## Layout
+
+```
+{{ package_name }}/
+├── pyproject.toml                     # declares the entry point
+└── src/{{ package_name }}/
+    ├── __init__.py                    # register() — the entry point target
+    ├── {{ scenario_name }}.py         # the scenario class (BaseScenario)
+    ├── configs.py                     # the scenario's config dataclass
+    └── conf/scenario/{{ scenario_name }}/
+        └── default.yaml               # a concrete scenario (YAML)
+```
+
+## Use it
+
+```bash
+# Install into the same environment as the framework.
+uv pip install -e .
+
+# Run the scenario — it is discoverable by name, no framework edits required.
+uv run scenario scenario={{ scenario_name }}/default map=nishishinjuku
+
+# Batch/glob and CLI overrides work exactly like the built-ins:
+uv run scenario scenario='{{ scenario_name }}/*' map=nishishinjuku
+uv run scenario scenario={{ scenario_name }}/default scenario.timeout_seconds=20
+```
+
+## How it plugs in
+
+`register()` in `__init__.py` calls `register_scenario(...)` and
+`register_conf_dir(...)`; the `autoware_carla_scenario.scenarios` entry point in
+`pyproject.toml` makes the `scenario` CLI discover it automatically at start-up.

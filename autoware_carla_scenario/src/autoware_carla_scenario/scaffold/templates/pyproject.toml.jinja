@@ -1,0 +1,23 @@
+[project]
+name = "{{ distribution_name }}"
+version = "0.1.0"
+description = "{{ description }}"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    # The framework provides the public API (register_scenario,
+    # register_conf_dir, BaseScenario, the shared config dataclasses, ...).
+    "autoware-carla-scenario",
+]
+
+# This entry point makes the package discoverable: when it is installed,
+# `uv run scenario ...` calls `{{ package_name }}:register` automatically at
+# start-up, which registers the scenario and its conf dir.
+[project.entry-points."autoware_carla_scenario.scenarios"]
+{{ package_name }} = "{{ package_name }}:register"
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv-build]
+packages = ["src/{{ package_name }}"]
