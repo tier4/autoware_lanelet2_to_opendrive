@@ -13,6 +13,11 @@ Or via the ``scenario-new`` console script::
 
 from __future__ import annotations
 
-from .generator import create_scenario_package, main, resolve_names
+from .generator import (
+    ScaffoldResult,
+    create_scenario_package,
+    main,
+    resolve_names,
+)
 
-__all__ = ["create_scenario_package", "main", "resolve_names"]
+__all__ = ["ScaffoldResult", "create_scenario_package", "main", "resolve_names"]

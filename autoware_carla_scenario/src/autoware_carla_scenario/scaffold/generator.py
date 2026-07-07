@@ -20,8 +20,19 @@ import keyword
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+
+class ScaffoldResult(NamedTuple):
+    """Result of :func:`create_scenario_package`."""
+
+    #: The created package root (``output_dir / package_name``).
+    root: Path
+    #: The resolved template variables (see :func:`resolve_names`).
+    names: dict[str, str]
+
 
 #: Directory holding the ``*.jinja`` templates shipped with this package.
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -134,8 +145,8 @@ def create_scenario_package(
     output_dir: str | Path = ".",
     description: str | None = None,
     force: bool = False,
-) -> Path:
-    """Render a new scenario package under *output_dir* and return its root path.
+) -> ScaffoldResult:
+    """Render a new scenario package under *output_dir*.
 
     Parameters
     ----------
@@ -155,8 +166,8 @@ def create_scenario_package(
 
     Returns
     -------
-    Path
-        The created package root (``output_dir / package_name``).
+    ScaffoldResult
+        The created package ``root`` and the resolved ``names``.
     """
     names = resolve_names(name, scenario_name, description)
     root = Path(output_dir) / names["package_name"]
@@ -172,7 +183,7 @@ def create_scenario_package(
         rendered = env.get_template(template_name).render(**names)
         out_path.write_text(rendered, encoding="utf-8")
 
-    return root
+    return ScaffoldResult(root=root, names=names)
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point for the ``scenario-new`` console script."""
     args = _build_parser().parse_args(argv)
     try:
-        root = create_scenario_package(
+        root, names = create_scenario_package(
             args.name,
             scenario_name=args.scenario_name,
             output_dir=args.output_dir,
@@ -232,7 +243,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
         return 1
 
-    names = resolve_names(args.name, args.scenario_name)
     print(f"Created scenario package at {root}")  # noqa: T201
     print("\nNext steps:")  # noqa: T201
     print(f"  uv pip install -e {root}")  # noqa: T201

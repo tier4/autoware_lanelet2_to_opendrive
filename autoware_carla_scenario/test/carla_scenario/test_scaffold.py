@@ -67,9 +67,11 @@ class TestResolveNames:
 
 class TestCreateScenarioPackage:
     def test_generates_valid_package(self, tmp_path: Path) -> None:
-        root = create_scenario_package("reach_goal_pkg", output_dir=tmp_path)
+        result = create_scenario_package("reach_goal_pkg", output_dir=tmp_path)
+        root = result.root
 
         assert root == tmp_path / "reach_goal_pkg"
+        assert result.names["scenario_name"] == "reach_goal"
         pkg = root / "src" / "reach_goal_pkg"
 
         # Expected files exist.
@@ -104,5 +106,5 @@ class TestCreateScenarioPackage:
     def test_force_overwrites(self, tmp_path: Path) -> None:
         create_scenario_package("dup_pkg", output_dir=tmp_path)
         # Should not raise when force=True.
-        root = create_scenario_package("dup_pkg", output_dir=tmp_path, force=True)
-        assert root.is_dir()
+        result = create_scenario_package("dup_pkg", output_dir=tmp_path, force=True)
+        assert result.root.is_dir()
