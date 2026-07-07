@@ -4,9 +4,11 @@ This module lives in a **separate installable package**, not inside
 ``autoware_carla_scenario``.  It only depends on the framework's public API,
 which it imports from the top-level package.
 
-Note: nothing here imports ``carla`` at module scope, so the module (and hence
-the entry-point registration) can be imported in any environment.  The CARLA
-world is only touched inside :meth:`setup`, which runs on the live server.
+Note: importing this module pulls in :class:`BaseScenario`, which imports CARLA
+at module scope, so it requires the framework's runtime environment.  The
+package ``__init__`` imports this module lazily (inside ``register()``) so that
+merely discovering the entry point stays lightweight.  The CARLA world itself
+is only touched inside :meth:`setup`, which runs on the live server.
 """
 
 from __future__ import annotations

@@ -37,7 +37,9 @@ class AutowareScenarioSearchPathPlugin(SearchPathPlugin):
         # entries -- so we simply append them all rather than tracking which is
         # primary.
         for conf_dir in get_conf_dirs():
+            # ``get_conf_dirs`` returns resolved (absolute) paths, so ``as_uri``
+            # is safe and yields a correct ``file:///...`` URI on every platform.
             search_path.append(
                 provider="autoware-carla-scenario",
-                path=f"file://{conf_dir}",
+                path=conf_dir.as_uri(),
             )

@@ -53,9 +53,10 @@ from autoware_carla_scenario.conditions import ScenarioResult
 from autoware_carla_scenario.registry import (
     BuildScenarioFn as BuildScenarioFn,
     ScenarioBuilder as ScenarioBuilder,
-    _SCENARIO_REGISTRY,
+    _SCENARIO_REGISTRY as _SCENARIO_REGISTRY,  # re-exported for backwards compat
     get_conf_dirs,
-    get_scenario_registry as get_scenario_registry,
+    get_scenario_builder,
+    get_scenario_registry,
     load_scenario_plugins,
     register_conf_dir,
     register_scenario,
@@ -245,7 +246,9 @@ def _resolve_scenario_glob(pattern: str) -> list[str]:
         searched_dirs.append(scenario_dir)
         for m in scenario_dir.glob(f"{pattern}.yaml"):
             rel = m.relative_to(scenario_dir).with_suffix("")
-            names.add(str(rel))
+            # Hydra config names always use forward slashes, so normalise
+            # away any OS-specific separator.
+            names.add(rel.as_posix())
     if not names:
         print(  # noqa: T201
             f"Error: no scenario configs match pattern '{pattern}' "
@@ -466,9 +469,9 @@ def build_scenario(
 
     # Validate the name before doing any expensive work.
     scenario_name: str = cfg.scenario.name
-    builder = _SCENARIO_REGISTRY.get(scenario_name)
+    builder = get_scenario_builder(scenario_name)
     if builder is None:
-        registered = sorted(_SCENARIO_REGISTRY)
+        registered = sorted(get_scenario_registry())
         msg = (
             f"Unknown scenario name: {scenario_name!r}. "
             f"Registered scenarios: {registered}"

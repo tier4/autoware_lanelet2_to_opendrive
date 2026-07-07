@@ -51,6 +51,7 @@ __all__ = [
     "register_scenario",
     "register_scenario_builder",
     "get_scenario_registry",
+    "get_scenario_builder",
     "register_conf_dir",
     "get_conf_dirs",
     "load_scenario_plugins",
@@ -133,6 +134,16 @@ def get_scenario_registry() -> dict[str, ScenarioBuilder]:
     Useful for introspection (e.g. listing available scenarios).
     """
     return dict(_SCENARIO_REGISTRY)
+
+
+def get_scenario_builder(name: str) -> ScenarioBuilder | None:
+    """Return the builder registered under *name*, or ``None`` if absent.
+
+    Public lookup helper so callers don't reach into the internal registry
+    dict.  Use :func:`get_scenario_registry` when you need the full mapping
+    (e.g. to list the registered names).
+    """
+    return _SCENARIO_REGISTRY.get(name)
 
 
 # ---------------------------------------------------------------------------
