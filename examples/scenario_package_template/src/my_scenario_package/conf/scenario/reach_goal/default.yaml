@@ -1,0 +1,15 @@
+# @package _global_
+# Concrete scenario: bind the reach_goal abstract scenario to specific values.
+#
+# The `map`, `ego`, `server`, `entity` and `traffic_manager` groups are still
+# provided by the framework's built-in conf directory (which is the primary
+# entry in Hydra's search path); this file only needs to override what differs.
+scenario:
+  name: reach_goal
+  goal_lanelet_ids: [460, 265]
+  timeout_seconds: 8.0
+
+ego:
+  initial_speed_kmh: 5.0
+  spawn_lanelet_id: 242
+  spawn_s: 25.0

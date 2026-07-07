@@ -33,7 +33,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
 
 import carla
 import hydra
@@ -51,6 +50,17 @@ from autoware_carla_scenario import (
     SpawnTransform,
 )
 from autoware_carla_scenario.conditions import ScenarioResult
+from autoware_carla_scenario.registry import (
+    BuildScenarioFn as BuildScenarioFn,
+    ScenarioBuilder as ScenarioBuilder,
+    _SCENARIO_REGISTRY,
+    get_conf_dirs,
+    get_scenario_registry as get_scenario_registry,
+    load_scenario_plugins,
+    register_conf_dir,
+    register_scenario,
+    register_scenario_builder as register_scenario_builder,
+)
 
 from .configs import (
     IntersectionPassingConfig,
@@ -63,82 +73,23 @@ from .lane_change import LaneChangeScenario
 from .temporary_stop import TemporaryStopScenario
 from .traffic_light_compliance import TrafficLightComplianceScenario
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Scenario Registry
 # ---------------------------------------------------------------------------
+#
+# The registry itself (``register_scenario``, ``register_scenario_builder``,
+# ``get_scenario_registry``, the conf-dir registry, and entry-point plugin
+# discovery) now lives in :mod:`autoware_carla_scenario.registry` so that it can
+# be imported without pulling in CARLA.  The symbols are re-exported at the top
+# of this module for backwards compatibility (``from ...examples.run import
+# register_scenario``).
 
-#: Callable that creates a :class:`BaseScenario` from its decomposed parts.
-#: Signature: ``(ego, scenario_dict, spawn_pose, ground_projection) -> scenario``
-ScenarioBuilder = Callable[
-    [EgoConfig, dict[str, Any], Lanelet2Pose, GroundProjectionConfig],
-    BaseScenario,
-]
-
-#: Callable that replaces the entire :func:`build_scenario` logic.
-#: Signature: ``(cfg) -> (ego, scenario)``
-BuildScenarioFn = Callable[[DictConfig], tuple[EgoConfig, BaseScenario]]
-
-_SCENARIO_REGISTRY: dict[str, ScenarioBuilder] = {}
-
-
-def register_scenario(
-    name: str,
-    scenario_cls: type[BaseScenario],
-    config_cls: type,
-) -> None:
-    """Register a scenario class and its config class under *name*.
-
-    This creates a standard builder that follows the convention used by all
-    built-in scenarios::
-
-        scenario_cls(ego, config=config_cls(**scenario_dict),
-                     spawn_pose=spawn_pose, ground_projection=ground_projection)
-
-    Downstream projects can call this at import time to make their custom
-    scenarios available to :func:`build_scenario` and the CLI runner::
-
-        from autoware_carla_scenario.examples.run import register_scenario
-        register_scenario("my_scenario", MyScenario, MyScenarioConfig)
-    """
-
-    def _builder(
-        ego: EgoConfig,
-        scenario_dict: dict[str, Any],
-        spawn_pose: Lanelet2Pose,
-        ground_projection: GroundProjectionConfig,
-    ) -> BaseScenario:
-        config = config_cls(**scenario_dict)
-        return scenario_cls(  # type: ignore[call-arg]
-            ego,
-            config=config,
-            spawn_pose=spawn_pose,
-            ground_projection=ground_projection,
-        )
-
-    _SCENARIO_REGISTRY[name] = _builder
-
-
-def register_scenario_builder(name: str, builder: ScenarioBuilder) -> None:
-    """Register a custom builder function under *name*.
-
-    Use this instead of :func:`register_scenario` when the scenario
-    constructor does not follow the standard ``(ego, config=..., ...)``
-    pattern and you need full control over instantiation.
-    """
-    _SCENARIO_REGISTRY[name] = builder
-
-
-def get_scenario_registry() -> dict[str, ScenarioBuilder]:
-    """Return a **copy** of the current scenario registry.
-
-    Useful for introspection (e.g. listing available scenarios).
-    """
-    return dict(_SCENARIO_REGISTRY)
+# Directory containing the built-in Hydra config files (conf/ next to this
+# module).  Registered so it becomes the primary entry in the search path.
+_CONF_DIR = Path(__file__).resolve().parent / "conf"
+register_conf_dir(_CONF_DIR)
 
 
 # Register built-in scenarios.
@@ -231,10 +182,6 @@ def run_scenario_with_queue(
     return results[0]
 
 
-# Directory containing Hydra config files (conf/ next to this module).
-_CONF_DIR = Path(__file__).resolve().parent / "conf"
-
-
 def _to_dict(cfg_node: DictConfig) -> dict:  # type: ignore[type-arg]
     """Convert an OmegaConf node to a plain dict (typed helper)."""
     container = OmegaConf.to_container(cfg_node, resolve=True)
@@ -269,25 +216,71 @@ def _extract_scenario_override(argv: list[str]) -> tuple[str | None, list[str]]:
     return scenario_value, remaining
 
 
-def _resolve_scenario_glob(pattern: str) -> list[str]:
-    """Glob ``conf/scenario/{pattern}.yaml`` and return sorted config names.
+def _extra_conf_dirs() -> list[Path]:
+    """Return registered conf dirs other than the built-in primary directory.
 
-    Each returned name is a Hydra config path relative to ``conf/scenario/``
-    without the ``.yaml`` suffix (e.g. ``"intersection_passing/left_turn"``).
+    These are contributed by external scenario packages (via
+    :func:`autoware_carla_scenario.register_conf_dir`) and must be added to
+    Hydra's search path so that their config groups become resolvable.
     """
-    scenario_dir = _CONF_DIR / "scenario"
-    matches = sorted(scenario_dir.glob(f"{pattern}.yaml"))
-    if not matches:
+    return [d for d in get_conf_dirs() if d != _CONF_DIR]
+
+
+def _searchpath_overrides() -> list[str]:
+    """Return the Hydra override(s) that add external conf dirs to the search path.
+
+    Returns an empty list when no external scenario packages are registered so
+    that the default (built-in-only) behaviour is completely unchanged.
+
+    Each entry is a quoted ``file://`` URI: Hydra's override grammar rejects the
+    ``:`` in an *unquoted* value, so the URIs must be wrapped in single quotes
+    (e.g. ``hydra.searchpath=['file:///abs/conf']``).  ``d`` is absolute, so
+    ``file://`` + ``/abs`` yields the correct triple-slash ``file:///abs``.
+    """
+    extra = _extra_conf_dirs()
+    if not extra:
+        return []
+    joined = ",".join(f"'file://{d}'" for d in extra)
+    return [f"hydra.searchpath=[{joined}]"]
+
+
+def _find_scenario_yaml(name: str) -> Path:
+    """Return the YAML path for scenario *name* across registered conf dirs.
+
+    Falls back to the built-in dir (for display only) when the file is not
+    found on disk, e.g. for a config coming from Hydra's ConfigStore.
+    """
+    for conf_dir in get_conf_dirs():
+        candidate = conf_dir / "scenario" / f"{name}.yaml"
+        if candidate.is_file():
+            return candidate
+    return _CONF_DIR / "scenario" / f"{name}.yaml"
+
+
+def _resolve_scenario_glob(pattern: str) -> list[str]:
+    """Glob ``conf/scenario/{pattern}.yaml`` across every registered conf dir.
+
+    Each returned name is a Hydra config path relative to ``scenario/`` without
+    the ``.yaml`` suffix (e.g. ``"intersection_passing/left_turn"``).  Matches
+    from external scenario packages are included alongside the built-ins.
+    """
+    names: set[str] = set()
+    searched_dirs: list[Path] = []
+    for conf_dir in get_conf_dirs():
+        scenario_dir = conf_dir / "scenario"
+        if not scenario_dir.is_dir():
+            continue
+        searched_dirs.append(scenario_dir)
+        for m in scenario_dir.glob(f"{pattern}.yaml"):
+            rel = m.relative_to(scenario_dir).with_suffix("")
+            names.add(str(rel))
+    if not names:
         print(  # noqa: T201
             f"Error: no scenario configs match pattern '{pattern}' "
-            f"under {scenario_dir}"
+            f"under {[str(d) for d in searched_dirs]}"
         )
         sys.exit(1)
-    names: list[str] = []
-    for m in matches:
-        rel = m.relative_to(scenario_dir).with_suffix("")
-        names.append(str(rel))
-    return names
+    return sorted(names)
 
 
 def _compose_config(scenario_name: str, overrides: list[str]) -> DictConfig:
@@ -296,7 +289,11 @@ def _compose_config(scenario_name: str, overrides: list[str]) -> DictConfig:
     with initialize_config_dir(config_dir=str(_CONF_DIR), version_base=None):
         cfg = compose(
             config_name="config",
-            overrides=[f"scenario={scenario_name}", *overrides],
+            overrides=[
+                f"scenario={scenario_name}",
+                *_searchpath_overrides(),
+                *overrides,
+            ],
         )
     return cfg
 
@@ -368,7 +365,6 @@ def _log_batch_plan(
     """Log which YAML configs will be loaded and their resolved parameters."""
     sep = "=" * 60
     thin = "-" * 60
-    scenario_dir = _CONF_DIR / "scenario"
     logger.info(sep)
     logger.info(
         "Batch execution plan: %d scenario(s)%s",
@@ -378,7 +374,7 @@ def _log_batch_plan(
     logger.info(sep)
 
     for i, (name, cfg) in enumerate(zip(scenario_names, configs), 1):
-        yaml_path = scenario_dir / f"{name}.yaml"
+        yaml_path = _find_scenario_yaml(name)
         logger.info(thin)
         logger.info("[%d/%d] %s", i, len(scenario_names), name)
         logger.info("  config file : %s", yaml_path)
@@ -430,8 +426,7 @@ def run_batch(
     map_names = {str(cfg.map.name) for cfg in configs}
     if len(map_names) > 1:
         print(  # noqa: T201
-            f"Error: batch scenarios must share the same map, "
-            f"but found: {map_names}"
+            f"Error: batch scenarios must share the same map, but found: {map_names}"
         )
         sys.exit(1)
 
@@ -629,6 +624,11 @@ def _extract_resume_from(argv: list[str]) -> tuple[int, list[str]]:
 
 def main() -> None:
     """CLI entry point: detect glob patterns and dispatch accordingly."""
+    # Discover external scenario packages (entry-point plugins) before we touch
+    # the config search path or the scenario registry, so their scenarios and
+    # conf dirs are available to both the glob and single-run code paths.
+    load_scenario_plugins()
+
     # Extract --resume-from before Hydra sees the argv.
     resume_from, cleaned_argv = _extract_resume_from(sys.argv)
     sys.argv = cleaned_argv
@@ -651,6 +651,11 @@ def main() -> None:
         )
         run_batch(scenario_names, remaining)
     else:
+        # Single run goes through @hydra.main, which owns its own search path.
+        # Inject the external conf dirs via a hydra.searchpath override so that
+        # ``scenario=<external_group>/<name>`` resolves.  Appended only when at
+        # least one external package is registered (otherwise argv is untouched).
+        sys.argv.extend(_searchpath_overrides())
         _hydra_main()
 
 
