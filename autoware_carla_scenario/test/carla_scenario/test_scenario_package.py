@@ -39,7 +39,7 @@ class TestScenarioRegistry:
     def test_register_scenario_builds_with_config(self) -> None:
         name = "__pkg_test_reach__"
         try:
-            register_scenario(name, _StoreKwargs, _StoreKwargs)
+            register_scenario(name, _StoreKwargs, _StoreKwargs)  # type: ignore[arg-type]
             builder = get_scenario_registry()[name]
 
             ego = MagicMock()
@@ -65,7 +65,10 @@ class TestScenarioRegistry:
         sentinel = object()
         try:
             register_scenario_builder(name, lambda *_: sentinel)  # type: ignore[arg-type,return-value]
-            assert get_scenario_registry()[name](None, {}, None, None) is sentinel
+            assert (
+                get_scenario_registry()[name](None, {}, None, None)  # type: ignore[arg-type]
+                is sentinel
+            )
         finally:
             registry._SCENARIO_REGISTRY.pop(name, None)
 
