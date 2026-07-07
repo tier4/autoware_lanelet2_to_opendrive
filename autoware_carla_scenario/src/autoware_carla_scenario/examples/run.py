@@ -216,34 +216,6 @@ def _extract_scenario_override(argv: list[str]) -> tuple[str | None, list[str]]:
     return scenario_value, remaining
 
 
-def _extra_conf_dirs() -> list[Path]:
-    """Return registered conf dirs other than the built-in primary directory.
-
-    These are contributed by external scenario packages (via
-    :func:`autoware_carla_scenario.register_conf_dir`) and must be added to
-    Hydra's search path so that their config groups become resolvable.
-    """
-    return [d for d in get_conf_dirs() if d != _CONF_DIR]
-
-
-def _searchpath_overrides() -> list[str]:
-    """Return the Hydra override(s) that add external conf dirs to the search path.
-
-    Returns an empty list when no external scenario packages are registered so
-    that the default (built-in-only) behaviour is completely unchanged.
-
-    Each entry is a quoted ``file://`` URI: Hydra's override grammar rejects the
-    ``:`` in an *unquoted* value, so the URIs must be wrapped in single quotes
-    (e.g. ``hydra.searchpath=['file:///abs/conf']``).  ``d`` is absolute, so
-    ``file://`` + ``/abs`` yields the correct triple-slash ``file:///abs``.
-    """
-    extra = _extra_conf_dirs()
-    if not extra:
-        return []
-    joined = ",".join(f"'file://{d}'" for d in extra)
-    return [f"hydra.searchpath=[{joined}]"]
-
-
 def _find_scenario_yaml(name: str) -> Path:
     """Return the YAML path for scenario *name* across registered conf dirs.
 
@@ -289,11 +261,7 @@ def _compose_config(scenario_name: str, overrides: list[str]) -> DictConfig:
     with initialize_config_dir(config_dir=str(_CONF_DIR), version_base=None):
         cfg = compose(
             config_name="config",
-            overrides=[
-                f"scenario={scenario_name}",
-                *_searchpath_overrides(),
-                *overrides,
-            ],
+            overrides=[f"scenario={scenario_name}", *overrides],
         )
     return cfg
 
@@ -651,11 +619,9 @@ def main() -> None:
         )
         run_batch(scenario_names, remaining)
     else:
-        # Single run goes through @hydra.main, which owns its own search path.
-        # Inject the external conf dirs via a hydra.searchpath override so that
-        # ``scenario=<external_group>/<name>`` resolves.  Appended only when at
-        # least one external package is registered (otherwise argv is untouched).
-        sys.argv.extend(_searchpath_overrides())
+        # Single run goes through @hydra.main.  External conf dirs are added to
+        # the search path by AutowareScenarioSearchPathPlugin (discovered via
+        # the hydra_plugins namespace), so nothing needs threading here.
         _hydra_main()
 
 

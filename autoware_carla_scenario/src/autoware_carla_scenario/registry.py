@@ -195,13 +195,9 @@ def load_scenario_plugins() -> None:
 
     import importlib.metadata as importlib_metadata  # noqa: PLC0415
 
-    try:
-        entry_points = importlib_metadata.entry_points(group=SCENARIO_ENTRY_POINT_GROUP)
-    except TypeError:
-        # Python <3.10 style API: entry_points() returns a mapping.
-        entry_points = importlib_metadata.entry_points().get(  # type: ignore[attr-defined]
-            SCENARIO_ENTRY_POINT_GROUP, []
-        )
+    # The selectable ``group=`` API exists on all supported interpreters
+    # (requires-python >= 3.10).
+    entry_points = importlib_metadata.entry_points(group=SCENARIO_ENTRY_POINT_GROUP)
 
     for entry_point in entry_points:
         try:

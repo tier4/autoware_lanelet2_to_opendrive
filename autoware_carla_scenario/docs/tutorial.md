@@ -444,8 +444,9 @@ uv run scenario scenario='my_scenario/*' map=nishishinjuku
 ```
 
 At start-up the runner calls `load_scenario_plugins()`, which loads every
-installed `autoware_carla_scenario.scenarios` entry point and merges each
-registered `conf/` directory into Hydra's search path. The `map`, `ego`,
+installed `autoware_carla_scenario.scenarios` entry point (registering your
+scenarios and `conf/` directory). A bundled Hydra `SearchPathPlugin` then adds
+every registered `conf/` directory to Hydra's search path. The `map`, `ego`,
 `server`, and `entity` config groups still come from the framework's built-in
 `conf/`, so your package only ships the `scenario/` group it actually owns.
 
