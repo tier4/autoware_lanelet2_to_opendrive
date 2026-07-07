@@ -5,30 +5,29 @@ documented defaults.  Hydra's ``structured configs`` feature maps the
 YAML values directly to these dataclasses via OmegaConf.
 
 The **shared** configs (``ServerConfig``, ``MapConfig``, ``EntityConfig``,
-``EgoVehicleConfig``, ``NpcVehicleConfig``, ``SweepConfig``) now live in the
-public :mod:`autoware_carla_scenario.scenario_config` module so that external
-scenario packages can reuse them.  They are re-exported here for backwards
-compatibility; new code should import them from the top-level package instead::
+``EgoVehicleConfig``, ``NpcVehicleConfig``, ``SweepConfig``) live in the public
+:mod:`autoware_carla_scenario.scenario_config` module so that external scenario
+packages can reuse them; import them from the top-level package::
 
-    from autoware_carla_scenario import ServerConfig, MapConfig  # preferred
+    from autoware_carla_scenario import ServerConfig, MapConfig
 
-Only the *example-specific* scenario configs (and the root
-``ScenarioRunConfig``) are defined in this module.
+This module defines only the *example-specific* scenario configs and the root
+``ScenarioRunConfig`` (which composes the shared configs below).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Shared configs are defined once in the public module and re-exported here so
-# that ``from .configs import ServerConfig`` (and friends) keep working.
+# The shared configs are imported because the composite configs in this module
+# (``ScenarioRunConfig`` and ``IntersectionPassingConfig``) reference them.
 from ..scenario_config import (
-    EgoVehicleConfig as EgoVehicleConfig,
-    EntityConfig as EntityConfig,
-    MapConfig as MapConfig,
+    EgoVehicleConfig,
+    EntityConfig,
+    MapConfig,
     NpcVehicleConfig,
-    ServerConfig as ServerConfig,
-    SweepConfig as SweepConfig,
+    ServerConfig,
+    SweepConfig,
 )
 
 # ---------------------------------------------------------------------------

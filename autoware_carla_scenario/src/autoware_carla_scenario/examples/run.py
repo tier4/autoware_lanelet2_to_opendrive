@@ -51,15 +51,13 @@ from autoware_carla_scenario import (
 )
 from autoware_carla_scenario.conditions import ScenarioResult
 from autoware_carla_scenario.registry import (
-    BuildScenarioFn as BuildScenarioFn,
-    ScenarioBuilder as ScenarioBuilder,
+    BuildScenarioFn,
     get_conf_dirs,
     get_scenario_builder,
     get_scenario_registry,
     load_scenario_plugins,
     register_conf_dir,
     register_scenario,
-    register_scenario_builder as register_scenario_builder,
 )
 
 from .configs import (
@@ -81,10 +79,9 @@ logger = logging.getLogger(__name__)
 #
 # The registry itself (``register_scenario``, ``register_scenario_builder``,
 # ``get_scenario_registry``, the conf-dir registry, and entry-point plugin
-# discovery) now lives in :mod:`autoware_carla_scenario.registry` so that it can
-# be imported without pulling in CARLA.  The symbols are re-exported at the top
-# of this module for backwards compatibility (``from ...examples.run import
-# register_scenario``).
+# discovery) lives in :mod:`autoware_carla_scenario.registry` (and is
+# re-exported from the top-level package) so it can be imported without pulling
+# in CARLA.  This runner only imports the pieces it actually uses.
 
 # Directory containing the built-in Hydra config files (conf/ next to this
 # module).  Registered so it becomes the primary entry in the search path.
