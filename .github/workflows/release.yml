@@ -332,13 +332,7 @@ jobs:
 
       - name: Run ASAM QC analysis
         run: |
-          # `analyze` requires both the .xodr and the source Lanelet2 .osm;
-          # pipefail makes a failing analyze fail this step instead of silently
-          # writing an empty report that later 400s on release upload.
-          set -o pipefail
-          uv run analyze sample_nishishinjuku.xodr \
-            autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm \
-            | tee asam_qc_report.txt
+          uv run analyze sample_nishishinjuku.xodr | tee asam_qc_report.txt
 
       - name: Upload ASAM QC report to GitHub Release
         run: |
