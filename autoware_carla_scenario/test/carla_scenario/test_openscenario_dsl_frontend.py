@@ -25,15 +25,19 @@ from autoware_carla_scenario.openscenario_dsl_frontend import (
 )
 from autoware_carla_scenario.openscenario_dsl_frontend.ast_model import (
     OscArgument,
+    OscComparison,
     OscComposition,
+    OscElapsed,
     OscField,
+    OscFieldAccess,
     OscInvocation,
     OscModifier,
     OscProgram,
     OscScenario,
+    OscWait,
 )
 from autoware_carla_scenario.openscenario_dsl_frontend.codegen import generate_module
-from autoware_carla_scenario.openscenario_dsl_frontend.plan import GateKind
+from autoware_carla_scenario.openscenario_dsl_frontend.plan import CondKind, GateKind
 from autoware_carla_scenario.openscenario_dsl_frontend.translator import (
     translate_program,
 )
@@ -411,6 +415,132 @@ def test_parallel_pass_conditions_are_unordered() -> None:
 
 
 # ---------------------------------------------------------------------------
+# wait / until + expression compiler (pure)
+# ---------------------------------------------------------------------------
+
+
+def _speed_lt(kmph: float) -> OscComparison:
+    return OscComparison(
+        lhs=OscFieldAccess("ego", "speed"), op="<", rhs=PhysicalValue(kmph, "kmph")
+    )
+
+
+def test_wait_elapsed_gates_next_action() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="w",
+                fields=[OscField("ego", "vehicle")],
+                do=OscComposition(
+                    operator="serial",
+                    members=[
+                        OscWait(condition=OscElapsed(PhysicalValue(3.0, "s"))),
+                        OscInvocation(
+                            "turn",
+                            "ego",
+                            [OscArgument("direction", SymbolValue("left"))],
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    turn = next(s for s in plan.specs if s.kind is SpecKind.TURN)
+    assert turn.gate.kind is GateKind.CONDITION
+    assert turn.gate.condition is not None
+    assert turn.gate.condition.kind is CondKind.ELAPSED
+    assert turn.gate.condition.value == pytest.approx(3.0)
+
+
+def test_wait_comparison_compiles_to_speed_condition() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="w",
+                fields=[OscField("ego", "vehicle")],
+                do=OscComposition(
+                    operator="serial",
+                    members=[
+                        OscWait(condition=_speed_lt(5.0)),
+                        OscInvocation(
+                            "turn",
+                            "ego",
+                            [OscArgument("direction", SymbolValue("left"))],
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    turn = next(s for s in plan.specs if s.kind is SpecKind.TURN)
+    assert turn.gate.condition is not None
+    assert turn.gate.condition.kind is CondKind.SPEED
+    assert turn.gate.condition.value == pytest.approx(5.0 / 3.6)
+    code = generate_module([plan], source_name="w.osc")
+    assert "SpeedCondition(" in code
+    assert "ComparisonRule.LESS_THAN" in code
+    compile(code, "gen_wait.py", "exec")
+
+
+def test_until_overrides_completion_with_lane_condition() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="u",
+                fields=[OscField("ego", "vehicle")],
+                do=OscComposition(
+                    operator="serial",
+                    members=[
+                        OscInvocation(
+                            "drive",
+                            "ego",
+                            until=OscComparison(
+                                lhs=OscFieldAccess("ego", "lane"),
+                                op="==",
+                                rhs=IntValue(460),
+                            ),
+                        ),
+                        OscInvocation(
+                            "turn",
+                            "ego",
+                            [OscArgument("direction", SymbolValue("left"))],
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    turn = next(s for s in plan.specs if s.kind is SpecKind.TURN)
+    assert turn.gate.kind is GateKind.CONDITION
+    assert turn.gate.condition is not None
+    assert turn.gate.condition.kind is CondKind.LANE
+    assert turn.gate.condition.lanelet_id == 460
+
+
+def test_unsupported_attribute_raises() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="bad",
+                fields=[OscField("ego", "vehicle")],
+                do=OscWait(
+                    condition=OscComparison(
+                        lhs=OscFieldAccess("ego", "altitude"),
+                        op="<",
+                        rhs=IntValue(3),
+                    )
+                ),
+            )
+        ]
+    )
+    with pytest.raises(OscTranslationError):
+        translate_program(program)
+
+
+# ---------------------------------------------------------------------------
 # parser (requires py-osc2)
 # ---------------------------------------------------------------------------
 
@@ -445,6 +575,25 @@ def test_parse_one_of_transpiles_to_variants() -> None:
     program = parse_program_from_string(source)
     plans = translate_program(program)
     assert len(plans) == 2
+
+
+@_requires_osc2
+def test_parse_wait_and_until_transpile() -> None:
+    source = (
+        "scenario reactive:\n"
+        "    ego: vehicle\n"
+        "    do serial:\n"
+        "        ego.drive() with:\n"
+        "            until(ego.lane == 460)\n"
+        "        wait elapsed(3s)\n"
+        "        ego.turn(direction: left)\n"
+    )
+    program = parse_program_from_string(source)
+    (plan,) = translate_program(program)
+    generated = generate_module([plan], source_name="reactive.osc")
+    compile(generated, "reactive.py", "exec")
+    assert "ElapsedTimeCondition(3.0" in generated
+    assert "EntityLanePositionCondition(" in generated
 
 
 @_requires_osc2

@@ -1,0 +1,18 @@
+# OpenSCENARIO DSL (OSC2) example using `until` and `wait` event conditions.
+#
+#     osc-transpile reactive_drive.osc -o reactive_drive_generated.py
+#
+# The ego drives until it reaches lanelet 460 (an observable completion), then
+# waits until it has slowed below 5 km/h, then changes lane. Each step's action
+# is gated on the previous step's event condition, so nothing arms early.
+
+scenario reactive_drive:
+    ego: vehicle
+    do serial:
+        ego.drive() with:
+            speed(30kmph)
+            spawn_lanelet(242)
+            until(ego.lane == 460)
+        wait ego.speed < 5kmph
+        ego.change_lane(direction: right)
+    timeout(20s)

@@ -13,15 +13,20 @@ from typing import Any, Optional
 
 from .ast_model import (
     OscArgument,
+    OscComparison,
     OscComposition,
     OscDoMember,
+    OscElapsed,
     OscEnum,
+    OscEventCond,
     OscField,
+    OscFieldAccess,
     OscInvocation,
     OscModifier,
     OscProgram,
     OscScenario,
     OscStruct,
+    OscWait,
 )
 from .parser import ParseResult
 from .values import (
@@ -179,28 +184,81 @@ class _Extractor:
             arguments=self.extract_arguments(node),
         )
 
-    def _extract_with_modifiers(self, invocation_node: Any) -> list[OscModifier]:
+    def _extract_with_block(
+        self, invocation_node: Any
+    ) -> tuple[list[OscModifier], Optional[OscEventCond]]:
+        """Extract a ``with:`` block's modifiers and optional ``until`` clause."""
         w = self._w
         with_decl = w.first_child_by_rule(invocation_node, "behavior_with_declaration")
         if with_decl is None:
-            return []
+            return [], None
         modifiers: list[OscModifier] = []
+        until: Optional[OscEventCond] = None
         for member in w.children_by_rule(with_decl, "behavior_with_member"):
             mod_node = w.first_child_by_rule(member, "modifier_application")
             if mod_node is not None:
                 modifiers.append(self.extract_modifier(mod_node))
-        return modifiers
+                continue
+            until_node = w.first_child_by_rule(member, "until_directive")
+            if until_node is not None:
+                until = self.extract_event_condition(until_node)
+        return modifiers, until
+
+    # -- event conditions (wait / until) -------------------------------
+
+    def extract_event_condition(self, node: Any) -> Optional[OscEventCond]:
+        """Extract an ``event_condition`` (``elapsed(...)`` or a comparison)."""
+        w = self._w
+        cond = w.find_descendant(node, "event_condition")
+        scope = cond if cond is not None else node
+
+        elapsed = w.find_descendant(scope, "elapsed_expression")
+        if elapsed is not None:
+            return OscElapsed(duration=self.evaluate(elapsed))
+
+        comparison = self._find_comparison(scope)
+        if comparison is None:
+            return None
+        children = [c for c in w.children(comparison) if w.rule(c) is not None]
+        op_node = w.first_child_by_rule(comparison, "relational_op")
+        if op_node is None or len(children) < 2:
+            return None
+        lhs_text = w.text(children[0])
+        if "." not in lhs_text:
+            return None
+        actor, attr = lhs_text.split(".", 1)
+        return OscComparison(
+            lhs=OscFieldAccess(actor=actor, attr=attr),
+            op=w.text(op_node),
+            rhs=self.evaluate(children[-1]),
+        )
+
+    def _find_comparison(self, node: Any) -> Optional[Any]:
+        """Find the first ``relation`` node that carries a ``relational_op``."""
+        w = self._w
+        if w.rule(node) == "relation" and w.first_child_by_rule(node, "relational_op"):
+            return node
+        for child in w.children(node):
+            found = self._find_comparison(child)
+            if found is not None:
+                return found
+        return None
 
     # -- do directive --------------------------------------------------
 
     def extract_do_member(
         self, node: Any, composition: Optional[str]
     ) -> Optional[OscDoMember]:
-        """Extract a ``do_member`` into an invocation or composition."""
+        """Extract a ``do_member`` into an invocation, wait, or composition."""
         w = self._w
         comp_node = w.first_child_by_rule(node, "composition")
         if comp_node is not None:
             return self._extract_composition(comp_node)
+
+        wait_node = w.first_child_by_rule(node, "wait_directive")
+        if wait_node is not None:
+            cond = self.extract_event_condition(wait_node)
+            return OscWait(condition=cond) if cond is not None else None
 
         invocation = w.first_child_by_rule(node, "behavior_invocation")
         if invocation is not None:
@@ -224,11 +282,13 @@ class _Extractor:
         w = self._w
         behavior_node = w.first_child_by_rule(node, "behavior_name")
         behavior = w.text(behavior_node) if behavior_node is not None else ""
+        modifiers, until = self._extract_with_block(node)
         return OscInvocation(
             behavior=behavior,
             actor=self._actor_of(node),
             arguments=self.extract_arguments(node),
-            modifiers=self._extract_with_modifiers(node),
+            modifiers=modifiers,
+            until=until,
             composition=composition,
         )
 

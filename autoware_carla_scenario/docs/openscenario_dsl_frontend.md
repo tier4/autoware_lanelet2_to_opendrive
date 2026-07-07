@@ -185,6 +185,34 @@ combined with an order-insensitive `AndCondition`.
     Where physical completion matters, follow the manoeuvre with an observable
     step (a `reach_lane` / `stand_still`) so the next action gates on that.
 
+### `wait` and `until` — explicit event conditions
+
+A `wait <event_condition>` step (no action) and an `until <event_condition>`
+clause in a behaviour's `with:` block let the DSL specify *when* to proceed,
+rather than relying on the inferred completion signal. The event condition is
+compiled to a framework condition and used as the next step's trigger:
+
+```
+do serial:
+    ego.drive() with:
+        until(ego.lane == 460)   # drive completes when the ego reaches lanelet 460
+    wait elapsed(3s)             # then wait 3 s
+    ego.turn(direction: left)    # then turn
+```
+
+Supported event conditions (see `expr_compiler.py`):
+
+| DSL | Compiles to |
+|---|---|
+| `elapsed(Ns)` | `ElapsedTimeCondition` |
+| `<actor>.speed\|velocity <op> <speed>` | `SpeedCondition` (`<`, `<=`, `>`, `>=`) |
+| `<actor>.lane\|lanelet == N` | `EntityLanePositionCondition` |
+
+When a `wait` follows another step, its condition is combined (via
+`AndCondition`) with that step's completion, so ordering is preserved. Using
+`until` gives a **real observable completion** (the "issued vs physically
+complete" caveat above disappears for that step).
+
 ### `parallel` — concurrent steps
 
 Members of a `parallel` block share the block's entry gate (they run
@@ -235,3 +263,28 @@ register_behavior("my_turn", _my_turn)
   choice; combinatorial blow-up is capped at 64 variants.
 - Speed values without a unit are assumed to be km/h and durations without a
   unit are assumed to be seconds.
+
+## Roadmap (not yet supported)
+
+The following OSC2 constructs are recognised as future work. Each entry notes
+the extension points involved (parser/extractor → IR → translator → framework
+condition/action → codegen).
+
+- [ ] **Richer event conditions** — logical combinators (`and` / `or` / `not`),
+      `distance(a, b) <op> X`, time-headway and other attributes. Needs the
+      `expr_compiler` to grow a small expression tree and, for distances, a new
+      framework condition. (Today: single comparison on `speed`/`lane`, or
+      `elapsed`.)
+- [ ] **`event` / `on` handlers** — `event e is <cond>` + `on e: do ...`.
+      Extract `event_declaration` / `on` into the IR; compile the event
+      condition (reusing `expr_compiler`); emit the handler's actions gated on
+      that condition. Mostly lands on the existing gated-action mechanism.
+- [ ] **`emit` (manual signalling)** — needs a shared event bus in the
+      framework (`EmitAction` sets a flag, an `EventCondition` reads it — a
+      generalisation of the existing `ActionDoneCondition`).
+- [ ] **`repeat(count)`** — bounded loops. Unroll the body `count` times at
+      transpile time (like `one_of` expansion), chaining gates with per-iteration
+      labels. No framework change required.
+- [ ] **`repeat until <cond>`** — unbounded loops. Needs a runtime primitive
+      (`RepeatAction` with `once=False`) and re-armable (non-latching)
+      conditions, since `Sticky` / `ActionDone` latch permanently.

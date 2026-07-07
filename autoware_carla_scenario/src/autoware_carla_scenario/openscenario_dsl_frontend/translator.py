@@ -25,8 +25,10 @@ from .ast_model import (
     OscInvocation,
     OscProgram,
     OscScenario,
+    OscWait,
 )
 from .errors import OscTranslationError
+from .expr_compiler import compile_event_condition
 from .plan import MAX_VARIANTS, ActorPlan, Gate, ScenarioPlan
 from .registry import Arguments, behavior_handler, modifier_handler
 
@@ -71,8 +73,8 @@ def _expand_one_of(node: OscDoMember) -> list[OscDoMember]:
     ``one_of`` contributes alternatives (union); ``serial``/``parallel``
     contribute the Cartesian product of their members, preserving the operator.
     """
-    if isinstance(node, OscInvocation):
-        return [node]
+    if not isinstance(node, OscComposition):
+        return [node]  # leaf: invocation or wait
 
     member_options = [_expand_one_of(m) for m in node.members]
     if node.operator == "one_of":
@@ -96,6 +98,15 @@ def _apply(
     *ordered* is ``True`` while every enclosing composition is ``serial``; it
     marks pass-condition specs that must be satisfied in sequence.
     """
+    if isinstance(node, OscWait):
+        # A wait registers no action; its condition gates the next serial step.
+        cond_gate = Gate.from_condition(
+            compile_event_condition(node.condition, resolve)
+        )
+        if entry_gate.is_immediate:
+            return cond_gate
+        return Gate.all_of([entry_gate, cond_gate])
+
     if isinstance(node, OscInvocation):
         actor = resolve(node.actor)
         for modifier in node.modifiers:
@@ -110,6 +121,10 @@ def _apply(
             pass_spec.ordered = ordered
             plan.specs.append(pass_spec)
         plan.specs.extend(result.fails)
+
+        # An explicit `until` clause overrides the inferred completion signal.
+        if node.until is not None:
+            return Gate.from_condition(compile_event_condition(node.until, resolve))
         return result.completion if result.completion is not None else entry_gate
 
     if node.operator == "parallel":

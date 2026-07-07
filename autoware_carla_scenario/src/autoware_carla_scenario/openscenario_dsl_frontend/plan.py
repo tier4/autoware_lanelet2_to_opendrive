@@ -28,6 +28,35 @@ DEFAULT_SPEED_CHECK_DELAY_SECONDS = 3.0
 MAX_VARIANTS = 64
 
 
+class CondKind(str, Enum):
+    """A framework condition a compiled event condition maps to."""
+
+    SPEED = "speed"  # SpeedCondition
+    LANE = "lane"  # EntityLanePositionCondition (equality)
+    ELAPSED = "elapsed"  # ElapsedTimeCondition
+
+
+@dataclass(frozen=True)
+class ConditionSpec:
+    """A compiled event condition (from a ``wait`` / ``until`` clause).
+
+    Attributes:
+        kind: The :class:`CondKind`.
+        actor: The actor the condition observes (``None`` for time-based).
+        op: The comparison operator for :attr:`CondKind.SPEED` (``"<"`` …).
+        value: The threshold — m/s for speed, seconds for elapsed.
+        lanelet_id: The target lanelet for :attr:`CondKind.LANE`.
+        label: A stable label for the generated framework condition.
+    """
+
+    kind: CondKind
+    actor: Optional[str] = None
+    op: Optional[str] = None
+    value: Optional[float] = None
+    lanelet_id: Optional[int] = None
+    label: str = "event_condition"
+
+
 class GateKind(str, Enum):
     """How an action is triggered / how a serial step signals completion."""
 
@@ -35,6 +64,7 @@ class GateKind(str, Enum):
     ACTION_DONE = "action_done"  # wait until a referenced action has fired
     LANE_REACHED = "lane_reached"  # wait until an actor reaches a lanelet
     STANDSTILL = "standstill"  # wait until an actor has stood still
+    CONDITION = "condition"  # wait until a compiled event condition holds
     ALL_OF = "all_of"  # wait until every sub-gate is satisfied
 
 
@@ -51,6 +81,7 @@ class Gate:
     actor: Optional[str] = None
     lanelet_id: Optional[int] = None
     duration: Optional[float] = None
+    condition: Optional[ConditionSpec] = None
     members: tuple["Gate", ...] = ()
 
     @staticmethod
@@ -68,6 +99,10 @@ class Gate:
     @staticmethod
     def standstill(actor: str, duration: float) -> "Gate":
         return Gate(kind=GateKind.STANDSTILL, actor=actor, duration=duration)
+
+    @staticmethod
+    def from_condition(condition: ConditionSpec) -> "Gate":
+        return Gate(kind=GateKind.CONDITION, condition=condition)
 
     @staticmethod
     def all_of(members: "list[Gate]") -> "Gate":

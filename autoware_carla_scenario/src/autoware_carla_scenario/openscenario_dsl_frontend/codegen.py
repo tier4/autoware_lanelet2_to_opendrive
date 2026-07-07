@@ -20,6 +20,8 @@ from typing import Optional
 from .plan import (
     DEFAULT_SPEED_CHECK_DELAY_SECONDS,
     ActorPlan,
+    CondKind,
+    ConditionSpec,
     Gate,
     GateKind,
     ScenarioPlan,
@@ -27,6 +29,13 @@ from .plan import (
     SpecKind,
     SpecRole,
 )
+
+_COMPARISON_RULE = {
+    "<": "ComparisonRule.LESS_THAN",
+    "<=": "ComparisonRule.LESS_THAN_OR_EQUAL",
+    ">": "ComparisonRule.GREATER_THAN",
+    ">=": "ComparisonRule.GREATER_THAN_OR_EQUAL",
+}
 
 _INDENT = "    "
 
@@ -119,12 +128,41 @@ class _Emitter:
                 f"duration={gate.duration!r}, "
                 f'label="after_{gate.actor}_standstill")'
             )
+        if gate.kind is GateKind.CONDITION:
+            assert gate.condition is not None  # noqa: S101
+            return self.condition_spec_expr(plan, gate.condition)
         if gate.kind is GateKind.ALL_OF:
             self.imports.add("AndCondition")
             parts = [self.gate_expr(plan, g) for g in gate.members]
             joined = ", ".join(p for p in parts if p)
             return f"AndCondition([{joined}])"
         raise AssertionError(gate.kind)  # pragma: no cover
+
+    def condition_spec_expr(self, plan: ScenarioPlan, spec: ConditionSpec) -> str:
+        """Render a compiled event condition into a one-line expression."""
+        if spec.kind is CondKind.ELAPSED:
+            self.imports.add("ElapsedTimeCondition")
+            return f'ElapsedTimeCondition({spec.value!r}, label="{spec.label}")'
+        if spec.kind is CondKind.SPEED:
+            self.imports.update({"SpeedCondition", "ComparisonRule"})
+            role = self.role_expr(plan, spec.actor or plan.ego.name)
+            rule = _COMPARISON_RULE[spec.op or "<"]
+            return (
+                f"SpeedCondition(entity_name={role}, value={spec.value!r}, "
+                f'rule={rule}, label="{spec.label}")'
+            )
+        if spec.kind is CondKind.LANE:
+            self.imports.update(
+                {"EntityLanePositionCondition", "to_opendrive", "Lanelet2Pose"}
+            )
+            role = self.role_expr(plan, spec.actor or plan.ego.name)
+            return (
+                f"EntityLanePositionCondition(entity_name={role}, "
+                f"road_id=to_opendrive("
+                f"Lanelet2Pose(lanelet_id={spec.lanelet_id}, s=0.0)).road_id, "
+                f'label="{spec.label}")'
+            )
+        raise AssertionError(spec.kind)  # pragma: no cover
 
     # -- actions ------------------------------------------------------
 

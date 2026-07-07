@@ -48,6 +48,46 @@ class OscModifier:
     arguments: list[OscArgument] = field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Event conditions (used by ``wait`` directives and ``until`` clauses)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OscFieldAccess:
+    """An attribute reference such as ``ego.speed`` (``<actor>.<attr>``)."""
+
+    actor: str
+    attr: str
+
+
+@dataclass(frozen=True)
+class OscComparison:
+    """A comparison ``<field> <op> <literal>`` (e.g. ``ego.speed < 5kmph``).
+
+    Attributes:
+        lhs: The left-hand attribute reference.
+        op: The relational operator (``"<"``, ``"<="``, ``">"``, ``">="``,
+            ``"=="``, ``"!="``).
+        rhs: The right-hand literal value.
+    """
+
+    lhs: OscFieldAccess
+    op: str
+    rhs: OscValue
+
+
+@dataclass(frozen=True)
+class OscElapsed:
+    """An ``elapsed(<duration>)`` event condition."""
+
+    duration: OscValue
+
+
+#: The event-condition forms the frontend understands.
+OscEventCond = Union[OscComparison, OscElapsed]
+
+
 @dataclass(frozen=True)
 class OscInvocation:
     """A ``behavior_invocation`` such as ``ego.drive() with: speed(30kmph)``.
@@ -57,6 +97,8 @@ class OscInvocation:
         actor: The actor the behaviour is invoked on, or ``None``.
         arguments: The invocation's argument list.
         modifiers: Modifiers attached via a trailing ``with:`` block.
+        until: An ``until <event_condition>`` clause in the ``with:`` block that
+            defines when the behaviour completes, or ``None``.
         composition: The nearest enclosing composition operator
             (``"serial"`` / ``"parallel"`` / ``"one_of"``), or ``None`` when the
             invocation is the direct ``do`` member.
@@ -66,7 +108,15 @@ class OscInvocation:
     actor: Optional[str]
     arguments: list[OscArgument] = field(default_factory=list)
     modifiers: list[OscModifier] = field(default_factory=list)
+    until: Optional[OscEventCond] = None
     composition: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class OscWait:
+    """A ``wait <event_condition>`` directive — a step with no action."""
+
+    condition: OscEventCond
 
 
 @dataclass(frozen=True)
@@ -82,8 +132,8 @@ class OscComposition:
     members: list[OscDoMember] = field(default_factory=list)
 
 
-#: Either a leaf behaviour invocation or a nested composition block.
-OscDoMember = Union[OscInvocation, OscComposition]
+#: A leaf invocation, a ``wait`` step, or a nested composition block.
+OscDoMember = Union[OscInvocation, OscWait, OscComposition]
 
 
 @dataclass(frozen=True)
