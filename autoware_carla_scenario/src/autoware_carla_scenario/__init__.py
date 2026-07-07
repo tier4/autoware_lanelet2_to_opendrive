@@ -159,6 +159,8 @@ if TYPE_CHECKING:
         register_conf_dir as register_conf_dir,
         register_scenario as register_scenario,
         register_scenario_builder as register_scenario_builder,
+        unregister_conf_dir as unregister_conf_dir,
+        unregister_scenario as unregister_scenario,
     )
     from .scenario_base import BaseScenario as BaseScenario, EgoConfig as EgoConfig
     from .scenario_config import (
@@ -193,9 +195,11 @@ __all__ = [
     # Scenario package extension API
     "register_scenario",
     "register_scenario_builder",
+    "unregister_scenario",
     "get_scenario_registry",
     "get_scenario_builder",
     "register_conf_dir",
+    "unregister_conf_dir",
     "get_conf_dirs",
     "load_scenario_plugins",
     "ScenarioBuilder",
@@ -385,9 +389,11 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     # scenario package extension API (registry)
     "register_scenario": (".registry", "register_scenario"),
     "register_scenario_builder": (".registry", "register_scenario_builder"),
+    "unregister_scenario": (".registry", "unregister_scenario"),
     "get_scenario_registry": (".registry", "get_scenario_registry"),
     "get_scenario_builder": (".registry", "get_scenario_builder"),
     "register_conf_dir": (".registry", "register_conf_dir"),
+    "unregister_conf_dir": (".registry", "unregister_conf_dir"),
     "get_conf_dirs": (".registry", "get_conf_dirs"),
     "load_scenario_plugins": (".registry", "load_scenario_plugins"),
     "ScenarioBuilder": (".registry", "ScenarioBuilder"),

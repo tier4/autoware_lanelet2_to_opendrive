@@ -102,33 +102,36 @@ class TestScenarioRegistry:
 
     def test_register_scenario(self) -> None:
         """register_scenario() should create a builder in the registry."""
-        from autoware_carla_scenario.examples.run import (
-            _SCENARIO_REGISTRY,
+        from autoware_carla_scenario import (
+            get_scenario_builder,
+            get_scenario_registry,
             register_scenario,
+            unregister_scenario,
         )
 
         name = "__test_register_scenario__"
         try:
             register_scenario(name, _DummyScenario, _DummyConfig)
-            assert name in _SCENARIO_REGISTRY
+            assert name in get_scenario_registry()
 
             # Verify the builder works.
             ego = _make_ego()
             spawn_pose = MagicMock()
             ground_projection = MagicMock()
             scenario_dict: dict[str, Any] = {"name": name, "foo": "bar"}
-            result = _SCENARIO_REGISTRY[name](
-                ego, scenario_dict, spawn_pose, ground_projection
-            )
+            builder = get_scenario_builder(name)
+            assert builder is not None
+            result = builder(ego, scenario_dict, spawn_pose, ground_projection)
             assert isinstance(result, _DummyScenario)
         finally:
-            _SCENARIO_REGISTRY.pop(name, None)
+            unregister_scenario(name)
 
     def test_register_scenario_builder(self) -> None:
         """register_scenario_builder() should accept a custom callable."""
-        from autoware_carla_scenario.examples.run import (
-            _SCENARIO_REGISTRY,
+        from autoware_carla_scenario import (
+            get_scenario_builder,
             register_scenario_builder,
+            unregister_scenario,
         )
 
         name = "__test_register_builder__"
@@ -144,28 +147,30 @@ class TestScenarioRegistry:
 
         try:
             register_scenario_builder(name, custom_builder)
-            assert _SCENARIO_REGISTRY[name] is custom_builder
-            result = _SCENARIO_REGISTRY[name](_make_ego(), {}, MagicMock(), MagicMock())
+            builder = get_scenario_builder(name)
+            assert builder is custom_builder
+            result = builder(_make_ego(), {}, MagicMock(), MagicMock())
             assert result is sentinel
         finally:
-            _SCENARIO_REGISTRY.pop(name, None)
+            unregister_scenario(name)
 
     def test_register_overwrites_existing(self) -> None:
         """Re-registering under the same name should overwrite silently."""
-        from autoware_carla_scenario.examples.run import (
-            _SCENARIO_REGISTRY,
+        from autoware_carla_scenario import (
+            get_scenario_builder,
             register_scenario,
+            unregister_scenario,
         )
 
         name = "__test_overwrite__"
         try:
             register_scenario(name, _DummyScenario, _DummyConfig)
-            old_builder = _SCENARIO_REGISTRY[name]
+            old_builder = get_scenario_builder(name)
             register_scenario(name, _DummyScenario, _DummyConfig)
             # Builder should be a new closure.
-            assert _SCENARIO_REGISTRY[name] is not old_builder
+            assert get_scenario_builder(name) is not old_builder
         finally:
-            _SCENARIO_REGISTRY.pop(name, None)
+            unregister_scenario(name)
 
 
 # ---------------------------------------------------------------------------

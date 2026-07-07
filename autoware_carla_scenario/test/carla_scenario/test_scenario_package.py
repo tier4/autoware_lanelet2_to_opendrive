@@ -15,10 +15,13 @@ from unittest.mock import MagicMock
 import autoware_carla_scenario.registry as registry
 from autoware_carla_scenario import (
     get_conf_dirs,
+    get_scenario_builder,
     get_scenario_registry,
     register_conf_dir,
     register_scenario,
     register_scenario_builder,
+    unregister_conf_dir,
+    unregister_scenario,
 )
 
 
@@ -58,19 +61,18 @@ class TestScenarioRegistry:
             assert isinstance(scenario.kwargs["config"], _StoreKwargs)
             assert scenario.kwargs["config"].kwargs == {"name": name, "foo": 1}
         finally:
-            registry._SCENARIO_REGISTRY.pop(name, None)
+            unregister_scenario(name)
 
     def test_register_scenario_builder_custom(self) -> None:
         name = "__pkg_test_builder__"
         sentinel = object()
         try:
             register_scenario_builder(name, lambda *_: sentinel)  # type: ignore[arg-type,return-value]
-            assert (
-                get_scenario_registry()[name](None, {}, None, None)  # type: ignore[arg-type]
-                is sentinel
-            )
+            builder = get_scenario_builder(name)
+            assert builder is not None
+            assert builder(None, {}, None, None) is sentinel  # type: ignore[arg-type]
         finally:
-            registry._SCENARIO_REGISTRY.pop(name, None)
+            unregister_scenario(name)
 
     def test_get_scenario_registry_returns_copy(self) -> None:
         copy1 = get_scenario_registry()
@@ -85,7 +87,6 @@ class TestScenarioRegistry:
 
 class TestConfDirRegistry:
     def test_register_conf_dir_dedupes(self, tmp_path: Path) -> None:
-        before = get_conf_dirs()
         try:
             register_conf_dir(tmp_path)
             register_conf_dir(tmp_path)  # duplicate must be ignored
@@ -93,8 +94,15 @@ class TestConfDirRegistry:
             assert dirs.count(tmp_path.resolve()) == 1
             assert tmp_path.resolve() in dirs
         finally:
-            # Restore the registry to its previous state.
-            registry._CONF_DIRS[:] = before
+            unregister_conf_dir(tmp_path)
+
+    def test_unregister_conf_dir(self, tmp_path: Path) -> None:
+        register_conf_dir(tmp_path)
+        assert tmp_path.resolve() in get_conf_dirs()
+        unregister_conf_dir(tmp_path)
+        assert tmp_path.resolve() not in get_conf_dirs()
+        # Unregistering an unknown dir is a no-op.
+        unregister_conf_dir(tmp_path)
 
     def test_get_conf_dirs_returns_copy(self, tmp_path: Path) -> None:
         dirs = get_conf_dirs()

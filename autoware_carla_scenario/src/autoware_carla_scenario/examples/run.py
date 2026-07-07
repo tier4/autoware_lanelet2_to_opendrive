@@ -53,7 +53,6 @@ from autoware_carla_scenario.conditions import ScenarioResult
 from autoware_carla_scenario.registry import (
     BuildScenarioFn as BuildScenarioFn,
     ScenarioBuilder as ScenarioBuilder,
-    _SCENARIO_REGISTRY as _SCENARIO_REGISTRY,  # re-exported for backwards compat
     get_conf_dirs,
     get_scenario_builder,
     get_scenario_registry,

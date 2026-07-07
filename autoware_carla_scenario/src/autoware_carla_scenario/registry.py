@@ -50,9 +50,11 @@ __all__ = [
     "BuildScenarioFn",
     "register_scenario",
     "register_scenario_builder",
+    "unregister_scenario",
     "get_scenario_registry",
     "get_scenario_builder",
     "register_conf_dir",
+    "unregister_conf_dir",
     "get_conf_dirs",
     "load_scenario_plugins",
     "SCENARIO_ENTRY_POINT_GROUP",
@@ -146,6 +148,16 @@ def get_scenario_builder(name: str) -> ScenarioBuilder | None:
     return _SCENARIO_REGISTRY.get(name)
 
 
+def unregister_scenario(name: str) -> None:
+    """Remove the scenario registered under *name*, if present.
+
+    Inverse of :func:`register_scenario` / :func:`register_scenario_builder`.
+    Unknown names are ignored, so this is safe to call unconditionally (e.g.
+    for test cleanup or to swap a scenario at runtime).
+    """
+    _SCENARIO_REGISTRY.pop(name, None)
+
+
 # ---------------------------------------------------------------------------
 # Config directory registry
 # ---------------------------------------------------------------------------
@@ -169,6 +181,18 @@ def register_conf_dir(path: str | Path) -> None:
     resolved = Path(path).resolve()
     if resolved not in _CONF_DIRS:
         _CONF_DIRS.append(resolved)
+
+
+def unregister_conf_dir(path: str | Path) -> None:
+    """Remove a previously registered config directory, if present.
+
+    Inverse of :func:`register_conf_dir`.  Unregistered paths are ignored.
+    """
+    resolved = Path(path).resolve()
+    try:
+        _CONF_DIRS.remove(resolved)
+    except ValueError:
+        pass
 
 
 def get_conf_dirs() -> list[Path]:
