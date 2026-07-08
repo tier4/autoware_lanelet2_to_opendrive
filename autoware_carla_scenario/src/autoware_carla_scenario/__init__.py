@@ -151,7 +151,28 @@ if TYPE_CHECKING:
         Vector3 as Vector3,
     )
     from .pytest_fixtures import CarlaScenarioFixture as CarlaScenarioFixture
+    from .registry import (
+        BuildScenarioFn as BuildScenarioFn,
+        ScenarioBuilder as ScenarioBuilder,
+        get_conf_dirs as get_conf_dirs,
+        get_scenario_builder as get_scenario_builder,
+        get_scenario_registry as get_scenario_registry,
+        load_scenario_plugins as load_scenario_plugins,
+        register_conf_dir as register_conf_dir,
+        register_scenario as register_scenario,
+        register_scenario_builder as register_scenario_builder,
+        unregister_conf_dir as unregister_conf_dir,
+        unregister_scenario as unregister_scenario,
+    )
     from .scenario_base import BaseScenario as BaseScenario, EgoConfig as EgoConfig
+    from .scenario_config import (
+        EgoVehicleConfig as EgoVehicleConfig,
+        EntityConfig as EntityConfig,
+        MapConfig as MapConfig,
+        NpcVehicleConfig as NpcVehicleConfig,
+        ServerConfig as ServerConfig,
+        SweepConfig as SweepConfig,
+    )
     from .scenario_queue import ScenarioQueue as ScenarioQueue
     from .scenario_runner import ScenarioRunner as ScenarioRunner
     from .sensor import (
@@ -173,6 +194,25 @@ __all__ = [
     "ScenarioRunner",
     "CarlaScenarioFixture",
     "CarlaServerManager",
+    # Scenario package extension API
+    "register_scenario",
+    "register_scenario_builder",
+    "unregister_scenario",
+    "get_scenario_registry",
+    "get_scenario_builder",
+    "register_conf_dir",
+    "unregister_conf_dir",
+    "get_conf_dirs",
+    "load_scenario_plugins",
+    "ScenarioBuilder",
+    "BuildScenarioFn",
+    # Shared scenario config dataclasses
+    "ServerConfig",
+    "MapConfig",
+    "EntityConfig",
+    "EgoVehicleConfig",
+    "NpcVehicleConfig",
+    "SweepConfig",
     "EntityExistenceCondition",
     "ActionDoneCondition",
     "AlwaysTrueCondition",
@@ -352,6 +392,25 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     # scenario base
     "BaseScenario": (".scenario_base", "BaseScenario"),
     "EgoConfig": (".scenario_base", "EgoConfig"),
+    # scenario package extension API (registry)
+    "register_scenario": (".registry", "register_scenario"),
+    "register_scenario_builder": (".registry", "register_scenario_builder"),
+    "unregister_scenario": (".registry", "unregister_scenario"),
+    "get_scenario_registry": (".registry", "get_scenario_registry"),
+    "get_scenario_builder": (".registry", "get_scenario_builder"),
+    "register_conf_dir": (".registry", "register_conf_dir"),
+    "unregister_conf_dir": (".registry", "unregister_conf_dir"),
+    "get_conf_dirs": (".registry", "get_conf_dirs"),
+    "load_scenario_plugins": (".registry", "load_scenario_plugins"),
+    "ScenarioBuilder": (".registry", "ScenarioBuilder"),
+    "BuildScenarioFn": (".registry", "BuildScenarioFn"),
+    # shared scenario config dataclasses
+    "ServerConfig": (".scenario_config", "ServerConfig"),
+    "MapConfig": (".scenario_config", "MapConfig"),
+    "EntityConfig": (".scenario_config", "EntityConfig"),
+    "EgoVehicleConfig": (".scenario_config", "EgoVehicleConfig"),
+    "NpcVehicleConfig": (".scenario_config", "NpcVehicleConfig"),
+    "SweepConfig": (".scenario_config", "SweepConfig"),
     # utils
     "find_nearest_traffic_light": (".utils", "find_nearest_traffic_light"),
     "get_stop_line_linestrings": (".utils", "get_stop_line_linestrings"),

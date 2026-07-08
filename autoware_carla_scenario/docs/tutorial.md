@@ -199,6 +199,13 @@ register_scenario("my_scenario", MyScenario, MyScenarioConfig)
 The first argument (`"my_scenario"`) is the name referenced in YAML's
 `scenario.name` field.
 
+!!! tip "Prefer a separate package for reusable scenarios"
+    `register_scenario` (and `register_conf_dir`) are part of the public API:
+    `from autoware_carla_scenario import register_scenario`. If your scenario is
+    not meant to ship inside the framework, put it in its own package instead of
+    editing `run.py` — see
+    [Packaging Scenarios in a Separate Package](#packaging-scenarios-in-a-separate-package).
+
 ---
 
 ## Step 4 — Write a Concrete Scenario (YAML)
@@ -363,3 +370,126 @@ uv run scenario --multirun scenario=my_scenario/default \
 
 The sweeper evaluates constraints against the Lanelet2 map and generates one
 job per matching lanelet. Results appear under `multirun/` in the viewer.
+
+---
+
+## Packaging Scenarios in a Separate Package
+
+The manual walkthrough above adds scenarios *inside* `autoware_carla_scenario`
+(`examples/configs.py`, `examples/my_scenario.py`, `examples/run.py`,
+`conf/scenario/...`). That is fine for scenarios shipped with the framework, but
+for **your own** scenarios it is often better to keep them — and their config
+`dataclass`es — in a **separate, installable package** that depends on the
+framework. This keeps your scenarios reusable and versioned independently, with
+no fork of `autoware_carla_scenario`.
+
+A ready-to-copy template lives at
+[`examples/scenario_package_template/`](https://github.com/tier4/autoware_lanelet2_to_opendrive/tree/master/examples/scenario_package_template).
+
+### Quickest path — generate one with `scenario-new`
+
+Instead of copying the template by hand, generate a fresh package (the files
+below are rendered from Jinja2 templates):
+
+```bash
+# scenario-new <package-name> [--scenario NAME] [--output-dir DIR]
+scenario-new reach_goal_pkg --scenario reach_goal
+```
+
+This writes a ready-to-install package:
+
+```
+reach_goal_pkg/
+├── pyproject.toml                     # name + entry point filled in
+└── src/reach_goal_pkg/
+    ├── __init__.py                    # register() wired up
+    ├── reach_goal.py                  # ReachGoalScenario
+    ├── configs.py                     # ReachGoalConfig
+    └── conf/scenario/reach_goal/default.yaml
+```
+
+```bash
+uv pip install -e reach_goal_pkg
+uv run scenario scenario=reach_goal/default map=nishishinjuku
+```
+
+The same generator is available programmatically:
+
+```python
+from autoware_carla_scenario.scaffold import create_scenario_package
+
+create_scenario_package("reach_goal_pkg", scenario_name="reach_goal",
+                        output_dir="~/pkgs")
+```
+
+The rest of this section explains what the generated files contain.
+
+### What a scenario package needs
+
+| Piece | Where | API used |
+|---|---|---|
+| Scenario class | your package `*.py` | subclass `BaseScenario` |
+| Config dataclass | your package `configs.py` | plain `@dataclass` |
+| Concrete YAML | your package `conf/scenario/<name>/*.yaml` | Hydra |
+| Registration | your package `__init__.py` | `register_scenario`, `register_conf_dir` |
+| Discovery | your `pyproject.toml` | `autoware_carla_scenario.scenarios` entry point |
+
+### Register at import time
+
+Everything you need is part of the framework's **public API** — import it from
+the top-level package, not from `examples`:
+
+```python
+# my_scenario_package/__init__.py
+from pathlib import Path
+
+from autoware_carla_scenario import register_conf_dir, register_scenario
+
+from .configs import MyScenarioConfig
+from .my_scenario import MyScenario
+
+
+def register() -> None:
+    register_scenario("my_scenario", MyScenario, MyScenarioConfig)
+    register_conf_dir(Path(__file__).parent / "conf")
+```
+
+Shared parameters (`ego`, `map`, `server`, `entity`, ...) are also public, so
+your config module reuses them instead of redefining them:
+
+```python
+from autoware_carla_scenario import EgoVehicleConfig, MapConfig, ServerConfig
+```
+
+### Advertise the entry point
+
+In your package's `pyproject.toml`, declare the entry point so the `scenario`
+CLI discovers your `register()` automatically when the package is installed:
+
+```toml
+[project.entry-points."autoware_carla_scenario.scenarios"]
+my_scenario_package = "my_scenario_package:register"
+```
+
+### Run it — no framework edits required
+
+```bash
+uv pip install -e path/to/my_scenario_package
+
+# Your scenario is discoverable by name, exactly like a built-in:
+uv run scenario scenario=my_scenario/default map=nishishinjuku
+uv run scenario scenario='my_scenario/*' map=nishishinjuku
+```
+
+At start-up the runner calls `load_scenario_plugins()`, which loads every
+installed `autoware_carla_scenario.scenarios` entry point (registering your
+scenarios and `conf/` directory). A bundled Hydra `SearchPathPlugin` then adds
+every registered `conf/` directory to Hydra's search path. The `map`, `ego`,
+`server`, and `entity` config groups still come from the framework's built-in
+`conf/`, so your package only ships the `scenario/` group it actually owns.
+
+!!! tip "No entry point? Register explicitly."
+    If you prefer not to rely on entry-point discovery (e.g. from a custom
+    runner script), just call your `register()` — or `register_scenario` /
+    `register_conf_dir` directly — before invoking the runner. The entry point
+    is only what lets the stock `scenario` CLI find you automatically.

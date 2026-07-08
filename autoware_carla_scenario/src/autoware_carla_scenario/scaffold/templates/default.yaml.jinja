@@ -1,0 +1,15 @@
+# @package _global_
+# Concrete scenario: bind the {{ scenario_name }} scenario to specific values.
+#
+# The `map`, `ego`, `server`, `entity` and `traffic_manager` groups are still
+# provided by the framework's built-in conf directory; this file only overrides
+# what differs.
+scenario:
+  name: {{ scenario_name }}
+  goal_lanelet_ids: [460, 265]
+  timeout_seconds: 8.0
+
+ego:
+  initial_speed_kmh: 5.0
+  spawn_lanelet_id: 242
+  spawn_s: 25.0

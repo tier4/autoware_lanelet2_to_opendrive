@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Existing release version to (re)generate the sample .xodr and ASAM QC
+          report for, e.g. 2.60.0 (no leading "v"). The matching tag must exist.
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,6 +20,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-22.04
+    # The bump / tag / create-release flow only runs for real merges to master.
+    # A manual `workflow_dispatch` skips this job and just (re)generates the
+    # sample assets in `attach-sample-xodr` for an already-released version.
+    if: github.event_name == 'push'
     outputs:
       bump_type: ${{ steps.pr-labels.outputs.bump_type }}
       new_version: ${{ steps.bump-version.outputs.new_version }}
@@ -297,12 +309,33 @@ jobs:
   attach-sample-xodr:
     runs-on: ubuntu-22.04
     needs: release
-    if: needs.release.outputs.bump_type != 'none'
+    # Run after a real release (push with a bump label, release job succeeded)
+    # OR on a manual dispatch that (re)generates the sample assets for an
+    # existing version. `always()` lets this run even when `release` is skipped
+    # (which it is on workflow_dispatch).
+    if: |
+      always() && (
+        (github.event_name == 'push'
+          && needs.release.result == 'success'
+          && needs.release.outputs.bump_type != 'none')
+        || github.event_name == 'workflow_dispatch'
+      )
     steps:
+      - name: Resolve target version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            value="${{ inputs.version }}"
+          else
+            value="${{ needs.release.outputs.new_version }}"
+          fi
+          echo "value=${value}" >> "$GITHUB_OUTPUT"
+          echo "Target release version: v${value}"
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: v${{ needs.release.outputs.new_version }}
+          ref: v${{ steps.version.outputs.value }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -325,18 +358,24 @@ jobs:
 
       - name: Upload sample xodr to GitHub Release
         run: |
-          gh release upload "v${{ needs.release.outputs.new_version }}" \
+          gh release upload "v${{ steps.version.outputs.value }}" \
             sample_nishishinjuku.xodr --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run ASAM QC analysis
         run: |
-          uv run analyze sample_nishishinjuku.xodr | tee asam_qc_report.txt
+          # `analyze` requires both the .xodr and the source Lanelet2 .osm;
+          # pipefail makes a failing analyze fail this step instead of silently
+          # writing an empty report that later 400s on release upload.
+          set -o pipefail
+          uv run analyze sample_nishishinjuku.xodr \
+            autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm \
+            | tee asam_qc_report.txt
 
       - name: Upload ASAM QC report to GitHub Release
         run: |
-          gh release upload "v${{ needs.release.outputs.new_version }}" \
+          gh release upload "v${{ steps.version.outputs.value }}" \
             asam_qc_report.txt --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
