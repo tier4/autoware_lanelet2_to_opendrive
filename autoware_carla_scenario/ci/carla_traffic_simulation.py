@@ -325,9 +325,13 @@ def run_simulation(args: argparse.Namespace) -> SimulationResult:
     actor_ids: List[int] = []
     recorder_started = False
     try:
-        # Deterministic synchronous simulation.
+        # Deterministic synchronous simulation. no_rendering_mode disables the
+        # server-side rendering pipeline so ticks stay cheap even when the
+        # server is backed by CPU software GL (llvmpipe); physics and the
+        # Traffic Manager still run, which is all a traffic smoke test needs.
         settings = world.get_settings()
         settings.synchronous_mode = True
+        settings.no_rendering_mode = not args.render
         settings.fixed_delta_seconds = args.fixed_delta
         world.apply_settings(settings)
 
@@ -491,6 +495,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=0, help="Traffic Manager seed.")
     parser.add_argument(
+        "--render",
+        action="store_true",
+        help=(
+            "Keep server-side rendering on. Off by default (no_rendering_mode) "
+            "so ticks stay fast on a CPU-only software-GL server."
+        ),
+    )
+    parser.add_argument(
         "--recorder-path",
         default="",
         help=(
@@ -501,8 +513,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--connect-timeout",
         type=float,
-        default=300.0,
-        help="Seconds to wait for the CARLA server to become ready.",
+        default=900.0,
+        help=(
+            "Seconds to wait for the CARLA server to become ready. Generous "
+            "because a CPU-only software-GL server is slow to finish booting."
+        ),
     )
     parser.add_argument(
         "--retry-interval",

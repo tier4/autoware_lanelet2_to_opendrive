@@ -87,7 +87,7 @@ inputs:
   connect-timeout:
     description: Seconds to wait for the CARLA server to become ready.
     required: false
-    default: "300"
+    default: "900"
   extra-args:
     description: Extra arguments appended verbatim to the simulation script.
     required: false
