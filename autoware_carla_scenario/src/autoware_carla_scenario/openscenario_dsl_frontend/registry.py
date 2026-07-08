@@ -194,12 +194,33 @@ def _modifier_speed(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
 
 def _modifier_spawn_lanelet(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
     plan.actor(actor).spawn_lanelet_id = args.require(
-        "lanelet", "lane", "id", index=0
+        "lanelet", "lanelet_id", "id", index=0
     ).as_int()
 
 
 def _modifier_spawn_s(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
-    plan.actor(actor).spawn_s = args.require("s", "offset", index=0).as_float()
+    plan.actor(actor).spawn_s = args.require("s", index=0).as_float()
+
+
+def _modifier_lanelet_position(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+    """Lanelet2 spawn position: ``lanelet_position(lanelet:, s:)``.
+
+    This is a deliberate *extension* type, not the OpenSCENARIO/OpenDRIVE
+    standard ``lane_position`` — the framework addresses spawns by Lanelet2
+    lanelet id (:class:`Lanelet2Pose`), which is a distinct concept from an
+    OpenDRIVE (road, lane). ``s`` is the standard Frenet arc-length. A lateral
+    ``offset`` / ``t`` is rejected because the spawn uses ``(lanelet, s)`` only.
+    """
+    target = plan.actor(actor)
+    target.spawn_lanelet_id = args.require("lanelet", "lanelet_id", index=0).as_int()
+    s = args.get("s", index=1)
+    if s is not None:
+        target.spawn_s = s.as_float()
+    if args.get("offset", "t") is not None:
+        raise OscTranslationError(
+            "lanelet_position lateral 'offset'/'t' is not supported: the spawn "
+            "only uses (lanelet, s)"
+        )
 
 
 def _modifier_vehicle_type(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
@@ -258,12 +279,12 @@ BEHAVIOR_HANDLERS: dict[str, BehaviorHandler] = {
 MODIFIER_HANDLERS: dict[str, ModifierHandler] = {
     "speed": _modifier_speed,
     "initial_speed": _modifier_speed,
+    # Recommended: a Lanelet2 spawn-position extension type (see below).
+    "lanelet_position": _modifier_lanelet_position,
+    # Aliases that set the individual spawn fields.
     "spawn_lanelet": _modifier_spawn_lanelet,
-    "spawn_lane": _modifier_spawn_lanelet,
     "lanelet": _modifier_spawn_lanelet,
-    "position": _modifier_spawn_lanelet,
     "spawn_s": _modifier_spawn_s,
-    "offset": _modifier_spawn_s,
     "vehicle_type": _modifier_vehicle_type,
     "model": _modifier_vehicle_type,
     "timeout": _modifier_timeout,

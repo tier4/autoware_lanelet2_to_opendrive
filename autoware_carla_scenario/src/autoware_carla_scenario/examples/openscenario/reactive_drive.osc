@@ -11,7 +11,7 @@ scenario reactive_drive:
     do serial:
         ego.drive() with:
             speed(30kmph)
-            spawn_lanelet(242)
+            lanelet_position(lanelet: 242)
             until(ego.lane == 460)
         wait ego.speed < 5kmph
         ego.change_lane(direction: right)

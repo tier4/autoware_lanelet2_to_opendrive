@@ -17,7 +17,7 @@ scenario junction_choice:
     do serial:
         ego.drive() with:
             speed(20kmph)
-            spawn_lanelet(242)
+            lanelet_position(lanelet: 242)
         set_traffic_lights(state: green)
         one_of:
             ego.turn(direction: left)

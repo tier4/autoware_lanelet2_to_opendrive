@@ -269,6 +269,53 @@ def test_no_ego_field_synthesises_ego() -> None:
     assert plan.ego.name == "ego"
 
 
+def _drive_with(modifiers: list[OscModifier]) -> OscProgram:
+    return OscProgram(
+        scenarios=[
+            OscScenario(
+                name="p",
+                fields=[OscField("ego", "vehicle")],
+                do=OscInvocation("drive", "ego", modifiers=modifiers),
+            )
+        ]
+    )
+
+
+def test_lanelet_position_sets_spawn() -> None:
+    program = _drive_with(
+        [
+            OscModifier(
+                "lanelet_position",
+                "ego",
+                [
+                    OscArgument("lanelet", IntValue(242)),
+                    OscArgument("s", FloatValue(25.0)),
+                ],
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    assert plan.ego.spawn_lanelet_id == 242
+    assert plan.ego.spawn_s == pytest.approx(25.0)
+
+
+def test_lanelet_position_rejects_lateral_offset() -> None:
+    program = _drive_with(
+        [
+            OscModifier(
+                "lanelet_position",
+                "ego",
+                [
+                    OscArgument("lanelet", IntValue(1)),
+                    OscArgument("offset", FloatValue(0.5)),
+                ],
+            )
+        ]
+    )
+    with pytest.raises(OscTranslationError):
+        translate_program(program)
+
+
 # ---------------------------------------------------------------------------
 # one_of expansion (pure)
 # ---------------------------------------------------------------------------

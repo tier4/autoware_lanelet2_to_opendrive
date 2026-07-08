@@ -15,7 +15,7 @@ scenario intersection_passing:
     do serial:
         ego.drive() with:
             speed(30kmph)
-            spawn_lanelet(242)
+            lanelet_position(lanelet: 242)
         set_traffic_lights(state: green)
         ego.turn(direction: left)
         ego.reach_lane(lanelet: 460)

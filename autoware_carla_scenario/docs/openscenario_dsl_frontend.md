@@ -92,10 +92,10 @@ uv run scenario scenario=junction_choice_v0/default map=nishishinjuku
 
 Each `one_of` variant is registered as its own scenario
 (`junction_choice_v0`, `junction_choice_v1`, …), so the whole logical scenario
-can be swept with the framework's multirun. The ego spawn (`spawn_lanelet`,
-`spawn_s`, `speed`) and the timeout land in the per-variant `default.yaml` /
-config dataclass so they stay overridable via Hydra; the manoeuvres and
-conditions are baked into the scenario class.
+can be swept with the framework's multirun. The ego spawn
+(`lanelet_position`, `speed`) and the timeout land in the per-variant
+`default.yaml` / config dataclass so they stay overridable via Hydra; the
+manoeuvres and conditions are baked into the scenario class.
 
 ## Programmatic usage
 
@@ -123,7 +123,7 @@ scenario intersection_passing:
     do serial:
         ego.drive() with:
             speed(30kmph)
-            spawn_lanelet(242)
+            lanelet_position(lanelet: 242)
         set_traffic_lights(state: green)
         ego.turn(direction: left)
         ego.reach_lane(lanelet: 460)
@@ -174,10 +174,20 @@ scenario s:
 | DSL modifier | Effect |
 |---|---|
 | `speed(Nkmph)` | actor initial speed |
-| `spawn_lanelet(N)` / `position(N)` | actor spawn lanelet id |
-| `spawn_s(N)` / `offset(N)` | longitudinal spawn offset |
+| `lanelet_position(lanelet: N, s: X)` | actor spawn position (see note) |
+| `spawn_lanelet(N)` / `lanelet(N)` | actor spawn lanelet id (alias) |
+| `spawn_s(N)` | longitudinal spawn arc-length (alias) |
 | `vehicle_type("...")` / `model(...)` | CARLA blueprint id |
 | `timeout(Ns)` | scenario-level fail: `TimeoutCondition` |
+
+!!! note "`lanelet_position` is an extension type, not `lane_position`"
+    OpenSCENARIO / OpenDRIVE's standard `lane_position` addresses an OpenDRIVE
+    `(road, lane, s, offset)`. This framework spawns actors by **Lanelet2**
+    lanelet id (`Lanelet2Pose`), a distinct concept the framework keeps
+    separate from its OpenDRIVE types. `lanelet_position(lanelet:, s:)` is
+    therefore a deliberate *extension* — `s` is the standard Frenet arc-length,
+    but the lane is a lanelet, not an OpenDRIVE lane. A lateral `offset`/`t` is
+    rejected because the spawn only uses `(lanelet, s)`.
 
 Unrecognised behaviour or modifier names raise `OscTranslationError` listing the
 supported names, so unsupported constructs fail loudly rather than silently.
