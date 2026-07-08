@@ -23,7 +23,7 @@ services:
     image: ${CARLA_IMAGE:-carlasim/carla:0.9.15}
     container_name: carla-server
     command: >-
-      /bin/bash -c "./CarlaUE4.sh
+      /bin/bash -c "mkdir -p /home/carla/recordings && ./CarlaUE4.sh
       -RenderOffScreen -nullrhi -nosound -quality-level=Low
       -carla-rpc-port=2000"
     ports:

@@ -26,8 +26,31 @@ The moving parts:
    `.xodr` via `generate_opendrive_world` (a procedural road mesh — no
    pre-baked map assets, so it works under `-nullrhi`), spawns autopilot
    vehicles, advances the simulation, and checks that vehicles actually drove.
-5. The run passes when enough vehicles moved far enough; the JSON result and
-   server logs are uploaded as artifacts.
+5. The run passes when enough vehicles moved far enough; the JSON result,
+   server logs, and a **native CARLA replay log** (`.log`) are uploaded as
+   artifacts.
+
+## Replay log
+
+The native CARLA recorder is started before the vehicles spawn, so the whole
+episode is captured. The `.log` is written on the *server* side (inside the
+container) and copied out to the `carla_replay_<scenario>.log` artifact.
+
+Download it and replay against a CARLA 0.9.15 server:
+
+```python
+import carla
+
+client = carla.Client("localhost", 2000)
+client.set_timeout(60.0)
+# Print a human-readable summary of the recording:
+print(client.show_recorder_file_info("carla_replay_nishishinjuku-traffic.log", True))
+# Or replay it (start, duration, follow-actor-id):
+client.replay_file("carla_replay_nishishinjuku-traffic.log", 0.0, 0.0, 0)
+```
+
+Recording is on by default; set the composite action's `record-replay: "false"`
+to disable it.
 
 ## Why CPU-only works
 

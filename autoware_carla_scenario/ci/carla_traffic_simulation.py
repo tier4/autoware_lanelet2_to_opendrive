@@ -66,6 +66,7 @@ class SimulationResult:
     max_distance_m: float = 0.0
     ticks: int = 0
     elapsed_seconds: float = 0.0
+    recorder_path: str = ""
     per_vehicle_distance_m: List[float] = field(default_factory=list)
 
     def to_json(self) -> str:
@@ -267,6 +268,7 @@ def run_simulation(args: argparse.Namespace) -> SimulationResult:
     traffic_manager = client.get_trafficmanager(args.tm_port)
 
     actor_ids: List[int] = []
+    recorder_started = False
     try:
         # Deterministic synchronous simulation.
         settings = world.get_settings()
@@ -276,6 +278,25 @@ def run_simulation(args: argparse.Namespace) -> SimulationResult:
 
         traffic_manager.set_synchronous_mode(True)
         traffic_manager.set_random_device_seed(args.seed)
+
+        # Start the native CARLA recorder before spawning so the whole episode
+        # (spawns included) is captured. The path is resolved on the *server*
+        # side, so it must be a path inside the CARLA container. The resulting
+        # .log is replayable via ``client.replay_file(...)``.
+        if args.recorder_path:
+            try:
+                info = client.start_recorder(args.recorder_path, True)
+                recorder_started = True
+                result.recorder_path = args.recorder_path
+                logger.info(
+                    "Started CARLA recorder at %s: %s", args.recorder_path, info
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to start CARLA recorder at %s",
+                    args.recorder_path,
+                    exc_info=True,
+                )
 
         actor_ids = spawn_traffic(
             client, world, args.tm_port, args.num_vehicles, args.seed
@@ -320,6 +341,14 @@ def run_simulation(args: argparse.Namespace) -> SimulationResult:
             f"({result.ticks * args.fixed_delta:.1f} s simulated)"
         )
     finally:
+        # Stop the recorder first so the .log is flushed before we tear the
+        # scene down (best-effort; failures here must not mask results).
+        if recorder_started:
+            try:
+                client.stop_recorder()
+                logger.info("Stopped CARLA recorder: %s", result.recorder_path)
+            except Exception:  # noqa: BLE001
+                logger.debug("Failed to stop CARLA recorder", exc_info=True)
         # Restore async mode and destroy spawned actors so the server is left
         # in a clean state (best-effort; failures here must not mask results).
         try:
@@ -393,6 +422,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=0, help="Traffic Manager seed.")
     parser.add_argument(
+        "--recorder-path",
+        default="",
+        help=(
+            "Server-side path for the native CARLA replay log (.log). Resolved "
+            "inside the CARLA server container. Empty disables recording."
+        ),
+    )
+    parser.add_argument(
         "--connect-timeout",
         type=float,
         default=300.0,
@@ -445,6 +482,8 @@ def main() -> None:
     print(f"  total distance: {result.total_distance_m:.1f} m")  # noqa: T201
     print(f"  max distance  : {result.max_distance_m:.1f} m")  # noqa: T201
     print(f"  message       : {result.message}")  # noqa: T201
+    if result.recorder_path:
+        print(f"  replay log    : {result.recorder_path} (server-side)")  # noqa: T201
     print(f"  result JSON   : {output_path.resolve()}")  # noqa: T201
     print("=" * 60)  # noqa: T201
 

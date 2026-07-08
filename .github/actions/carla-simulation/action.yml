@@ -82,6 +82,15 @@ inputs:
     description: Extra arguments appended verbatim to the simulation script.
     required: false
     default: ""
+  container-name:
+    description: Name of the CARLA server container (see the compose file).
+    required: false
+    default: carla-server
+  record-replay:
+    description: >
+      Record a native CARLA replay log (.log) and upload it as an artifact.
+    required: false
+    default: "true"
   upload-artifacts:
     description: Whether to upload the result JSON and server logs as artifacts.
     required: false
@@ -131,6 +140,15 @@ runs:
         source "${CARLA_CLIENT_VENV}/bin/activate"
         result_json="carla_traffic_sim_${{ inputs.scenario-name }}.json"
         echo "result-json=${result_json}" >> "$GITHUB_OUTPUT"
+        # Server-side path for the native CARLA replay log (created by the
+        # compose command). Passed through to the client and shared with the
+        # extraction step below.
+        recorder_arg=()
+        if [ "${{ inputs.record-replay }}" = "true" ]; then
+          recorder_container_path="/home/carla/recordings/${{ inputs.scenario-name }}.log"
+          recorder_arg=(--recorder-path "${recorder_container_path}")
+          echo "recorder-container-path=${recorder_container_path}" >> "$GITHUB_OUTPUT"
+        fi
         status=0
         python "${{ inputs.script-path }}" \
           --xodr "${{ inputs.xodr-path }}" \
@@ -146,6 +164,7 @@ runs:
           --seed "${{ inputs.seed }}" \
           --connect-timeout "${{ inputs.connect-timeout }}" \
           --output "${result_json}" \
+          "${recorder_arg[@]}" \
           ${{ inputs.extra-args }} \
           2>&1 | tee "carla_traffic_sim_${{ inputs.scenario-name }}.log" || status=$?
         if [ "${status}" -eq 0 ]; then
@@ -162,6 +181,21 @@ runs:
         docker compose -f "${{ inputs.compose-file }}" logs --no-color \
           > "carla_server_${{ inputs.scenario-name }}.log" 2>&1 || true
 
+    - name: Extract CARLA replay log
+      if: always() && inputs.record-replay == 'true'
+      shell: bash
+      run: |
+        # The recorder writes the .log inside the server container; copy it out
+        # to the workspace so it can be uploaded as an artifact. Best-effort:
+        # a failed/short run may not have produced a file.
+        src="/home/carla/recordings/${{ inputs.scenario-name }}.log"
+        dst="carla_replay_${{ inputs.scenario-name }}.log"
+        if docker cp "${{ inputs.container-name }}:${src}" "${dst}" 2>/dev/null; then
+          echo "Extracted replay log to ${dst} ($(du -h "${dst}" | cut -f1))"
+        else
+          echo "No CARLA replay log found at ${src} (skipping)."
+        fi
+
     - name: Stop CARLA server
       if: always()
       shell: bash
@@ -177,5 +211,6 @@ runs:
           carla_traffic_sim_${{ inputs.scenario-name }}.json
           carla_traffic_sim_${{ inputs.scenario-name }}.log
           carla_server_${{ inputs.scenario-name }}.log
+          carla_replay_${{ inputs.scenario-name }}.log
         retention-days: 7
         if-no-files-found: warn
