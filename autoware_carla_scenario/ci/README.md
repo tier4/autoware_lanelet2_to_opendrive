@@ -21,11 +21,12 @@ The moving parts:
 
 ## How it works
 
-1. The composite action starts the CARLA 0.9.15 container in headless CPU-only
-   mode using OpenGL software rendering (`-opengl` with an empty `DISPLAY` and
-   `LIBGL_ALWAYS_SOFTWARE=1`, Mesa's llvmpipe). This is CARLA's documented
-   no-GPU path; `-nullrhi` segfaults the engine and `-RenderOffScreen` needs a
-   real Vulkan device.
+1. The composite action starts a headless Xvfb virtual display on the runner
+   and launches the CARLA 0.9.15 container in OpenGL software-rendering mode
+   (`-opengl`, `DISPLAY=:99` shared via `/tmp/.X11-unix`, `XDG_RUNTIME_DIR`,
+   and `LIBGL_ALWAYS_SOFTWARE=1` for Mesa's llvmpipe). This is the CPU-only
+   path; `-nullrhi` segfaults the engine and `-RenderOffScreen` needs a real
+   Vulkan device.
 2. It installs the matching `carla==0.9.15` Python client into a throwaway
    virtualenv (the client version must equal the server version).
 3. `carla_traffic_simulation.py` connects, loads the built-in town map with

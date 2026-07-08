@@ -117,6 +117,23 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Start Xvfb virtual display
+      shell: bash
+      run: |
+        # CARLA's OpenGL RHI needs an X display even when running headless.
+        # A virtual framebuffer on the host, shared into the container via
+        # /tmp/.X11-unix, provides one without a GPU.
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends xvfb
+        Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset \
+          > /tmp/xvfb.log 2>&1 &
+        # Wait for the X socket to appear so the container can connect to it.
+        for _ in $(seq 1 30); do
+          [ -S /tmp/.X11-unix/X99 ] && break
+          sleep 1
+        done
+        ls -l /tmp/.X11-unix/ || true
+
     - name: Start CARLA server (CPU-only, headless)
       shell: bash
       env:

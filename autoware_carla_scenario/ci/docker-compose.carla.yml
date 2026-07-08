@@ -1,26 +1,27 @@
 # CPU-only CARLA server for CI traffic simulation.
 #
 # Inspired by boundrivesim/starter-carla-0913, but pinned to CARLA 0.9.15 and
-# the official image. The server runs fully headless on the CPU.
+# the official image. The server runs headless on the CPU.
 #
-# CPU-only rendering: the official CARLA image bundles the full UE4 renderer,
-# which normally needs a Vulkan GPU. Per CARLA's rendering-options docs, the
-# supported no-GPU path is OpenGL software rendering:
+# CPU-only rendering: the official CARLA image bundles the full UE4 renderer.
+# On a GPU-less runner it is driven through OpenGL software rendering:
 #
 #   -opengl                 use the OpenGL RHI instead of Vulkan
-#   DISPLAY= (empty)        render off-screen, no X server
+#   Xvfb virtual display    a fake X server (DISPLAY=:99) started on the runner
+#                           and shared into the container via /tmp/.X11-unix
 #   LIBGL_ALWAYS_SOFTWARE=1 force Mesa's llvmpipe software rasterizer
-#   -nosound                disable audio
-#   -quality-level=Low      keep asset streaming light
+#   XDG_RUNTIME_DIR         Mesa/EGL refuse to init without it
+#   -nosound / -quality-level=Low  keep the footprint light
 #
 # NOTE: -nullrhi segfaults the UE4 engine on this build, and -RenderOffScreen
-# needs a real Vulkan device (unavailable on a CPU-only runner), so neither is
-# used. OpenGL + llvmpipe is the CPU-only path.
+# needs a real Vulkan device, so neither is used. OpenGL + Xvfb + llvmpipe is
+# the CPU-only path. The runner must start Xvfb on :99 before `up`.
 #
 # The image is overridable via the CARLA_IMAGE environment variable so the same
 # file can pin a different patch release without edits.
 #
 # Usage:
+#   Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
 #   CARLA_IMAGE=carlasim/carla:0.9.15 \
 #     docker compose -f docker-compose.carla.yml up -d
 #   ... run the client ...
@@ -34,11 +35,16 @@ services:
     # relative launch does not depend on the image's default WORKDIR.
     working_dir: /home/carla
     environment:
-      # Empty DISPLAY + software GL make OpenGL render off-screen on the CPU.
-      DISPLAY: ""
+      # Connect to the Xvfb display shared from the host and force software GL.
+      DISPLAY: ":99"
       LIBGL_ALWAYS_SOFTWARE: "1"
+      XDG_RUNTIME_DIR: "/tmp/runtime-carla"
+    volumes:
+      # Share the host's Xvfb X11 socket so OpenGL has a display to render into.
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
     command: >-
-      /bin/bash -c "mkdir -p /home/carla/recordings && ./CarlaUE4.sh
+      /bin/bash -c "mkdir -p /home/carla/recordings /tmp/runtime-carla &&
+      chmod 700 /tmp/runtime-carla && ./CarlaUE4.sh
       -opengl -nosound -quality-level=Low
       -carla-rpc-port=2000"
     ports:
