@@ -1,0 +1,10 @@
+# @package _global_
+# Concrete values for the transpiled 'intersection_passing' scenario.
+scenario:
+  name: intersection_passing
+  timeout_seconds: 5.0
+
+ego:
+  initial_speed_kmh: 5.0
+  spawn_lanelet_id: 242
+  spawn_s: 25.0

@@ -1,0 +1,26 @@
+# OpenSCENARIO DSL rendition of the built-in `intersection_passing` scenario.
+#
+# Reference (hand-written):
+#   autoware_carla_scenario/src/autoware_carla_scenario/examples/intersection_passing.py
+#   + conf/scenario/intersection_passing/straight.yaml
+#
+# The built-in "straight" variant: the ego spawns on lanelet 242 (s=25) at
+# 5 km/h, all traffic lights are set green, the ego is expected to traverse
+# OpenDRIVE roads for lanelets 460 then 265, must not drop below 5 km/h, and a
+# 5 s timeout guards against getting stuck.
+#
+# Transpile it into an installable scenario package with:
+#   osc-transpile intersection_passing.osc -o .
+
+scenario intersection_passing:
+    ego: vehicle
+    do serial:
+        ego.drive() with:
+            speed(5kmph)
+            spawn_lanelet(242)
+            spawn_s(25.0)
+        set_traffic_lights(state: green)
+        ego.reach_lane(lanelet: 460)
+        ego.reach_lane(lanelet: 265)
+        ego.keep_speed_above(5kmph)
+    timeout(5s)
