@@ -62,6 +62,10 @@ def _speed_kmh(value: OscValue) -> float:
     raise OscTranslationError(f"{value!r} is not a valid speed value")
 
 
+#: Public alias — the translator reuses this to build timed ``SpeedAction``s.
+speed_kmh = _speed_kmh
+
+
 def _seconds(value: OscValue) -> float:
     """Coerce a duration argument to seconds (bare numbers are assumed s)."""
     if isinstance(value, PhysicalValue):

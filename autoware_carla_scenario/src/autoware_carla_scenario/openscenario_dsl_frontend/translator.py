@@ -49,9 +49,14 @@ from .registry import (
     Arguments,
     behavior_handler,
     modifier_handler,
+    speed_kmh,
 )
 
 logger = logging.getLogger(__name__)
+
+#: Modifiers that set a speed: in the initial context they set the spawn speed,
+#: but in a later (gated) phase they become a timed :class:`SpeedAction`.
+_SPEED_MODIFIERS = frozenset({"speed", "initial_speed"})
 
 #: Field types that denote a controllable vehicle actor.
 _VEHICLE_TYPES = {"vehicle", "car", "ego", "npc"}
@@ -188,6 +193,19 @@ def _apply(
                     plan.specs.append(maction)
                 plan.specs.extend(mresult.passes)
                 plan.specs.extend(mresult.fails)
+            elif modifier.name in _SPEED_MODIFIERS and not entry_gate.is_immediate:
+                # A speed() in a later (gated) phase is a *timed* speed change,
+                # not the spawn speed: emit a gated SpeedAction.
+                speed = speed_kmh(args.require("speed", "value", index=0))
+                plan.specs.append(
+                    Spec(
+                        kind=SpecKind.SPEED_ACTION,
+                        actor=mactor,
+                        label=f"{mactor}_speed_{speed:g}",
+                        params={"speed_kmh": speed},
+                        gate=entry_gate,
+                    )
+                )
             else:
                 modifier_handler(modifier.name)(plan, mactor, args)
         # Modifier handlers that emit an action spec (e.g. a dynamic

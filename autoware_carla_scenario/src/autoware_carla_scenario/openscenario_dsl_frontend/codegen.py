@@ -180,6 +180,15 @@ class _Emitter:
                 "tm_port=self.tm_port",
                 "once=False",
             ]
+        if spec.kind is SpecKind.SPEED_ACTION:
+            self.imports.update({"SpeedAction", "TickTiming"})
+            return "SpeedAction", [
+                f"entity_name={role}",
+                f"target_speed_kmh={spec.params['speed_kmh']!r}",
+                "client=self.client",
+                "timing=TickTiming.PRE_TICK",
+                "tm_port=self.tm_port",
+            ]
         if spec.kind is SpecKind.TRAFFIC_SIGNAL:
             self.imports.update({"TrafficSignalAction", "TrafficLightTarget"})
             self.needs_carla = True

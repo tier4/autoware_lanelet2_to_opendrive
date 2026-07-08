@@ -807,6 +807,53 @@ def _timed_phase(label: str, seconds: float, member: OscInvocation) -> OscCompos
     )
 
 
+def _speed_mod(kmph: float) -> OscModifier:
+    return OscModifier("speed", None, [OscArgument(None, PhysicalValue(kmph, "kmph"))])
+
+
+def test_speed_initial_vs_timed() -> None:
+    """speed() at the start sets the spawn speed; in a later phase it is timed."""
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="top",
+                fields=[OscField("ego", "vehicle"), OscField("npc", "vehicle")],
+                do=OscComposition(
+                    operator="serial",
+                    members=[
+                        _timed_phase(
+                            "run",
+                            15.0,
+                            OscInvocation("drive", "ego", modifiers=[_speed_mod(30.0)]),
+                        ),
+                        _timed_phase(
+                            "slow",
+                            20.0,
+                            OscInvocation("drive", "npc", modifiers=[_speed_mod(20.0)]),
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    # Phase-1 ego speed -> spawn speed.
+    assert plan.ego.initial_speed_kmh == pytest.approx(30.0)
+    # Phase-2 npc speed -> a timed SpeedAction, not a spawn speed.
+    npc = plan.npcs[0]
+    assert npc.initial_speed_kmh == pytest.approx(0.0)
+    speed_spec = next(s for s in plan.specs if s.kind is SpecKind.SPEED_ACTION)
+    assert speed_spec.actor == "npc"
+    assert speed_spec.params["speed_kmh"] == pytest.approx(20.0)
+    assert speed_spec.gate.condition is not None
+    assert speed_spec.gate.condition.value == pytest.approx(15.0)
+
+    code = _module_from_plans([plan])
+    compile(code, "p.py", "exec")
+    assert "SpeedAction(" in code
+    assert "target_speed_kmh=20.0" in code
+
+
 def test_timed_phases_gate_actions_by_elapsed_time() -> None:
     program = OscProgram(
         scenarios=[

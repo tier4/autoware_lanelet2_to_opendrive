@@ -190,7 +190,7 @@ scenario top:             # scenario_runner dialect
 
 | DSL modifier | Effect |
 |---|---|
-| `speed(Nkmph)` | actor initial speed |
+| `speed(Nkmph)` | actor initial spawn speed, or a timed `SpeedAction` in a later phase (see below) |
 | `lanelet_position(lanelet: N, s: X)` | actor spawn position (see note) |
 | `spawn_lanelet(N)` / `lanelet(N)` | actor spawn lanelet id (alias) |
 | `spawn_s(N)` | longitudinal spawn arc-length (alias) |
@@ -300,6 +300,21 @@ do serial:
 Here the NPC's `change_lane` is emitted as a `LaneChangeAction` triggered by
 `ElapsedTimeCondition(12.0)`. When the scenario declares no `timeout(...)`, a
 fail-safe timeout is derived from the total phase duration (18 s above).
+
+### `speed(...)` — initial vs. timed
+
+`speed(N)` on the first/initial step sets the actor's **spawn speed**
+(`initial_speed_kmh`). In a *later* timed phase it is a **speed change**, not a
+spawn speed, so it compiles to a `SpeedAction` (TrafficManager
+`set_desired_speed`) gated on that phase's start:
+
+```
+do serial:
+    approach: parallel(duration: 15s):
+        ego.drive() with: speed(30kmph)   # spawn speed
+    slow: parallel(duration: 20s):
+        npc.drive() with: speed(20kmph)   # SpeedAction at t = 15 s
+```
 
 ### Relational placement (`behind` / `ahead_of` / `right_of`)
 
