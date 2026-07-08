@@ -531,6 +531,38 @@ def test_generate_package_files_single_variant() -> None:
     assert "timeout_seconds: float = 9.0" in files["src/reach_package/configs.py"]
 
 
+def _named_program(scenario_name: str) -> OscProgram:
+    return OscProgram(
+        scenarios=[
+            OscScenario(
+                name=scenario_name,
+                fields=[OscField("ego", "vehicle")],
+                do=OscInvocation("drive", "ego"),
+            )
+        ]
+    )
+
+
+def test_generic_scenario_name_falls_back_to_filename() -> None:
+    # scenario_runner names its entry scenario ``top``; use the .osc filename.
+    files = generate_package_files(
+        translate_program(_named_program("top")),
+        source_name="/scenarios/change_lane.osc",
+    )
+    assert any(k.startswith("src/change_lane_package/") for k in files)
+    module = _scenario_module(files)
+    assert "class ChangeLaneScenario(BaseScenario):" in module
+    assert '"top"' not in module
+
+
+def test_meaningful_scenario_name_is_kept() -> None:
+    files = generate_package_files(
+        translate_program(_named_program("cut_in_from_right")),
+        source_name="/scenarios/whatever.osc",
+    )
+    assert any(k.startswith("src/cut_in_from_right_package/") for k in files)
+
+
 # ---------------------------------------------------------------------------
 # wait / until + expression compiler (pure)
 # ---------------------------------------------------------------------------
@@ -1089,8 +1121,12 @@ def test_parse_scenario_runner_change_lane_transpiles(tmp_path: Path) -> None:
     assert "scenario.npc_1_spawn_lanelet_id" in plan.sweep_bindings
 
     files = generate_package_files(plans, source_name="change_lane.osc")
+    # The DSL scenario name 'top' is a placeholder; the package takes its name
+    # from the source file instead.
+    assert any(k.startswith("src/change_lane_package/") for k in files)
     module = _scenario_module(files)
     compile(module, "change_lane.py", "exec")
+    assert "class ChangeLaneScenario(BaseScenario):" in module
     assert "LaneChangeAction(" in module
     assert "ElapsedTimeCondition(15.0" in module
     assert "self._config.npc_1_spawn_lanelet_id" in module

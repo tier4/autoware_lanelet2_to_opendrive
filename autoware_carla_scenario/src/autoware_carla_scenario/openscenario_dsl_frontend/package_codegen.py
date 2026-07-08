@@ -20,7 +20,9 @@ plugs straight into the framework's ``uv run scenario`` / multirun flow.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from .codegen import _INDENT, _Emitter, _indent, _setup_body
@@ -28,6 +30,32 @@ from .plan import ScenarioPlan, Spec, SpecKind
 
 #: Default fail-safe timeout (seconds) when the DSL declares none.
 _DEFAULT_TIMEOUT_SECONDS = 60.0
+
+#: DSL scenario names that carry no meaning (e.g. scenario_runner names its
+#: entry scenario ``top``); for these the source filename is a better name.
+_GENERIC_SCENARIO_NAMES = frozenset(
+    {"top", "main", "scenario", "default", "base", "test"}
+)
+
+
+def _resolve_base_name(
+    plans: list[ScenarioPlan], source_name: str, package_name: str | None
+) -> str:
+    """Choose a meaningful base name for the package.
+
+    An explicit *package_name* wins. Otherwise a non-generic DSL scenario name
+    is used; when that is a placeholder (``top`` …), the source ``.osc``
+    filename is used instead, since users name their files meaningfully.
+    """
+    if package_name:
+        return package_name
+    dsl_name = plans[0].name.split(".")[-1].strip()
+    if dsl_name and dsl_name.lower() not in _GENERIC_SCENARIO_NAMES:
+        return f"{dsl_name}_package"
+    stem = re.sub(r"\W+", "_", Path(source_name).stem).strip("_") if source_name else ""
+    if stem and stem.lower() not in _GENERIC_SCENARIO_NAMES:
+        return f"{stem}_package"
+    return f"{dsl_name or 'scenario'}_package"
 
 
 def _variant_names(base_scenario: str, base_class: str, index: int, count: int):
@@ -69,7 +97,7 @@ def _render_scenario_class(
     setup_body = _setup_body(plan, emitter)
     return [
         f"class {class_name}(BaseScenario):",
-        f'{_INDENT}"""Transpiled scenario {plan.name!r}{variant_note}."""',
+        f'{_INDENT}"""Transpiled scenario{variant_note}."""',
         "",
         f"{_INDENT}def __init__(",
         f"{_INDENT * 2}self,",
@@ -409,8 +437,7 @@ def generate_package_files(
     # of the frontend does not need.
     from ..scaffold.generator import resolve_names
 
-    base_dsl_name = plans[0].name.split(".")[-1]
-    raw_name = package_name or f"{base_dsl_name}_package"
+    raw_name = _resolve_base_name(plans, source_name, package_name)
     names = resolve_names(raw_name, description=description)
     pkg = names["package_name"]
     base_scenario = names["scenario_name"]

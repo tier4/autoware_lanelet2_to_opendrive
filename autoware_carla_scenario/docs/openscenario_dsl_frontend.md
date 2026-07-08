@@ -65,6 +65,12 @@ osc-transpile intersection_passing.osc -o out/ --name my_pkg
 osc-transpile intersection_passing.osc --check
 ```
 
+The package, scenario, class and config names default to the DSL `scenario`
+name. When that name is a generic placeholder (`top`, `main`, … — e.g.
+scenario_runner names its entry scenario `top`), the source `.osc` **filename**
+is used instead, so `change_lane.osc` yields `change_lane` / `ChangeLaneScenario`
+rather than `top`. Pass `--name` to override.
+
 ## The generated scenario package
 
 The transpiler emits a standalone, installable **scenario package** — the
