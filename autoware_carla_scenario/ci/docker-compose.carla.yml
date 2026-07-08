@@ -1,0 +1,36 @@
+# CPU-only CARLA server for CI traffic simulation.
+#
+# Inspired by boundrivesim/starter-carla-0913, but pinned to CARLA 0.9.15 and
+# the official image.  The server runs fully headless with the Null RHI so it
+# needs no GPU and can boot on standard GitHub Actions runners:
+#
+#   -RenderOffScreen  no on-screen window
+#   -nullrhi          no rendering hardware interface (pure CPU, no GPU/Vulkan)
+#   -nosound          disable audio
+#   -quality-level=Low keep asset streaming light
+#
+# The image is overridable via the CARLA_IMAGE environment variable so the same
+# file can pin a different patch release without edits.
+#
+# Usage:
+#   CARLA_IMAGE=carlasim/carla:0.9.15 \
+#     docker compose -f docker-compose.carla.yml up -d
+#   ... run the client ...
+#   docker compose -f docker-compose.carla.yml down
+
+services:
+  carla-server:
+    image: ${CARLA_IMAGE:-carlasim/carla:0.9.15}
+    container_name: carla-server
+    command: >-
+      /bin/bash -c "./CarlaUE4.sh
+      -RenderOffScreen -nullrhi -nosound -quality-level=Low
+      -carla-rpc-port=2000"
+    ports:
+      # RPC (2000), streaming (2001), secondary (2002) and Traffic Manager (8000).
+      - "2000-2002:2000-2002"
+      - "8000:8000"
+    # nullrhi keeps the footprint modest, but CARLA still wants a few GB of
+    # shared memory for asset streaming.
+    shm_size: "2gb"
+    restart: "no"

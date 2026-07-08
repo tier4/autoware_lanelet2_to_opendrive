@@ -1,0 +1,92 @@
+name: CARLA Simulation
+
+# CPU-only CARLA traffic-simulation CI.
+#
+# For each scenario in the matrix this workflow converts a Lanelet2 map to
+# OpenDRIVE with the repository's `convert` CLI, boots a headless CARLA 0.9.15
+# server (Null RHI, no GPU) via the reusable `carla-simulation` composite
+# action, and runs a Traffic-Manager-driven simulation that asserts the traffic
+# actually moved.
+#
+# Add a new scenario by appending an entry to the `matrix.include` list below —
+# the composite action is scenario-agnostic, so no other file needs to change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      num-vehicles:
+        description: Override the number of vehicles to spawn.
+        required: false
+        default: "20"
+      ticks:
+        description: Override the number of synchronous ticks to simulate.
+        required: false
+        default: "200"
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "autoware_carla_scenario/ci/**"
+      - ".github/actions/carla-simulation/**"
+      - ".github/workflows/carla-simulation.yml"
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "autoware_carla_scenario/ci/**"
+      - ".github/actions/carla-simulation/**"
+      - ".github/workflows/carla-simulation.yml"
+
+concurrency:
+  group: carla-simulation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulate:
+    name: ${{ matrix.name }} (CARLA ${{ matrix.carla-client-version }})
+    runs-on: ubicloud-standard-8-ubuntu-2204
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- Scenarios ---------------------------------------------------
+          # Each entry is a self-contained scenario. `map` / `input-map-path`
+          # feed the `convert` CLI; the remaining keys tune the simulation.
+          - name: nishishinjuku-traffic
+            map: nishishinjuku
+            input-map-path: autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm
+            num-vehicles: "20"
+            ticks: "200"
+            min-total-distance: "5.0"
+            carla-image: carlasim/carla:0.9.15
+            carla-client-version: "0.9.15"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+        with:
+          python-version: "3.10"
+          install-system-deps: "true"
+          install-dev-deps: "true"
+          run-precommit: "false"
+          carla-extra: "carla"
+          cache-suffix: ubicloud-standard-8-ubuntu-2204
+
+      - name: Convert Lanelet2 map to OpenDRIVE (CARLA target)
+        run: |
+          uv run convert \
+            map=${{ matrix.map }} \
+            target=carla \
+            input_map_path=${{ matrix.input-map-path }} \
+            output_map_path=${{ matrix.name }}.xodr
+
+      - name: Run CPU-only CARLA traffic simulation
+        uses: ./.github/actions/carla-simulation
+        with:
+          xodr-path: ${{ matrix.name }}.xodr
+          scenario-name: ${{ matrix.name }}
+          carla-image: ${{ matrix.carla-image }}
+          carla-client-version: ${{ matrix.carla-client-version }}
+          num-vehicles: ${{ github.event.inputs.num-vehicles || matrix.num-vehicles }}
+          ticks: ${{ github.event.inputs.ticks || matrix.ticks }}
+          min-total-distance: ${{ matrix.min-total-distance }}

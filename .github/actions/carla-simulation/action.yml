@@ -1,0 +1,181 @@
+name: CARLA CPU-only Traffic Simulation
+description: >
+  Run a CPU-only CARLA traffic simulation for a single scenario. Boots a
+  headless CARLA server container (Null RHI, no GPU), installs the matching
+  CARLA Python client into a throwaway virtualenv, loads an OpenDRIVE map, spawns
+  Traffic-Manager-controlled vehicles, and asserts the traffic moved. All
+  scenario knobs are inputs so callers pick the scenario at call time.
+
+inputs:
+  xodr-path:
+    description: Path to the OpenDRIVE (.xodr) map file to simulate.
+    required: true
+  scenario-name:
+    description: Human-readable scenario label (used for logs and artifact names).
+    required: false
+    default: default
+  carla-image:
+    description: CARLA server Docker image (must match carla-client-version).
+    required: false
+    default: carlasim/carla:0.9.15
+  carla-client-version:
+    description: CARLA Python client version to pip install (must match the server).
+    required: false
+    default: "0.9.15"
+  python-version:
+    description: Python version for the CARLA client virtualenv.
+    required: false
+    default: "3.10"
+  compose-file:
+    description: Path to the CARLA server docker-compose file.
+    required: false
+    default: autoware_carla_scenario/ci/docker-compose.carla.yml
+  script-path:
+    description: Path to the traffic-simulation Python script.
+    required: false
+    default: autoware_carla_scenario/ci/carla_traffic_simulation.py
+  host:
+    description: CARLA RPC host.
+    required: false
+    default: localhost
+  rpc-port:
+    description: CARLA RPC port.
+    required: false
+    default: "2000"
+  tm-port:
+    description: CARLA Traffic Manager port.
+    required: false
+    default: "8000"
+  num-vehicles:
+    description: Number of vehicles to spawn.
+    required: false
+    default: "20"
+  ticks:
+    description: Number of synchronous ticks to simulate after warm-up.
+    required: false
+    default: "200"
+  warmup-ticks:
+    description: Ticks to run before recording start positions.
+    required: false
+    default: "20"
+  fixed-delta:
+    description: Fixed simulation step in seconds (0.05 = 20 Hz).
+    required: false
+    default: "0.05"
+  min-total-distance:
+    description: Minimum total distance (m) the fleet must cover to pass.
+    required: false
+    default: "5.0"
+  min-moved-vehicles:
+    description: Minimum number of vehicles that must move for the run to pass.
+    required: false
+    default: "1"
+  seed:
+    description: Traffic Manager random seed.
+    required: false
+    default: "0"
+  connect-timeout:
+    description: Seconds to wait for the CARLA server to become ready.
+    required: false
+    default: "300"
+  extra-args:
+    description: Extra arguments appended verbatim to the simulation script.
+    required: false
+    default: ""
+  upload-artifacts:
+    description: Whether to upload the result JSON and server logs as artifacts.
+    required: false
+    default: "true"
+
+outputs:
+  result-json:
+    description: Path to the JSON result report produced by the simulation.
+    value: ${{ steps.simulate.outputs.result-json }}
+  passed:
+    description: "'true' when the traffic simulation passed, 'false' otherwise."
+    value: ${{ steps.simulate.outputs.passed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Start CARLA server (CPU-only, headless)
+      shell: bash
+      env:
+        CARLA_IMAGE: ${{ inputs.carla-image }}
+      run: |
+        echo "Starting CARLA server: $CARLA_IMAGE"
+        docker compose -f "${{ inputs.compose-file }}" up -d
+        docker compose -f "${{ inputs.compose-file }}" ps
+
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install CARLA Python client
+      shell: bash
+      run: |
+        python -m venv "${RUNNER_TEMP}/carla-client-venv"
+        # shellcheck disable=SC1091
+        source "${RUNNER_TEMP}/carla-client-venv/bin/activate"
+        python -m pip install --upgrade pip
+        python -m pip install "carla==${{ inputs.carla-client-version }}"
+        echo "CARLA_CLIENT_VENV=${RUNNER_TEMP}/carla-client-venv" >> "$GITHUB_ENV"
+
+    - name: Run traffic simulation
+      id: simulate
+      shell: bash
+      run: |
+        set -o pipefail
+        # shellcheck disable=SC1091
+        source "${CARLA_CLIENT_VENV}/bin/activate"
+        result_json="carla_traffic_sim_${{ inputs.scenario-name }}.json"
+        echo "result-json=${result_json}" >> "$GITHUB_OUTPUT"
+        status=0
+        python "${{ inputs.script-path }}" \
+          --xodr "${{ inputs.xodr-path }}" \
+          --host "${{ inputs.host }}" \
+          --port "${{ inputs.rpc-port }}" \
+          --tm-port "${{ inputs.tm-port }}" \
+          --num-vehicles "${{ inputs.num-vehicles }}" \
+          --ticks "${{ inputs.ticks }}" \
+          --warmup-ticks "${{ inputs.warmup-ticks }}" \
+          --fixed-delta "${{ inputs.fixed-delta }}" \
+          --min-total-distance "${{ inputs.min-total-distance }}" \
+          --min-moved-vehicles "${{ inputs.min-moved-vehicles }}" \
+          --seed "${{ inputs.seed }}" \
+          --connect-timeout "${{ inputs.connect-timeout }}" \
+          --output "${result_json}" \
+          ${{ inputs.extra-args }} \
+          2>&1 | tee "carla_traffic_sim_${{ inputs.scenario-name }}.log" || status=$?
+        if [ "${status}" -eq 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        fi
+        exit "${status}"
+
+    - name: Capture CARLA server logs
+      if: always()
+      shell: bash
+      run: |
+        docker compose -f "${{ inputs.compose-file }}" logs --no-color \
+          > "carla_server_${{ inputs.scenario-name }}.log" 2>&1 || true
+
+    - name: Stop CARLA server
+      if: always()
+      shell: bash
+      run: |
+        docker compose -f "${{ inputs.compose-file }}" down -v || true
+
+    - name: Upload simulation artifacts
+      if: always() && inputs.upload-artifacts == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: carla-simulation-${{ inputs.scenario-name }}
+        path: |
+          carla_traffic_sim_${{ inputs.scenario-name }}.json
+          carla_traffic_sim_${{ inputs.scenario-name }}.log
+          carla_server_${{ inputs.scenario-name }}.log
+        retention-days: 7
+        if-no-files-found: warn
