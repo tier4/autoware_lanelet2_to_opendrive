@@ -125,6 +125,14 @@ runs:
         echo "Starting CARLA server: $CARLA_IMAGE"
         docker compose -f "${{ inputs.compose-file }}" up -d
         docker compose -f "${{ inputs.compose-file }}" ps
+        # Give the engine a moment to boot, then surface its early output and
+        # container state so a crash/hang is visible directly in the job log.
+        sleep 30
+        echo "----- container state -----"
+        docker compose -f "${{ inputs.compose-file }}" ps -a
+        echo "----- initial CARLA server logs -----"
+        docker compose -f "${{ inputs.compose-file }}" logs --no-color --tail 150 \
+          || true
 
     - name: Set up Python ${{ inputs.python-version }}
       uses: actions/setup-python@v5
@@ -200,8 +208,10 @@ runs:
       if: always()
       shell: bash
       run: |
-        docker compose -f "${{ inputs.compose-file }}" logs --no-color \
-          > "carla_server_${{ inputs.scenario-name }}.log" 2>&1 || true
+        # tee to stdout as well so the server output is always visible in the
+        # job log (artifact download is not always convenient).
+        docker compose -f "${{ inputs.compose-file }}" logs --no-color 2>&1 \
+          | tee "carla_server_${{ inputs.scenario-name }}.log" || true
 
     - name: Extract CARLA replay log
       if: always() && inputs.record-replay == 'true'

@@ -4,10 +4,13 @@
 # the official image.  The server runs fully headless with the Null RHI so it
 # needs no GPU and can boot on standard GitHub Actions runners:
 #
-#   -RenderOffScreen  no on-screen window
 #   -nullrhi          no rendering hardware interface (pure CPU, no GPU/Vulkan)
 #   -nosound          disable audio
 #   -quality-level=Low keep asset streaming light
+#
+# NOTE: -RenderOffScreen is deliberately NOT used. It renders off-screen via a
+# real Vulkan device, which is unavailable on a CPU-only runner and makes the
+# server hang before it can open the RPC port. -nullrhi is the pure no-GPU path.
 #
 # The image is overridable via the CARLA_IMAGE environment variable so the same
 # file can pin a different patch release without edits.
@@ -22,9 +25,12 @@ services:
   carla-server:
     image: ${CARLA_IMAGE:-carlasim/carla:0.9.15}
     container_name: carla-server
+    # CarlaUE4.sh lives in the image's home directory; set it explicitly so the
+    # relative launch does not depend on the image's default WORKDIR.
+    working_dir: /home/carla
     command: >-
       /bin/bash -c "mkdir -p /home/carla/recordings && ./CarlaUE4.sh
-      -RenderOffScreen -nullrhi -nosound -quality-level=Low
+      -nullrhi -nosound -quality-level=Low
       -carla-rpc-port=2000"
     ports:
       # RPC (2000), streaming (2001), secondary (2002) and Traffic Manager (8000).
