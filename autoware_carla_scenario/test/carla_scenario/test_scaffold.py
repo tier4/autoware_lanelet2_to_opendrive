@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from autoware_carla_scenario.scaffold import (
     create_scenario_package,
@@ -94,9 +93,9 @@ class TestCreateScenarioPackage:
         assert 'reach_goal_pkg = "reach_goal_pkg:register"' in pyproject
         assert '[project.entry-points."autoware_carla_scenario.scenarios"]' in pyproject
 
-        # YAML binds the scenario name.
-        cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-        assert cfg["scenario"]["name"] == "reach_goal"
+        # YAML binds the scenario name (assert on text; avoids a yaml stub dep).
+        yaml_text = yaml_path.read_text(encoding="utf-8")
+        assert "name: reach_goal" in yaml_text
 
     def test_refuses_existing_without_force(self, tmp_path: Path) -> None:
         create_scenario_package("dup_pkg", output_dir=tmp_path)
