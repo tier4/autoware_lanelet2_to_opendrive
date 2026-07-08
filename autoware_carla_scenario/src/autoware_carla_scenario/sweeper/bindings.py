@@ -256,12 +256,57 @@ class StopLineOffsetBinding:
         )
 
 
+@dataclass
+class AdjacentLaneletBinding:
+    """Derive a lanelet id as the left/right neighbour of the swept lanelet.
+
+    This turns an inter-actor relation like "NPC is one lane to the right of
+    the ego" into a binding: the sweeper constrains ``ego.spawn_lanelet_id``
+    and this binding sets, say, ``scenario.npc_1_spawn_lanelet_id`` to the
+    same-direction neighbour of the ego's chosen lanelet via
+    ``routing_graph.left()`` / ``routing_graph.right()``.
+
+    When the swept lanelet has no neighbour on the requested side the binding
+    raises, so the sweeper skips that lanelet (the relation is unsatisfiable
+    there).
+    """
+
+    target_key: str
+    side: str = "right"
+
+    def __post_init__(self) -> None:
+        if self.side not in ("left", "right"):
+            raise ValueError(
+                f"AdjacentLaneletBinding side must be 'left' or 'right', "
+                f"got {self.side!r}"
+            )
+
+    def resolve(
+        self, lanelet_id: int, lanelet_map: Any, routing_graph: Any | None = None
+    ) -> BindingResult:
+        """Return the id of the same-direction neighbour on :attr:`side`."""
+        if routing_graph is None:
+            from .constraints import create_routing_graph
+
+            routing_graph = create_routing_graph(lanelet_map)
+        lanelet = lanelet_map.laneletLayer[lanelet_id]
+        getter = routing_graph.right if self.side == "right" else routing_graph.left
+        neighbour = getter(lanelet)
+        if neighbour is None:
+            raise ValueError(
+                f"lanelet {lanelet_id} has no {self.side} adjacent lane; "
+                "cannot resolve adjacent_lanelet binding."
+            )
+        return BindingResult(value=neighbour.id)
+
+
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
-_BINDING_REGISTRY: dict[str, type[StopLineOffsetBinding]] = {
+_BINDING_REGISTRY: dict[str, type] = {
     "stop_line_offset": StopLineOffsetBinding,
+    "adjacent_lanelet": AdjacentLaneletBinding,
 }
 
 

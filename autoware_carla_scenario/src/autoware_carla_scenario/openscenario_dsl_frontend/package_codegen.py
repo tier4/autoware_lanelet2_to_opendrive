@@ -21,6 +21,7 @@ plugs straight into the framework's ``uv run scenario`` / multirun flow.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 from .codegen import _INDENT, _Emitter, _indent, _setup_body
 from .plan import ScenarioPlan, Spec, SpecKind
@@ -131,7 +132,30 @@ def _render_scenario_module(
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def _render_configs(config_class: str, scenario_name: str, timeout: float) -> str:
+def _npc_lanelet_fields(plans: list[ScenarioPlan]) -> list[str]:
+    """NPC config field names whose lanelet the sweeper resolves, in order."""
+    fields: list[str] = []
+    for plan in plans:
+        for npc in plan.npcs:
+            name = f"npc_{npc.index}_spawn_lanelet_id"
+            if npc.config_spawn_lanelet and name not in fields:
+                fields.append(name)
+    return fields
+
+
+def _render_configs(
+    config_class: str,
+    scenario_name: str,
+    timeout: float,
+    npc_lanelet_fields: list[str],
+) -> str:
+    npc_lines = ""
+    for field_name in npc_lanelet_fields:
+        npc_lines += (
+            f"\n    #: Spawn lanelet for {field_name.rsplit('_', 3)[0]}, "
+            "resolved by the lanelet-constraint sweeper.\n"
+            f"    {field_name}: int = 0\n"
+        )
     return (
         f'"""Config dataclass for the transpiled {scenario_name!r} scenario."""\n\n'
         "from __future__ import annotations\n\n"
@@ -144,6 +168,7 @@ def _render_configs(config_class: str, scenario_name: str, timeout: float) -> st
         f'    name: str = "{scenario_name}"\n\n'
         "    #: Fail-safe timeout in seconds.\n"
         f"    timeout_seconds: float = {timeout!r}\n"
+        f"{npc_lines}"
     )
 
 
@@ -241,7 +266,7 @@ def _render_readme(
             f"\n## Map\n\nThe source targeted map `{map_hint}`. The map is "
             "selected at run time via `map=...`, so this is advisory only.\n"
         )
-    if any(p.sweep_constraints for p in plans):
+    if any(p.sweep_constraints or p.sweep_bindings for p in plans):
         body += (
             "\n## Spawn selection (lanelet-constraint sweep)\n\n"
             "The source constrained the spawn road (e.g. "
@@ -301,21 +326,33 @@ def _render_default_yaml(plan: ScenarioPlan, scenario_name: str, timeout: float)
     note = "" if ego.spawn_lanelet_id is not None else "  # overridden by sweep below"
     if ego.spawn_lanelet_id is None and not plan.sweep_constraints:
         note = "  # TODO: set spawn lanelet"
+    npc_fields = ""
+    for npc in plan.npcs:
+        if npc.config_spawn_lanelet:
+            npc_fields += (
+                f"  npc_{npc.index}_spawn_lanelet_id: 0  # resolved by sweep\n"
+            )
     text = (
         "# @package _global_\n"
         f"# Concrete values for the transpiled {scenario_name!r} scenario.\n"
         "scenario:\n"
         f"  name: {scenario_name}\n"
-        f"  timeout_seconds: {timeout}\n\n"
+        f"  timeout_seconds: {timeout}\n"
+        f"{npc_fields}\n"
         "ego:\n"
         f"  initial_speed_kmh: {ego.initial_speed_kmh}\n"
         f"  spawn_lanelet_id: {lanelet}{note}\n"
         f"  spawn_s: {ego.spawn_s}\n"
     )
+    sweep: dict[str, Any] = {}
     if plan.sweep_constraints:
-        # Resolve the spawn lanelet against the map via the lanelet-constraint
+        sweep["constraints"] = plan.sweep_constraints
+    if plan.sweep_bindings:
+        sweep["bindings"] = plan.sweep_bindings
+    if sweep:
+        # Resolve spawn lanelets against the map via the lanelet-constraint
         # sweeper (run with `--multirun hydra/sweeper=lanelet_constraint`).
-        block = _yaml_lines({"sweep": {"constraints": plan.sweep_constraints}})
+        block = _yaml_lines({"sweep": sweep})
         text += "\n" + "\n".join(block) + "\n"
     return text
 
@@ -395,7 +432,9 @@ def generate_package_files(
             list(zip(variant_scn, variant_cls)),
         ),
         f"src/{pkg}/{base_scenario}.py": scenario_module,
-        f"src/{pkg}/configs.py": _render_configs(config_class, base_scenario, timeout),
+        f"src/{pkg}/configs.py": _render_configs(
+            config_class, base_scenario, timeout, _npc_lanelet_fields(plans)
+        ),
     }
     for plan, scn in zip(plans, variant_scn):
         files[f"src/{pkg}/conf/scenario/{scn}/default.yaml"] = _render_default_yaml(

@@ -861,16 +861,23 @@ def test_relational_position_and_lane_set_relative_spawn() -> None:
     assert npc.relative_spawn.side == "right"
     assert npc.relative_spawn.longitudinal == pytest.approx(-15.0)
 
-    # The longitudinal placement relative to the ego is emitted as code against
-    # the ego's runtime spawn pose (no transpile-time value, no note).
+    # Longitudinal: emitted as code against the ego's runtime spawn pose.
+    # Lateral: the NPC lanelet is resolved by the sweeper into a config field.
     code = _module_from_plans([plan])
     compile(code, "p.py", "exec")
-    assert "lanelet_id=self._spawn_pose.lanelet_id" in code
+    assert "lanelet_id=self._config.npc_1_spawn_lanelet_id" in code
     assert "s=max(0.0, self._spawn_pose.s - 15.0)" in code
-    assert not any("behind" in n for n in plan.notes)
 
-    # The lateral neighbour is map-dependent and stays a note.
-    assert any("right of ego" in n for n in plan.notes)
+    # The lateral neighbour is a sweep binding + an ego has_adjacent constraint,
+    # not a note.
+    assert plan.sweep_bindings["scenario.npc_1_spawn_lanelet_id"] == {
+        "type": "adjacent_lanelet",
+        "side": "right",
+    }
+    assert {"type": "has_adjacent", "value": "right"} in plan.sweep_constraints[
+        "ego.spawn_lanelet_id"
+    ]
+    assert not plan.notes
 
 
 def test_dynamic_end_position_emits_relative_position_action() -> None:
@@ -1062,11 +1069,22 @@ def test_parse_scenario_runner_change_lane_transpiles(tmp_path: Path) -> None:
     assert [n.name for n in plan.npcs] == ["npc"]
     assert plan.map_hint == "Town04"
 
+    # lane(1) + right_of + min_lanes all resolve into a sweep; only the
+    # advisory map note remains (surfaced as a README Map section, not a note).
+    assert not plan.notes
+    assert "ego.spawn_lanelet_id" in plan.sweep_constraints
+    assert "scenario.npc_1_spawn_lanelet_id" in plan.sweep_bindings
+
     files = generate_package_files(plans, source_name="change_lane.osc")
     module = _scenario_module(files)
     compile(module, "change_lane.py", "exec")
     assert "LaneChangeAction(" in module
     assert "ElapsedTimeCondition(15.0" in module
+    assert "self._config.npc_1_spawn_lanelet_id" in module
+
+    yaml_text = next(v for k, v in files.items() if k.endswith("default.yaml"))
+    assert "adjacent_lanelet" in yaml_text
+    assert "has_adjacent" in yaml_text
     readme = files["README.md"]
-    assert "Transpiler notes" in readme
+    assert "Spawn selection" in readme
     assert "Town04" in readme

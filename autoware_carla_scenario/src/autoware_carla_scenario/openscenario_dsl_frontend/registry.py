@@ -290,11 +290,9 @@ def _modifier_lane(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
             return
     index = args.get("lane", index=0)
     if index is not None:
+        # The lane index becomes a has_adjacent sweep constraint on the ego
+        # spawn lanelet (see _finalize_spawn_constraints).
         plan.actor(actor).spawn_lane_index = index.as_int()
-        plan.notes.append(
-            f"{actor} starts in map-relative lane index {index.as_int()} "
-            f"(at: {anchor}); set 'spawn_lanelet_id' in the config to pin it."
-        )
 
 
 def _modifier_position(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
@@ -347,24 +345,14 @@ def _modifier_set_map(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
 def _modifier_min_driving_lanes(
     plan: ScenarioPlan, actor: str, args: Arguments
 ) -> None:
-    """``path_min_driving_lanes(n)`` — a pre-run lanelet-constraint sweep.
+    """``path_min_driving_lanes(n)`` — record the road's minimum lane count.
 
-    Expressed with the ``has_adjacent`` constraint of the Hydra
-    lanelet-constraint sweeper: a lane with both a left and a right neighbour
-    sits on a road of at least 3 lanes; one neighbour means at least 2. The
-    sweeper resolves ``ego.spawn_lanelet_id`` to a lanelet satisfying this
-    against whatever map is chosen at run time.
+    The concrete lanelet-constraint sweep is built once, in the translator's
+    :func:`~.translator._finalize_spawn_constraints`, together with the lane
+    index and any relational lateral placement so the constraints stay
+    consistent.
     """
-    lanes = args.require("lanes", index=0).as_int()
-    left = {"type": "has_adjacent", "value": "left"}
-    right = {"type": "has_adjacent", "value": "right"}
-    if lanes >= 3:
-        node: dict[str, object] = {"type": "and", "constraints": [left, right]}
-    elif lanes == 2:
-        node = {"type": "or", "constraints": [left, right]}
-    else:
-        return
-    plan.sweep_constraints.setdefault("ego.spawn_lanelet_id", []).append(node)
+    plan.min_driving_lanes = args.require("lanes", index=0).as_int()
 
 
 def _modifier_vehicle_type(plan: ScenarioPlan, actor: str, args: Arguments) -> None:

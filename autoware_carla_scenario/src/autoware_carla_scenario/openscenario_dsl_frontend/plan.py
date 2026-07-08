@@ -196,6 +196,10 @@ class ActorPlan:
     initial_speed_kmh: float = 0.0
     spawn_lane_index: Optional[int] = None
     relative_spawn: Optional[RelativeSpawn] = None
+    #: When set, the NPC's spawn lanelet is read from the generated config field
+    #: ``npc_<index>_spawn_lanelet_id`` (resolved by the lanelet sweeper) rather
+    #: than the ego spawn pose.
+    config_spawn_lanelet: bool = False
 
 
 @dataclass
@@ -276,6 +280,12 @@ class ScenarioPlan:
     #: the ``sweep.constraints`` YAML shape. Rendered into the package config so
     #: the lanelet-constraint sweeper resolves the spawn against the map.
     sweep_constraints: dict[str, list[Any]] = field(default_factory=dict)
+    #: Pre-run sweep bindings, keyed by Hydra override target (e.g.
+    #: ``"scenario.npc_1_spawn_lanelet_id"``); each value is a single binding
+    #: node (``{"type": ..., ...}``) deriving a dependent param.
+    sweep_bindings: dict[str, Any] = field(default_factory=dict)
+    #: Minimum driving-lane count from ``path_min_driving_lanes(n)``, or ``None``.
+    min_driving_lanes: Optional[int] = None
 
     def actor(self, name: str) -> ActorPlan:
         """Return the actor named *name* (ego or an NPC).

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import itertools
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 from .ast_model import (
     OscComposition,
@@ -289,9 +289,68 @@ def _build_plan(
         _apply(plan, do_tree, Gate.immediate(), resolve, ordered=True)
 
     _resolve_relative_spawns(plan)
+    _finalize_spawn_constraints(plan)
     _ensure_phase_timeout(plan, do_tree)
 
     return plan
+
+
+def _has_adjacent(side: str) -> dict[str, str]:
+    return {"type": "has_adjacent", "value": side}
+
+
+def _not(node: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "not", "constraint": node}
+
+
+def _finalize_spawn_constraints(plan: ScenarioPlan) -> None:
+    """Build the lanelet-constraint sweep for lateral / lane placement.
+
+    Collapses the ego lane index, the ``path_min_driving_lanes`` count and any
+    NPC ``right_of`` / ``left_of`` relation into a single consistent set of
+    ``has_adjacent`` constraints on ``ego.spawn_lanelet_id`` plus one
+    ``adjacent_lanelet`` binding per relationally-placed NPC. Because
+    ``has_adjacent`` only tests the existence of a neighbour (it cannot count
+    lanes), an exact lane count from a fixed lane index degrades to "has a
+    neighbour on the required side".
+    """
+    atoms: list[dict[str, Any]] = []
+
+    index = plan.ego.spawn_lane_index
+    if index == 1:
+        atoms.append(_not(_has_adjacent("left")))  # leftmost lane
+    elif index is not None and index >= 2:
+        atoms.append(_has_adjacent("left"))  # has lane(s) to the left
+
+    sides: set[str] = set()
+    for npc in plan.npcs:
+        rel = npc.relative_spawn
+        if rel is None or rel.side is None or rel.reference != plan.ego.name:
+            continue
+        sides.add(rel.side)
+        npc.config_spawn_lanelet = True
+        plan.sweep_bindings[f"scenario.npc_{npc.index}_spawn_lanelet_id"] = {
+            "type": "adjacent_lanelet",
+            "side": rel.side,
+        }
+    for side in sorted(sides):
+        # The ego must have a neighbour on that side for the NPC to sit there.
+        atoms.append(_has_adjacent(side))
+
+    if not atoms and plan.min_driving_lanes is not None:
+        left, right = _has_adjacent("left"), _has_adjacent("right")
+        if plan.min_driving_lanes >= 3:
+            atoms.append({"type": "and", "constraints": [left, right]})
+        elif plan.min_driving_lanes == 2:
+            atoms.append({"type": "or", "constraints": [left, right]})
+
+    # De-duplicate while preserving order.
+    seen: list[dict[str, Any]] = []
+    for atom in atoms:
+        if atom not in seen:
+            seen.append(atom)
+    if seen:
+        plan.sweep_constraints.setdefault("ego.spawn_lanelet_id", []).extend(seen)
 
 
 def _resolve_relative_spawns(plan: ScenarioPlan) -> None:
@@ -308,15 +367,11 @@ def _resolve_relative_spawns(plan: ScenarioPlan) -> None:
         rel = npc.relative_spawn
         if rel is None or rel.anchor != "start":
             continue
-        if rel.side is not None:
-            plan.notes.append(
-                f"npc {npc.index} ({npc.name}) starts one lane to the "
-                f"{rel.side} of {rel.reference}; the lateral neighbour needs "
-                f"the map — set its 'spawn_lanelet_id' to that lane."
-            )
         if rel.reference == plan.ego.name:
             # Longitudinal placement relative to the ego is emitted as code
-            # against ``self._spawn_pose`` (see codegen); nothing to resolve.
+            # against ``self._spawn_pose``; a lateral neighbour is resolved by
+            # the sweeper (see ``_finalize_spawn_constraints``). Nothing to
+            # resolve numerically here.
             continue
         # Reference is another NPC: resolve the offset numerically.
         reference = plan.actor(rel.reference)

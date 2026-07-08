@@ -317,21 +317,41 @@ class _Emitter:
     def npc_pose_lines(self, plan: ScenarioPlan, npc: ActorPlan, var: str) -> list[str]:
         """Render the ``<var>_pose = Lanelet2Pose(...)`` statement for an NPC.
 
-        When the NPC is placed a longitudinal distance relative to the *ego*,
-        the pose is derived from the ego's spawn pose (``self._spawn_pose``) at
-        runtime — no map or transpile-time position needed.
+        The lanelet comes from the config field the sweeper resolves
+        (``self._config.npc_<i>_spawn_lanelet_id``) when the NPC is placed in a
+        neighbouring lane, else from the ego's spawn lanelet. The arc length is
+        derived from the ego's runtime spawn pose when the NPC is placed a
+        longitudinal distance relative to the ego.
         """
         rel = npc.relative_spawn
-        if rel is not None and rel.anchor == "start" and rel.reference == plan.ego.name:
-            op = "+" if rel.longitudinal >= 0 else "-"
+        ego_relative = (
+            rel is not None and rel.anchor == "start" and rel.reference == plan.ego.name
+        )
+        if not ego_relative and not npc.config_spawn_lanelet:
+            lanelet = npc.spawn_lanelet_id if npc.spawn_lanelet_id is not None else 0
             return [
-                f"{var}_pose = Lanelet2Pose(",
-                f"{_INDENT}lanelet_id=self._spawn_pose.lanelet_id,",
-                f"{_INDENT}s=max(0.0, self._spawn_pose.s {op} {abs(rel.longitudinal)!r}),",
-                ")",
+                f"{var}_pose = Lanelet2Pose(lanelet_id={lanelet}, s={npc.spawn_s!r})"
             ]
-        lanelet = npc.spawn_lanelet_id if npc.spawn_lanelet_id is not None else 0
-        return [f"{var}_pose = Lanelet2Pose(lanelet_id={lanelet}, s={npc.spawn_s!r})"]
+
+        if npc.config_spawn_lanelet:
+            lanelet_expr = f"self._config.npc_{npc.index}_spawn_lanelet_id"
+        else:
+            lanelet_expr = "self._spawn_pose.lanelet_id"
+
+        if ego_relative and rel is not None and rel.longitudinal != 0:
+            op = "+" if rel.longitudinal >= 0 else "-"
+            s_expr = f"max(0.0, self._spawn_pose.s {op} {abs(rel.longitudinal)!r})"
+        elif ego_relative:
+            s_expr = "self._spawn_pose.s"
+        else:
+            s_expr = repr(npc.spawn_s)
+
+        return [
+            f"{var}_pose = Lanelet2Pose(",
+            f"{_INDENT}lanelet_id={lanelet_expr},",
+            f"{_INDENT}s={s_expr},",
+            ")",
+        ]
 
     def npc_spawn_lines(self, plan: ScenarioPlan, npc: ActorPlan) -> list[str]:
         self.imports.update(

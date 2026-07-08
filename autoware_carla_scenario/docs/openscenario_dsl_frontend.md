@@ -310,31 +310,44 @@ npc_1_pose = Lanelet2Pose(
 ```
 
 (An offset relative to *another NPC* is instead resolved numerically at
-transpile time.) The **lateral** part (`lane(right_of: ego)`) depends on the
-map, so it is surfaced as a `# NOTE:` comment and a *Transpiler notes* README
-section rather than silently guessed — pin it by editing `spawn_lanelet_id`.
+transpile time.)
 
-### Road-level constraints → lanelet-constraint sweep
+### Lateral & road-level placement → lanelet-constraint sweep
 
-`path_min_driving_lanes(N)` constrains the *spawn road*, which is a map
-question, so instead of a note it transpiles to a `sweep.constraints` block on
-`ego.spawn_lanelet_id` using the Hydra lanelet-constraint sweeper's
-`has_adjacent` primitive — a lanelet with both a left and a right neighbour sits
-on a road of ≥3 lanes (one neighbour ⇒ ≥2):
+The **lateral** part of a placement is a map question, so instead of a note it
+transpiles to the Hydra lanelet-constraint sweeper, which resolves spawn
+lanelets against whatever map is chosen at run time
+(`uv run scenario --multirun … hydra/sweeper=lanelet_constraint`). Three DSL
+constructs feed one consistent sweep, using the sweeper's `has_adjacent`
+primitive (existence of a same-direction neighbour):
+
+| DSL | Sweep effect |
+|---|---|
+| `lane(1, at: start)` (leftmost) | constraint `not has_adjacent(left)` on `ego.spawn_lanelet_id` |
+| `lane(n)` (n ≥ 2) | constraint `has_adjacent(left)` (approx: has lanes to the left) |
+| `path_min_driving_lanes(N)` | constraint `and/or(has_adjacent left, right)` (only when no lane / lateral pin already applies) |
+| `lane(right_of: ego)` on an NPC | ego constraint `has_adjacent(right)` **+** binding `adjacent_lanelet(side: right)` on `scenario.npc_<i>_spawn_lanelet_id` |
+
+The NPC binding is the inter-actor hook: the sweeper constrains
+`ego.spawn_lanelet_id`, then the `adjacent_lanelet` binding derives the NPC's
+lanelet as the ego's chosen neighbour. The generated NPC reads that lanelet from
+its config field (`self._config.npc_<i>_spawn_lanelet_id`), so a single sweep
+run places both actors. For `change_lane.osc` the ego resolves to a leftmost
+lane with a right neighbour, and the NPC to that right neighbour:
 
 ```yaml
 sweep:
   constraints:
     ego.spawn_lanelet_id:
-      - type: and
-        constraints:
-          - {type: has_adjacent, value: left}
-          - {type: has_adjacent, value: right}
+      - {type: not, constraint: {type: has_adjacent, value: left}}
+      - {type: has_adjacent, value: right}
+  bindings:
+    scenario.npc_1_spawn_lanelet_id: {type: adjacent_lanelet, side: right}
 ```
 
-The sweeper then resolves the spawn lanelet against whatever map is chosen at
-run time (`uv run scenario --multirun … hydra/sweeper=lanelet_constraint`), so
-the scenario stays map-independent while the road constraint is honoured.
+Because `has_adjacent` only tests neighbour *existence* (it cannot count
+lanes), an exact lane count from a fixed lane index degrades to "has a neighbour
+on the required side".
 
 ### Dynamic relative goals (`position(..., at: end)`)
 
