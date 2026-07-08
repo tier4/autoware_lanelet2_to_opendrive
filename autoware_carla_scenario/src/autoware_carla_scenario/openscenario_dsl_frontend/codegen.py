@@ -168,6 +168,18 @@ class _Emitter:
                 "timing=TickTiming.PRE_TICK",
                 "tm_port=self.tm_port",
             ]
+        if spec.kind is SpecKind.RELATIVE_POSITION:
+            self.imports.update({"RelativePositionAction", "TickTiming"})
+            reference = self.role_expr(plan, spec.params["reference"])
+            return "RelativePositionAction", [
+                f"entity_name={role}",
+                f"reference_name={reference}",
+                f"target_gap={spec.params['target_gap']!r}",
+                "client=self.client",
+                "timing=TickTiming.PRE_TICK",
+                "tm_port=self.tm_port",
+                "once=False",
+            ]
         if spec.kind is SpecKind.TRAFFIC_SIGNAL:
             self.imports.update({"TrafficSignalAction", "TrafficLightTarget"})
             self.needs_carla = True

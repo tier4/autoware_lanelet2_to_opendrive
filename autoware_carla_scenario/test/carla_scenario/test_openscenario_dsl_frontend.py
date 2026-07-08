@@ -866,22 +866,71 @@ def test_relational_position_and_lane_set_relative_spawn() -> None:
     assert any("right of ego" in n for n in plan.notes)
 
 
-def test_dynamic_end_position_is_noted_not_transpiled() -> None:
-    program = _drive_with(
-        [
-            OscModifier(
-                "position",
-                "ego",
-                [
-                    OscArgument(None, PhysicalValue(20.0, "m")),
-                    OscArgument("ahead_of", SymbolValue("ego")),
-                    OscArgument("at", SymbolValue("end")),
-                ],
+def test_dynamic_end_position_emits_relative_position_action() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="p",
+                fields=[OscField("ego", "vehicle"), OscField("npc", "vehicle")],
+                do=OscInvocation(
+                    "drive",
+                    "npc",
+                    modifiers=[
+                        OscModifier(
+                            "position",
+                            None,
+                            [
+                                OscArgument(None, PhysicalValue(20.0, "m")),
+                                OscArgument("ahead_of", SymbolValue("ego")),
+                                OscArgument("at", SymbolValue("end")),
+                            ],
+                        )
+                    ],
+                ),
             )
         ]
     )
     (plan,) = translate_program(program)
-    assert any("dynamic relative goal" in n for n in plan.notes)
+    rel = next(s for s in plan.specs if s.kind is SpecKind.RELATIVE_POSITION)
+    assert rel.actor == "npc"
+    assert rel.params["reference"] == "ego"
+    assert rel.params["target_gap"] == pytest.approx(20.0)
+
+    code = _module_from_plans([plan])
+    compile(code, "p.py", "exec")
+    assert "RelativePositionAction(" in code
+    assert "reference_name=EGO_ROLE_NAME" in code
+    assert "target_gap=20.0" in code
+    assert "once=False" in code
+
+
+def test_dynamic_end_position_behind_is_negative_gap() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="p",
+                fields=[OscField("ego", "vehicle"), OscField("npc", "vehicle")],
+                do=OscInvocation(
+                    "drive",
+                    "npc",
+                    modifiers=[
+                        OscModifier(
+                            "position",
+                            None,
+                            [
+                                OscArgument(None, PhysicalValue(10.0, "m")),
+                                OscArgument("behind", SymbolValue("ego")),
+                                OscArgument("at", SymbolValue("end")),
+                            ],
+                        )
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    rel = next(s for s in plan.specs if s.kind is SpecKind.RELATIVE_POSITION)
+    assert rel.params["target_gap"] == pytest.approx(-10.0)
 
 
 def test_set_map_and_min_lanes_are_advisory() -> None:

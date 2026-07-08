@@ -305,9 +305,39 @@ part (`lane(right_of: ego)`) and road-level constraints
 `# NOTE:` comments in the generated `setup()` and a *Transpiler notes* section
 in the package README rather than silently guessed — pin them by editing
 `spawn_lanelet_id`, or resolve them up front with the Hydra
-lanelet-constraint sweeper. A **dynamic** relative goal
-(`position(20m, ahead_of: ego, at: end)`) needs per-frame feedback control and
-is likewise recorded as a note (see Roadmap).
+lanelet-constraint sweeper.
+
+### Dynamic relative goals (`position(..., at: end)`)
+
+A relative placement anchored at `end` — e.g. `position(20m, ahead_of: ego,
+at: end)`, "the NPC must *end up* 20 m ahead of the ego" — is a **moving-target
+goal**: both vehicles move, so it cannot be a fixed spawn. It transpiles to a
+per-frame `RelativePositionAction`:
+
+```python
+RelativePositionAction(
+    entity_name=EntityRole.npc(1),
+    reference_name=EGO_ROLE_NAME,
+    target_gap=20.0,          # +ahead / -behind, metres
+    client=self.client,
+    once=False,               # runs every tick
+)
+```
+
+The action keeps the NPC on TrafficManager autopilot (lane keeping stays with
+TM) and each tick nudges its desired cruise speed by a proportional law on the
+longitudinal gap error, measured along the reference actor's forward axis:
+
+```
+gap   = (npc_pos - ego_pos) · ego_forward
+error = target_gap - gap
+desired_speed = clamp(ego_speed + gain * error, 0, max_speed)
+```
+
+so the NPC converges to — and holds — the requested gap as the ego moves. The
+companion `RelativePositionCondition` checks whether the gap has been reached
+(within a tolerance) and can register the goal as a scenario pass condition.
+Only the longitudinal channel is controlled; the target lane is still TM's job.
 
 ### `one_of` — exclusive choice → concrete variants
 
@@ -365,12 +395,13 @@ condition/action → codegen).
       `expr_compiler` to grow a small expression tree and, for distances, a new
       framework condition. (Today: single comparison on `speed`/`lane`, or
       `elapsed`.)
-- [ ] **Dynamic relative goals** — `position(Xm, ahead_of: other, at: end)` and
-      similar *moving-target* placements. The `at: start` case is resolved to a
-      spawn today; the `at: end` case needs a per-frame relative-position
-      controller (a new `Action` that recomputes and applies control each tick)
-      plus, for lateral neighbours, map-aware lanelet resolution (or the Hydra
-      sweeper). Currently recorded as a transpiler note.
+- [x] **Dynamic longitudinal relative goals** — `position(Xm, ahead_of/behind:
+      other, at: end)` now transpiles to a per-frame `RelativePositionAction`
+      (TrafficManager `set_desired_speed` proportional controller). *Remaining:*
+      the **lateral** neighbour of a relational placement (`lane(right_of:
+      other)`) still needs map-aware lanelet resolution or the Hydra sweeper,
+      and the controller could grow an `apply_control` mode for precise metric
+      goals where TM speed control is too coarse.
 - [ ] **`event` / `on` handlers** — `event e is <cond>` + `on e: do ...`.
       Extract `event_declaration` / `on` into the IR; compile the event
       condition (reusing `expr_compiler`); emit the handler's actions gated on

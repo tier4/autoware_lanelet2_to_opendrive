@@ -300,9 +300,10 @@ def _modifier_lane(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
 def _modifier_position(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
     """Longitudinal placement: ``position(<distance>, behind:/ahead_of:, at:)``.
 
-    ``at: start`` placements are resolved to a concrete spawn relative to the
-    reference actor; an ``at: end`` placement is a *dynamic* relative goal that
-    needs per-frame feedback control and is recorded as an unsupported note.
+    ``at: start`` placements resolve to a concrete spawn relative to the
+    reference actor. An ``at: end`` placement is a *dynamic* relative goal —
+    both vehicles move, so it becomes a per-frame ``RelativePositionAction``
+    that drives the actor toward the moving target gap.
     """
     anchor = _anchor_of(args)
     distance_value = args.get("distance", index=0)
@@ -319,11 +320,22 @@ def _modifier_position(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
             plan, actor, reference, longitudinal=longitudinal, anchor=anchor
         )
         return
-    relation = "behind" if behind is not None else "ahead of"
-    plan.notes.append(
-        f"{actor} should end {distance:g} m {relation} {reference} "
-        f"(at: {anchor}); this dynamic relative goal is not yet transpiled "
-        "(needs a per-frame relative-position controller)."
+
+    if reference not in {plan.ego.name, *(n.name for n in plan.npcs)}:
+        raise OscTranslationError(
+            f"relative placement references unknown actor {reference!r}"
+        )
+    side = "ahead" if longitudinal > 0 else "behind"
+    plan.specs.append(
+        Spec(
+            kind=SpecKind.RELATIVE_POSITION,
+            actor=actor,
+            label=f"{actor}_{side}_{reference}",
+            params={"reference": reference, "target_gap": longitudinal},
+            # Gated by the enclosing invocation; the translator assigns the
+            # phase entry gate to modifier-produced action specs.
+            gate=Gate.immediate(),
+        )
     )
 
 

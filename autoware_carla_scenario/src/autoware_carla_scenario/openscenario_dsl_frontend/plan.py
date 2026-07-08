@@ -118,6 +118,7 @@ class SpecKind(str, Enum):
 
     TURN = "turn"
     LANE_CHANGE = "lane_change"
+    RELATIVE_POSITION = "relative_position"
     TRAFFIC_SIGNAL = "traffic_signal"
     REACH_LANE = "reach_lane"
     STANDSTILL = "standstill"
@@ -138,6 +139,7 @@ class SpecRole(str, Enum):
 SPEC_ROLES: dict[SpecKind, SpecRole] = {
     SpecKind.TURN: SpecRole.ACTION,
     SpecKind.LANE_CHANGE: SpecRole.ACTION,
+    SpecKind.RELATIVE_POSITION: SpecRole.ACTION,
     SpecKind.TRAFFIC_SIGNAL: SpecRole.ACTION,
     SpecKind.REACH_LANE: SpecRole.PASS,
     SpecKind.STANDSTILL: SpecRole.PASS,

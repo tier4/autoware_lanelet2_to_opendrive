@@ -5,6 +5,7 @@ from .attach_carla_camera_sensor import AttachCarlaCameraSensorAction
 from .attach_lidar_sensor import AttachLidarSensorAction
 from .base import BaseAction, TickTiming
 from .lane_change import LaneChangeAction, LaneChangeDirection
+from .relative_position import RelativePositionAction
 from .traffic_signal import TrafficLightTarget, TrafficSignalAction
 from .turn import TurnAction, TurnDirection
 
@@ -15,6 +16,7 @@ __all__ = [
     "BaseAction",
     "LaneChangeAction",
     "LaneChangeDirection",
+    "RelativePositionAction",
     "TickTiming",
     "TrafficLightTarget",
     "TrafficSignalAction",

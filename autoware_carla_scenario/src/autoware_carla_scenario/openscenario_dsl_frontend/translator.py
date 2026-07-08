@@ -40,6 +40,7 @@ from .plan import (
     ScenarioPlan,
     Spec,
     SpecKind,
+    SpecRole,
 )
 from .registry import (
     BEHAVIOR_HANDLERS,
@@ -171,6 +172,7 @@ def _apply(
 
     if isinstance(node, OscInvocation):
         actor = resolve(node.actor)
+        before = len(plan.specs)
         for modifier in node.modifiers:
             mactor = resolve(modifier.actor) if modifier.actor else actor
             args = Arguments(modifier.arguments)
@@ -188,6 +190,12 @@ def _apply(
                 plan.specs.extend(mresult.fails)
             else:
                 modifier_handler(modifier.name)(plan, mactor, args)
+        # Modifier handlers that emit an action spec (e.g. a dynamic
+        # ``position(..., at: end)`` goal) leave it immediate; bind it to this
+        # invocation's entry gate so it arms with the enclosing phase.
+        for spec in plan.specs[before:]:
+            if spec.role is SpecRole.ACTION and spec.gate.is_immediate:
+                spec.gate = entry_gate
 
         result = behavior_handler(node.behavior)(actor, Arguments(node.arguments))
         for action in result.actions:

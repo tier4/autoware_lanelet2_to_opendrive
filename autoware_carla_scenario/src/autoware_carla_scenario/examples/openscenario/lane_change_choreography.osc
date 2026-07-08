@@ -13,6 +13,8 @@
 #     behind: ego)`` sets the NPC's longitudinal spawn relative to the ego. A
 #     lateral ``lane(right_of: ego)`` and ``path.path_min_driving_lanes(3)`` are
 #     map-dependent, so they are surfaced as transpiler notes rather than pinned.
+#   * A dynamic goal ``position(20m, ahead_of: ego, at: end)`` — the NPC must end
+#     ahead of the ego, a moving target — becomes a per-frame RelativePositionAction.
 #   * ``change_lane`` used as a ``with:`` modifier becomes a gated LaneChangeAction.
 #   * ``path.set_map(...)`` is advisory — the map is still chosen at run time.
 
@@ -31,6 +33,7 @@ scenario lane_change_choreography:
                 lanelet_position(lanelet: 242)
                 lane(right_of: ego, at: start)
                 position(15m, behind: ego, at: start)
+                position(20m, ahead_of: ego, at: end)
         merge: parallel(duration: 6s):
             ego.drive()
             npc.drive() with:
