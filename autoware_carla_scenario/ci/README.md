@@ -38,6 +38,19 @@ the visual mesh is skipped (`enable_mesh_visibility=False`). Camera/LiDAR
 sensors do **not** work in this mode, but they are not needed for a traffic
 smoke test.
 
+## Runner requirements
+
+The workflow runs on a **stock GitHub-hosted `ubuntu-22.04` runner** — no GPU
+and no larger/self-hosted runner. To stay within that budget the workflow:
+
+- frees preinstalled toolchains before pulling the multi-GB CARLA image,
+- caps shared memory at 1 GB (`shm_size` in the compose file),
+- spawns only a handful of vehicles for a short run (`num-vehicles`, `ticks`).
+
+`ubuntu-22.04` is pinned rather than `ubuntu-latest` (now 24.04) because the
+`lanelet2` bindings the `convert` step depends on only build against Ubuntu
+22.04's Boost 1.74.
+
 ## Adding a scenario
 
 Scenarios are defined declaratively in the workflow's `matrix.include` list.
@@ -80,7 +93,7 @@ CARLA_IMAGE=carlasim/carla:0.9.15 \
 python3.10 -m venv /tmp/carla-venv
 /tmp/carla-venv/bin/pip install "carla==0.9.15"
 /tmp/carla-venv/bin/python autoware_carla_scenario/ci/carla_traffic_simulation.py \
-  --xodr nishishinjuku.xodr --num-vehicles 20 --ticks 200
+  --xodr nishishinjuku.xodr --num-vehicles 8 --ticks 120
 
 # 4. Tear down
 docker compose -f autoware_carla_scenario/ci/docker-compose.carla.yml down -v

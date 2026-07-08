@@ -47,13 +47,13 @@ inputs:
     required: false
     default: "8000"
   num-vehicles:
-    description: Number of vehicles to spawn.
+    description: Number of vehicles to spawn (kept small for stock runners).
     required: false
-    default: "20"
+    default: "8"
   ticks:
     description: Number of synchronous ticks to simulate after warm-up.
     required: false
-    default: "200"
+    default: "120"
   warmup-ticks:
     description: Ticks to run before recording start positions.
     required: false

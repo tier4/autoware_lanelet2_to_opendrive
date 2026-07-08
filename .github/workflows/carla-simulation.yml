@@ -17,11 +17,11 @@ on:
       num-vehicles:
         description: Override the number of vehicles to spawn.
         required: false
-        default: "20"
+        default: "8"
       ticks:
         description: Override the number of synchronous ticks to simulate.
         required: false
-        default: "200"
+        default: "120"
   pull_request:
     branches: [master, main, develop]
     paths:
@@ -42,7 +42,11 @@ concurrency:
 jobs:
   simulate:
     name: ${{ matrix.name }} (CARLA ${{ matrix.carla-client-version }})
-    runs-on: ubicloud-standard-8-ubuntu-2204
+    # Standard GitHub-hosted runner. Pinned to 22.04 (not ubuntu-latest, which
+    # is now 24.04) because the lanelet2 bindings used by the `convert` step
+    # only build against Ubuntu 22.04's Boost 1.74. The CARLA server itself is
+    # CPU-only (Null RHI), so no GPU or larger runner is required.
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -50,17 +54,26 @@ jobs:
           # --- Scenarios ---------------------------------------------------
           # Each entry is a self-contained scenario. `map` / `input-map-path`
           # feed the `convert` CLI; the remaining keys tune the simulation.
+          # Vehicle/tick counts are deliberately small to fit a stock runner.
           - name: nishishinjuku-traffic
             map: nishishinjuku
             input-map-path: autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm
-            num-vehicles: "20"
-            ticks: "200"
+            num-vehicles: "8"
+            ticks: "120"
             min-total-distance: "5.0"
             carla-image: carlasim/carla:0.9.15
             carla-client-version: "0.9.15"
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free up disk space for the CARLA image
+        run: |
+          # The carlasim/carla image is several GB; stock runners only ship
+          # ~14 GB free. Drop preinstalled toolchains we do not need.
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost "${AGENT_TOOLSDIRECTORY}" || true
+          df -h /
 
       - name: Setup environment
         uses: ./.github/actions/setup-env
@@ -70,7 +83,7 @@ jobs:
           install-dev-deps: "true"
           run-precommit: "false"
           carla-extra: "carla"
-          cache-suffix: ubicloud-standard-8-ubuntu-2204
+          cache-suffix: ubuntu-22.04
 
       - name: Convert Lanelet2 map to OpenDRIVE (CARLA target)
         run: |
