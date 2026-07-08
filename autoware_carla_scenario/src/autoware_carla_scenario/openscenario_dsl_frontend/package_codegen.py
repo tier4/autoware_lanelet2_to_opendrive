@@ -246,9 +246,10 @@ def _render_readme(
     source_name: str,
     plans: list[ScenarioPlan],
 ) -> str:
+    map_hint = next((p.map_hint for p in plans if p.map_hint), None)
+    map_group = _map_group_name(map_hint) if map_hint else "nishishinjuku"
     runs = "\n".join(
-        f"uv run scenario scenario={name}/default map=nishishinjuku"
-        for name in scenario_names
+        f"uv run scenario scenario={name}/default" for name in scenario_names
     )
     body = (
         f"# {distribution_name}\n\n"
@@ -260,22 +261,24 @@ def _render_readme(
         f"{runs}\n"
         "```\n"
     )
-    map_hint = next((p.map_hint for p in plans if p.map_hint), None)
     if map_hint is not None:
         body += (
-            f"\n## Map\n\nThe source targeted map `{map_hint}`. The map is "
-            "selected at run time via `map=...`, so this is advisory only.\n"
+            f"\n## Map\n\nThe source `set_map({map_hint!r})` is bound in the "
+            f"config as a Hydra `map` group selection (`map={map_group}`), so "
+            "the scenario carries its own map. Provide a matching "
+            f"`conf/map/{map_group}.yaml` (with the Town's lanelet2 + OpenDRIVE "
+            "paths) on the search path, or override with `map=<other>`.\n"
         )
     if any(p.sweep_constraints or p.sweep_bindings for p in plans):
         body += (
             "\n## Spawn selection (lanelet-constraint sweep)\n\n"
             "The source constrained the spawn road (e.g. "
-            "`path_min_driving_lanes`). The config declares a `sweep` section "
-            "that resolves `ego.spawn_lanelet_id` against the chosen map. Run "
-            "it through the lanelet-constraint sweeper:\n\n"
+            "`path_min_driving_lanes`, `lane(right_of: ...)`). The config "
+            "declares a `sweep` section that resolves the spawn lanelets "
+            "against the map. Run it through the lanelet-constraint sweeper:\n\n"
             "```bash\n"
             f"uv run scenario --multirun scenario={scenario_names[0]}/default "
-            "map=nishishinjuku hydra/sweeper=lanelet_constraint\n"
+            "hydra/sweeper=lanelet_constraint\n"
             "```\n"
         )
     notes = _collect_notes(plans)
@@ -284,6 +287,12 @@ def _render_readme(
         body += "Constructs approximated or deferred during transpilation:\n\n"
         body += "".join(f"- {note}\n" for note in notes)
     return body
+
+
+def _map_group_name(map_hint: str) -> str:
+    """Sanitize a set_map name into a Hydra ``map`` group name (e.g. town04)."""
+    sanitized = "".join(c if c.isalnum() else "_" for c in map_hint).strip("_")
+    return sanitized.lower() or "map"
 
 
 def _yaml_scalar(value: object) -> str:
@@ -332,9 +341,22 @@ def _render_default_yaml(plan: ScenarioPlan, scenario_name: str, timeout: float)
             npc_fields += (
                 f"  npc_{npc.index}_spawn_lanelet_id: 0  # resolved by sweep\n"
             )
+    defaults = ""
+    if plan.map_hint is not None:
+        # Bind the map named by set_map(...) as a Hydra `map` group selection,
+        # exactly like the top-level config's defaults list. Overridable with
+        # `map=<name>`; expects a matching conf/map/<name>.yaml on the search
+        # path (provide it, or override at run time).
+        map_group = _map_group_name(plan.map_hint)
+        defaults = (
+            "defaults:\n"
+            f"  - /map: {map_group}  # from set_map({plan.map_hint!r})\n"
+            "  - _self_\n\n"
+        )
     text = (
         "# @package _global_\n"
         f"# Concrete values for the transpiled {scenario_name!r} scenario.\n"
+        f"{defaults}"
         "scenario:\n"
         f"  name: {scenario_name}\n"
         f"  timeout_seconds: {timeout}\n"

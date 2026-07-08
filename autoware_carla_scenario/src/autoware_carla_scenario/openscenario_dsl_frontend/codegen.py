@@ -421,15 +421,12 @@ def _wrap_note(note: str) -> list[str]:
 
 
 def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
-    """Build the statements inside ``setup`` (unindented, section by section)."""
+    """Build the statements inside ``setup`` (unindented, section by section).
+
+    The ``set_map(...)`` directive is bound in the package config (a Hydra
+    ``map`` group selection), not here, so it is not a code note.
+    """
     body: list[str] = []
-    if plan.map_hint is not None:
-        body.extend(
-            _wrap_note(
-                f"the source targeted map {plan.map_hint!r}; the map is chosen "
-                "at run time (map=...), so this is advisory only."
-            )
-        )
     for note in plan.notes:
         body.extend(_wrap_note(note))
     if body:

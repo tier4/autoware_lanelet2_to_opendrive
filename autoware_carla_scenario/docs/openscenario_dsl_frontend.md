@@ -191,7 +191,7 @@ scenario top:             # scenario_runner dialect
 | `position(Xm, behind\|ahead_of: actor, at: start)` | NPC longitudinal spawn relative to another actor |
 | `lane(right_of\|left_of: actor)` / `lane(N)` | relational / map-relative lane placement (see below) |
 | `vehicle_type("...")` / `model(...)` | CARLA blueprint id |
-| `set_map("Town")` | advisory map hint (the map is still chosen at run time) |
+| `set_map("Town")` | binds a Hydra `map` group selection in the package config (see below) |
 | `path_min_driving_lanes(N)` | pre-run `sweep.constraints` on `ego.spawn_lanelet_id` (see below) |
 | `timeout(Ns)` | scenario-level fail: `TimeoutCondition` |
 
@@ -348,6 +348,24 @@ sweep:
 Because `has_adjacent` only tests neighbour *existence* (it cannot count
 lanes), an exact lane count from a fixed lane index degrades to "has a neighbour
 on the required side".
+
+### `set_map(...)` → bound `map` group selection
+
+`set_map("Town04")` binds the map the same way the framework's top-level
+`config.yaml` does — a Hydra `map` group selection in the generated scenario
+config's defaults list, rather than a code comment:
+
+```yaml
+# @package _global_
+defaults:
+  - /map: town04     # from set_map("Town04")
+  - _self_
+```
+
+So the scenario carries its own map and runs without an explicit `map=` on the
+CLI. The package must find a matching `conf/map/town04.yaml` (with the Town's
+lanelet2 + OpenDRIVE paths) on the Hydra search path; supply one, or override
+with `map=<other>` at run time.
 
 ### Dynamic relative goals (`position(..., at: end)`)
 

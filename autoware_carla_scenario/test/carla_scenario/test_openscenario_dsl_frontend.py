@@ -969,9 +969,22 @@ def _set_map_min_lanes_program(lanes: int) -> OscProgram:
     )
 
 
-def test_set_map_is_advisory() -> None:
+def test_set_map_binds_map_group_in_config() -> None:
     (plan,) = translate_program(_set_map_min_lanes_program(3))
     assert plan.map_hint == "Town04"
+
+    files = generate_package_files([plan], source_name="t.osc")
+    yaml_text = next(v for k, v in files.items() if k.endswith("default.yaml"))
+    # Bound as a Hydra `map` group selection (like the top-level config.yaml),
+    # not a code note.
+    assert "defaults:" in yaml_text
+    assert "- /map: town04" in yaml_text
+    assert "- _self_" in yaml_text
+
+    module = _scenario_module(files)
+    assert "set_map" not in module  # no code note for the map
+    readme = files["README.md"]
+    assert "map=town04" in readme
 
 
 def test_min_lanes_emits_sweep_constraint() -> None:
