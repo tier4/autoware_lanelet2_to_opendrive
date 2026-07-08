@@ -354,9 +354,37 @@ def _referenced_action_labels(plan: ScenarioPlan) -> set[str]:
     return refs
 
 
+def _wrap_note(note: str) -> list[str]:
+    """Wrap a transpiler note into ``# NOTE:`` comment lines (<= 88 cols)."""
+    words = f"NOTE: {note}".split()
+    lines: list[str] = []
+    current = "#"
+    for word in words:
+        candidate = f"{current} {word}"
+        if len(candidate) > 88 and current != "#":
+            lines.append(current)
+            current = f"#   {word}"
+        else:
+            current = candidate
+    lines.append(current)
+    return lines
+
+
 def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
     """Build the statements inside ``setup`` (unindented, section by section)."""
-    body: list[str] = [
+    body: list[str] = []
+    if plan.map_hint is not None:
+        body.extend(
+            _wrap_note(
+                f"the source targeted map {plan.map_hint!r}; the map is chosen "
+                "at run time (map=...), so this is advisory only."
+            )
+        )
+    for note in plan.notes:
+        body.extend(_wrap_note(note))
+    if body:
+        body.append("")
+    body += [
         "# Snap the ego spawn pose to the CARLA road surface.",
         "self._setup_ego_spawn()",
     ]

@@ -22,6 +22,7 @@ from typing import Callable
 from .ast_model import (
     OscComposition,
     OscDoMember,
+    OscField,
     OscInvocation,
     OscProgram,
     OscScenario,
@@ -29,41 +30,95 @@ from .ast_model import (
 )
 from .errors import OscTranslationError
 from .expr_compiler import compile_event_condition
-from .plan import MAX_VARIANTS, ActorPlan, Gate, ScenarioPlan
-from .registry import Arguments, behavior_handler, modifier_handler
+from .plan import (
+    MAX_VARIANTS,
+    ActorPlan,
+    CondKind,
+    ConditionSpec,
+    Gate,
+    GateKind,
+    ScenarioPlan,
+    Spec,
+    SpecKind,
+)
+from .registry import (
+    BEHAVIOR_HANDLERS,
+    MODIFIER_HANDLERS,
+    PLAN_LEVEL_MODIFIERS,
+    Arguments,
+    behavior_handler,
+    modifier_handler,
+)
 
 logger = logging.getLogger(__name__)
 
 #: Field types that denote a controllable vehicle actor.
 _VEHICLE_TYPES = {"vehicle", "car", "ego", "npc"}
 
+#: Non-vehicle struct field types that must never be treated as actors.
+_NON_ACTOR_TYPES = {"path", "route", "map"}
 
-def _resolve_actors(scenario: OscScenario) -> tuple[ActorPlan, list[ActorPlan]]:
-    """Split the scenario's vehicle fields into a fresh ego actor and NPCs."""
-    vehicle_fields = [
-        f
-        for f in scenario.fields
-        if (f.type_name or "").lower() in _VEHICLE_TYPES or f.name == "ego"
-    ]
 
-    ego: ActorPlan | None = None
+def _referenced_actors(node: OscDoMember | None) -> list[str]:
+    """Return actor names invoked in a ``do`` tree, in first-seen order."""
+    order: list[str] = []
+
+    def visit(member: OscDoMember | None) -> None:
+        if isinstance(member, OscInvocation):
+            if member.actor and member.actor not in order:
+                order.append(member.actor)
+        elif isinstance(member, OscComposition):
+            for child in member.members:
+                visit(child)
+
+    visit(node)
+    return order
+
+
+def _seconds_of(value: object) -> float:
+    """Best-effort duration coercion for a phase ``duration:`` value."""
+    to_seconds = getattr(value, "to_seconds", None)
+    if callable(to_seconds):
+        return float(to_seconds())
+    as_float = getattr(value, "as_float", None)
+    return float(as_float()) if callable(as_float) else 0.0
+
+
+def _resolve_actors(
+    scenario: OscScenario, do_tree: OscDoMember | None
+) -> tuple[ActorPlan, list[ActorPlan]]:
+    """Split the scenario's vehicle fields into a fresh ego actor and NPCs.
+
+    A field is a vehicle actor when it is driven in the ``do`` tree, has a
+    vehicle-like type, or is named after the ego — but never when its type is
+    a known non-vehicle struct (e.g. ``path: Path``). The ego is the actor
+    whose name mentions ``ego``; otherwise the first actor is promoted.
+    """
+    referenced = _referenced_actors(do_tree)
+
+    def is_actor(f: OscField) -> bool:
+        type_name = (f.type_name or "").lower()
+        if type_name in _NON_ACTOR_TYPES:
+            return False
+        return (
+            f.name in referenced
+            or type_name in _VEHICLE_TYPES
+            or "ego" in f.name.lower()
+        )
+
+    vehicle_fields = [f for f in scenario.fields if is_actor(f)]
+
+    ego_names = [f.name for f in vehicle_fields if "ego" in f.name.lower()]
+    ego_name = ego_names[0] if ego_names else None
+    if ego_name is None and vehicle_fields:
+        ego_name = vehicle_fields[0].name
+
+    ego = ActorPlan(name=ego_name or "ego", is_ego=True)
     npcs: list[ActorPlan] = []
-    npc_index = 0
     for f in vehicle_fields:
-        if f.name == "ego" and ego is None:
-            ego = ActorPlan(name="ego", is_ego=True)
-        else:
-            npc_index += 1
-            npcs.append(ActorPlan(name=f.name, is_ego=False, index=npc_index))
-
-    if ego is None:
-        if npcs:
-            first = npcs.pop(0)
-            ego = ActorPlan(name=first.name, is_ego=True)
-            for i, npc in enumerate(npcs, start=1):
-                npc.index = i
-        else:
-            ego = ActorPlan(name="ego", is_ego=True)
+        if f.name == ego.name:
+            continue
+        npcs.append(ActorPlan(name=f.name, is_ego=False, index=len(npcs) + 1))
     return ego, npcs
 
 
@@ -82,7 +137,14 @@ def _expand_one_of(node: OscDoMember) -> list[OscDoMember]:
 
     variants: list[OscDoMember] = []
     for combo in itertools.product(*member_options):
-        variants.append(OscComposition(operator=node.operator, members=list(combo)))
+        variants.append(
+            OscComposition(
+                operator=node.operator,
+                members=list(combo),
+                label=node.label,
+                duration=node.duration,
+            )
+        )
     return variants
 
 
@@ -111,7 +173,21 @@ def _apply(
         actor = resolve(node.actor)
         for modifier in node.modifiers:
             mactor = resolve(modifier.actor) if modifier.actor else actor
-            modifier_handler(modifier.name)(plan, mactor, Arguments(modifier.arguments))
+            args = Arguments(modifier.arguments)
+            if (
+                modifier.name in BEHAVIOR_HANDLERS
+                and modifier.name not in MODIFIER_HANDLERS
+            ):
+                # An action-producing behaviour used as a ``with:`` modifier
+                # (e.g. ``change_lane(...)``): register it as a gated action.
+                mresult = behavior_handler(modifier.name)(mactor, args)
+                for maction in mresult.actions:
+                    maction.gate = entry_gate
+                    plan.specs.append(maction)
+                plan.specs.extend(mresult.passes)
+                plan.specs.extend(mresult.fails)
+            else:
+                modifier_handler(modifier.name)(plan, mactor, args)
 
         result = behavior_handler(node.behavior)(actor, Arguments(node.arguments))
         for action in result.actions:
@@ -141,10 +217,31 @@ def _apply(
             return advancing[0]
         return Gate.all_of(advancing)
 
-    # serial (default): thread the gate through the members in order.
+    # serial (default): thread the gate through the members in order. A member
+    # that is a *timed* phase (``parallel(duration: 15s)``) advances the
+    # sequence by wall-clock time, so the next phase arms at the cumulative
+    # elapsed instant rather than on an observable completion.
     gate = entry_gate
+    elapsed = 0.0
+    if (
+        entry_gate.kind is GateKind.CONDITION
+        and entry_gate.condition is not None
+        and entry_gate.condition.kind is CondKind.ELAPSED
+    ):
+        elapsed = entry_gate.condition.value or 0.0
     for member in node.members:
-        gate = _apply(plan, member, gate, resolve, ordered=ordered)
+        completion = _apply(plan, member, gate, resolve, ordered=ordered)
+        if isinstance(member, OscComposition) and member.duration is not None:
+            elapsed += _seconds_of(member.duration)
+            gate = Gate.from_condition(
+                ConditionSpec(
+                    kind=CondKind.ELAPSED,
+                    value=elapsed,
+                    label=f"after_{member.label or 'phase'}_{elapsed:g}s",
+                )
+            )
+        else:
+            gate = completion
     return gate
 
 
@@ -155,7 +252,7 @@ def _build_plan(
     variant_count: int,
 ) -> ScenarioPlan:
     """Build one :class:`ScenarioPlan` for a single ``do`` variant."""
-    ego, npcs = _resolve_actors(scenario)
+    ego, npcs = _resolve_actors(scenario, do_tree)
     plan = ScenarioPlan(
         name=scenario.name,
         ego=ego,
@@ -175,14 +272,78 @@ def _build_plan(
         return actor
 
     for modifier in scenario.modifiers:
-        modifier_handler(modifier.name)(
-            plan, resolve(modifier.actor), Arguments(modifier.arguments)
-        )
+        # Struct-scoped directives (``path.set_map(...)``) are not bound to a
+        # vehicle actor, so they bypass actor resolution.
+        actor = "" if modifier.name in PLAN_LEVEL_MODIFIERS else resolve(modifier.actor)
+        modifier_handler(modifier.name)(plan, actor, Arguments(modifier.arguments))
 
     if do_tree is not None:
         _apply(plan, do_tree, Gate.immediate(), resolve, ordered=True)
 
+    _resolve_relative_spawns(plan)
+    _ensure_phase_timeout(plan, do_tree)
+
     return plan
+
+
+def _resolve_relative_spawns(plan: ScenarioPlan) -> None:
+    """Resolve each NPC's ``at: start`` relative placement to a concrete spawn.
+
+    The longitudinal offset is applied directly (map-free); a lateral
+    neighbour (``right_of`` / ``left_of``) cannot be turned into a lanelet id
+    without the map, so it stays on the reference lanelet with a note.
+    """
+    for npc in plan.npcs:
+        rel = npc.relative_spawn
+        if rel is None or rel.anchor != "start":
+            continue
+        reference = plan.actor(rel.reference)
+        if npc.spawn_lanelet_id is None:
+            npc.spawn_lanelet_id = reference.spawn_lanelet_id
+        npc.spawn_s = max(0.0, reference.spawn_s + rel.longitudinal)
+        where = f"{abs(rel.longitudinal):g} m "
+        where += "ahead of" if rel.longitudinal > 0 else "behind"
+        if rel.side is not None:
+            plan.notes.append(
+                f"npc {npc.index} ({npc.name}) starts one lane to the "
+                f"{rel.side} of {rel.reference}; the lateral neighbour needs "
+                f"the map — set its 'spawn_lanelet_id' to that lane."
+            )
+        plan.notes.append(
+            f"npc {npc.index} ({npc.name}) spawns {where} {rel.reference} "
+            f"(spawn_s={npc.spawn_s:g})."
+        )
+
+
+def _ensure_phase_timeout(plan: ScenarioPlan, do_tree: OscDoMember | None) -> None:
+    """Derive a fail-safe timeout from timed phases when none was declared."""
+    if any(s.kind is SpecKind.TIMEOUT for s in plan.specs):
+        return
+    total = _total_duration(do_tree)
+    if total <= 0:
+        return
+    plan.specs.append(
+        Spec(
+            kind=SpecKind.TIMEOUT,
+            actor=plan.ego.name,
+            label="scenario_timeout",
+            params={"seconds": total},
+        )
+    )
+
+
+def _total_duration(node: OscDoMember | None) -> float:
+    """Sum the durations of a serial run of timed phases."""
+    if not isinstance(node, OscComposition):
+        return 0.0
+    child_total = sum(
+        _seconds_of(m.duration)
+        for m in node.members
+        if isinstance(m, OscComposition) and m.duration is not None
+    )
+    if child_total:
+        return child_total
+    return _seconds_of(node.duration) if node.duration is not None else 0.0
 
 
 def translate_scenario(scenario: OscScenario) -> list[ScenarioPlan]:

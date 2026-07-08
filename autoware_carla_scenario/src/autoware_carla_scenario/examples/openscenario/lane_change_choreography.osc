@@ -1,0 +1,37 @@
+# OpenSCENARIO DSL (OSC2) example: a two-actor, timed lane-change choreography.
+#
+#     osc-transpile lane_change_choreography.osc -o out/
+#
+# This mirrors the scenario_runner-style dialect and exercises the frontend's
+# multi-actor support:
+#
+#   * Two controllable actors (ego + one NPC).
+#   * Named, time-bounded ``parallel`` phases — each phase's actions arm at the
+#     cumulative elapsed instant, and the scenario timeout is derived from the
+#     total phase duration when none is declared.
+#   * Relational NPC placement resolved at transpile time: ``position(15m,
+#     behind: ego)`` sets the NPC's longitudinal spawn relative to the ego. A
+#     lateral ``lane(right_of: ego)`` and ``path.path_min_driving_lanes(3)`` are
+#     map-dependent, so they are surfaced as transpiler notes rather than pinned.
+#   * ``change_lane`` used as a ``with:`` modifier becomes a gated LaneChangeAction.
+#   * ``path.set_map(...)`` is advisory — the map is still chosen at run time.
+
+scenario lane_change_choreography:
+    path: Path
+    path.set_map("Town04")
+    path.path_min_driving_lanes(3)
+    ego: vehicle
+    npc: vehicle
+    do serial:
+        approach: parallel(duration: 12s):
+            ego.drive() with:
+                speed(30kmph)
+                lanelet_position(lanelet: 242)
+            npc.drive() with:
+                lanelet_position(lanelet: 242)
+                lane(right_of: ego, at: start)
+                position(15m, behind: ego, at: start)
+        merge: parallel(duration: 6s):
+            ego.drive()
+            npc.drive() with:
+                change_lane(side: left, lane_changes: 1)

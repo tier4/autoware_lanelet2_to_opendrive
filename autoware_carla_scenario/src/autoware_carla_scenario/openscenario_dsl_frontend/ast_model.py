@@ -126,10 +126,16 @@ class OscComposition:
     Attributes:
         operator: The composition operator keyword.
         members: The nested ``do`` members, in source order.
+        label: The optional phase label (``get_ahead`` in
+            ``get_ahead: parallel(...)``), or ``None``.
+        duration: The optional ``duration:`` argument of a timed phase
+            (``parallel(duration: 15s)``), or ``None``.
     """
 
     operator: str
     members: list[OscDoMember] = field(default_factory=list)
+    label: Optional[str] = None
+    duration: Optional[OscValue] = None
 
 
 #: A leaf invocation, a ``wait`` step, or a nested composition block.

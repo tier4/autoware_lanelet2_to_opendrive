@@ -71,6 +71,15 @@ def _seconds(value: OscValue) -> float:
     raise OscTranslationError(f"{value!r} is not a valid duration value")
 
 
+def _meters(value: OscValue) -> float:
+    """Coerce a length argument to metres (bare numbers are assumed metres)."""
+    if isinstance(value, PhysicalValue):
+        return value.to_meters()
+    if isinstance(value, (IntValue, FloatValue)):
+        return value.as_float()
+    raise OscTranslationError(f"{value!r} is not a valid length value")
+
+
 def _direction(value: OscValue) -> str:
     symbol = value.as_symbol().lower()
     if symbol not in ("left", "right"):
@@ -84,8 +93,7 @@ def _traffic_light_state(value: OscValue) -> str:
     symbol = value.as_symbol().lower()
     if symbol not in ("green", "red", "yellow"):
         raise OscTranslationError(
-            f"traffic light state must be 'green', 'red' or 'yellow', "
-            f"got {symbol!r}"
+            f"traffic light state must be 'green', 'red' or 'yellow', got {symbol!r}"
         )
     return symbol
 
@@ -117,12 +125,14 @@ def _behavior_turn(actor: str, args: Arguments) -> BehaviorResult:
 
 
 def _behavior_lane_change(actor: str, args: Arguments) -> BehaviorResult:
-    direction = _direction(args.require("direction", index=0))
+    direction = _direction(args.require("direction", "side", index=0))
+    count_value = args.get("lane_changes", "count")
+    lane_changes = count_value.as_int() if count_value is not None else 1
     spec = Spec(
         kind=SpecKind.LANE_CHANGE,
         actor=actor,
         label=f"{actor}_lane_change_{direction}",
-        params={"direction": direction},
+        params={"direction": direction, "lane_changes": lane_changes},
     )
     return BehaviorResult(actions=[spec], completion=Gate.action_done(spec.label))
 
@@ -223,6 +233,117 @@ def _modifier_lanelet_position(plan: ScenarioPlan, actor: str, args: Arguments) 
         )
 
 
+def _anchor_of(args: Arguments) -> str:
+    """Return the ``at:`` time anchor of a placement modifier (default start)."""
+    at = args.get("at")
+    return at.as_symbol().lower() if at is not None else "start"
+
+
+def _merge_relative_spawn(
+    plan: ScenarioPlan,
+    actor: str,
+    reference: str,
+    *,
+    side: str | None = None,
+    longitudinal: float | None = None,
+    anchor: str = "start",
+) -> None:
+    """Attach or extend an actor's relative-spawn placement.
+
+    ``lane(right_of: ego)`` and ``position(15m, behind: ego)`` contribute
+    complementary lateral / longitudinal parts of the same placement, so they
+    are merged into one :class:`~.plan.RelativeSpawn`.
+    """
+    from .plan import RelativeSpawn
+
+    if reference not in {plan.ego.name, *(n.name for n in plan.npcs)}:
+        raise OscTranslationError(
+            f"relative placement references unknown actor {reference!r}"
+        )
+    target = plan.actor(actor)
+    current = target.relative_spawn
+    target.relative_spawn = RelativeSpawn(
+        reference=reference,
+        side=side if side is not None else (current.side if current else None),
+        longitudinal=(
+            longitudinal
+            if longitudinal is not None
+            else (current.longitudinal if current else 0.0)
+        ),
+        anchor=anchor,
+    )
+
+
+def _modifier_lane(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+    """Lane placement: ``lane(<index>, at:)`` or ``lane(right_of:/left_of:)``.
+
+    An absolute lane index is map-relative and recorded as advisory metadata;
+    a ``right_of`` / ``left_of`` reference is a relational lateral placement.
+    """
+    anchor = _anchor_of(args)
+    for side, key in (("right", "right_of"), ("left", "left_of")):
+        ref = args.get(key)
+        if ref is not None:
+            _merge_relative_spawn(
+                plan, actor, ref.as_symbol(), side=side, anchor=anchor
+            )
+            return
+    index = args.get("lane", index=0)
+    if index is not None:
+        plan.actor(actor).spawn_lane_index = index.as_int()
+        plan.notes.append(
+            f"{actor} starts in map-relative lane index {index.as_int()} "
+            f"(at: {anchor}); set 'spawn_lanelet_id' in the config to pin it."
+        )
+
+
+def _modifier_position(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+    """Longitudinal placement: ``position(<distance>, behind:/ahead_of:, at:)``.
+
+    ``at: start`` placements are resolved to a concrete spawn relative to the
+    reference actor; an ``at: end`` placement is a *dynamic* relative goal that
+    needs per-frame feedback control and is recorded as an unsupported note.
+    """
+    anchor = _anchor_of(args)
+    distance_value = args.get("distance", index=0)
+    distance = _meters(distance_value) if distance_value is not None else 0.0
+    behind = args.get("behind")
+    ahead = args.get("ahead_of", "ahead")
+    if behind is None and ahead is None:
+        return
+    reference = (behind or ahead).as_symbol()  # type: ignore[union-attr]
+    longitudinal = -distance if behind is not None else distance
+
+    if anchor == "start":
+        _merge_relative_spawn(
+            plan, actor, reference, longitudinal=longitudinal, anchor=anchor
+        )
+        return
+    relation = "behind" if behind is not None else "ahead of"
+    plan.notes.append(
+        f"{actor} should end {distance:g} m {relation} {reference} "
+        f"(at: {anchor}); this dynamic relative goal is not yet transpiled "
+        "(needs a per-frame relative-position controller)."
+    )
+
+
+def _modifier_set_map(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
+    """``set_map("Town04")`` — advisory only; the map is chosen at run time."""
+    plan.map_hint = args.require("map", index=0).as_str()
+
+
+def _modifier_min_driving_lanes(
+    plan: ScenarioPlan, actor: str, args: Arguments
+) -> None:
+    """``path_min_driving_lanes(n)`` — a pre-run constraint on the spawn road."""
+    lanes = args.require("lanes", index=0).as_int()
+    plan.notes.append(
+        f"path requires at least {lanes} driving lanes; choose spawn lanelets "
+        "on such a road (e.g. via the Hydra lanelet-constraint sweeper: a "
+        "lanelet with both left and right neighbours lies on a >=3-lane road)."
+    )
+
+
 def _modifier_vehicle_type(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
     plan.actor(actor).vehicle_type = args.require(
         "type", "model", "blueprint", index=0
@@ -290,7 +411,17 @@ MODIFIER_HANDLERS: dict[str, ModifierHandler] = {
     "timeout": _modifier_timeout,
     "keep_speed_above": _modifier_min_speed,
     "min_speed": _modifier_min_speed,
+    # Relational placement (map-relative / inter-actor).
+    "lane": _modifier_lane,
+    "position": _modifier_position,
+    # Struct-scoped path directives (not bound to a vehicle actor).
+    "set_map": _modifier_set_map,
+    "path_min_driving_lanes": _modifier_min_driving_lanes,
 }
+
+#: Modifiers scoped to a non-vehicle struct (e.g. ``path.set_map(...)``); the
+#: translator applies these without resolving their scope as an actor.
+PLAN_LEVEL_MODIFIERS: frozenset[str] = frozenset({"set_map", "path_min_driving_lanes"})
 
 
 def register_behavior(name: str, handler: BehaviorHandler) -> None:

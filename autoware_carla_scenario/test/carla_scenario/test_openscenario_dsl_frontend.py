@@ -47,6 +47,7 @@ from autoware_carla_scenario.openscenario_dsl_frontend.values import (
     FloatValue,
     IntValue,
     PhysicalValue,
+    StringValue,
     SymbolValue,
     parse_physical_literal,
 )
@@ -732,3 +733,253 @@ def test_transpile_to_package_writes_installable_package(
         compile(module.read_text(encoding="utf-8"), str(module), "exec")
     yamls = list((root / "src").rglob("default.yaml"))
     assert yamls
+
+
+# ---------------------------------------------------------------------------
+# Multi-actor, timed phases, and relational placement (scenario_runner dialect)
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_vehicle_types_resolve_actors() -> None:
+    """Fields typed with catalog names are actors; ``Path`` structs are not."""
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="top",
+                fields=[
+                    OscField("path", "Path"),
+                    OscField("ego_vehicle", "Model3"),
+                    OscField("npc", "Rubicon"),
+                ],
+                do=OscComposition(
+                    operator="parallel",
+                    members=[
+                        OscInvocation("drive", "ego_vehicle"),
+                        OscInvocation("drive", "npc"),
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    assert plan.ego.name == "ego_vehicle"
+    assert [n.name for n in plan.npcs] == ["npc"]
+
+
+def _timed_phase(label: str, seconds: float, member: OscInvocation) -> OscComposition:
+    return OscComposition(
+        operator="parallel",
+        members=[member],
+        label=label,
+        duration=PhysicalValue(seconds, "s"),
+    )
+
+
+def test_timed_phases_gate_actions_by_elapsed_time() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="top",
+                fields=[OscField("ego", "vehicle"), OscField("npc", "vehicle")],
+                do=OscComposition(
+                    operator="serial",
+                    members=[
+                        _timed_phase("get_ahead", 15.0, OscInvocation("drive", "ego")),
+                        _timed_phase(
+                            "change",
+                            5.0,
+                            OscInvocation(
+                                "drive",
+                                "npc",
+                                modifiers=[
+                                    OscModifier(
+                                        "change_lane",
+                                        None,
+                                        [OscArgument("side", SymbolValue("left"))],
+                                    )
+                                ],
+                            ),
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    lane_change = next(s for s in plan.specs if s.kind is SpecKind.LANE_CHANGE)
+    assert lane_change.actor == "npc"
+    assert lane_change.gate.kind is GateKind.CONDITION
+    assert lane_change.gate.condition is not None
+    assert lane_change.gate.condition.kind is CondKind.ELAPSED
+    assert lane_change.gate.condition.value == pytest.approx(15.0)
+    # No explicit timeout(): a fail-safe is derived from the total phase time.
+    timeout = next(s for s in plan.specs if s.kind is SpecKind.TIMEOUT)
+    assert timeout.params["seconds"] == pytest.approx(20.0)
+
+
+def test_relational_position_and_lane_set_relative_spawn() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="top",
+                fields=[OscField("ego", "vehicle"), OscField("npc", "vehicle")],
+                modifiers=[
+                    OscModifier(
+                        "spawn_lanelet", "ego", [OscArgument("lanelet", IntValue(100))]
+                    ),
+                    OscModifier("spawn_s", "ego", [OscArgument("s", FloatValue(40.0))]),
+                ],
+                do=OscInvocation(
+                    "drive",
+                    "npc",
+                    modifiers=[
+                        OscModifier(
+                            "lane",
+                            None,
+                            [
+                                OscArgument("right_of", SymbolValue("ego")),
+                                OscArgument("at", SymbolValue("start")),
+                            ],
+                        ),
+                        OscModifier(
+                            "position",
+                            None,
+                            [
+                                OscArgument(None, PhysicalValue(15.0, "m")),
+                                OscArgument("behind", SymbolValue("ego")),
+                                OscArgument("at", SymbolValue("start")),
+                            ],
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    npc = plan.npcs[0]
+    assert npc.relative_spawn is not None
+    assert npc.relative_spawn.side == "right"
+    assert npc.relative_spawn.longitudinal == pytest.approx(-15.0)
+    # 15 m behind ego (spawn_s=40) on the ego's lanelet.
+    assert npc.spawn_lanelet_id == 100
+    assert npc.spawn_s == pytest.approx(25.0)
+    assert any("right of ego" in n for n in plan.notes)
+
+
+def test_dynamic_end_position_is_noted_not_transpiled() -> None:
+    program = _drive_with(
+        [
+            OscModifier(
+                "position",
+                "ego",
+                [
+                    OscArgument(None, PhysicalValue(20.0, "m")),
+                    OscArgument("ahead_of", SymbolValue("ego")),
+                    OscArgument("at", SymbolValue("end")),
+                ],
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    assert any("dynamic relative goal" in n for n in plan.notes)
+
+
+def test_set_map_and_min_lanes_are_advisory() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="top",
+                fields=[OscField("path", "Path"), OscField("ego", "vehicle")],
+                modifiers=[
+                    OscModifier(
+                        "set_map", "path", [OscArgument(None, StringValue("Town04"))]
+                    ),
+                    OscModifier(
+                        "path_min_driving_lanes",
+                        "path",
+                        [OscArgument(None, IntValue(3))],
+                    ),
+                ],
+                do=OscInvocation("drive", "ego"),
+            )
+        ]
+    )
+    (plan,) = translate_program(program)
+    assert plan.map_hint == "Town04"
+    assert any("3 driving lanes" in n for n in plan.notes)
+
+
+def test_change_lane_modifier_generates_gated_action_code() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="top",
+                fields=[OscField("ego", "vehicle"), OscField("npc", "vehicle")],
+                do=OscComposition(
+                    operator="serial",
+                    members=[
+                        _timed_phase("run", 10.0, OscInvocation("drive", "ego")),
+                        _timed_phase(
+                            "change",
+                            5.0,
+                            OscInvocation(
+                                "drive",
+                                "npc",
+                                modifiers=[
+                                    OscModifier(
+                                        "change_lane",
+                                        None,
+                                        [OscArgument("side", SymbolValue("left"))],
+                                    )
+                                ],
+                            ),
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    code = _module_from_plans(translate_program(program))
+    compile(code, "top.py", "exec")
+    assert "LaneChangeAction(" in code
+    assert "ElapsedTimeCondition(10.0" in code
+
+
+@_requires_osc2
+def test_parse_scenario_runner_change_lane_transpiles(tmp_path: Path) -> None:
+    """A scenario_runner-style two-actor timed choreography transpiles."""
+    source = (
+        "scenario top:\n"
+        "    path: Path\n"
+        '    path.set_map("Town04")\n'
+        "    path.path_min_driving_lanes(3)\n"
+        "    ego_vehicle: Model3\n"
+        "    npc: Rubicon\n"
+        "    do serial:\n"
+        "        get_ahead: parallel(duration: 15s):\n"
+        "            ego_vehicle.drive(path) with:\n"
+        "                speed(20kph)\n"
+        "                lane(1, at: start)\n"
+        "            npc.drive(path) with:\n"
+        "                lane(right_of: ego_vehicle, at: start)\n"
+        "                position(15m, behind: ego_vehicle, at: start)\n"
+        "        change_lane: parallel(duration: 5s):\n"
+        "            ego_vehicle.drive(path)\n"
+        "            npc.drive(path) with:\n"
+        "                change_lane(lane_changes: 1, side: left)\n"
+    )
+    program = parse_program_from_string(source)
+    plans = translate_program(program)
+    (plan,) = plans
+    assert plan.ego.name == "ego_vehicle"
+    assert [n.name for n in plan.npcs] == ["npc"]
+    assert plan.map_hint == "Town04"
+
+    files = generate_package_files(plans, source_name="change_lane.osc")
+    module = _scenario_module(files)
+    compile(module, "change_lane.py", "exec")
+    assert "LaneChangeAction(" in module
+    assert "ElapsedTimeCondition(15.0" in module
+    readme = files["README.md"]
+    assert "Transpiler notes" in readme
+    assert "Town04" in readme

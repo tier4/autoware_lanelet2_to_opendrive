@@ -203,14 +203,29 @@ def _render_pyproject(
     )
 
 
+def _collect_notes(plans: list[ScenarioPlan]) -> list[str]:
+    """Aggregate transpiler notes across variants, preserving first-seen order."""
+    seen: set[str] = set()
+    notes: list[str] = []
+    for plan in plans:
+        for note in plan.notes:
+            if note not in seen:
+                seen.add(note)
+                notes.append(note)
+    return notes
+
+
 def _render_readme(
-    distribution_name: str, scenario_names: list[str], source_name: str
+    distribution_name: str,
+    scenario_names: list[str],
+    source_name: str,
+    plans: list[ScenarioPlan],
 ) -> str:
     runs = "\n".join(
         f"uv run scenario scenario={name}/default map=nishishinjuku"
         for name in scenario_names
     )
-    return (
+    body = (
         f"# {distribution_name}\n\n"
         f"Scenario package transpiled from `{source_name}` by "
         "`autoware_carla_scenario.openscenario_dsl_frontend`.\n\n"
@@ -220,6 +235,18 @@ def _render_readme(
         f"{runs}\n"
         "```\n"
     )
+    map_hint = next((p.map_hint for p in plans if p.map_hint), None)
+    if map_hint is not None:
+        body += (
+            f"\n## Map\n\nThe source targeted map `{map_hint}`. The map is "
+            "selected at run time via `map=...`, so this is advisory only.\n"
+        )
+    notes = _collect_notes(plans)
+    if notes:
+        body += "\n## Transpiler notes\n\n"
+        body += "Constructs approximated or deferred during transpilation:\n\n"
+        body += "".join(f"- {note}\n" for note in notes)
+    return body
 
 
 def _render_default_yaml(plan: ScenarioPlan, scenario_name: str, timeout: float) -> str:
@@ -304,7 +331,7 @@ def generate_package_files(
             names["distribution_name"], pkg, description
         ),
         "README.md": _render_readme(
-            names["distribution_name"], variant_scn, source_name
+            names["distribution_name"], variant_scn, source_name, plans
         ),
         f"src/{pkg}/__init__.py": _render_init(
             pkg,

@@ -147,13 +147,24 @@ The mapping from DSL names to framework module calls lives in
 
 ### Actors
 
-Vehicle-typed scenario fields become actors. A field named `ego` is the ego
-vehicle; every other vehicle field becomes an NPC (`EntityRole.npc(i)`).
+Vehicle scenario fields become actors. A field is treated as a vehicle when it
+is *driven* in the `do` tree, has a vehicle-like type (`vehicle`, `car`, …), or
+is named after the ego — but never when its type is a known non-vehicle struct
+(e.g. `path: Path`). This means catalog model types from the scenario_runner
+dialect (`Model3`, `Rubicon`, …) resolve correctly. The actor whose name
+mentions `ego` (e.g. `ego` or `ego_vehicle`) is the ego; every other vehicle
+field becomes an NPC (`EntityRole.npc(i)`), spawned in `setup()`.
 
 ```
 scenario s:
-    ego: vehicle      # the ego vehicle
-    npc: vehicle      # NPC #1
+    ego: vehicle          # the ego vehicle
+    npc: vehicle          # NPC #1
+```
+```
+scenario top:             # scenario_runner dialect
+    path: Path            # a struct field, not an actor
+    ego_vehicle: Model3   # the ego (name mentions "ego")
+    npc: Rubicon          # NPC #1
 ```
 
 ### Behaviours (invoked inside `do`)
@@ -162,7 +173,7 @@ scenario s:
 |---|---|
 | `drive()`, `follow_lane()`, `keep_lane()` | no-op (autopilot); a carrier for `with:` modifiers |
 | `turn(direction: left\|right)` | `TurnAction` |
-| `change_lane(direction: left\|right)` / `lane_change(...)` | `LaneChangeAction` |
+| `change_lane(direction\|side: left\|right, lane_changes: N)` / `lane_change(...)` | `LaneChangeAction` (also usable as a `with:` modifier) |
 | `set_traffic_lights(state: green\|red\|yellow)` | `TrafficSignalAction` |
 | `reach_lane(lanelet: N)` / `on_lane(...)` | pass: sticky `EntityLanePositionCondition` |
 | `stand_still(Ns)` / `stop(...)` | pass: `StandstillCondition` |
@@ -177,7 +188,11 @@ scenario s:
 | `lanelet_position(lanelet: N, s: X)` | actor spawn position (see note) |
 | `spawn_lanelet(N)` / `lanelet(N)` | actor spawn lanelet id (alias) |
 | `spawn_s(N)` | longitudinal spawn arc-length (alias) |
+| `position(Xm, behind\|ahead_of: actor, at: start)` | NPC longitudinal spawn relative to another actor |
+| `lane(right_of\|left_of: actor)` / `lane(N)` | relational / map-relative lane placement (see below) |
 | `vehicle_type("...")` / `model(...)` | CARLA blueprint id |
+| `set_map("Town")` | advisory map hint (the map is still chosen at run time) |
+| `path_min_driving_lanes(N)` | pre-run constraint on the spawn road (recorded as a note) |
 | `timeout(Ns)` | scenario-level fail: `TimeoutCondition` |
 
 !!! note "`lanelet_position` is an extension type, not `lane_position`"
@@ -259,6 +274,41 @@ Members of a `parallel` block share the block's entry gate (they run
 concurrently); the block completes when *all* members complete
 (`AndCondition` of their completions).
 
+### Timed phases — `label: parallel(duration: Ns)`
+
+A named, time-bounded phase advances the sequence by **wall-clock time**: the
+actions inside phase *i* arm at the cumulative elapsed instant, gated on an
+`ElapsedTimeCondition`. A `serial` of timed phases (the scenario_runner
+choreography style) therefore plays out phase-by-phase on a timeline:
+
+```
+do serial:
+    approach: parallel(duration: 12s):   # phase 1 runs 0–12 s
+        ego.drive() with: speed(30kmph)
+        npc.drive() with: position(15m, behind: ego, at: start)
+    merge: parallel(duration: 6s):       # phase 2 arms at t = 12 s
+        ego.drive()
+        npc.drive() with: change_lane(side: left)
+```
+
+Here the NPC's `change_lane` is emitted as a `LaneChangeAction` triggered by
+`ElapsedTimeCondition(12.0)`. When the scenario declares no `timeout(...)`, a
+fail-safe timeout is derived from the total phase duration (18 s above).
+
+### Relational placement (`behind` / `ahead_of` / `right_of`)
+
+An NPC can be placed relative to another actor. The **longitudinal** part is
+resolved at transpile time with no map: `position(15m, behind: ego, at: start)`
+sets the NPC's spawn to the ego's lanelet at `ego.spawn_s − 15`. The **lateral**
+part (`lane(right_of: ego)`) and road-level constraints
+(`path_min_driving_lanes(3)`) depend on the map, so they are surfaced as
+`# NOTE:` comments in the generated `setup()` and a *Transpiler notes* section
+in the package README rather than silently guessed — pin them by editing
+`spawn_lanelet_id`, or resolve them up front with the Hydra
+lanelet-constraint sweeper. A **dynamic** relative goal
+(`position(20m, ahead_of: ego, at: end)`) needs per-frame feedback control and
+is likewise recorded as a note (see Roadmap).
+
 ### `one_of` — exclusive choice → concrete variants
 
 A `one_of` is expanded at transpile time into **one concrete scenario per
@@ -315,6 +365,12 @@ condition/action → codegen).
       `expr_compiler` to grow a small expression tree and, for distances, a new
       framework condition. (Today: single comparison on `speed`/`lane`, or
       `elapsed`.)
+- [ ] **Dynamic relative goals** — `position(Xm, ahead_of: other, at: end)` and
+      similar *moving-target* placements. The `at: start` case is resolved to a
+      spawn today; the `at: end` case needs a per-frame relative-position
+      controller (a new `Action` that recomputes and applies control each tick)
+      plus, for lateral neighbours, map-aware lanelet resolution (or the Hydra
+      sweeper). Currently recorded as a transpiler note.
 - [ ] **`event` / `on` handlers** — `event e is <cond>` + `on e: do ...`.
       Extract `event_declaration` / `on` into the IR; compile the event
       condition (reusing `expr_compiler`); emit the handler's actions gated on

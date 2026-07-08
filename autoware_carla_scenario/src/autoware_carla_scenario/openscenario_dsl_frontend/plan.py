@@ -147,6 +147,25 @@ SPEC_ROLES: dict[SpecKind, SpecRole] = {
 }
 
 
+@dataclass(frozen=True)
+class RelativeSpawn:
+    """A spawn position expressed relative to another actor.
+
+    Attributes:
+        reference: The name of the actor this spawn is relative to.
+        side: ``"left"`` / ``"right"`` for a lateral neighbour, or ``None``.
+        longitudinal: Signed metres along the reference actor's lane —
+            positive is ahead of, negative is behind, the reference.
+        anchor: The DSL time anchor (``"start"`` / ``"end"``); only
+            ``"start"`` placements are resolved to a concrete spawn.
+    """
+
+    reference: str
+    side: Optional[str] = None
+    longitudinal: float = 0.0
+    anchor: str = "start"
+
+
 @dataclass
 class ActorPlan:
     """A resolved actor (the ego or an NPC).
@@ -161,6 +180,9 @@ class ActorPlan:
             unspecified.
         spawn_s: Longitudinal offset along the spawn lanelet.
         initial_speed_kmh: Initial speed in km/h.
+        spawn_lane_index: A map-relative lane index (``lane(1, at: start)``)
+            when the spawn was given by lane number rather than a lanelet id.
+        relative_spawn: A placement relative to another actor, or ``None``.
     """
 
     name: str
@@ -170,6 +192,8 @@ class ActorPlan:
     spawn_lanelet_id: Optional[int] = None
     spawn_s: float = 0.0
     initial_speed_kmh: float = 0.0
+    spawn_lane_index: Optional[int] = None
+    relative_spawn: Optional[RelativeSpawn] = None
 
 
 @dataclass
@@ -239,6 +263,12 @@ class ScenarioPlan:
     specs: list[Spec] = field(default_factory=list)
     variant_index: int = 0
     variant_count: int = 1
+    #: The map named by a ``set_map(...)`` directive, surfaced as advisory
+    #: metadata (the map is still chosen at run time), or ``None``.
+    map_hint: Optional[str] = None
+    #: Human-readable notes about approximated / unsupported constructs,
+    #: rendered into the generated scenario and its README for transparency.
+    notes: list[str] = field(default_factory=list)
 
     def actor(self, name: str) -> ActorPlan:
         """Return the actor named *name* (ego or an NPC).

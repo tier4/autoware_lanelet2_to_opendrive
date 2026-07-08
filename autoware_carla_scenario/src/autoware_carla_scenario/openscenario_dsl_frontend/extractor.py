@@ -253,7 +253,9 @@ class _Extractor:
         w = self._w
         comp_node = w.first_child_by_rule(node, "composition")
         if comp_node is not None:
-            return self._extract_composition(comp_node)
+            label_node = w.first_child_by_rule(node, "label_name")
+            label = w.text(label_node) if label_node is not None else None
+            return self._extract_composition(comp_node, label=label)
 
         wait_node = w.first_child_by_rule(node, "wait_directive")
         if wait_node is not None:
@@ -265,16 +267,41 @@ class _Extractor:
             return self._extract_invocation(invocation, composition)
         return None
 
-    def _extract_composition(self, node: Any) -> OscComposition:
+    def _extract_composition(
+        self, node: Any, label: Optional[str] = None
+    ) -> OscComposition:
         w = self._w
         op_node = w.first_child_by_rule(node, "composition_operator")
         operator = w.text(op_node) if op_node is not None else "serial"
+        duration = self._composition_duration(node)
         members: list[OscDoMember] = []
         for member in w.children_by_rule(node, "do_member"):
             extracted = self.extract_do_member(member, composition=operator)
             if extracted is not None:
                 members.append(extracted)
-        return OscComposition(operator=operator, members=members)
+        return OscComposition(
+            operator=operator, members=members, label=label, duration=duration
+        )
+
+    def _composition_duration(self, node: Any) -> Optional[OscValue]:
+        """Return the ``duration:`` argument of a timed phase, if present.
+
+        Composition arguments (``parallel(duration: 15s)``) are carried in an
+        ``unqualified_argument_list`` of ``unqualified_named_argument`` nodes,
+        which differ from ordinary call ``argument_list`` rules.
+        """
+        w = self._w
+        arg_list = w.first_child_by_rule(node, "unqualified_argument_list")
+        if arg_list is None:
+            return None
+        for arg in w.children_by_rule(arg_list, "unqualified_named_argument"):
+            name_node = w.first_child_by_rule(arg, "unqualified_argument_name")
+            name = w.text(name_node) if name_node is not None else ""
+            if name == "duration":
+                expr = w.first_child_by_rule(arg, "expression")
+                if expr is not None:
+                    return self.evaluate(expr)
+        return None
 
     def _extract_invocation(
         self, node: Any, composition: Optional[str]
