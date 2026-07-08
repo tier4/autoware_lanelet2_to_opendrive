@@ -295,28 +295,36 @@ def _build_plan(
 
 
 def _resolve_relative_spawns(plan: ScenarioPlan) -> None:
-    """Resolve each NPC's ``at: start`` relative placement to a concrete spawn.
+    """Resolve each NPC's ``at: start`` relative placement.
 
-    The longitudinal offset is applied directly (map-free); a lateral
-    neighbour (``right_of`` / ``left_of``) cannot be turned into a lanelet id
-    without the map, so it stays on the reference lanelet with a note.
+    A **longitudinal** offset relative to the *ego* is left symbolic — the
+    generated ``setup`` derives the NPC pose from the ego's spawn pose
+    (``self._spawn_pose``) at runtime, so no map and no transpile-time value are
+    needed. A longitudinal offset relative to *another NPC* is resolved
+    numerically here. A **lateral** neighbour (``right_of`` / ``left_of``) is
+    map-dependent and kept as a note.
     """
     for npc in plan.npcs:
         rel = npc.relative_spawn
         if rel is None or rel.anchor != "start":
             continue
-        reference = plan.actor(rel.reference)
-        if npc.spawn_lanelet_id is None:
-            npc.spawn_lanelet_id = reference.spawn_lanelet_id
-        npc.spawn_s = max(0.0, reference.spawn_s + rel.longitudinal)
-        where = f"{abs(rel.longitudinal):g} m "
-        where += "ahead of" if rel.longitudinal > 0 else "behind"
         if rel.side is not None:
             plan.notes.append(
                 f"npc {npc.index} ({npc.name}) starts one lane to the "
                 f"{rel.side} of {rel.reference}; the lateral neighbour needs "
                 f"the map — set its 'spawn_lanelet_id' to that lane."
             )
+        if rel.reference == plan.ego.name:
+            # Longitudinal placement relative to the ego is emitted as code
+            # against ``self._spawn_pose`` (see codegen); nothing to resolve.
+            continue
+        # Reference is another NPC: resolve the offset numerically.
+        reference = plan.actor(rel.reference)
+        if npc.spawn_lanelet_id is None:
+            npc.spawn_lanelet_id = reference.spawn_lanelet_id
+        npc.spawn_s = max(0.0, reference.spawn_s + rel.longitudinal)
+        where = f"{abs(rel.longitudinal):g} m "
+        where += "ahead of" if rel.longitudinal > 0 else "behind"
         plan.notes.append(
             f"npc {npc.index} ({npc.name}) spawns {where} {rel.reference} "
             f"(spawn_s={npc.spawn_s:g})."

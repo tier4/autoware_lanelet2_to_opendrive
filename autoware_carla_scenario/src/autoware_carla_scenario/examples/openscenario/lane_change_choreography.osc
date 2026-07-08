@@ -9,10 +9,10 @@
 #   * Named, time-bounded ``parallel`` phases — each phase's actions arm at the
 #     cumulative elapsed instant, and the scenario timeout is derived from the
 #     total phase duration when none is declared.
-#   * Relational NPC placement resolved at transpile time: ``position(15m,
-#     behind: ego)`` sets the NPC's longitudinal spawn relative to the ego. A
-#     lateral ``lane(right_of: ego)`` and ``path.path_min_driving_lanes(3)`` are
-#     map-dependent, so they are surfaced as transpiler notes rather than pinned.
+#   * Relational NPC placement: ``position(15m, behind: ego)`` spawns the NPC
+#     from the ego's runtime spawn pose (``self._spawn_pose``) offset by 15 m —
+#     no map needed. A lateral ``lane(right_of: ego)`` and
+#     ``path.path_min_driving_lanes(3)`` are map-dependent, so they stay notes.
 #   * A dynamic goal ``position(20m, ahead_of: ego, at: end)`` — the NPC must end
 #     ahead of the ego, a moving target — becomes a per-frame RelativePositionAction.
 #   * ``change_lane`` used as a ``with:`` modifier becomes a gated LaneChangeAction.
@@ -30,7 +30,6 @@ scenario lane_change_choreography:
                 speed(30kmph)
                 lanelet_position(lanelet: 242)
             npc.drive() with:
-                lanelet_position(lanelet: 242)
                 lane(right_of: ego, at: start)
                 position(15m, behind: ego, at: start)
                 position(20m, ahead_of: ego, at: end)

@@ -297,14 +297,24 @@ fail-safe timeout is derived from the total phase duration (18 s above).
 
 ### Relational placement (`behind` / `ahead_of` / `right_of`)
 
-An NPC can be placed relative to another actor. The **longitudinal** part is
-resolved at transpile time with no map: `position(15m, behind: ego, at: start)`
-sets the NPC's spawn to the ego's lanelet at `ego.spawn_s − 15`. The **lateral**
-part (`lane(right_of: ego)`) and road-level constraints
-(`path_min_driving_lanes(3)`) depend on the map, so they are surfaced as
-`# NOTE:` comments in the generated `setup()` and a *Transpiler notes* section
-in the package README rather than silently guessed — pin them by editing
-`spawn_lanelet_id`, or resolve them up front with the Hydra
+An NPC can be placed relative to another actor. A **longitudinal** offset
+relative to the **ego** is emitted as code against the ego's runtime spawn pose,
+so it needs no map and no transpile-time position:
+
+```python
+# position(15m, behind: ego, at: start)
+npc_1_pose = Lanelet2Pose(
+    lanelet_id=self._spawn_pose.lanelet_id,
+    s=max(0.0, self._spawn_pose.s - 15.0),
+)
+```
+
+(An offset relative to *another NPC* is instead resolved numerically at
+transpile time.) The **lateral** part (`lane(right_of: ego)`) and road-level
+constraints (`path_min_driving_lanes(3)`) depend on the map, so they are
+surfaced as `# NOTE:` comments in the generated `setup()` and a *Transpiler
+notes* section in the package README rather than silently guessed — pin them by
+editing `spawn_lanelet_id`, or resolve them up front with the Hydra
 lanelet-constraint sweeper.
 
 ### Dynamic relative goals (`position(..., at: end)`)

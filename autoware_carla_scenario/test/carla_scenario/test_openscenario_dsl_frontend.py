@@ -860,9 +860,16 @@ def test_relational_position_and_lane_set_relative_spawn() -> None:
     assert npc.relative_spawn is not None
     assert npc.relative_spawn.side == "right"
     assert npc.relative_spawn.longitudinal == pytest.approx(-15.0)
-    # 15 m behind ego (spawn_s=40) on the ego's lanelet.
-    assert npc.spawn_lanelet_id == 100
-    assert npc.spawn_s == pytest.approx(25.0)
+
+    # The longitudinal placement relative to the ego is emitted as code against
+    # the ego's runtime spawn pose (no transpile-time value, no note).
+    code = _module_from_plans([plan])
+    compile(code, "p.py", "exec")
+    assert "lanelet_id=self._spawn_pose.lanelet_id" in code
+    assert "s=max(0.0, self._spawn_pose.s - 15.0)" in code
+    assert not any("behind" in n for n in plan.notes)
+
+    # The lateral neighbour is map-dependent and stays a note.
     assert any("right of ego" in n for n in plan.notes)
 
 

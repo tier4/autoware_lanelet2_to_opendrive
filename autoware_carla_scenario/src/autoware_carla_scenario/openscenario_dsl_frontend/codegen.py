@@ -314,7 +314,26 @@ class _Emitter:
 
     # -- npc spawning -------------------------------------------------
 
-    def npc_spawn_lines(self, npc: ActorPlan) -> list[str]:
+    def npc_pose_lines(self, plan: ScenarioPlan, npc: ActorPlan, var: str) -> list[str]:
+        """Render the ``<var>_pose = Lanelet2Pose(...)`` statement for an NPC.
+
+        When the NPC is placed a longitudinal distance relative to the *ego*,
+        the pose is derived from the ego's spawn pose (``self._spawn_pose``) at
+        runtime — no map or transpile-time position needed.
+        """
+        rel = npc.relative_spawn
+        if rel is not None and rel.anchor == "start" and rel.reference == plan.ego.name:
+            op = "+" if rel.longitudinal >= 0 else "-"
+            return [
+                f"{var}_pose = Lanelet2Pose(",
+                f"{_INDENT}lanelet_id=self._spawn_pose.lanelet_id,",
+                f"{_INDENT}s=max(0.0, self._spawn_pose.s {op} {abs(rel.longitudinal)!r}),",
+                ")",
+            ]
+        lanelet = npc.spawn_lanelet_id if npc.spawn_lanelet_id is not None else 0
+        return [f"{var}_pose = Lanelet2Pose(lanelet_id={lanelet}, s={npc.spawn_s!r})"]
+
+    def npc_spawn_lines(self, plan: ScenarioPlan, npc: ActorPlan) -> list[str]:
         self.imports.update(
             {
                 "Lanelet2Pose",
@@ -327,9 +346,8 @@ class _Emitter:
             }
         )
         var = f"npc_{npc.index}"
-        lanelet = npc.spawn_lanelet_id if npc.spawn_lanelet_id is not None else 0
         return [
-            f"{var}_pose = Lanelet2Pose(lanelet_id={lanelet}, s={npc.spawn_s!r})",
+            *self.npc_pose_lines(plan, npc, var),
             f"{var}_od_pose = to_opendrive({var}_pose)",
             f"{var}_snapped = snap_to_carla_road(",
             f"{_INDENT}{var}_od_pose, self.world, "
@@ -405,7 +423,7 @@ def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
         body.append("")
         body.append("# Spawn NPC vehicles.")
         for npc in plan.npcs:
-            body.extend(emitter.npc_spawn_lines(npc))
+            body.extend(emitter.npc_spawn_lines(plan, npc))
             body.append("")
         body.pop()
 
