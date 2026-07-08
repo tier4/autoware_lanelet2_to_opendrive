@@ -7,9 +7,19 @@ description: >
   scenario knobs are inputs so callers pick the scenario at call time.
 
 inputs:
+  map:
+    description: >
+      Built-in CARLA town map to load (e.g. Town03). Ships with the CARLA
+      image, so no OpenDRIVE conversion is needed. Provide either `map` or
+      `xodr-path`.
+    required: false
+    default: ""
   xodr-path:
-    description: Path to the OpenDRIVE (.xodr) map file to simulate.
-    required: true
+    description: >
+      Path to an OpenDRIVE (.xodr) map file to simulate. Used when `map` is
+      empty. Provide either `map` or `xodr-path`.
+    required: false
+    default: ""
   scenario-name:
     description: Human-readable scenario label (used for logs and artifact names).
     required: false
@@ -149,9 +159,21 @@ runs:
           recorder_arg=(--recorder-path "${recorder_container_path}")
           echo "recorder-container-path=${recorder_container_path}" >> "$GITHUB_OUTPUT"
         fi
+        # Source the world from a built-in town (`map`) or an OpenDRIVE file.
+        map_arg=()
+        if [ -n "${{ inputs.map }}" ]; then
+          map_arg=(--map "${{ inputs.map }}")
+        fi
+        if [ -n "${{ inputs.xodr-path }}" ]; then
+          map_arg+=(--xodr "${{ inputs.xodr-path }}")
+        fi
+        if [ "${#map_arg[@]}" -eq 0 ]; then
+          echo "::error::Either 'map' or 'xodr-path' must be provided."
+          exit 1
+        fi
         status=0
         python "${{ inputs.script-path }}" \
-          --xodr "${{ inputs.xodr-path }}" \
+          "${map_arg[@]}" \
           --host "${{ inputs.host }}" \
           --port "${{ inputs.rpc-port }}" \
           --tm-port "${{ inputs.tm-port }}" \

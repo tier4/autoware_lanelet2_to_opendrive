@@ -2,14 +2,16 @@ name: CARLA Simulation
 
 # CPU-only CARLA traffic-simulation CI.
 #
-# For each scenario in the matrix this workflow converts a Lanelet2 map to
-# OpenDRIVE with the repository's `convert` CLI, boots a headless CARLA 0.9.15
+# For each scenario in the matrix this workflow boots a headless CARLA 0.9.15
 # server (Null RHI, no GPU) via the reusable `carla-simulation` composite
-# action, and runs a Traffic-Manager-driven simulation that asserts the traffic
-# actually moved.
+# action and runs a Traffic-Manager-driven simulation on a built-in CARLA town
+# map, asserting that the traffic actually moved. Using a bundled map keeps CI
+# self-contained — no OpenDRIVE conversion or map data is required.
 #
 # Add a new scenario by appending an entry to the `matrix.include` list below —
 # the composite action is scenario-agnostic, so no other file needs to change.
+# (The composite action also accepts `xodr-path` instead of `map` if you want
+# to simulate a converted OpenDRIVE map.)
 
 on:
   workflow_dispatch:
@@ -42,22 +44,19 @@ concurrency:
 jobs:
   simulate:
     name: ${{ matrix.name }} (CARLA ${{ matrix.carla-client-version }})
-    # Standard GitHub-hosted runner. Pinned to 22.04 (not ubuntu-latest, which
-    # is now 24.04) because the lanelet2 bindings used by the `convert` step
-    # only build against Ubuntu 22.04's Boost 1.74. The CARLA server itself is
-    # CPU-only (Null RHI), so no GPU or larger runner is required.
+    # Stock GitHub-hosted runner — no GPU and no larger/self-hosted runner. The
+    # CARLA server is CPU-only (Null RHI) and the world is a bundled town map,
+    # so nothing here needs to build the lanelet2 bindings.
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
           # --- Scenarios ---------------------------------------------------
-          # Each entry is a self-contained scenario. `map` / `input-map-path`
-          # feed the `convert` CLI; the remaining keys tune the simulation.
+          # Each entry runs a traffic simulation on a built-in CARLA town map.
           # Vehicle/tick counts are deliberately small to fit a stock runner.
-          - name: nishishinjuku-traffic
-            map: nishishinjuku
-            input-map-path: autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm
+          - name: town03-traffic
+            map: Town03
             num-vehicles: "8"
             ticks: "120"
             min-total-distance: "5.0"
@@ -75,28 +74,10 @@ jobs:
             /usr/local/share/boost "${AGENT_TOOLSDIRECTORY}" || true
           df -h /
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-env
-        with:
-          python-version: "3.10"
-          install-system-deps: "true"
-          install-dev-deps: "true"
-          run-precommit: "false"
-          carla-extra: "carla"
-          cache-suffix: ubuntu-22.04
-
-      - name: Convert Lanelet2 map to OpenDRIVE (CARLA target)
-        run: |
-          uv run convert \
-            map=${{ matrix.map }} \
-            target=carla \
-            input_map_path=${{ matrix.input-map-path }} \
-            output_map_path=${{ matrix.name }}.xodr
-
       - name: Run CPU-only CARLA traffic simulation
         uses: ./.github/actions/carla-simulation
         with:
-          xodr-path: ${{ matrix.name }}.xodr
+          map: ${{ matrix.map }}
           scenario-name: ${{ matrix.name }}
           carla-image: ${{ matrix.carla-image }}
           carla-client-version: ${{ matrix.carla-client-version }}

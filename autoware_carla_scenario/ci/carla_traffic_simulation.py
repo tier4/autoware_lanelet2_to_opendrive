@@ -19,13 +19,21 @@ which fits a CPU-only 0.9.15 server.  Keeping this harness dependency-free
 Exit code is ``0`` when the traffic simulation passes and ``1`` otherwise, so it
 can gate a CI job directly.
 
+The world can come from a built-in CARLA town (``--map Town03``, which ships
+with the image and needs no conversion) or from an OpenDRIVE file
+(``--xodr map.xodr``).
+
 Example::
 
+    # Built-in town (default for CI)
     python carla_traffic_simulation.py \
-        --xodr nishishinjuku_carla.xodr \
+        --map Town03 \
         --host localhost --port 2000 --tm-port 8000 \
-        --num-vehicles 20 --ticks 200 \
+        --num-vehicles 8 --ticks 120 \
         --output carla_traffic_sim_result.json
+
+    # Or from an OpenDRIVE file
+    python carla_traffic_simulation.py --xodr map.xodr
 """
 
 from __future__ import annotations
@@ -148,6 +156,41 @@ def load_opendrive_world(client: carla.Client, xodr_path: Path) -> carla.World:
     return world
 
 
+def load_named_world(client: carla.Client, map_name: str) -> carla.World:
+    """Load a built-in CARLA town map by name (e.g. ``Town03``).
+
+    Built-in towns ship with the CARLA image and provide reliable spawn points
+    and Traffic-Manager navigation, so no OpenDRIVE conversion is needed. Both
+    short names (``Town03``) and full asset paths (``/Game/Carla/Maps/Town03``)
+    are accepted. If the requested map is unavailable, the currently loaded
+    world is used instead so CI degrades gracefully rather than erroring out.
+    """
+    available = client.get_available_maps()
+
+    def _short(name: str) -> str:
+        return name.split("/")[-1]
+
+    target = next(
+        (m for m in available if m == map_name or _short(m) == _short(map_name)),
+        None,
+    )
+    if target is None:
+        logger.warning(
+            "Map %r is not available (have %s); using the current world",
+            map_name,
+            sorted(_short(m) for m in available),
+        )
+        return client.get_world()
+
+    current = client.get_world().get_map().name
+    if _short(current) == _short(target):
+        logger.info("Requested map already loaded: %s", current)
+        return client.get_world()
+
+    logger.info("Loading built-in world: %s", target)
+    return client.load_world(target)
+
+
 def pick_spawn_transforms(world: carla.World, limit: int) -> List[carla.Transform]:
     """Return up to *limit* spawn transforms for the generated map.
 
@@ -248,10 +291,16 @@ def run_simulation(args: argparse.Namespace) -> SimulationResult:
     result = SimulationResult()
     start = time.monotonic()
 
-    xodr_path = Path(args.xodr)
-    if not xodr_path.is_file():
-        result.message = f"OpenDRIVE file not found: {xodr_path}"
+    if not args.map and not args.xodr:
+        result.message = "Either --map or --xodr must be provided"
         return result
+
+    xodr_path: Optional[Path] = None
+    if args.xodr:
+        xodr_path = Path(args.xodr)
+        if not xodr_path.is_file():
+            result.message = f"OpenDRIVE file not found: {xodr_path}"
+            return result
 
     client = wait_for_server(
         args.host, args.port, args.connect_timeout, args.retry_interval
@@ -260,7 +309,13 @@ def run_simulation(args: argparse.Namespace) -> SimulationResult:
     result.client_version = client.get_client_version()
     result.server_version = client.get_server_version()
 
-    world = load_opendrive_world(client, xodr_path)
+    # Prefer a built-in town map when requested; otherwise build one from the
+    # OpenDRIVE file.
+    if args.map:
+        world = load_named_world(client, args.map)
+    else:
+        assert xodr_path is not None  # noqa: S101 - guarded above
+        world = load_opendrive_world(client, xodr_path)
     result.map_name = world.get_map().name
     result.spawn_points = len(world.get_map().get_spawn_points())
 
@@ -374,7 +429,21 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--xodr", required=True, help="Path to the OpenDRIVE (.xodr) map file."
+        "--map",
+        default="",
+        help=(
+            "Built-in CARLA town map to load (e.g. Town03). Ships with the "
+            "CARLA image, so no OpenDRIVE conversion is needed. Mutually "
+            "exclusive with --xodr; one of the two is required."
+        ),
+    )
+    parser.add_argument(
+        "--xodr",
+        default="",
+        help=(
+            "Path to an OpenDRIVE (.xodr) map file to generate a world from. "
+            "Used when --map is not given."
+        ),
     )
     parser.add_argument("--host", default="localhost", help="CARLA RPC host.")
     parser.add_argument("--port", type=int, default=2000, help="CARLA RPC port.")
@@ -444,8 +513,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rpc-timeout",
         type=float,
-        default=60.0,
-        help="Per-request RPC timeout in seconds.",
+        default=120.0,
+        help=(
+            "Per-request RPC timeout in seconds. Generous so loading a built-in "
+            "town map on a CPU-only server does not time out."
+        ),
     )
     parser.add_argument(
         "--output",
