@@ -3,12 +3,13 @@
 The `openscenario_dsl_frontend` subpackage parses
 [ASAM OpenSCENARIO DSL](https://www.asam.net/standards/detail/openscenario-dsl/)
 (OSC2, `.osc`) sources with [py-osc2](https://github.com/PMSFIT/py-osc2) and
-**transpiles them into readable Python scenarios** for this framework.
+**transpiles them into an installable
+[scenario package](tutorial.md)** for this framework.
 
-The generated code is ordinary `autoware_carla_scenario` scenario code — a
-[`BaseScenario`](api.md) subclass whose `setup()` registers the same actions and
-pass/fail conditions you would write by hand. It is meant to be committed,
-reviewed and edited, not treated as an opaque build artifact.
+The generated scenario code is ordinary `autoware_carla_scenario` scenario
+code — a [`BaseScenario`](api.md) subclass whose `setup()` registers the same
+actions and pass/fail conditions you would write by hand. It is meant to be
+committed, reviewed and edited, not treated as an opaque build artifact.
 
 ## Pipeline
 
@@ -16,13 +17,13 @@ reviewed and edited, not treated as an opaque build artifact.
 .osc source
   → parser.parse_osc_file        # py-osc2 / ANTLR parse tree
   → extractor.extract_program    # syntax IR (OscProgram)
-  → translator.translate_program # semantic plan (ScenarioPlan)
-  → codegen.generate_module      # readable Python source
+  → translator.translate_program        # semantic plans (ScenarioPlan per one_of variant)
+  → package_codegen.generate_package     # installable scenario package
 ```
 
 The parse/extract/translate/codegen layers are pure Python and do **not** import
 CARLA, so they run (and are tested) without a CARLA installation. Only the
-*generated* code imports CARLA-backed modules at run time.
+*generated* package's scenario module imports CARLA-backed modules at run time.
 
 ## Installing py-osc2
 
@@ -38,39 +39,36 @@ CARLA, so they run (and are tested) without a CARLA installation. Only the
 
     ```bash
     python -m venv .osc-venv
-    .osc-venv/bin/pip install py-osc2
+    .osc-venv/bin/pip install py-osc2 jinja2
     PYTHONPATH=autoware_carla_scenario/src \
         .osc-venv/bin/python -m autoware_carla_scenario.openscenario_dsl_frontend.cli \
-        my_scenario.osc -o my_scenario_generated.py
+        my_scenario.osc -o out/
     ```
 
     The frontend imports `py-osc2` lazily and raises `OscDependencyError` with
     this guidance when it is missing. Only the parse step needs it; the
-    *generated* Python has no dependency on `py-osc2` at all.
+    *generated* package has no dependency on `py-osc2` at all.
 
 ## Command-line usage
 
-The subpackage installs an `osc-transpile` console script:
+The subpackage installs an `osc-transpile` console script that generates an
+installable scenario package:
 
 ```bash
-# Print the generated Python to stdout
-osc-transpile src/autoware_carla_scenario/examples/openscenario/intersection_passing.osc
+# Create ./<scenario>_package
+osc-transpile intersection_passing.osc
 
-# Write a single Python module
-osc-transpile intersection_passing.osc -o intersection_passing_generated.py
+# Create it under out/, choosing the package name
+osc-transpile intersection_passing.osc -o out/ --name my_pkg
 
-# Generate an installable scenario package (recommended)
-osc-transpile intersection_passing.osc --package -o out/
-
-# Syntax-check only
+# Syntax-check only (no output)
 osc-transpile intersection_passing.osc --check
 ```
 
-## Output as a scenario package
+## The generated scenario package
 
-With `--package` (CLI) or `transpile_to_package` (API) the transpiler emits a
-standalone, installable **scenario package** — the layout introduced in
-`autoware_carla_scenario` — instead of a loose module:
+The transpiler emits a standalone, installable **scenario package** — the
+layout introduced in `autoware_carla_scenario`:
 
 ```
 <scenario>_package/
@@ -87,7 +85,7 @@ Installing it makes the scenario runnable through the framework CLI without
 editing `autoware_carla_scenario`:
 
 ```bash
-osc-transpile junction_choice.osc --package -o .
+osc-transpile junction_choice.osc -o .
 uv pip install -e junction_choice_package
 uv run scenario scenario=junction_choice_v0/default map=nishishinjuku
 ```
@@ -103,19 +101,11 @@ conditions are baked into the scenario class.
 
 ```python
 from autoware_carla_scenario.openscenario_dsl_frontend import (
-    transpile_file,
-    transpile_to_file,
     transpile_to_package,
     plans_from_file,
 )
 
-# Get the generated Python source as a string.
-code = transpile_file("intersection_passing.osc")
-
-# Write a single module to disk.
-transpile_to_file("intersection_passing.osc", "generated.py")
-
-# Or generate a full scenario package under out/.
+# Generate a full scenario package under out/.
 root = transpile_to_package("intersection_passing.osc", output_dir="out")
 
 # Inspect the semantic plans (one per one_of variant) without generating code.
@@ -263,11 +253,11 @@ concurrently); the block completes when *all* members complete
 
 A `one_of` is expanded at transpile time into **one concrete scenario per
 branch** (a Cartesian product across `serial`/`parallel` nesting, a union over
-`one_of`). The generated module then contains several classes
-(`FooScenarioV0`, `FooScenarioV1`, …) and a `SCENARIO_VARIANTS` registry mapping
-each variant name to its build function — which slots directly into the runner's
-existing multirun / batch model. Expansion is capped at 64 variants (excess is
-logged and truncated).
+`one_of`). The generated package then contains several classes
+(`FooScenarioV0`, `FooScenarioV1`, …), each registered under its own name
+(`foo_v0`, `foo_v1`, …) with its own `default.yaml` — so the whole logical
+scenario slots directly into the runner's multirun / batch model. Expansion is
+capped at 64 variants (excess is logged and truncated).
 
 ## Extending the mapping
 

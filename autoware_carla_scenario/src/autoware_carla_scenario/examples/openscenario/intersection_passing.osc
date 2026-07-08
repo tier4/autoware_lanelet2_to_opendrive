@@ -1,10 +1,10 @@
 # OpenSCENARIO DSL (OSC2) example.
 #
-# Transpile it into a readable Python scenario with:
+# Transpile it into an installable scenario package with:
 #
 #     osc-transpile \
 #         src/autoware_carla_scenario/examples/openscenario/intersection_passing.osc \
-#         -o intersection_passing_generated.py
+#         -o out/   # -> out/intersection_passing_package/
 #
 # The ego spawns on lanelet 242 at 30 km/h, turns left through the junction,
 # and the scenario passes once the ego reaches lanelets 460 and 265. A 10 s

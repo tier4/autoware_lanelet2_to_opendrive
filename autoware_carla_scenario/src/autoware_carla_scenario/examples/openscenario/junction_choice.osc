@@ -1,11 +1,12 @@
 # OpenSCENARIO DSL (OSC2) example using serial ordering and a one_of choice.
 #
-# Transpiling this produces TWO concrete scenarios (one per one_of branch):
+# Transpiling this produces a scenario package with TWO concrete scenarios
+# (one per one_of branch):
 #
-#     osc-transpile junction_choice.osc -o junction_choice_generated.py
+#     osc-transpile junction_choice.osc -o out/   # -> out/junction_choice_package/
 #
-# The generated module defines JunctionChoiceScenarioV0 (left turn) and
-# JunctionChoiceScenarioV1 (right turn), plus a SCENARIO_VARIANTS registry.
+# The package registers junction_choice_v0 (left turn) and junction_choice_v1
+# (right turn), runnable via `uv run scenario scenario=junction_choice_v0/default`.
 #
 # Because the do block is serial, each step is gated on the previous one:
 # the turn only fires after the lights are set green, and reaching the target

@@ -98,7 +98,7 @@ def _render_scenario_module(
     class_names: list[str],
     config_class: str,
 ) -> str:
-    emitter = _Emitter(timeout_from_config=True)
+    emitter = _Emitter()
     class_blocks = [
         _render_scenario_class(plan, class_names[i], config_class, emitter)
         for i, plan in enumerate(plans)

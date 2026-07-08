@@ -1,6 +1,6 @@
-"""Render :class:`~.plan.ScenarioPlan` variants into readable Python code.
+"""Render the body of a transpiled scenario into readable Python code.
 
-The generated module mirrors the hand-written example scenarios: one
+Shared helpers used by :mod:`.package_codegen` to emit one
 :class:`~autoware_carla_scenario.BaseScenario` subclass per ``one_of`` variant,
 whose ``setup`` spawns actors and registers actions and pass/fail conditions
 with explicit, constructor-level module calls.
@@ -50,31 +50,6 @@ def _sanitize(name: str) -> str:
     return re.sub(r"\W+", "_", name).strip("_")
 
 
-def _class_name(scenario_name: str, variant_index: int, variant_count: int) -> str:
-    """Turn a DSL scenario name into a ``CamelCaseScenario`` class name."""
-    tail = scenario_name.split(".")[-1]
-    parts = [p for p in re.split(r"[^0-9A-Za-z]+", tail) if p]
-    camel = "".join(p[:1].upper() + p[1:] for p in parts) or "Osc"
-    if not camel.endswith("Scenario"):
-        camel += "Scenario"
-    if variant_count > 1:
-        camel += f"V{variant_index}"
-    return camel
-
-
-def _registry_key(scenario_name: str, variant_index: int, variant_count: int) -> str:
-    key = _sanitize(scenario_name.split(".")[-1]).lower() or "scenario"
-    if variant_count > 1:
-        key += f"_v{variant_index}"
-    return key
-
-
-def _build_fn_name(variant_index: int, variant_count: int) -> str:
-    return (
-        "build_scenario" if variant_count == 1 else f"build_scenario_v{variant_index}"
-    )
-
-
 def _action_var(label: str) -> str:
     return f"{_sanitize(label)}_action"
 
@@ -89,9 +64,6 @@ class _Emitter:
     """Accumulates import requirements while rendering spec code."""
 
     imports: set[str] = field(default_factory=set)
-    #: In package mode, render the timeout from ``self._config`` instead of a
-    #: baked literal so it stays overridable via the scenario's YAML config.
-    timeout_from_config: bool = False
     #: Set when the generated ``setup`` references the ``carla`` module.
     needs_carla: bool = False
 
@@ -285,14 +257,10 @@ class _Emitter:
     def fail_condition_lines(self, plan: ScenarioPlan, spec: Spec) -> list[str]:
         if spec.kind is SpecKind.TIMEOUT:
             self.imports.add("TimeoutCondition")
-            seconds = (
-                "self._config.timeout_seconds"
-                if self.timeout_from_config
-                else repr(spec.params["seconds"])
-            )
             return [
                 "self.register_fail_condition(",
-                f'{_INDENT}TimeoutCondition({seconds}, label="{spec.label}")',
+                f"{_INDENT}TimeoutCondition("
+                'self._config.timeout_seconds, label="scenario_timeout")',
                 ")",
             ]
         if spec.kind is SpecKind.COLLISION:
@@ -452,110 +420,3 @@ def _setup_body(plan: ScenarioPlan, emitter: _Emitter) -> list[str]:
             body.extend(emitter.fail_condition_lines(plan, spec))
 
     return body
-
-
-def _scenario_class(
-    plan: ScenarioPlan, emitter: _Emitter
-) -> tuple[str, str, list[str]]:
-    """Render one scenario class + build function; return (key, class_name, lines)."""
-    class_name = _class_name(plan.name, plan.variant_index, plan.variant_count)
-    build_name = _build_fn_name(plan.variant_index, plan.variant_count)
-    key = _registry_key(plan.name, plan.variant_index, plan.variant_count)
-
-    setup_body = _setup_body(plan, emitter)
-    emitter.imports.update({"SpawnTransform", "Lanelet2Pose"})
-
-    ego = plan.ego
-    spawn_lanelet = ego.spawn_lanelet_id if ego.spawn_lanelet_id is not None else 0
-    spawn_comment = (
-        ""
-        if ego.spawn_lanelet_id is not None
-        else "  # NOTE: spawn lanelet not set in DSL"
-    )
-    variant_note = f" (variant {plan.variant_index})" if plan.variant_count > 1 else ""
-
-    lines = [
-        f"class {class_name}(BaseScenario):",
-        f'{_INDENT}"""Transpiled scenario {plan.name!r}{variant_note}."""',
-        "",
-        f"{_INDENT}def setup(self) -> None:",
-        *_indent(setup_body, 2),
-        "",
-        f"{_INDENT}def is_done(self) -> bool:",
-        f"{_INDENT * 2}return False",
-        "",
-        "",
-        f"def {build_name}() -> {class_name}:",
-        f'{_INDENT}"""Construct the scenario with the ego spawn baked in from the DSL."""',
-        f"{_INDENT}ego_config = EgoConfig(",
-        f"{_INDENT * 2}spawn_location=SpawnTransform("
-        "carla.Transform(carla.Location())),",
-        f'{_INDENT * 2}vehicle_type="{ego.vehicle_type}",',
-        f"{_INDENT * 2}initial_speed_kmh={ego.initial_speed_kmh!r},",
-        f"{_INDENT})",
-        f"{_INDENT}spawn_pose = Lanelet2Pose("
-        f"lanelet_id={spawn_lanelet}, s={ego.spawn_s!r}){spawn_comment}",
-        f"{_INDENT}return {class_name}(ego_config, spawn_pose=spawn_pose)",
-    ]
-    return key, build_name, lines
-
-
-def _render_imports(emitter: _Emitter) -> list[str]:
-    names = sorted(emitter.imports | {"BaseScenario", "EgoConfig"})
-    lines = ["import carla", "", "from autoware_carla_scenario import ("]
-    lines.extend(f"{_INDENT}{name}," for name in names)
-    lines.append(")")
-    return lines
-
-
-def generate_module(plans: list[ScenarioPlan], *, source_name: str) -> str:
-    """Render *plans* (one per ``one_of`` variant) into a Python module string.
-
-    Args:
-        plans: The scenario variants to render. Must be non-empty.
-        source_name: The originating ``.osc`` path, recorded in the docstring.
-
-    Returns:
-        The generated Python source code.
-    """
-    if not plans:
-        raise ValueError("generate_module requires at least one plan")
-
-    emitter = _Emitter()
-
-    class_blocks: list[list[str]] = []
-    registry: list[tuple[str, str]] = []
-    for plan in plans:
-        key, build_name, block = _scenario_class(plan, emitter)
-        class_blocks.append(block)
-        registry.append((key, build_name))
-
-    import_lines = _render_imports(emitter)
-
-    header = [
-        '"""Scenario transpiled from an OpenSCENARIO DSL source.',
-        "",
-        f"Source: {source_name}",
-        "",
-        "Generated by autoware_carla_scenario.openscenario_dsl_frontend.",
-        "Edit freely — this file is plain, readable scenario code.",
-        '"""',
-        "",
-        "from __future__ import annotations",
-        "",
-        *import_lines,
-        "",
-        "",
-    ]
-
-    body: list[str] = []
-    for block in class_blocks:
-        body.extend(block)
-        body.append("")
-        body.append("")
-
-    registry_lines = ["SCENARIO_VARIANTS = {"]
-    registry_lines += [f'{_INDENT}"{key}": {build},' for key, build in registry]
-    registry_lines.append("}")
-
-    return "\n".join([*header, *body, *registry_lines]) + "\n"

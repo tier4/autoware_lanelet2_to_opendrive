@@ -3,10 +3,10 @@
 The pipeline is::
 
     .osc source
-        -> parser.parse_*          (py-osc2 / ANTLR parse tree)
-        -> extractor.extract       (syntax IR: OscProgram)
-        -> translator.translate    (semantic plan: ScenarioPlan)
-        -> codegen.generate_module (readable Python source)
+        -> parser.parse_*             (py-osc2 / ANTLR parse tree)
+        -> extractor.extract          (syntax IR: OscProgram)
+        -> translator.translate       (semantic plan: ScenarioPlan)
+        -> package_codegen.generate   (installable scenario package)
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from .ast_model import OscProgram
-from .codegen import generate_module
 from .extractor import extract_program
 from .package_codegen import generate_package_files
 from .parser import parse_osc_file, parse_osc_string
@@ -48,43 +47,6 @@ def plans_from_string(
 ) -> list[ScenarioPlan]:
     """Parse, extract and translate DSL source text into scenario variants."""
     return translate_program(parse_program_from_string(text, source_name=source_name))
-
-
-def transpile_file(path: str | Path) -> str:
-    """Transpile a ``.osc`` file into readable Python scenario source.
-
-    Args:
-        path: Path to the ``.osc`` source.
-
-    Returns:
-        The generated Python module as a string (one class per ``one_of``
-        variant).
-    """
-    plans = plans_from_file(path)
-    return generate_module(plans, source_name=str(path))
-
-
-def transpile_string(text: str, *, source_name: str = "<string>") -> str:
-    """Transpile DSL source text into readable Python scenario source."""
-    plans = plans_from_string(text, source_name=source_name)
-    return generate_module(plans, source_name=source_name)
-
-
-def transpile_to_file(source: str | Path, destination: str | Path) -> Path:
-    """Transpile *source* (``.osc``) and write the result to *destination*.
-
-    Args:
-        source: Path to the ``.osc`` source.
-        destination: Path to the ``.py`` file to write.
-
-    Returns:
-        The *destination* path.
-    """
-    code = transpile_file(source)
-    dst = Path(destination)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(code, encoding="utf-8")
-    return dst
 
 
 def transpile_to_package(

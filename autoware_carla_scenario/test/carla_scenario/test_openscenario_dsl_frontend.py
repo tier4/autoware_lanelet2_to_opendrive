@@ -18,7 +18,6 @@ from autoware_carla_scenario.openscenario_dsl_frontend import (
     OscTranslationError,
     SpecKind,
     parse_program_from_string,
-    transpile_file,
     transpile_to_package,
 )
 from autoware_carla_scenario.openscenario_dsl_frontend.package_codegen import (
@@ -40,7 +39,6 @@ from autoware_carla_scenario.openscenario_dsl_frontend.ast_model import (
     OscScenario,
     OscWait,
 )
-from autoware_carla_scenario.openscenario_dsl_frontend.codegen import generate_module
 from autoware_carla_scenario.openscenario_dsl_frontend.plan import CondKind, GateKind
 from autoware_carla_scenario.openscenario_dsl_frontend.translator import (
     translate_program,
@@ -344,16 +342,15 @@ def test_nested_one_of_is_cartesian() -> None:
 
 
 def test_generated_code_is_valid_python() -> None:
-    code = generate_module(translate_program(_demo_program()), source_name="demo.osc")
+    code = _module_from_plans(translate_program(_demo_program()))
     compile(code, "generated_demo.py", "exec")
     assert "class DemoScenario(BaseScenario):" in code
-    assert "def build_scenario() -> DemoScenario:" in code
+    assert "def __init__(" in code  # framework builder constructor
     assert "self._setup_ego_spawn()" in code
-    assert "SCENARIO_VARIANTS = {" in code
 
 
 def test_generated_code_contains_gated_module_calls() -> None:
-    code = generate_module(translate_program(_demo_program()), source_name="demo.osc")
+    code = _module_from_plans(translate_program(_demo_program()))
     assert "TurnAction(" in code
     assert "TurnDirection.LEFT" in code
     assert "TrafficSignalAction(" in code
@@ -361,17 +358,16 @@ def test_generated_code_contains_gated_module_calls() -> None:
     assert "ActionDoneCondition(set_traffic_lights_green_action" in code
     # lane change is triggered by reaching lanelet 460.
     assert "condition=EntityLanePositionCondition(" in code
-    assert "TimeoutCondition(8.0, label=" in code
-    assert "Lanelet2Pose(lanelet_id=242, s=5.0)" in code
+    # timeout is config-driven so it stays overridable via the YAML config.
+    assert "TimeoutCondition(self._config.timeout_seconds" in code
+    assert "Lanelet2Pose(lanelet_id=460" in code
 
 
 def test_generated_one_of_has_multiple_classes() -> None:
-    code = generate_module(translate_program(_one_of_program()), source_name="c.osc")
+    code = _module_from_plans(translate_program(_one_of_program()))
     compile(code, "generated_choice.py", "exec")
     assert "class ChoiceScenarioV0(BaseScenario):" in code
     assert "class ChoiceScenarioV1(BaseScenario):" in code
-    assert '"choice_v0": build_scenario_v0,' in code
-    assert '"choice_v1": build_scenario_v1,' in code
 
 
 def _two_reach_lanes(operator: str) -> OscProgram:
@@ -403,7 +399,7 @@ def _two_reach_lanes(operator: str) -> OscProgram:
 def test_serial_pass_conditions_are_ordered() -> None:
     (plan,) = translate_program(_two_reach_lanes("serial"))
     assert all(s.ordered for s in plan.specs if s.kind is SpecKind.REACH_LANE)
-    code = generate_module([plan], source_name="x.osc")
+    code = _module_from_plans([plan])
     assert "SequentialCondition(" in code
     assert "AndCondition(" not in code
     compile(code, "generated_seq.py", "exec")
@@ -412,7 +408,7 @@ def test_serial_pass_conditions_are_ordered() -> None:
 def test_parallel_pass_conditions_are_unordered() -> None:
     (plan,) = translate_program(_two_reach_lanes("parallel"))
     assert all(not s.ordered for s in plan.specs if s.kind is SpecKind.REACH_LANE)
-    code = generate_module([plan], source_name="x.osc")
+    code = _module_from_plans([plan])
     assert "SequentialCondition(" not in code
     assert "AndCondition(" in code
     compile(code, "generated_par.py", "exec")
@@ -433,6 +429,11 @@ def _scenario_module(files: dict[str, str]) -> str:
         and not k.endswith("configs.py")
     )
     return files[key]
+
+
+def _module_from_plans(plans: list) -> str:
+    """Render the package's scenario module for a set of plans."""
+    return _scenario_module(generate_package_files(plans, source_name="t.osc"))
 
 
 def test_generate_package_files_structure() -> None:
@@ -546,7 +547,7 @@ def test_wait_comparison_compiles_to_speed_condition() -> None:
     assert turn.gate.condition is not None
     assert turn.gate.condition.kind is CondKind.SPEED
     assert turn.gate.condition.value == pytest.approx(5.0 / 3.6)
-    code = generate_module([plan], source_name="w.osc")
+    code = _module_from_plans([plan])
     assert "SpeedCondition(" in code
     assert "ComparisonRule.LESS_THAN" in code
     compile(code, "gen_wait.py", "exec")
@@ -657,8 +658,8 @@ def test_parse_wait_and_until_transpile() -> None:
         "        ego.turn(direction: left)\n"
     )
     program = parse_program_from_string(source)
-    (plan,) = translate_program(program)
-    generated = generate_module([plan], source_name="reactive.osc")
+    plans = translate_program(program)
+    generated = _module_from_plans(plans)
     compile(generated, "reactive.py", "exec")
     assert "ElapsedTimeCondition(3.0" in generated
     assert "EntityLanePositionCondition(" in generated
@@ -669,14 +670,6 @@ def test_parse_error_raises() -> None:
     with pytest.raises(OscParseError) as exc_info:
         parse_program_from_string("scenario broken\n  ego vehicle\n")
     assert exc_info.value.errors
-
-
-@_requires_osc2
-def test_example_osc_transpiles() -> None:
-    assert _EXAMPLE_OSC.is_file(), f"missing example: {_EXAMPLE_OSC}"
-    code = transpile_file(_EXAMPLE_OSC)
-    compile(code, "example.py", "exec")
-    assert "class IntersectionPassingScenario(BaseScenario):" in code
 
 
 @_requires_osc2

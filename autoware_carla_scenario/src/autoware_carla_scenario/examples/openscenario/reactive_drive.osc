@@ -1,6 +1,6 @@
 # OpenSCENARIO DSL (OSC2) example using `until` and `wait` event conditions.
 #
-#     osc-transpile reactive_drive.osc -o reactive_drive_generated.py
+#     osc-transpile reactive_drive.osc -o out/   # -> out/reactive_drive_package/
 #
 # The ego drives until it reaches lanelet 460 (an observable completion), then
 # waits until it has slowed below 5 km/h, then changes lane. Each step's action
