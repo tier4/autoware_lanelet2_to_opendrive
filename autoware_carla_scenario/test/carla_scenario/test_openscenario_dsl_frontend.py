@@ -19,6 +19,10 @@ from autoware_carla_scenario.openscenario_dsl_frontend import (
     SpecKind,
     parse_program_from_string,
     transpile_file,
+    transpile_to_package,
+)
+from autoware_carla_scenario.openscenario_dsl_frontend.package_codegen import (
+    generate_package_files,
 )
 from autoware_carla_scenario.openscenario_dsl_frontend import (
     __file__ as _frontend_file,
@@ -415,6 +419,70 @@ def test_parallel_pass_conditions_are_unordered() -> None:
 
 
 # ---------------------------------------------------------------------------
+# scenario package generation (pure; needs jinja2 but not py-osc2)
+# ---------------------------------------------------------------------------
+
+
+def _scenario_module(files: dict[str, str]) -> str:
+    key = next(
+        k
+        for k in files
+        if k.startswith("src/")
+        and k.endswith(".py")
+        and not k.endswith("__init__.py")
+        and not k.endswith("configs.py")
+    )
+    return files[key]
+
+
+def test_generate_package_files_structure() -> None:
+    plans = translate_program(_one_of_program())  # 2 variants
+    files = generate_package_files(plans, source_name="choice.osc")
+
+    assert "pyproject.toml" in files
+    assert "README.md" in files
+    assert any(k.endswith("/__init__.py") for k in files)
+    assert any(k.endswith("/configs.py") for k in files)
+    # One concrete Hydra config per one_of variant.
+    yamls = [k for k in files if k.endswith("default.yaml")]
+    assert len(yamls) == 2
+
+    # The package plugs into the framework via the entry point.
+    assert 'entry-points."autoware_carla_scenario.scenarios"' in files["pyproject.toml"]
+    init = next(files[k] for k in files if k.endswith("/__init__.py"))
+    assert init.count("register_scenario(") == 2
+    assert "register_conf_dir(CONF_DIR)" in init
+
+    module = _scenario_module(files)
+    assert "self._config.timeout_seconds" in module
+    assert "def __init__(" in module  # framework builder constructor
+    compile(module, "pkg_scenario.py", "exec")
+
+
+def test_generate_package_files_single_variant() -> None:
+    program = OscProgram(
+        scenarios=[
+            OscScenario(
+                name="reach",
+                fields=[OscField("ego", "vehicle")],
+                do=OscInvocation(
+                    "reach_lane",
+                    "ego",
+                    [OscArgument("lanelet", IntValue(460))],
+                ),
+                modifiers=[
+                    OscModifier("timeout", None, [OscArgument(None, IntValue(9))])
+                ],
+            )
+        ]
+    )
+    files = generate_package_files(translate_program(program), source_name="r.osc")
+    yamls = [k for k in files if k.endswith("default.yaml")]
+    assert len(yamls) == 1
+    assert "timeout_seconds: float = 9.0" in files["src/reach_package/configs.py"]
+
+
+# ---------------------------------------------------------------------------
 # wait / until + expression compiler (pure)
 # ---------------------------------------------------------------------------
 
@@ -609,3 +677,18 @@ def test_example_osc_transpiles() -> None:
     code = transpile_file(_EXAMPLE_OSC)
     compile(code, "example.py", "exec")
     assert "class IntersectionPassingScenario(BaseScenario):" in code
+
+
+@_requires_osc2
+def test_transpile_to_package_writes_installable_package(
+    tmp_path: Path,
+) -> None:
+    root = transpile_to_package(_EXAMPLE_OSC, output_dir=tmp_path)
+    assert (root / "pyproject.toml").is_file()
+    assert (root / "README.md").is_file()
+    modules = list((root / "src").rglob("*.py"))
+    assert modules
+    for module in modules:
+        compile(module.read_text(encoding="utf-8"), str(module), "exec")
+    yamls = list((root / "src").rglob("default.yaml"))
+    assert yamls

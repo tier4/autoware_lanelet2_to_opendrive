@@ -89,6 +89,11 @@ class _Emitter:
     """Accumulates import requirements while rendering spec code."""
 
     imports: set[str] = field(default_factory=set)
+    #: In package mode, render the timeout from ``self._config`` instead of a
+    #: baked literal so it stays overridable via the scenario's YAML config.
+    timeout_from_config: bool = False
+    #: Set when the generated ``setup`` references the ``carla`` module.
+    needs_carla: bool = False
 
     def role_expr(self, plan: ScenarioPlan, actor_name: str) -> str:
         """Return the CARLA ``role_name`` expression for *actor_name*."""
@@ -193,6 +198,7 @@ class _Emitter:
             ]
         if spec.kind is SpecKind.TRAFFIC_SIGNAL:
             self.imports.update({"TrafficSignalAction", "TrafficLightTarget"})
+            self.needs_carla = True
             state = _TRAFFIC_LIGHT_STATE[spec.params["state"]]
             return "TrafficSignalAction", [
                 f"state={state}",
@@ -279,10 +285,14 @@ class _Emitter:
     def fail_condition_lines(self, plan: ScenarioPlan, spec: Spec) -> list[str]:
         if spec.kind is SpecKind.TIMEOUT:
             self.imports.add("TimeoutCondition")
+            seconds = (
+                "self._config.timeout_seconds"
+                if self.timeout_from_config
+                else repr(spec.params["seconds"])
+            )
             return [
                 "self.register_fail_condition(",
-                f"{_INDENT}TimeoutCondition("
-                f"{spec.params['seconds']!r}, label=\"{spec.label}\")",
+                f'{_INDENT}TimeoutCondition({seconds}, label="{spec.label}")',
                 ")",
             ]
         if spec.kind is SpecKind.COLLISION:

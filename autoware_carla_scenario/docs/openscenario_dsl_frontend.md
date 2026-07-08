@@ -56,12 +56,48 @@ The subpackage installs an `osc-transpile` console script:
 # Print the generated Python to stdout
 osc-transpile src/autoware_carla_scenario/examples/openscenario/intersection_passing.osc
 
-# Write it to a file
+# Write a single Python module
 osc-transpile intersection_passing.osc -o intersection_passing_generated.py
+
+# Generate an installable scenario package (recommended)
+osc-transpile intersection_passing.osc --package -o out/
 
 # Syntax-check only
 osc-transpile intersection_passing.osc --check
 ```
+
+## Output as a scenario package
+
+With `--package` (CLI) or `transpile_to_package` (API) the transpiler emits a
+standalone, installable **scenario package** — the layout introduced in
+`autoware_carla_scenario` — instead of a loose module:
+
+```
+<scenario>_package/
+├── pyproject.toml                              # autoware_carla_scenario.scenarios entry point
+├── README.md
+└── src/<scenario>_package/
+    ├── __init__.py                             # register() → register_scenario(...) + register_conf_dir(...)
+    ├── <scenario>.py                           # the transpiled BaseScenario subclass(es)
+    ├── configs.py                              # config dataclass (name, timeout_seconds)
+    └── conf/scenario/<variant>/default.yaml    # concrete ego spawn / timeout per variant
+```
+
+Installing it makes the scenario runnable through the framework CLI without
+editing `autoware_carla_scenario`:
+
+```bash
+osc-transpile junction_choice.osc --package -o .
+uv pip install -e junction_choice_package
+uv run scenario scenario=junction_choice_v0/default map=nishishinjuku
+```
+
+Each `one_of` variant is registered as its own scenario
+(`junction_choice_v0`, `junction_choice_v1`, …), so the whole logical scenario
+can be swept with the framework's multirun. The ego spawn (`spawn_lanelet`,
+`spawn_s`, `speed`) and the timeout land in the per-variant `default.yaml` /
+config dataclass so they stay overridable via Hydra; the manoeuvres and
+conditions are baked into the scenario class.
 
 ## Programmatic usage
 
@@ -69,18 +105,22 @@ osc-transpile intersection_passing.osc --check
 from autoware_carla_scenario.openscenario_dsl_frontend import (
     transpile_file,
     transpile_to_file,
-    plan_from_file,
+    transpile_to_package,
+    plans_from_file,
 )
 
 # Get the generated Python source as a string.
 code = transpile_file("intersection_passing.osc")
 
-# Or write it straight to disk.
+# Write a single module to disk.
 transpile_to_file("intersection_passing.osc", "generated.py")
 
-# Inspect the semantic plan without generating code.
-plan = plan_from_file("intersection_passing.osc")
-print(plan.ego, plan.specs)
+# Or generate a full scenario package under out/.
+root = transpile_to_package("intersection_passing.osc", output_dir="out")
+
+# Inspect the semantic plans (one per one_of variant) without generating code.
+plans = plans_from_file("intersection_passing.osc")
+print(plans[0].ego, plans[0].specs)
 ```
 
 ## Example

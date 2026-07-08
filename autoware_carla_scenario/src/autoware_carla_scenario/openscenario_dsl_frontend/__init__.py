@@ -42,6 +42,7 @@ from .transpiler import (
     transpile_file,
     transpile_string,
     transpile_to_file,
+    transpile_to_package,
 )
 
 __all__ = [
@@ -64,4 +65,5 @@ __all__ = [
     "transpile_file",
     "transpile_string",
     "transpile_to_file",
+    "transpile_to_package",
 ]
