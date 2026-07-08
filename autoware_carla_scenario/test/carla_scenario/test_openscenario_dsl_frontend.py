@@ -940,8 +940,8 @@ def test_dynamic_end_position_behind_is_negative_gap() -> None:
     assert rel.params["target_gap"] == pytest.approx(-10.0)
 
 
-def test_set_map_and_min_lanes_are_advisory() -> None:
-    program = OscProgram(
+def _set_map_min_lanes_program(lanes: int) -> OscProgram:
+    return OscProgram(
         scenarios=[
             OscScenario(
                 name="top",
@@ -953,16 +953,47 @@ def test_set_map_and_min_lanes_are_advisory() -> None:
                     OscModifier(
                         "path_min_driving_lanes",
                         "path",
-                        [OscArgument(None, IntValue(3))],
+                        [OscArgument(None, IntValue(lanes))],
                     ),
                 ],
                 do=OscInvocation("drive", "ego"),
             )
         ]
     )
-    (plan,) = translate_program(program)
+
+
+def test_set_map_is_advisory() -> None:
+    (plan,) = translate_program(_set_map_min_lanes_program(3))
     assert plan.map_hint == "Town04"
-    assert any("3 driving lanes" in n for n in plan.notes)
+
+
+def test_min_lanes_emits_sweep_constraint() -> None:
+    (plan,) = translate_program(_set_map_min_lanes_program(3))
+    # >= 3 lanes -> a lanelet with both left and right neighbours.
+    constraints = plan.sweep_constraints["ego.spawn_lanelet_id"]
+    assert constraints == [
+        {
+            "type": "and",
+            "constraints": [
+                {"type": "has_adjacent", "value": "left"},
+                {"type": "has_adjacent", "value": "right"},
+            ],
+        }
+    ]
+    # No longer a note; it is machine-resolvable pre-run config.
+    assert not any("driving lanes" in n for n in plan.notes)
+
+    files = generate_package_files([plan], source_name="t.osc")
+    yaml_text = next(v for k, v in files.items() if k.endswith("default.yaml"))
+    assert "sweep:" in yaml_text
+    assert "ego.spawn_lanelet_id:" in yaml_text
+    assert "type: has_adjacent" in yaml_text
+
+
+def test_min_lanes_two_uses_or() -> None:
+    (plan,) = translate_program(_set_map_min_lanes_program(2))
+    node = plan.sweep_constraints["ego.spawn_lanelet_id"][0]
+    assert node["type"] == "or"
 
 
 def test_change_lane_modifier_generates_gated_action_code() -> None:

@@ -347,13 +347,24 @@ def _modifier_set_map(plan: ScenarioPlan, actor: str, args: Arguments) -> None:
 def _modifier_min_driving_lanes(
     plan: ScenarioPlan, actor: str, args: Arguments
 ) -> None:
-    """``path_min_driving_lanes(n)`` — a pre-run constraint on the spawn road."""
+    """``path_min_driving_lanes(n)`` — a pre-run lanelet-constraint sweep.
+
+    Expressed with the ``has_adjacent`` constraint of the Hydra
+    lanelet-constraint sweeper: a lane with both a left and a right neighbour
+    sits on a road of at least 3 lanes; one neighbour means at least 2. The
+    sweeper resolves ``ego.spawn_lanelet_id`` to a lanelet satisfying this
+    against whatever map is chosen at run time.
+    """
     lanes = args.require("lanes", index=0).as_int()
-    plan.notes.append(
-        f"path requires at least {lanes} driving lanes; choose spawn lanelets "
-        "on such a road (e.g. via the Hydra lanelet-constraint sweeper: a "
-        "lanelet with both left and right neighbours lies on a >=3-lane road)."
-    )
+    left = {"type": "has_adjacent", "value": "left"}
+    right = {"type": "has_adjacent", "value": "right"}
+    if lanes >= 3:
+        node: dict[str, object] = {"type": "and", "constraints": [left, right]}
+    elif lanes == 2:
+        node = {"type": "or", "constraints": [left, right]}
+    else:
+        return
+    plan.sweep_constraints.setdefault("ego.spawn_lanelet_id", []).append(node)
 
 
 def _modifier_vehicle_type(plan: ScenarioPlan, actor: str, args: Arguments) -> None:

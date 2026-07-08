@@ -271,6 +271,11 @@ class ScenarioPlan:
     #: Human-readable notes about approximated / unsupported constructs,
     #: rendered into the generated scenario and its README for transparency.
     notes: list[str] = field(default_factory=list)
+    #: Pre-run lanelet-constraint sweep, keyed by Hydra override target (e.g.
+    #: ``"ego.spawn_lanelet_id"``); each value is a list of constraint nodes in
+    #: the ``sweep.constraints`` YAML shape. Rendered into the package config so
+    #: the lanelet-constraint sweeper resolves the spawn against the map.
+    sweep_constraints: dict[str, list[Any]] = field(default_factory=dict)
 
     def actor(self, name: str) -> ActorPlan:
         """Return the actor named *name* (ego or an NPC).

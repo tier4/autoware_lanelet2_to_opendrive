@@ -192,7 +192,7 @@ scenario top:             # scenario_runner dialect
 | `lane(right_of\|left_of: actor)` / `lane(N)` | relational / map-relative lane placement (see below) |
 | `vehicle_type("...")` / `model(...)` | CARLA blueprint id |
 | `set_map("Town")` | advisory map hint (the map is still chosen at run time) |
-| `path_min_driving_lanes(N)` | pre-run constraint on the spawn road (recorded as a note) |
+| `path_min_driving_lanes(N)` | pre-run `sweep.constraints` on `ego.spawn_lanelet_id` (see below) |
 | `timeout(Ns)` | scenario-level fail: `TimeoutCondition` |
 
 !!! note "`lanelet_position` is an extension type, not `lane_position`"
@@ -310,12 +310,31 @@ npc_1_pose = Lanelet2Pose(
 ```
 
 (An offset relative to *another NPC* is instead resolved numerically at
-transpile time.) The **lateral** part (`lane(right_of: ego)`) and road-level
-constraints (`path_min_driving_lanes(3)`) depend on the map, so they are
-surfaced as `# NOTE:` comments in the generated `setup()` and a *Transpiler
-notes* section in the package README rather than silently guessed — pin them by
-editing `spawn_lanelet_id`, or resolve them up front with the Hydra
-lanelet-constraint sweeper.
+transpile time.) The **lateral** part (`lane(right_of: ego)`) depends on the
+map, so it is surfaced as a `# NOTE:` comment and a *Transpiler notes* README
+section rather than silently guessed — pin it by editing `spawn_lanelet_id`.
+
+### Road-level constraints → lanelet-constraint sweep
+
+`path_min_driving_lanes(N)` constrains the *spawn road*, which is a map
+question, so instead of a note it transpiles to a `sweep.constraints` block on
+`ego.spawn_lanelet_id` using the Hydra lanelet-constraint sweeper's
+`has_adjacent` primitive — a lanelet with both a left and a right neighbour sits
+on a road of ≥3 lanes (one neighbour ⇒ ≥2):
+
+```yaml
+sweep:
+  constraints:
+    ego.spawn_lanelet_id:
+      - type: and
+        constraints:
+          - {type: has_adjacent, value: left}
+          - {type: has_adjacent, value: right}
+```
+
+The sweeper then resolves the spawn lanelet against whatever map is chosen at
+run time (`uv run scenario --multirun … hydra/sweeper=lanelet_constraint`), so
+the scenario stays map-independent while the road constraint is honoured.
 
 ### Dynamic relative goals (`position(..., at: end)`)
 

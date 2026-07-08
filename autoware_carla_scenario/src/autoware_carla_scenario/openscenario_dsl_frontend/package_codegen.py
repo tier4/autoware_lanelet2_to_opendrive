@@ -241,6 +241,18 @@ def _render_readme(
             f"\n## Map\n\nThe source targeted map `{map_hint}`. The map is "
             "selected at run time via `map=...`, so this is advisory only.\n"
         )
+    if any(p.sweep_constraints for p in plans):
+        body += (
+            "\n## Spawn selection (lanelet-constraint sweep)\n\n"
+            "The source constrained the spawn road (e.g. "
+            "`path_min_driving_lanes`). The config declares a `sweep` section "
+            "that resolves `ego.spawn_lanelet_id` against the chosen map. Run "
+            "it through the lanelet-constraint sweeper:\n\n"
+            "```bash\n"
+            f"uv run scenario --multirun scenario={scenario_names[0]}/default "
+            "map=nishishinjuku hydra/sweeper=lanelet_constraint\n"
+            "```\n"
+        )
     notes = _collect_notes(plans)
     if notes:
         body += "\n## Transpiler notes\n\n"
@@ -249,11 +261,47 @@ def _render_readme(
     return body
 
 
+def _yaml_scalar(value: object) -> str:
+    """Render a scalar for the generated YAML."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    return str(value)
+
+
+def _yaml_lines(obj: object, indent: int = 0) -> list[str]:
+    """Render a nested dict/list/scalar structure as block-style YAML lines."""
+    pad = "  " * indent
+    lines: list[str] = []
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, (dict, list)):
+                lines.append(f"{pad}{key}:")
+                lines.extend(_yaml_lines(value, indent + 1))
+            else:
+                lines.append(f"{pad}{key}: {_yaml_scalar(value)}")
+    elif isinstance(obj, list):
+        for item in obj:
+            if isinstance(item, (dict, list)):
+                inner = _yaml_lines(item, indent + 1)
+                # Turn the first inner line into a "- " list entry.
+                lines.append(f"{pad}- {inner[0].lstrip()}")
+                lines.extend(inner[1:])
+            else:
+                lines.append(f"{pad}- {_yaml_scalar(item)}")
+    else:
+        lines.append(f"{pad}{_yaml_scalar(obj)}")
+    return lines
+
+
 def _render_default_yaml(plan: ScenarioPlan, scenario_name: str, timeout: float) -> str:
     ego = plan.ego
     lanelet = ego.spawn_lanelet_id if ego.spawn_lanelet_id is not None else 0
-    note = "" if ego.spawn_lanelet_id is not None else "  # TODO: set spawn lanelet"
-    return (
+    note = "" if ego.spawn_lanelet_id is not None else "  # overridden by sweep below"
+    if ego.spawn_lanelet_id is None and not plan.sweep_constraints:
+        note = "  # TODO: set spawn lanelet"
+    text = (
         "# @package _global_\n"
         f"# Concrete values for the transpiled {scenario_name!r} scenario.\n"
         "scenario:\n"
@@ -264,6 +312,12 @@ def _render_default_yaml(plan: ScenarioPlan, scenario_name: str, timeout: float)
         f"  spawn_lanelet_id: {lanelet}{note}\n"
         f"  spawn_s: {ego.spawn_s}\n"
     )
+    if plan.sweep_constraints:
+        # Resolve the spawn lanelet against the map via the lanelet-constraint
+        # sweeper (run with `--multirun hydra/sweeper=lanelet_constraint`).
+        block = _yaml_lines({"sweep": {"constraints": plan.sweep_constraints}})
+        text += "\n" + "\n".join(block) + "\n"
+    return text
 
 
 # ---------------------------------------------------------------------------
