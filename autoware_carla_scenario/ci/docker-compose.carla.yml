@@ -1,16 +1,21 @@
 # CPU-only CARLA server for CI traffic simulation.
 #
 # Inspired by boundrivesim/starter-carla-0913, but pinned to CARLA 0.9.15 and
-# the official image.  The server runs fully headless with the Null RHI so it
-# needs no GPU and can boot on standard GitHub Actions runners:
+# the official image. The server runs fully headless on the CPU.
 #
-#   -nullrhi          no rendering hardware interface (pure CPU, no GPU/Vulkan)
-#   -nosound          disable audio
-#   -quality-level=Low keep asset streaming light
+# CPU-only rendering: the official CARLA image bundles the full UE4 renderer,
+# which normally needs a Vulkan GPU. Per CARLA's rendering-options docs, the
+# supported no-GPU path is OpenGL software rendering:
 #
-# NOTE: -RenderOffScreen is deliberately NOT used. It renders off-screen via a
-# real Vulkan device, which is unavailable on a CPU-only runner and makes the
-# server hang before it can open the RPC port. -nullrhi is the pure no-GPU path.
+#   -opengl                 use the OpenGL RHI instead of Vulkan
+#   DISPLAY= (empty)        render off-screen, no X server
+#   LIBGL_ALWAYS_SOFTWARE=1 force Mesa's llvmpipe software rasterizer
+#   -nosound                disable audio
+#   -quality-level=Low      keep asset streaming light
+#
+# NOTE: -nullrhi segfaults the UE4 engine on this build, and -RenderOffScreen
+# needs a real Vulkan device (unavailable on a CPU-only runner), so neither is
+# used. OpenGL + llvmpipe is the CPU-only path.
 #
 # The image is overridable via the CARLA_IMAGE environment variable so the same
 # file can pin a different patch release without edits.
@@ -28,15 +33,19 @@ services:
     # CarlaUE4.sh lives in the image's home directory; set it explicitly so the
     # relative launch does not depend on the image's default WORKDIR.
     working_dir: /home/carla
+    environment:
+      # Empty DISPLAY + software GL make OpenGL render off-screen on the CPU.
+      DISPLAY: ""
+      LIBGL_ALWAYS_SOFTWARE: "1"
     command: >-
       /bin/bash -c "mkdir -p /home/carla/recordings && ./CarlaUE4.sh
-      -nullrhi -nosound -quality-level=Low
+      -opengl -nosound -quality-level=Low
       -carla-rpc-port=2000"
     ports:
       # RPC (2000), streaming (2001), secondary (2002) and Traffic Manager (8000).
       - "2000-2002:2000-2002"
       - "8000:8000"
-    # nullrhi keeps the footprint modest; 1 GB of shared memory is enough for
-    # asset streaming and fits a stock GitHub-hosted runner's RAM budget.
+    # 1 GB of shared memory is enough for asset streaming and fits a stock
+    # GitHub-hosted runner's RAM budget.
     shm_size: "1gb"
     restart: "no"
