@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import re
 import shutil
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import carla
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from .scenario_base import SpectatorCameraConfig
 
 from .camera_recorder import CameraRecorder
+from .command_batch import CommandBatch
 from .conditions import EntityExistenceCondition, ScenarioResult, TimeoutCondition
 from .conditions.base import BaseCondition, ConditionStatus, find_actor_by_role_name
 from .constants import DEFAULT_TM_PORT, EGO_ROLE_NAME
@@ -53,6 +55,42 @@ def _map_name_to_env_var(map_name: str) -> str:
 
 #: Log ego OpenDRIVE position every N ticks (~1 s at 20 Hz).
 _CONDITION_LOG_INTERVAL: int = 20
+
+
+def _callback_wants_batch(cb: Callable[..., None]) -> bool:
+    """Return ``True`` if *cb* accepts the frame's :class:`CommandBatch`.
+
+    Tick callbacks come in two shapes: the legacy ``cb(world)`` form and the
+    batch-aware ``cb(world, batch)`` form (used e.g. by the spectator-follow
+    callback so its transform write joins the frame's ``apply_batch_sync``).
+    Arity is inspected once per call; when the signature cannot be read (e.g. a
+    ``MagicMock`` in tests) the legacy single-argument form is assumed.
+    """
+    try:
+        sig = inspect.signature(cb)
+    except (TypeError, ValueError):
+        return False
+
+    positional = 0
+    for param in sig.parameters.values():
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if param.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional += 1
+    return positional >= 2
+
+
+def _invoke_tick_callback(
+    cb: Callable[..., None], world: "carla.World", batch: "CommandBatch"
+) -> None:
+    """Invoke a tick callback, passing *batch* only when it accepts one."""
+    if _callback_wants_batch(cb):
+        cb(world, batch)
+    else:
+        cb(world)
 
 
 def _log_ego_opendrive_position(
@@ -536,23 +574,24 @@ class ScenarioRunner:
                 elapsed = time.monotonic() - start_time
                 tick_count += 1
 
-                # Pre-tick actions (receive elapsed)
+                # Pre-tick phase: collect every event's CARLA commands into a
+                # single batch and apply them in one apply_batch_sync round-trip.
+                pre_batch = CommandBatch()
                 for action in scenario._pre_tick_actions:
-                    action.tick(world, elapsed)
-
-                # Pre-tick callbacks
+                    action.tick(world, elapsed, batch=pre_batch)
                 for cb in scenario._pre_tick_callbacks:
-                    cb(world)
+                    _invoke_tick_callback(cb, world, pre_batch)
+                pre_batch.apply(self._client)
 
                 world.tick()
 
-                # Post-tick actions (receive elapsed)
+                # Post-tick phase: same batching strategy for post-tick events.
+                post_batch = CommandBatch()
                 for action in scenario._post_tick_actions:
-                    action.tick(world, elapsed)
-
-                # Post-tick callbacks
+                    action.tick(world, elapsed, batch=post_batch)
                 for cb in scenario._post_tick_callbacks:
-                    cb(world)
+                    _invoke_tick_callback(cb, world, post_batch)
+                post_batch.apply(self._client)
 
                 # Periodic ego OpenDRIVE position log
                 if tick_count % _CONDITION_LOG_INTERVAL == 0:

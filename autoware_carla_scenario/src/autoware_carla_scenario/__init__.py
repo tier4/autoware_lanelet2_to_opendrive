@@ -84,6 +84,7 @@ if TYPE_CHECKING:
         TurnDirection as TurnDirection,
     )
     from .camera_recorder import CameraRecorder as CameraRecorder
+    from .command_batch import CommandBatch as CommandBatch
     from .conditions import (
         AlwaysTrueCondition as AlwaysTrueCondition,
         AndCondition as AndCondition,
@@ -273,6 +274,7 @@ __all__ = [
     "AttachCameraSensorAction",
     "AttachCarlaCameraSensorAction",
     "BaseAction",
+    "CommandBatch",
     "LaneChangeAction",
     "LaneChangeDirection",
     "TickTiming",
@@ -309,6 +311,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "TurnDirection": (".actions", "TurnDirection"),
     # camera / sensor
     "CameraRecorder": (".camera_recorder", "CameraRecorder"),
+    # command batching
+    "CommandBatch": (".command_batch", "CommandBatch"),
     "CameraSensorBase": (".sensor", "CameraSensorBase"),
     "CameraSensorConfig": (".sensor", "CameraSensorConfig"),
     "CarlaCameraSensor": (".sensor", "CarlaCameraSensor"),

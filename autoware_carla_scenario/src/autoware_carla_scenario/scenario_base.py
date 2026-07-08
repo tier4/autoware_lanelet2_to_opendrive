@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 if TYPE_CHECKING:
+    from .command_batch import CommandBatch
     from .entity.ego import EgoVehicle
 
 import carla
@@ -342,7 +343,7 @@ class BaseScenario(ABC):
             offset_back=offset_back, offset_up=offset_up, pitch=pitch
         )
 
-        def _follow(world: "carla.World") -> None:
+        def _follow(world: "carla.World", batch: "CommandBatch") -> None:
             actor = actor_getter()
             if actor is None:
                 return
@@ -357,7 +358,12 @@ class BaseScenario(ABC):
                 z=tf.location.z + offset_up,
             )
             rot = carla.Rotation(yaw=tf.rotation.yaw, pitch=pitch)
-            world.get_spectator().set_transform(carla.Transform(loc, rot))
+            # Batch the spectator move so it shares the frame's single
+            # apply_batch_sync round-trip instead of issuing its own RPC.
+            spectator = world.get_spectator()
+            batch.add(
+                carla.command.ApplyTransform(spectator, carla.Transform(loc, rot))
+            )
 
         self.register_post_tick(_follow)
 
@@ -415,22 +421,35 @@ class BaseScenario(ABC):
         This method is called by :class:`ScenarioRunner` **after** the warm-up
         ticks complete so that vehicles remain stationary during stabilisation.
 
+        The per-actor target-velocity writes are collected into a single
+        :class:`~autoware_carla_scenario.command_batch.CommandBatch` and applied
+        in one ``apply_batch_sync`` round-trip, so scenarios with many entities
+        pay a single RPC instead of one per actor.
+
         Args:
             ego_actor: The ego vehicle CARLA actor.
         """
+        from .command_batch import CommandBatch  # noqa: PLC0415
 
-        def _apply(actor: "carla.Actor", speed_kmh: float) -> None:
+        batch = CommandBatch()
+
+        def _queue(actor: "carla.Actor", speed_kmh: float) -> None:
             if speed_kmh <= 0.0:
                 return
             speed_ms = speed_kmh / 3.6
             fwd = actor.get_transform().get_forward_vector()
-            actor.set_target_velocity(
-                carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0)
+            batch.add(
+                carla.command.ApplyTargetVelocity(
+                    actor,
+                    carla.Vector3D(x=fwd.x * speed_ms, y=fwd.y * speed_ms, z=0.0),
+                )
             )
 
         for entity in self._entities:
             if entity.actor is not None:
-                _apply(entity.actor, entity.initial_speed_kmh)
+                _queue(entity.actor, entity.initial_speed_kmh)
 
         if ego_actor is not None:
-            _apply(ego_actor, self.ego_config.initial_speed_kmh)
+            _queue(ego_actor, self.ego_config.initial_speed_kmh)
+
+        batch.apply(self.client)

@@ -13,6 +13,8 @@ from ..conditions.always_true import AlwaysTrueCondition
 if TYPE_CHECKING:
     import carla
 
+    from ..command_batch import CommandBatch
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +62,9 @@ class BaseAction(ABC):
         self._timing = timing
         self._once = once
         self._done = False
+        #: The frame's command batch, set by :meth:`tick` so that
+        #: :meth:`execute` may emit batched commands via :meth:`emit`.
+        self._active_batch: Optional["CommandBatch"] = None
 
     @property
     def timing(self) -> TickTiming:
@@ -77,12 +82,42 @@ class BaseAction(ABC):
 
         Called when the condition is satisfied.
 
+        Subclasses whose effect maps to a ``carla.command.*`` should append it
+        via :meth:`emit` so it is dispatched together with the rest of the
+        frame's events in a single ``apply_batch_sync`` call.  Effects with no
+        command equivalent (TrafficManager routing, traffic-light state) may
+        issue their RPC directly.
+
         Args:
             world: The CARLA world instance.
         """
         ...
 
-    def tick(self, world: "carla.World", elapsed: float) -> None:
+    def emit(self, command: object) -> None:
+        """Queue a ``carla.command.*`` into the current frame's batch.
+
+        Only valid while :meth:`execute` is running (i.e. from within
+        :meth:`tick`).  The scenario runner flushes the batch once per tick
+        phase, so all events emitted in the same frame share a single
+        ``apply_batch_sync`` round-trip.
+
+        If no batch is active (e.g. :meth:`execute` is called directly in a
+        unit test) the command is dropped with a warning.
+        """
+        if self._active_batch is not None:
+            self._active_batch.add(command)
+        else:
+            logger.warning(
+                "%s.emit called without an active CommandBatch; command dropped",
+                type(self).__name__,
+            )
+
+    def tick(
+        self,
+        world: "carla.World",
+        elapsed: float,
+        batch: Optional["CommandBatch"] = None,
+    ) -> None:
         """Evaluate the condition and, if met, run :meth:`execute`.
 
         Called by the scenario runner's tick loop with the current elapsed
@@ -91,6 +126,9 @@ class BaseAction(ABC):
         Args:
             world: The CARLA world instance.
             elapsed: Seconds elapsed since the tick loop started.
+            batch: The frame's :class:`~autoware_carla_scenario.command_batch.CommandBatch`.
+                When provided, commands emitted via :meth:`emit` are collected
+                into it and applied by the runner in a single batch.
         """
         if self._once and self._done:
             return
@@ -102,5 +140,9 @@ class BaseAction(ABC):
                 type(self).__name__,
                 result.message,
             )
-            self.execute(world)
+            self._active_batch = batch
+            try:
+                self.execute(world)
+            finally:
+                self._active_batch = None
             self._done = True

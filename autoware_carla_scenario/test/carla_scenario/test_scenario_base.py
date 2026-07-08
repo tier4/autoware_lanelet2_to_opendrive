@@ -168,6 +168,29 @@ class TestBaseScenario:
         action.tick(world, 5.0)
         assert condition.last_elapsed == 5.0
 
+    def test_base_action_emit_appends_to_active_batch(self) -> None:
+        from autoware_carla_scenario.command_batch import CommandBatch
+
+        action = _EmittingAction()
+        batch = CommandBatch()
+        action.tick(MagicMock(), 0.0, batch=batch)
+        assert action.executed
+        assert batch.commands == ["cmd"]
+
+    def test_base_action_emit_without_batch_drops_command(self) -> None:
+        # Calling tick() without a batch (default None) must not raise; the
+        # emitted command is dropped with a warning instead.
+        action = _EmittingAction()
+        action.tick(MagicMock(), 0.0)
+        assert action.executed
+
+    def test_base_action_active_batch_cleared_after_tick(self) -> None:
+        from autoware_carla_scenario.command_batch import CommandBatch
+
+        action = _EmittingAction()
+        action.tick(MagicMock(), 0.0, batch=CommandBatch())
+        assert action._active_batch is None
+
 
 # ---------------------------------------------------------------------------
 # Test helpers for BaseAction tests
@@ -183,6 +206,18 @@ class _NoOpAction(BaseAction):
 
     def execute(self, world: object) -> None:  # type: ignore[override]
         self.executed = True
+
+
+class _EmittingAction(BaseAction):
+    """Action that emits a batched command when it fires."""
+
+    def __init__(self) -> None:
+        super().__init__(label="emitting")
+        self.executed = False
+
+    def execute(self, world: object) -> None:  # type: ignore[override]
+        self.executed = True
+        self.emit("cmd")
 
 
 class _ElapsedRecordingCondition(BaseCondition):
