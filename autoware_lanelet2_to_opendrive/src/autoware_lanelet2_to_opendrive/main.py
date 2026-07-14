@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Main script to convert Lanelet2 maps to OpenDRIVE format."""
 
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -11,7 +10,6 @@ import logging
 from datetime import datetime
 
 import hydra
-import mgrs as mgrs_lib
 from omegaconf import DictConfig, OmegaConf
 
 # Import autoware extensions before loading maps to ensure proper registration.
@@ -25,13 +23,9 @@ import autoware_lanelet2_extension_python.regulatory_elements as _ll2_ext_reg  #
 import lanelet2
 from lanelet2.routing import RoutingGraph
 
-from autoware_lanelet2_to_opendrive.projection import (
-    mgrs_to_lanelet2_origin,
-    mgrs_grid_with_offset_to_lanelet2_origin,
-    mgrs_grid_with_offset_to_latlon,
-    latlon_to_lanelet2_origin,
-    latlon_to_proj_string,
-    mgrs_to_proj_string,
+from autoware_lanelet2_to_opendrive.projection_resolver import (
+    geo_reference_for_origin,
+    resolve_projection_from_hydra,
 )
 from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
@@ -76,27 +70,42 @@ logger = logging.getLogger(__name__)
 
 
 def load_lanelet2_map(
-    lanelet2_path: Path, origin: lanelet2.io.Origin
+    lanelet2_path: Path,
+    origin: Optional[lanelet2.io.Origin] = None,
+    *,
+    projector: Optional[MGRSProjector] = None,
 ) -> lanelet2.core.LaneletMap:
     """
     Load Lanelet2 map from file with specified origin projection.
 
     Args:
         lanelet2_path: Path to the Lanelet2 OSM file
-        origin: lanelet2.io.Origin object specifying the map origin
+        origin: lanelet2.io.Origin object specifying the map origin. Used to
+            construct an ``MGRSProjector`` when ``projector`` is not given.
+        projector: Pre-built projector (e.g. from
+            :meth:`ResolvedProjection.make_projector`). When supplied it takes
+            precedence over ``origin`` so projector construction stays in the
+            projector-resolution layer.
 
     Returns:
         Loaded Lanelet2 map
 
     Raises:
         FileNotFoundError: If the Lanelet2 file doesn't exist
+        ValueError: If neither ``origin`` nor ``projector`` is provided
         Exception: If map loading fails
     """
     if not lanelet2_path.exists():
         raise FileNotFoundError(f"Lanelet2 file not found: {lanelet2_path}")
 
-    try:
+    if projector is None:
+        if origin is None:
+            raise ValueError(
+                "load_lanelet2_map requires either 'origin' or 'projector'"
+            )
         projector = MGRSProjector(origin)
+
+    try:
         lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
         print(f"Successfully loaded Lanelet2 map: {lanelet2_path}")
         print(f"  - Lanelets: {len(lanelet_map.laneletLayer)}")
@@ -961,24 +970,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         Returns:
             OpenDRIVE object
         """
-        # Generate PROJ string for geoReference.
-        #
-        # Priority:
-        #   1. lat/lon  – most precise; set when an MGRS offset is applied or
-        #                 when the origin was specified directly as lat/lon.
-        #   2. mgrs_code – fallback; used when only the MGRS grid square is
-        #                  known (origin = south-west corner of the square).
-        if self.config.origin.lat is not None and self.config.origin.lon is not None:
-            geo_reference_proj = latlon_to_proj_string(
-                self.config.origin.lat, self.config.origin.lon
-            )
-        elif self.config.origin.mgrs_code is not None:
-            geo_reference_proj = mgrs_to_proj_string(self.config.origin.mgrs_code)
-        else:
-            raise ValueError(
-                "Cannot generate geoReference: config.origin must have lat/lon "
-                "or mgrs_code set."
-            )
+        # Generate PROJ string for geoReference via the projector-resolution
+        # layer (single source of truth for origin -> geoReference).
+        geo_reference_proj = geo_reference_for_origin(self.config.origin)
         logger.info("geoReference (PROJ string): %s", geo_reference_proj)
 
         # Bounding box of the projected map — populates the OpenDRIVE
@@ -1320,6 +1314,11 @@ def parse_origin_from_config(
     """
     Parse origin specification from Hydra config with mutual exclusion validation.
 
+    Thin wrapper around
+    :func:`autoware_lanelet2_to_opendrive.projection_resolver.resolve_projection_from_hydra`
+    kept for backward compatibility. New code should use the projector-resolution
+    layer directly.
+
     Supports three methods of origin specification (mutually exclusive):
     1. mgrs_grid: Simple MGRS grid code (e.g., "54SUE")
        - With optional offset: mgrs_grid + offset {x, y, z}
@@ -1338,113 +1337,16 @@ def parse_origin_from_config(
     Raises:
         ValueError: If origin specification is invalid or multiple methods are specified
     """
-    map_cfg = cfg.map
-
-    # Check which origin specification methods are provided
-    has_mgrs_grid = "mgrs_grid" in map_cfg and map_cfg.mgrs_grid is not None
-    has_mgrs_code = (
-        "mgrs_code" in map_cfg and map_cfg.mgrs_code is not None
-    )  # Legacy support
-    has_offset = "offset" in map_cfg and map_cfg.offset is not None
-    has_lat_lon = "lat_lon" in map_cfg and map_cfg.lat_lon is not None
-
-    # Support legacy mgrs_code field
-    if has_mgrs_code and not has_mgrs_grid:
-        has_mgrs_grid = True
-        map_cfg.mgrs_grid = map_cfg.mgrs_code
-
-    # Count how many base methods are specified (offset is an optional modifier for mgrs_grid)
-    specified_methods = sum([has_mgrs_grid, has_lat_lon])
-
-    if specified_methods == 0:
-        raise ValueError(
-            "Origin must be specified using one of: mgrs_grid (with optional offset), or lat_lon"
-        )
-
-    if specified_methods > 1:
-        raise ValueError(
-            "Multiple origin specification methods detected. "
-            "Please specify only one of: mgrs_grid (with optional offset), or lat_lon"
-        )
-
-    # Offset can only be used with mgrs_grid
-    if has_offset and not has_mgrs_grid:
-        raise ValueError(
-            "The 'offset' field can only be used together with 'mgrs_grid'"
-        )
-
-    # Parse the specified method
-    if has_mgrs_grid:
-        mgrs_grid = map_cfg.mgrs_grid
-
-        # Check if offset is specified
-        if has_offset:
-            offset_cfg = map_cfg.offset
-            offset_x = offset_cfg.x
-            offset_y = offset_cfg.y
-            offset_z = offset_cfg.get("z", 0.0)
-
-            logger.info(
-                f"Using MGRS grid with offset: {mgrs_grid}, "
-                f"offset x={offset_x} y={offset_y} z={offset_z}"
-            )
-            # Get lat/lon with offset applied
-            origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
-                mgrs_grid, offset_x, offset_y
-            )
-            origin = mgrs_grid_with_offset_to_lanelet2_origin(
-                mgrs_grid, offset_x, offset_y, offset_z
-            )
-            logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-            return (
-                origin,
-                mgrs_grid,
-                origin_lat,
-                origin_lon,
-                offset_x,
-                offset_y,
-                offset_z,
-            )
-        else:
-            logger.info(f"Using MGRS grid origin: {mgrs_grid}")
-            origin = mgrs_to_lanelet2_origin(mgrs_grid)
-            # Get lat/lon from MGRS grid origin (no offset)
-            origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
-                mgrs_grid, 0.0, 0.0
-            )
-            logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-            # No offset specified
-            return origin, mgrs_grid, origin_lat, origin_lon, 0.0, 0.0, 0.0
-
-    elif has_lat_lon:
-        latlon_cfg = map_cfg.lat_lon
-        latitude = latlon_cfg.latitude
-        longitude = latlon_cfg.longitude
-        altitude = latlon_cfg.get("altitude", 0.0)
-
-        logger.info(
-            f"Using lat/lon origin: latitude={latitude}, longitude={longitude}, altitude={altitude}"
-        )
-        origin = latlon_to_lanelet2_origin(latitude, longitude, altitude)
-
-        # For lat/lon origin, we need to generate an approximate MGRS code for the PROJ string
-        # Convert lat/lon back to MGRS to get the grid zone
-        m = mgrs_lib.MGRS()
-        mgrs_code = m.toMGRS(latitude, longitude)
-        # Extract just the grid zone designator (first 5 characters: zone + band + square)
-        # Format: 54SUE1234567890 -> we want 54SUE
-        match = re.match(r"^(\d+[A-Z][A-Z][A-Z])", mgrs_code)
-        if match:
-            mgrs_grid = match.group(1)
-        else:
-            mgrs_grid = mgrs_code[:5]  # Fallback to first 5 chars
-
-        logger.info(f"Derived MGRS grid for PROJ string: {mgrs_grid}")
-        # No offset for lat/lon origin
-        return origin, mgrs_grid, latitude, longitude, 0.0, 0.0, 0.0
-
-    # Should never reach here due to the checks above
-    raise ValueError("Invalid origin configuration")
+    resolved = resolve_projection_from_hydra(cfg)
+    return (
+        resolved.origin,
+        resolved.mgrs_code,
+        resolved.origin_lat,
+        resolved.origin_lon,
+        resolved.offset_x,
+        resolved.offset_y,
+        resolved.offset_z,
+    )
 
 
 def preprocess_and_convert_with_hydra(
@@ -1462,16 +1364,13 @@ def preprocess_and_convert_with_hydra(
     """
     input_map_path = lanelet2_file
 
-    # Parse origin from config (with mutual exclusion validation)
-    (
-        origin,
-        mgrs_code,
-        origin_lat,
-        origin_lon,
-        offset_x,
-        offset_y,
-        offset_z,
-    ) = parse_origin_from_config(cfg)
+    # Resolve the coordinate frame (origin, projector, geoReference, offset)
+    # through the single projector-resolution layer.
+    resolved = resolve_projection_from_hydra(cfg)
+    mgrs_code = resolved.mgrs_code
+    origin_lat = resolved.origin_lat
+    origin_lon = resolved.origin_lon
+    offset_x, offset_y, offset_z = resolved.offset
 
     # Set global coordinate offset for conversion
     # This will be applied to all coordinates during OpenDRIVE export
@@ -1533,7 +1432,7 @@ def preprocess_and_convert_with_hydra(
     logger.info(f"Loading Lanelet2 map from: {input_map_path}")
     logger.info(f"Using origin with MGRS code for PROJ: {mgrs_code}")
 
-    lanelet_map = load_lanelet2_map(input_map_path, origin)
+    lanelet_map = load_lanelet2_map(input_map_path, projector=resolved.make_projector())
 
     # Convert to OpenDRIVE
     logger.info("Converting to OpenDRIVE format...")
