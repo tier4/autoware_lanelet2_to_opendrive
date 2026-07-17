@@ -87,12 +87,8 @@ def test_tm_geo_reference_string_exact():
 def test_tm_round_trip_closes_within_tolerance():
     resolved = resolve_projection(_cfg(), TMERC_MINI_OSM)
 
-    forward = Transformer.from_crs(
-        "EPSG:4326", resolved.geo_reference, always_xy=True
-    )
-    inverse = Transformer.from_crs(
-        resolved.geo_reference, "EPSG:4326", always_xy=True
-    )
+    forward = Transformer.from_crs("EPSG:4326", resolved.geo_reference, always_xy=True)
+    inverse = Transformer.from_crs(resolved.geo_reference, "EPSG:4326", always_xy=True)
 
     lon_in = EXPECTED_LON + 0.01
     lat_in = EXPECTED_LAT + 0.01

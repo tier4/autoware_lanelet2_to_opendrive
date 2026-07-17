@@ -14,7 +14,7 @@ from ..util import (
     create_routing_graph,
     filter_regulatory_element_by_type,
 )
-from ..config import COORDINATE_OFFSET
+from ..config import CoordinateOffset
 from ..conversion_config import TrafficLightConfig
 
 if TYPE_CHECKING:
@@ -88,6 +88,7 @@ class SignalsAndControllers:
         exclude_non_junction_signals: bool = False,
         junction_lanelet_ids: Optional[Set[int]] = None,
         traffic_light_config: Optional[TrafficLightConfig] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> "SignalsAndControllers":
         """
         Construct signals and controllers from Lanelet2 map.
@@ -109,6 +110,8 @@ class SignalsAndControllers:
             traffic_light_config: Configuration for traffic light actor spawn offset.
                   If provided, the offsets are rotated by hdg and subtracted from
                   positionInertial coordinates.
+            offset: Coordinate offset to subtract from extracted signal
+                  coordinates. Defaults to a zero offset.
 
         Returns:
             SignalsAndControllers object with populated signals and controllers
@@ -219,6 +222,7 @@ class SignalsAndControllers:
                     road_lanelet_mapping=road_lanelet_mapping,
                     road=matching_road,
                     routing_graph=signal_routing_graph,
+                    offset=offset,
                 )
 
                 # Calculate physical position from linestring centroid
@@ -227,6 +231,7 @@ class SignalsAndControllers:
                     road=matching_road,
                     road_s=s,
                     traffic_light_config=traffic_light_config,
+                    offset=offset,
                 )
 
                 # Determine lane IDs for the validity element.
@@ -250,6 +255,7 @@ class SignalsAndControllers:
                     lane_ids=lane_ids,
                     road_elevation_at_s=road_elevation_at_s,
                     position_inertial=position_inertial,
+                    offset=offset,
                 )
 
                 result.add_signal(signal)
@@ -344,6 +350,7 @@ class SignalsAndControllers:
         road_lanelet_mapping: RoadLaneletMapping,
         road: Optional["Road"] = None,
         routing_graph: Optional[RoutingGraph] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> tuple[float, float]:
         """
         Calculate logical s,t coordinates for a traffic signal on a road.
@@ -363,6 +370,8 @@ class SignalsAndControllers:
             routing_graph: Optional pre-built routing graph for the same
                 lanelet_map. Reused when supplied so the graph is not rebuilt
                 per signal; a fresh graph is built only when None.
+            offset: Coordinate offset to subtract from extracted signal
+                coordinates. Defaults to a zero offset.
 
         Returns:
             Tuple of (s, t) coordinates where:
@@ -377,24 +386,15 @@ class SignalsAndControllers:
         if stop_line is not None and len(stop_line) > 0:
             # Use stop line centroid
             n = len(stop_line)
-            x = sum(float(stop_line[i].x) for i in range(n)) / n - COORDINATE_OFFSET.x
-            y = sum(float(stop_line[i].y) for i in range(n)) / n - COORDINATE_OFFSET.y
-            z = sum(float(stop_line[i].z) for i in range(n)) / n - COORDINATE_OFFSET.z
+            x = sum(float(stop_line[i].x) for i in range(n)) / n - offset.x
+            y = sum(float(stop_line[i].y) for i in range(n)) / n - offset.y
+            z = sum(float(stop_line[i].z) for i in range(n)) / n - offset.z
         else:
             # Fallback: use linestring centroid (all points, not just [0])
             n = len(light_linestring)
-            x = (
-                sum(float(light_linestring[i].x) for i in range(n)) / n
-                - COORDINATE_OFFSET.x
-            )
-            y = (
-                sum(float(light_linestring[i].y) for i in range(n)) / n
-                - COORDINATE_OFFSET.y
-            )
-            z = (
-                sum(float(light_linestring[i].z) for i in range(n)) / n
-                - COORDINATE_OFFSET.z
-            )
+            x = sum(float(light_linestring[i].x) for i in range(n)) / n - offset.x
+            y = sum(float(light_linestring[i].y) for i in range(n)) / n - offset.y
+            z = sum(float(light_linestring[i].z) for i in range(n)) / n - offset.z
 
         # Build spline for this road
         from .reference_line import ReferenceLine
@@ -418,7 +418,7 @@ class SignalsAndControllers:
 
         try:
             reference_line = ReferenceLine.construct_from_lanelet_groups(
-                lanelet_map, lanelets, routing_graph=routing_graph
+                lanelet_map, lanelets, routing_graph=routing_graph, offset=offset
             )
             spline = reference_line.centerline_2d
 
@@ -443,6 +443,7 @@ class SignalsAndControllers:
         road: Optional["Road"] = None,
         road_s: Optional[float] = None,
         traffic_light_config: Optional[TrafficLightConfig] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> PositionInertial:
         """Calculate physical position of a signal from Light Bulb LineString centroid.
 
@@ -453,23 +454,16 @@ class SignalsAndControllers:
             traffic_light_config: Optional traffic light config with spawn offsets.
                 The (offset_x, offset_y) are rotated by hdg and subtracted from the
                 centroid position to adjust signal placement.
+            offset: Coordinate offset to subtract from extracted signal
+                coordinates. Defaults to a zero offset.
 
         Returns:
             PositionInertial with centroid coordinates and heading
         """
         n = len(light_linestring)
-        x = (
-            sum(float(light_linestring[i].x) for i in range(n)) / n
-            - COORDINATE_OFFSET.x
-        )
-        y = (
-            sum(float(light_linestring[i].y) for i in range(n)) / n
-            - COORDINATE_OFFSET.y
-        )
-        z = (
-            sum(float(light_linestring[i].z) for i in range(n)) / n
-            - COORDINATE_OFFSET.z
-        )
+        x = sum(float(light_linestring[i].x) for i in range(n)) / n - offset.x
+        y = sum(float(light_linestring[i].y) for i in range(n)) / n - offset.y
+        z = sum(float(light_linestring[i].z) for i in range(n)) / n - offset.z
 
         # hdg: facing direction of the traffic light.
         # The LineString direction (first→last) runs along the bulb arrangement

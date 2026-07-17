@@ -8,7 +8,7 @@ import lxml.etree as ET
 from ..centerline import estimate_lanelet_width_as_spline, Width1DSplineAdapter
 from ..spline import Splines
 from ..conversion_config import WidthEstimationConfig, WidthReference
-from ..config import DEFAULT_CONFIG
+from ..config import DEFAULT_CONFIG, CoordinateOffset
 
 from .opendrive_dataclass import (
     LaneType,
@@ -209,6 +209,7 @@ class Lane:
         reference_line_spline: Optional["Splines"] = None,
         anchor_start_override: Optional[Tuple[float, float, float]] = None,
         anchor_end_override: Optional[Tuple[float, float, float]] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> "Lane":
         """
         Construct a Lane from a Lanelet2 lanelet.
@@ -232,6 +233,8 @@ class Lane:
                 lane edge. P0-2 junction endpoint fidelity, lane-width side.
             anchor_end_override: Optional (x, y, z) override for the anchor
                 boundary's last point, used analogously for the s=length end.
+            offset: Coordinate offset to subtract from extracted boundary
+                points during width estimation. Defaults to a zero offset.
 
         Returns:
             Lane instance constructed from the lanelet
@@ -300,10 +303,13 @@ class Lane:
                 config,
                 anchor_start_override=anchor_start_override,
                 anchor_end_override=anchor_end_override,
+                offset=offset,
             )
         else:
             # Fallback to old behavior (for backward compatibility)
-            width_spline = estimate_lanelet_width_as_spline(lanelet, config)
+            width_spline = estimate_lanelet_width_as_spline(
+                lanelet, config, offset=offset
+            )
 
         # Sample the spline at multiple points to create width definitions
         lane._add_width_from_spline(width_spline)

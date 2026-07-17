@@ -56,6 +56,15 @@ class OriginSpec:
             set by the projector-resolution layer. When ``None``, the
             geoReference is derived from ``mgrs_code``/``lat``/``lon`` via
             :func:`~.projection_resolver.geo_reference_for_origin`.
+        offset_x: Easting offset in meters, subtracted from Lanelet2 X
+            coordinates during OpenDRIVE export. Mirrors
+            :attr:`~.projection_resolver.ResolvedProjection.offset_x`.
+        offset_y: Northing offset in meters, subtracted from Lanelet2 Y
+            coordinates during OpenDRIVE export. Mirrors
+            :attr:`~.projection_resolver.ResolvedProjection.offset_y`.
+        offset_z: Altitude offset in meters, subtracted from Lanelet2 Z
+            coordinates during OpenDRIVE export. Mirrors
+            :attr:`~.projection_resolver.ResolvedProjection.offset_z`.
     """
 
     mgrs_code: Optional[str] = None
@@ -63,6 +72,9 @@ class OriginSpec:
     lon: Optional[float] = None
     scale_factor: Optional[float] = None
     geo_reference: Optional[str] = None
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+    offset_z: float = 0.0
 
 
 @dataclass
