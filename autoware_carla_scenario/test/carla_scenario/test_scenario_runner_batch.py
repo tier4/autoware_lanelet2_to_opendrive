@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from autoware_carla_scenario.command_batch import CommandBatch
 from autoware_carla_scenario.scenario_runner import (
     _callback_wants_batch,
-    _invoke_tick_callback,
+    _normalize_tick_callback,
 )
 
 
@@ -27,20 +27,22 @@ class TestCallbackWantsBatch:
         assert _callback_wants_batch(MagicMock()) is False
 
 
-class TestInvokeTickCallback:
-    def test_legacy_callback_invoked_with_world_only(self) -> None:
+class TestNormalizeTickCallback:
+    def test_legacy_callback_wrapped_to_ignore_batch(self) -> None:
         received: list = []
         cb = lambda world: received.append(world)  # noqa: E731
         world = object()
-        _invoke_tick_callback(cb, world, CommandBatch())
+        _normalize_tick_callback(cb)(world, CommandBatch())
         assert received == [world]
 
-    def test_batch_aware_callback_receives_batch(self) -> None:
+    def test_batch_aware_callback_passed_through(self) -> None:
         received: list = []
         cb = lambda world, batch: received.append((world, batch))  # noqa: E731
+        # A batch-aware callback is returned unchanged.
+        assert _normalize_tick_callback(cb) is cb
         world = object()
         batch = CommandBatch()
-        _invoke_tick_callback(cb, world, batch)
+        _normalize_tick_callback(cb)(world, batch)
         assert received == [(world, batch)]
 
     def test_batch_aware_callback_can_emit_commands(self) -> None:
@@ -48,5 +50,5 @@ class TestInvokeTickCallback:
             batch.add("cmd")
 
         batch = CommandBatch()
-        _invoke_tick_callback(cb, object(), batch)
+        _normalize_tick_callback(cb)(object(), batch)
         assert batch.commands == ["cmd"]

@@ -19,22 +19,15 @@ class _FakeResponse:
 
 
 class TestCommandBatch:
-    def test_empty_batch_is_falsy_and_zero_length(self) -> None:
+    def test_empty_batch_has_zero_length(self) -> None:
         batch = CommandBatch()
         assert len(batch) == 0
-        assert not batch
 
     def test_add_accumulates_commands(self) -> None:
         batch = CommandBatch()
         batch.add("cmd-a")
         batch.add("cmd-b")
         assert len(batch) == 2
-        assert bool(batch) is True
-        assert batch.commands == ["cmd-a", "cmd-b"]
-
-    def test_extend_accumulates_commands(self) -> None:
-        batch = CommandBatch()
-        batch.extend(["cmd-a", "cmd-b"])
         assert batch.commands == ["cmd-a", "cmd-b"]
 
     def test_commands_property_returns_copy(self) -> None:
@@ -44,12 +37,6 @@ class TestCommandBatch:
         snapshot.append("mutated")
         # Mutating the returned list must not affect the batch.
         assert batch.commands == ["cmd-a"]
-
-    def test_clear_discards_without_applying(self) -> None:
-        batch = CommandBatch()
-        batch.add("cmd-a")
-        batch.clear()
-        assert len(batch) == 0
 
     def test_apply_empty_batch_skips_rpc(self) -> None:
         client = MagicMock()

@@ -20,7 +20,7 @@ form and are still issued directly by their respective actions.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Iterable, List
+from typing import TYPE_CHECKING, Any, List
 
 if TYPE_CHECKING:
     import carla
@@ -48,14 +48,6 @@ class CommandBatch:
         """Queue a single ``carla.command.*`` for this frame."""
         self._commands.append(command)
 
-    def extend(self, commands: Iterable[Any]) -> None:
-        """Queue multiple ``carla.command.*`` objects for this frame."""
-        self._commands.extend(commands)
-
-    def clear(self) -> None:
-        """Discard all queued commands without applying them."""
-        self._commands.clear()
-
     @property
     def commands(self) -> List[Any]:
         """A copy of the currently queued commands."""
@@ -63,9 +55,6 @@ class CommandBatch:
 
     def __len__(self) -> int:
         return len(self._commands)
-
-    def __bool__(self) -> bool:
-        return bool(self._commands)
 
     def apply(self, client: "carla.Client", *, due_tick_cue: bool = False) -> List[Any]:
         """Flush the batch through ``client.apply_batch_sync`` and clear it.

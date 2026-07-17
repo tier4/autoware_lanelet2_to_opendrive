@@ -343,6 +343,10 @@ class BaseScenario(ABC):
             offset_back=offset_back, offset_up=offset_up, pitch=pitch
         )
 
+        # The spectator is a stable singleton actor; fetch it once and reuse
+        # the handle instead of paying a get_spectator() RPC every frame.
+        spectator_cache: dict[str, "carla.Actor"] = {}
+
         def _follow(world: "carla.World", batch: "CommandBatch") -> None:
             actor = actor_getter()
             if actor is None:
@@ -358,9 +362,12 @@ class BaseScenario(ABC):
                 z=tf.location.z + offset_up,
             )
             rot = carla.Rotation(yaw=tf.rotation.yaw, pitch=pitch)
+            spectator = spectator_cache.get("actor")
+            if spectator is None:
+                spectator = world.get_spectator()
+                spectator_cache["actor"] = spectator
             # Batch the spectator move so it shares the frame's single
             # apply_batch_sync round-trip instead of issuing its own RPC.
-            spectator = world.get_spectator()
             batch.add(
                 carla.command.ApplyTransform(spectator, carla.Transform(loc, rot))
             )

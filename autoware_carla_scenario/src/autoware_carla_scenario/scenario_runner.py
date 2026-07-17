@@ -83,14 +83,46 @@ def _callback_wants_batch(cb: Callable[..., None]) -> bool:
     return positional >= 2
 
 
-def _invoke_tick_callback(
-    cb: Callable[..., None], world: "carla.World", batch: "CommandBatch"
-) -> None:
-    """Invoke a tick callback, passing *batch* only when it accepts one."""
+def _normalize_tick_callback(
+    cb: Callable[..., None],
+) -> Callable[["carla.World", "CommandBatch"], None]:
+    """Adapt a tick callback to the uniform ``cb(world, batch)`` signature.
+
+    Arity is inspected here — once, at tick-loop setup — instead of on every
+    frame: batch-aware ``cb(world, batch)`` callbacks pass through unchanged,
+    while legacy ``cb(world)`` callbacks are wrapped to ignore the batch.
+    """
     if _callback_wants_batch(cb):
+        return cb
+    return lambda world, batch: cb(world)
+
+
+def _run_tick_phase(
+    actions: list,
+    callbacks: list,
+    world: "carla.World",
+    elapsed: float,
+    client: "carla.Client",
+) -> None:
+    """Run one tick phase and flush its events in a single ``apply_batch_sync``.
+
+    Fires every action and callback for the phase, collecting the CARLA
+    commands they emit into one :class:`CommandBatch`, then applies the batch.
+
+    Args:
+        actions: The phase's :class:`BaseAction` list.
+        callbacks: The phase's callbacks, already normalized to the
+            ``cb(world, batch)`` signature by :func:`_normalize_tick_callback`.
+        world: The CARLA world.
+        elapsed: Seconds elapsed since the tick loop started.
+        client: The CARLA client used to dispatch the batch.
+    """
+    batch = CommandBatch()
+    for action in actions:
+        action.tick(world, elapsed, batch=batch)
+    for cb in callbacks:
         cb(world, batch)
-    else:
-        cb(world)
+    batch.apply(client)
 
 
 def _log_ego_opendrive_position(
@@ -569,29 +601,37 @@ class ScenarioRunner:
             logger.info("[%s] === Tick loop start ===", scenario_name)
             start_time = time.monotonic()
 
-            # Tick loop
+            # Normalize the (stable) callback lists to the uniform
+            # cb(world, batch) signature once, so the hot loop never re-inspects
+            # arity per frame.
+            pre_callbacks = [
+                _normalize_tick_callback(cb) for cb in scenario._pre_tick_callbacks
+            ]
+            post_callbacks = [
+                _normalize_tick_callback(cb) for cb in scenario._post_tick_callbacks
+            ]
+
+            # Tick loop. Each phase collects its events' CARLA commands into a
+            # single batch and applies them in one apply_batch_sync round-trip.
             while not scenario.is_done():
                 elapsed = time.monotonic() - start_time
                 tick_count += 1
 
-                # Pre-tick phase: collect every event's CARLA commands into a
-                # single batch and apply them in one apply_batch_sync round-trip.
-                pre_batch = CommandBatch()
-                for action in scenario._pre_tick_actions:
-                    action.tick(world, elapsed, batch=pre_batch)
-                for cb in scenario._pre_tick_callbacks:
-                    _invoke_tick_callback(cb, world, pre_batch)
-                pre_batch.apply(self._client)
-
+                _run_tick_phase(
+                    scenario._pre_tick_actions,
+                    pre_callbacks,
+                    world,
+                    elapsed,
+                    self._client,
+                )
                 world.tick()
-
-                # Post-tick phase: same batching strategy for post-tick events.
-                post_batch = CommandBatch()
-                for action in scenario._post_tick_actions:
-                    action.tick(world, elapsed, batch=post_batch)
-                for cb in scenario._post_tick_callbacks:
-                    _invoke_tick_callback(cb, world, post_batch)
-                post_batch.apply(self._client)
+                _run_tick_phase(
+                    scenario._post_tick_actions,
+                    post_callbacks,
+                    world,
+                    elapsed,
+                    self._client,
+                )
 
                 # Periodic ego OpenDRIVE position log
                 if tick_count % _CONDITION_LOG_INTERVAL == 0:
