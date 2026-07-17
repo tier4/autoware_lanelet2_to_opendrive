@@ -972,8 +972,15 @@ class _Lanelet2ToOpenDRIVEConverter:
             OpenDRIVE object
         """
         # Generate PROJ string for geoReference via the projector-resolution
-        # layer (single source of truth for origin -> geoReference).
-        geo_reference_proj = geo_reference_for_origin(self.config.origin)
+        # layer (single source of truth for origin -> geoReference). Prefer
+        # the already-resolved string (set for e.g. TransverseMercator
+        # origins, which geo_reference_for_origin cannot derive from
+        # mgrs_code/lat/lon alone); fall back to re-deriving it for the
+        # MGRS/lat-lon origins that don't set it explicitly.
+        geo_reference_proj = (
+            self.config.origin.geo_reference
+            or geo_reference_for_origin(self.config.origin)
+        )
         logger.info("geoReference (PROJ string): %s", geo_reference_proj)
 
         # Bounding box of the projected map — populates the OpenDRIVE
@@ -1403,6 +1410,15 @@ def preprocess_and_convert_with_hydra(
         ]
     )
 
+    # TransverseMercator (issue #541) is not yet supported together with
+    # preprocessing: the preprocessing pipeline coordinate handling has only
+    # been validated against MGRS/lat-lon origins.
+    if has_preprocessing and resolved.projector_type == "TransverseMercator":
+        raise NotImplementedError(
+            "TransverseMercator + preprocessing is not yet supported. "
+            "Disable preprocessing or track follow-up."
+        )
+
     preprocessing_log_dict: dict | None = None
 
     if has_preprocessing:
@@ -1561,6 +1577,8 @@ def preprocess_and_convert_with_hydra(
             mgrs_code=mgrs_code,
             lat=origin_lat,
             lon=origin_lon,
+            scale_factor=resolved.scale_factor,
+            geo_reference=resolved.geo_reference,
         ),
         exclude_non_junction_signals=exclude_non_junction_signals,
         traffic_rule=traffic_rule,

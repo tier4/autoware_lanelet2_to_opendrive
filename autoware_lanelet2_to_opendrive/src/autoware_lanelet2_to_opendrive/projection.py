@@ -244,6 +244,35 @@ def mgrs_to_proj_string(mgrs_grid: str) -> str:
         raise ValueError(f"Invalid MGRS grid string '{mgrs_grid}': {e}") from e
 
 
+def latlon_to_tmerc_proj_string(lat_0: float, lon_0: float, scale_factor: float) -> str:
+    """Build a Transverse Mercator PROJ string for OpenDRIVE geoReference.
+
+    Pure string formatting -- no pyproj call. Mirrors the projection applied
+    by Autoware's ``TransverseMercatorProjector`` C++/Python binding, which
+    locks the central-meridian scale factor at ``k=0.9996`` (see issue #541;
+    other scale factors are rejected earlier, in
+    :mod:`autoware_lanelet2_to_opendrive.projection_resolver`, and tracked as
+    follow-up issue #548).
+
+    Args:
+        lat_0: Origin latitude in decimal degrees.
+        lon_0: Origin longitude in decimal degrees.
+        scale_factor: Central-meridian scale factor (k).
+
+    Returns:
+        PROJ string for a Transverse Mercator projection centered at
+        (lat_0, lon_0).
+
+    Example:
+        >>> latlon_to_tmerc_proj_string(35.61739731, 139.7797546, 0.9996)
+        '+proj=tmerc +lat_0=35.61739731 +lon_0=139.7797546 +k=0.9996 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs'
+    """
+    return (
+        f"+proj=tmerc +lat_0={lat_0} +lon_0={lon_0} +k={scale_factor} "
+        f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+    )
+
+
 def latlon_to_proj_string(lat: float, lon: float) -> str:
     """Convert latitude/longitude to PROJ string for OpenDRIVE geoReference.
 
