@@ -37,16 +37,6 @@ from .projection import (
 
 logger = logging.getLogger(__name__)
 
-#: Only this scale factor is supported for TransverseMercator maps: the
-#: Autoware Python binding for ``TransverseMercatorProjector`` does not
-#: expose ``scale_factor`` -- it is locked at k=0.9996 in C++. Supporting
-#: other scale factors would require a two-stage pyproj transform and is
-#: tracked as follow-up issue #548.
-SUPPORTED_TMERC_SCALE_FACTOR = 0.9996
-TMERC_SCALE_FACTOR_FOLLOWUP_URL = (
-    "https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/548"
-)
-
 
 def geo_reference_for_origin(origin_spec: OriginSpec) -> str:
     """Build the OpenDRIVE geoReference PROJ string for an origin spec.
@@ -93,7 +83,7 @@ class ResolvedProjection:
 
     def make_projector(self):
         if self.projector_type == "TransverseMercator":
-            return TransverseMercatorProjector(self.origin)
+            return TransverseMercatorProjector(self.origin, self.scale_factor)
         return MGRSProjector(self.origin)
 
     @property
@@ -259,11 +249,10 @@ MAP_PROJECTOR_INFO_FILENAME = "map_projector_info.yaml"
 def _resolve_transverse_mercator(info_path: Path, data: dict) -> ResolvedProjection:
     """Build a :class:`ResolvedProjection` for ``projector_type: TransverseMercator``.
 
-    Only ``scale_factor: 0.9996`` is supported: the Autoware Python binding
-    for ``TransverseMercatorProjector`` does not expose ``scale_factor`` --
-    it is locked at k=0.9996 in C++. Any other scale factor raises a
-    ``ValueError`` pointing at follow-up issue #548 rather than silently
-    producing a projector/geoReference mismatch.
+    Any positive ``scale_factor`` is accepted: the Autoware Python binding
+    for ``TransverseMercatorProjector`` accepts an explicit ``scale_factor``
+    argument (defaulting to ``0.9996``), so it is threaded straight through
+    to the projector.
 
     Args:
         info_path: Path to the ``map_projector_info.yaml`` file (for error
@@ -275,8 +264,7 @@ def _resolve_transverse_mercator(info_path: Path, data: dict) -> ResolvedProject
 
     Raises:
         ValueError: If ``map_origin.latitude``/``.longitude`` or
-            ``scale_factor`` are missing, or ``scale_factor`` is not exactly
-            ``0.9996``.
+            ``scale_factor`` are missing.
     """
     map_origin = data.get("map_origin") or {}
     if "latitude" not in map_origin or "longitude" not in map_origin:
@@ -293,16 +281,6 @@ def _resolve_transverse_mercator(info_path: Path, data: dict) -> ResolvedProject
             "'scale_factor' field"
         )
     scale_factor = float(data["scale_factor"])
-    if scale_factor != SUPPORTED_TMERC_SCALE_FACTOR:
-        raise ValueError(
-            f"{info_path}: TransverseMercator scale_factor={scale_factor} is "
-            f"not supported -- only scale_factor={SUPPORTED_TMERC_SCALE_FACTOR} "
-            "is supported. The Autoware Python binding for "
-            "TransverseMercatorProjector locks the projector at "
-            f"k={SUPPORTED_TMERC_SCALE_FACTOR}; other scale factors require "
-            "a two-stage pyproj transform, tracked as follow-up issue #548 "
-            f"({TMERC_SCALE_FACTOR_FOLLOWUP_URL})"
-        )
 
     origin = lanelet2.io.Origin(origin_lat, origin_lon)
     return ResolvedProjection(
@@ -335,8 +313,8 @@ def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjec
     Raises:
         ValueError: If ``projector_type`` is MGRS but ``mgrs_grid`` is
             missing, or if ``projector_type`` is TransverseMercator but
-            ``map_origin``/``scale_factor`` are missing or ``scale_factor``
-            is unsupported (see :func:`_resolve_transverse_mercator`).
+            ``map_origin``/``scale_factor`` are missing (see
+            :func:`_resolve_transverse_mercator`).
     """
     data = yaml.safe_load(info_path.read_text(encoding="utf-8")) or {}
     projector_type = str(data.get("projector_type", "")).strip()

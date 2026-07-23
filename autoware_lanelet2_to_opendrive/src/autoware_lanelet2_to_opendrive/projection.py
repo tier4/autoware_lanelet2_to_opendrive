@@ -249,10 +249,8 @@ def latlon_to_tmerc_proj_string(lat_0: float, lon_0: float, scale_factor: float)
 
     Pure string formatting -- no pyproj call. Mirrors the projection applied
     by Autoware's ``TransverseMercatorProjector`` C++/Python binding, which
-    locks the central-meridian scale factor at ``k=0.9996`` (see issue #541;
-    other scale factors are rejected earlier, in
-    :mod:`autoware_lanelet2_to_opendrive.projection_resolver`, and tracked as
-    follow-up issue #548).
+    accepts an explicit central-meridian scale factor (``k``, see issue
+    #541).
 
     Args:
         lat_0: Origin latitude in decimal degrees.
