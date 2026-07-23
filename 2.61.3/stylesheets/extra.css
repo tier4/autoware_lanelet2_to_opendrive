@@ -1,0 +1,80 @@
+/* Custom styles for CARLA OpenDRIVE documentation */
+
+/* Use full viewport width for content */
+.md-grid {
+    max-width: none;
+    margin-left: 1rem;
+    margin-right: 1rem;
+}
+
+/* Adjust main content container to use available space */
+.md-main__inner {
+    margin-top: 0;
+}
+
+/* Fix table width overflow issues */
+.md-typeset table:not([class]) {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+/* Set specific column widths for the unified tag reference table (9 columns) */
+.md-typeset table:not([class]) th:nth-child(1),
+.md-typeset table:not([class]) td:nth-child(1) {
+    width: 9%; /* Parser Module */
+}
+
+.md-typeset table:not([class]) th:nth-child(2),
+.md-typeset table:not([class]) td:nth-child(2) {
+    width: 13%; /* OpenDRIVE Tag/Attribute */
+}
+
+.md-typeset table:not([class]) th:nth-child(3),
+.md-typeset table:not([class]) td:nth-child(3) {
+    width: 14%; /* CARLA Purpose */
+}
+
+.md-typeset table:not([class]) th:nth-child(4),
+.md-typeset table:not([class]) td:nth-child(4) {
+    width: 11%; /* CARLA Code Location */
+}
+
+.md-typeset table:not([class]) th:nth-child(5),
+.md-typeset table:not([class]) td:nth-child(5) {
+    width: 13%; /* Lanelet2 Mapping */
+}
+
+.md-typeset table:not([class]) th:nth-child(6),
+.md-typeset table:not([class]) td:nth-child(6) {
+    width: 4%; /* Status */
+    text-align: center;
+}
+
+.md-typeset table:not([class]) th:nth-child(7),
+.md-typeset table:not([class]) td:nth-child(7) {
+    width: 12%; /* Conversion Notes */
+}
+
+.md-typeset table:not([class]) th:nth-child(8),
+.md-typeset table:not([class]) td:nth-child(8) {
+    width: 12%; /* CARLA NPC Behavior Impact */
+}
+
+.md-typeset table:not([class]) th:nth-child(9),
+.md-typeset table:not([class]) td:nth-child(9) {
+    width: 12%; /* NPC Behavior Source */
+}
+
+/* Enable text wrapping in table cells */
+.md-typeset table:not([class]) td {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+}
+
+/* Ensure code elements in tables also wrap */
+.md-typeset table:not([class]) td code {
+    white-space: normal;
+    word-break: break-all;
+}
