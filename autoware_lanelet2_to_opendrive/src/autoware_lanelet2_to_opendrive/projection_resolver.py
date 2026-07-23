@@ -10,6 +10,7 @@ emitted ``.xodr`` is byte-identical.
 """
 
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -264,7 +265,8 @@ def _resolve_transverse_mercator(info_path: Path, data: dict) -> ResolvedProject
 
     Raises:
         ValueError: If ``map_origin.latitude``/``.longitude`` or
-            ``scale_factor`` are missing.
+            ``scale_factor`` are missing, or if ``scale_factor`` is not a
+            positive, finite number.
     """
     map_origin = data.get("map_origin") or {}
     if "latitude" not in map_origin or "longitude" not in map_origin:
@@ -281,6 +283,11 @@ def _resolve_transverse_mercator(info_path: Path, data: dict) -> ResolvedProject
             "'scale_factor' field"
         )
     scale_factor = float(data["scale_factor"])
+    if not (math.isfinite(scale_factor) and scale_factor > 0):
+        raise ValueError(
+            f"{info_path}: TransverseMercator scale_factor={scale_factor!r} must be "
+            "a positive, finite number"
+        )
 
     origin = lanelet2.io.Origin(origin_lat, origin_lon)
     return ResolvedProjection(

@@ -12,15 +12,20 @@ scale). These tests lock:
   the string is a well-formed, self-consistent Transverse Mercator
   definition.
 * End-to-end ``.osm`` -> ``.xodr`` conversion for the ``k=0.9999`` fixture.
-* Rejection of a missing ``map_origin``.
+* That the underlying C++ projector binding actually applies ``scale_factor``
+  (not just the PROJ-string formatting).
+* Rejection of a missing ``map_origin`` and of a non-positive/non-finite
+  ``scale_factor``.
 * That the MGRS resolution path is unaffected (additive-contract guard).
 * That the cached map-resolution path (``map_resolver``) refuses a
   TransverseMercator map rather than silently mis-projecting it.
 """
 
+import math
 import subprocess
 from pathlib import Path
 
+import lanelet2
 import pytest
 from lxml import etree as ET
 from omegaconf import OmegaConf
@@ -190,6 +195,43 @@ def test_tm_k9999_conversion_to_xodr_succeeds(tmp_path):
     assert tree.findall(".//road"), "conversion should emit at least one road"
 
 
+def test_tm_projector_binding_actually_uses_scale_factor():
+    """The C++ ``TransverseMercatorProjector`` binding must honor scale_factor.
+
+    ``test_tm_geo_reference_string_exact``/``test_tm_k9999_geo_reference_string_exact``
+    only check the PROJ string produced by ``latlon_to_tmerc_proj_string`` --
+    pure string formatting, independent of the Autoware binding. This test
+    exercises the actual C++ projector (via ``make_projector()``) so a
+    binding that silently ignored ``scale_factor`` would be caught.
+
+    Both fixtures share the exact same origin (only ``scale_factor`` differs:
+    0.9996 vs 0.9999), so forward-projecting the same off-origin point through
+    each projector isolates the effect of the scale factor.
+    """
+    resolved_k9996 = resolve_projection(_cfg(), TMERC_MINI_OSM)
+    resolved_k9999 = resolve_projection(_cfg(), TMERC_MINI_K9999_OSM)
+    assert resolved_k9996.origin_lat == resolved_k9999.origin_lat
+    assert resolved_k9996.origin_lon == resolved_k9999.origin_lon
+
+    projector_k9996 = resolved_k9996.make_projector()
+    projector_k9999 = resolved_k9999.make_projector()
+
+    point = lanelet2.core.GPSPoint(EXPECTED_LAT + 0.01, EXPECTED_LON + 0.01, 0.0)
+    fwd_k9996 = projector_k9996.forward(point)
+    fwd_k9999 = projector_k9999.forward(point)
+
+    dist_k9996 = math.hypot(fwd_k9996.x, fwd_k9996.y)
+    dist_k9999 = math.hypot(fwd_k9999.x, fwd_k9999.y)
+
+    # If the binding ignored scale_factor, both distances would be identical.
+    assert dist_k9999 != pytest.approx(dist_k9996, rel=1e-6)
+    # A larger scale_factor stretches map distances away from the origin, so
+    # k=0.9999 must place the point farther from (0, 0) than k=0.9996 does,
+    # roughly in proportion to the scale ratio.
+    assert dist_k9999 > dist_k9996
+    assert dist_k9999 / dist_k9996 == pytest.approx(0.9999 / 0.9996, rel=1e-3)
+
+
 # ---------------------------------------------------------------------------
 # 5. Missing map_origin -> ValueError
 # ---------------------------------------------------------------------------
@@ -203,6 +245,34 @@ def test_tm_missing_map_origin_raises(tmp_path):
         "scale_factor: 0.9996\n",
     )
     with pytest.raises(ValueError, match="map_origin"):
+        resolve_projection(_cfg(), osm)
+
+
+# ---------------------------------------------------------------------------
+# 5b. Invalid scale_factor (non-positive or non-finite) -> ValueError
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "scale_factor_yaml",
+    [
+        "scale_factor: 0\n",
+        "scale_factor: -0.9996\n",
+        "scale_factor: .nan\n",
+    ],
+    ids=["zero", "negative", "nan"],
+)
+def test_tm_invalid_scale_factor_raises(tmp_path, scale_factor_yaml):
+    osm = _write_projector_info(
+        tmp_path,
+        "projector_type: TransverseMercator\n"
+        "vertical_datum: WGS84\n"
+        "map_origin:\n"
+        f"  latitude: {EXPECTED_LAT}\n"
+        f"  longitude: {EXPECTED_LON}\n"
+        f"{scale_factor_yaml}",
+    )
+    with pytest.raises(ValueError, match="must be a positive, finite number"):
         resolve_projection(_cfg(), osm)
 
 
