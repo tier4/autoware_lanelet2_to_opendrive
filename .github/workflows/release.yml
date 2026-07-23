@@ -131,6 +131,14 @@ jobs:
           # Update autoware_lanelet2_to_opendrive/pyproject.toml
           sed -i "s/^version = \".*\"/version = \"$new_version\"/" autoware_lanelet2_to_opendrive/pyproject.toml
 
+          # Keep uv.lock in sync with the bumped version. The editable package
+          # entry in uv.lock records the version, so bumping pyproject.toml
+          # without re-locking leaves uv.lock stale and makes every subsequent
+          # non-frozen uv command (uv lock / uv sync / uv pip install) rewrite
+          # the lockfile. `uv lock` only resolves; it does not build the
+          # lanelet2 wheel, so no system dependencies are required here.
+          uv lock
+
           # Set outputs
           echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
           echo "bump_type=${bump_type}" >> "$GITHUB_OUTPUT"
@@ -141,7 +149,7 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          git add autoware_lanelet2_to_opendrive/pyproject.toml
+          git add autoware_lanelet2_to_opendrive/pyproject.toml uv.lock
           git commit -m "chore: bump version to ${{ steps.bump-version.outputs.new_version }}"
           git push origin master
 
