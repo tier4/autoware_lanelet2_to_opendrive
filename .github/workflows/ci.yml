@@ -196,6 +196,21 @@ jobs:
           --output nishishinjuku_carla_qc_report.xqar \
           | tee analyze_result.txt
 
+    - name: Convert TransverseMercator fixture map (scale_factor=0.9999, issue #541)
+      run: |
+        uv run convert \
+          map=example_mgrs_offset \
+          target=carla \
+          input_map_path=autoware_lanelet2_to_opendrive/test/data/tmerc_mini_k9999/lanelet2_map.osm \
+          output_map_path=tmerc_mini_k9999_carla.xodr
+
+    - name: Run CARLA import test (TransverseMercator fixture)
+      run: |
+        set -o pipefail
+        uv run carla-import-test tmerc_mini_k9999_carla.xodr \
+          --map-name tmerc_mini_k9999 \
+          | tee tmerc_mini_k9999_carla_import_test_result.txt
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()
@@ -206,6 +221,8 @@ jobs:
           carla_import_test_result.txt
           nishishinjuku_carla_qc_report.xqar
           analyze_result.txt
+          tmerc_mini_k9999_carla.xodr
+          tmerc_mini_k9999_carla_import_test_result.txt
         retention-days: 7
 
   qc-validate:
