@@ -353,12 +353,10 @@ def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjec
 def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
     """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
 
-    ``map_projector_info.yaml`` (Autoware's canonical projector definition) is
-    the champion source: when it sits next to ``input_map_path`` and declares a
-    supported projector, it drives the frame and any explicit ``cfg.map`` origin
-    keys are ignored (with an informational log). When the file is absent -- or
-    present but of a projector type not yet supported -- resolution falls back
-    to the explicit-key path (:func:`resolve_projection_from_hydra`).
+    When that file sits next to ``input_map_path`` and declares a supported
+    projector, it drives the frame and any explicit ``cfg.map`` origin keys
+    are ignored. Otherwise resolution falls back to the explicit-key path
+    (:func:`resolve_projection_from_hydra`).
 
     Args:
         cfg: Hydra configuration object with a ``map`` section.
