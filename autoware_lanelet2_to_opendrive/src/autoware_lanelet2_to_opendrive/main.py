@@ -56,6 +56,7 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     OriginSpec,
     ParamPoly3Config,
     ParkingLotConfig,
+    SignalConfig,
     StopLineConfig,
     TrafficLightConfig,
     WidthEstimationConfig,
@@ -419,6 +420,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             exclude_non_junction_signals=self.config.exclude_non_junction_signals,
             junction_lanelet_ids=junction_lanelet_ids,
             traffic_light_config=self.config.traffic_light,
+            signal_config=self.config.signal,
         )
         print(
             f"Extracted {len(signals_and_controllers.signals)} signals and "
@@ -781,6 +783,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         stop_sign_206_count = 0
         yield_sign_205_count = 0
         road_marking_294_count = 0
+        signal_country = self.config.signal.country
 
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
@@ -831,7 +834,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     pitch=0.0,
                     orientation="-" if signal_t < 0 else "+",
                     dynamic="no",
-                    country="DE",
+                    country=signal_country,
                     type=signal_type,
                     subtype=-1,
                     value=-1.0,
@@ -1511,6 +1514,18 @@ def preprocess_and_convert_with_hydra(
         f"carla_stop_line={stopline_config.carla_stop_line}"
     )
 
+    # Build SignalConfig from Hydra config
+    # Priority: map config > target config > default
+    signal_dict = cfg.map.get("signal") or cfg.target.get("signal", {})
+    signal_config = SignalConfig(
+        country=(
+            signal_dict.get("country", SignalConfig.country)
+            if signal_dict
+            else SignalConfig.country
+        )
+    )
+    logger.info(f"Signal config: country={signal_config.country}")
+
     # Build TrafficLightConfig from Hydra config
     # Priority: map config > target config > default
     tl_dict = cfg.map.get("traffic_light") or cfg.target.get("traffic_light", {})
@@ -1567,6 +1582,7 @@ def preprocess_and_convert_with_hydra(
         stopline=stopline_config,
         traffic_light=tl_config,
         parking_lot=parking_config,
+        signal=signal_config,
     )
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;

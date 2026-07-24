@@ -6,6 +6,7 @@ from typing import Any, Optional, List
 import lxml.etree as ET
 
 from ..config import COORDINATE_OFFSET
+from ..conversion_config import DEFAULT_SIGNAL_COUNTRY
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +276,7 @@ class Signal:
         road_elevation_at_s: Optional[float] = None,
         light_linestring: Any = None,
         position_inertial: Optional["PositionInertial"] = None,
+        country: str = DEFAULT_SIGNAL_COUNTRY,
     ) -> "Signal":
         """Construct a Signal from a lanelet2 TrafficLight regulatory element.
 
@@ -305,6 +307,7 @@ class Signal:
                 does not carry per-bulb attributes.
             position_inertial: Physical position of the signal in inertial
                 coordinates. If provided, attached to the Signal object.
+            country: OpenDRIVE signal country code.
 
         Returns:
             Signal object constructed from the traffic light with OpenDRIVE format
@@ -425,7 +428,7 @@ class Signal:
             pitch=0.0,
             orientation=orientation,
             dynamic="yes",  # Traffic lights are always dynamic
-            country="DE",  # Use German StVO country code
+            country=country,
             type=signal_type,
             subtype=signal_subtype,
             value=-1.0,  # No speed limit value for traffic lights

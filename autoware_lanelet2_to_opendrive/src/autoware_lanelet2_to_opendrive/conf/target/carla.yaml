@@ -8,6 +8,11 @@ exclude_non_junction_signals: true
 # Traffic rule defaults to RHT (can be overridden via command line)
 # traffic_rule: "RHT"
 
+# OpenDRIVE signal configuration
+signal:
+  # OpenDRIVE signal country code
+  country: "DE"
+
 # ParamPoly3 segment generation configuration
 # CARLA crashes when loading segments shorter than 0.5m
 parampoly3:
