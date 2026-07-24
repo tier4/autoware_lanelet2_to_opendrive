@@ -172,7 +172,7 @@ def test_resolved_projection_helpers():
 
 
 # ---------------------------------------------------------------------------
-# resolve_projection – map_projector_info.yaml (issue #542)
+# resolve_projection – map_projector_info.yaml
 # ---------------------------------------------------------------------------
 
 

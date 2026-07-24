@@ -1424,9 +1424,9 @@ def preprocess_and_convert_with_hydra(
         ]
     )
 
-    # TransverseMercator (issue #541) is not yet supported together with
-    # preprocessing: the preprocessing pipeline coordinate handling has only
-    # been validated against MGRS/lat-lon origins.
+    # TransverseMercator is not yet supported together with preprocessing:
+    # the preprocessing pipeline's coordinate handling has only been
+    # validated against MGRS/lat-lon origins.
     if has_preprocessing and resolved.projector_type == "TransverseMercator":
         raise NotImplementedError(
             "TransverseMercator + preprocessing is not yet supported. "
