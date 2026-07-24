@@ -231,12 +231,10 @@ MAP_PROJECTOR_INFO_FILENAME = "map_projector_info.yaml"
 def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjection]:
     """Build a :class:`ResolvedProjection` from a ``map_projector_info.yaml``.
 
-    Only ``projector_type: MGRS`` is wired in this slice (issue #542). For an
-    MGRS grid this reproduces the exact projector/geoReference of the
-    equivalent explicit ``mgrs_grid`` config, so existing MGRS outputs are
-    byte-identical. Other projector types (e.g. TransverseMercator) return
-    ``None`` so the caller falls back to the explicit origin keys; they are
-    added in sub-issue #541.
+    Only ``projector_type: MGRS`` is supported here; it reproduces the exact
+    projector/geoReference of the equivalent explicit ``mgrs_grid`` config,
+    so existing MGRS outputs stay byte-identical. Other projector types
+    return ``None`` so the caller falls back to the explicit origin keys.
 
     Args:
         info_path: Path to the ``map_projector_info.yaml`` file.
@@ -267,8 +265,8 @@ def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjec
         )
 
     logger.warning(
-        "map_projector_info.yaml projector_type=%r is not yet supported "
-        "(see #541); falling back to explicit origin keys",
+        "map_projector_info.yaml projector_type=%r is not yet supported; "
+        "falling back to explicit origin keys",
         projector_type,
     )
     return None
@@ -277,12 +275,10 @@ def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjec
 def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
     """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
 
-    ``map_projector_info.yaml`` (Autoware's canonical projector definition) is
-    the champion source: when it sits next to ``input_map_path`` and declares a
-    supported projector, it drives the frame and any explicit ``cfg.map`` origin
-    keys are ignored (with an informational log). When the file is absent -- or
-    present but of a projector type not yet supported -- resolution falls back
-    to the explicit-key path (:func:`resolve_projection_from_hydra`).
+    When that file sits next to ``input_map_path`` and declares a supported
+    projector, it drives the frame and any explicit ``cfg.map`` origin keys
+    are ignored. Otherwise resolution falls back to the explicit-key path
+    (:func:`resolve_projection_from_hydra`).
 
     Args:
         cfg: Hydra configuration object with a ``map`` section.
