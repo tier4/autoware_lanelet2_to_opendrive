@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+from autoware_lanelet2_to_opendrive.conversion_config import SignalConfig
 from autoware_lanelet2_to_opendrive.opendrive import (
     SignalsAndControllers,
     Signal,
@@ -314,6 +315,66 @@ def _make_mapping():
         road_to_lanelets={0: [100, 101], 1: [200, 201]},
         lanelet_to_road={100: 0, 101: 0, 200: 1, 201: 1},
     )
+
+
+def _construct_mock_signals(signal_config=None):
+    """Construct mock traffic-light signals through SignalsAndControllers."""
+    from unittest.mock import patch, MagicMock
+
+    pt = MagicMock(x=10.0, y=5.0, z=8.0)
+    ls1 = _make_linestring(1001, [pt])
+
+    traffic_light = MagicMock()
+    traffic_light.id = 9000
+    traffic_light.trafficLights = [ls1]
+    traffic_light.stopLine = None
+    traffic_light.attributes = {}
+
+    mock_lanelet_map = MagicMock()
+    mock_lanelet_map.laneletLayer.get.return_value = MagicMock()
+
+    with (
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+            return_value={9000: (traffic_light, [100, 200])},
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.create_routing_graph",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
+            return_value=(5.0, -3.0),
+        ),
+    ):
+        return SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=mock_lanelet_map,
+            road_lanelet_mapping=_make_mapping(),
+            roads=_make_mock_roads(),
+            signal_config=signal_config,
+        )
+
+
+def test_default_signal_country_keeps_existing_de_behavior():
+    """Omitting signal country config preserves the current DE default."""
+    result = _construct_mock_signals()
+
+    assert result.signals
+    assert {signal.country for signal in result.signals} == {"DE"}
+    xml = result.to_xml()
+    assert {signal.get("country") for signal in xml.findall(".//signal")} == {"DE"}
+
+
+def test_signal_country_config_propagates_to_generated_signals():
+    """Explicit country config is propagated to generated OpenDRIVE signals."""
+    signal_config = SignalConfig(country="JP")
+
+    result = _construct_mock_signals(signal_config=signal_config)
+
+    assert result.signals
+    assert {signal.country for signal in result.signals} == {"JP"}
+    xml = result.to_xml()
+    assert {signal.get("country") for signal in xml.findall(".//signal")} == {"JP"}
 
 
 def test_multiple_linestrings_deduplicated_to_one_per_road():
