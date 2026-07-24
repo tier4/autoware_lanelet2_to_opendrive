@@ -232,16 +232,19 @@ class ConversionConstants:
     arcspiral: ArcSpiralConstants = ArcSpiralConstants()
 
 
-@dataclass
+@dataclass(frozen=True)
 class CoordinateOffset:
-    """Runtime coordinate offset configuration.
+    """Immutable coordinate offset applied to Lanelet2 coordinates.
 
-    This class holds the coordinate offset values that are applied to all
-    coordinates during OpenDRIVE export. The offset is subtracted from
-    Lanelet2 coordinates to convert them to local coordinates.
+    This value holds the coordinate offset that is subtracted from
+    Lanelet2 coordinates during OpenDRIVE export to convert them to local
+    coordinates. It is threaded explicitly through the conversion call
+    chain (originating from :class:`~.projection_resolver.ResolvedProjection`
+    / :class:`~.conversion_config.OriginSpec`) rather than read from a
+    mutable global.
 
-    When offset is configured (e.g., from MGRS grid + offset in config),
-    all coordinates in the output xodr file will be shifted by subtracting
+    When the offset is non-zero (e.g., from MGRS grid + offset in config),
+    all coordinates in the output xodr file are shifted by subtracting
     these offset values, making them relative to the offset point.
 
     Attributes:
@@ -254,24 +257,6 @@ class CoordinateOffset:
     y: float = 0.0
     z: float = 0.0
 
-    def set(self, x: float, y: float, z: float = 0.0) -> None:
-        """Set coordinate offset values.
-
-        Args:
-            x: Easting offset in meters
-            y: Northing offset in meters
-            z: Altitude offset in meters (default 0.0)
-        """
-        self.x = x
-        self.y = y
-        self.z = z
-
-    def reset(self) -> None:
-        """Reset offset to zero (no offset applied)."""
-        self.x = 0.0
-        self.y = 0.0
-        self.z = 0.0
-
     @property
     def is_active(self) -> bool:
         """Check if any offset is active (non-zero)."""
@@ -281,7 +266,3 @@ class CoordinateOffset:
 # Global default configuration instance
 # This can be imported and used directly throughout the codebase
 DEFAULT_CONFIG = ConversionConstants()
-
-# Global runtime coordinate offset
-# Set this before conversion to apply coordinate offset to all outputs
-COORDINATE_OFFSET = CoordinateOffset()

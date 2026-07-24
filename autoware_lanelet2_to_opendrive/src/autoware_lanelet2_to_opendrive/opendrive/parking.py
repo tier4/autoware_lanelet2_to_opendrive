@@ -20,6 +20,7 @@ import lanelet2
 import lxml.etree as ET
 import numpy as np
 
+from ..config import CoordinateOffset
 from ..conversion_config import ParkingLotConfig
 from ..util import extract_points
 from .enums import LaneType
@@ -136,13 +137,21 @@ def _polygon_area(xy: np.ndarray) -> float:
     return float(0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
 
 
-def _area_polygon_xy(area: lanelet2.core.Area) -> np.ndarray:
+def _area_polygon_xy(
+    area: lanelet2.core.Area,
+    offset: CoordinateOffset = CoordinateOffset(),
+) -> np.ndarray:
     """Concatenate the outer-bound LineStrings into a 2D polygon array.
 
     The outer bound of a Lanelet2 ``Area`` is a closed loop made of one
     or more ``LineString3d`` segments.  Shared endpoints between
     consecutive LineStrings are not deduplicated because the OBB is
     barely affected by an extra coincident vertex.
+
+    Args:
+        area: The Lanelet2 Area to extract the outer boundary polygon from.
+        offset: Coordinate offset to subtract from extracted points.
+            Defaults to a zero offset.
     """
     points: List[List[float]] = []
     try:
@@ -152,7 +161,7 @@ def _area_polygon_xy(area: lanelet2.core.Area) -> np.ndarray:
 
     for ls in outer:
         try:
-            pts = extract_points(ls, dimensions=2)
+            pts = extract_points(ls, dimensions=2, offset=offset)
         except Exception:
             continue
         if pts.size:
@@ -165,14 +174,20 @@ def _area_polygon_xy(area: lanelet2.core.Area) -> np.ndarray:
 
 def _stall_centroid_and_length(
     stall: lanelet2.core.LineString3d,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Optional[Tuple[np.ndarray, float, np.ndarray, np.ndarray]]:
     """Return ``(centroid, length, start, end)`` for a stall LineString.
 
     Returns ``None`` when the LineString is degenerate (fewer than two
     points or near-zero length).
+
+    Args:
+        stall: The stall LineString to compute centroid/length for.
+        offset: Coordinate offset to subtract from extracted points.
+            Defaults to a zero offset.
     """
     try:
-        pts = extract_points(stall, dimensions=2)
+        pts = extract_points(stall, dimensions=2, offset=offset)
     except Exception:
         return None
     if pts.shape[0] < 2:
@@ -362,14 +377,23 @@ class ParkingSpaceObject:
         road: Road,
         object_id: int,
         default_width: float,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> Optional["ParkingSpaceObject"]:
         """Construct a ParkingSpaceObject by projecting the stall onto a road.
 
         Returns ``None`` and logs a warning when the LineString is too
         short or when Frenet projection onto ``road`` fails.
+
+        Args:
+            stall: The stall LineString to construct the object from.
+            road: The road to project the stall onto.
+            object_id: ID for the resulting object.
+            default_width: Default stall width in meters.
+            offset: Coordinate offset to subtract from extracted points.
+                Defaults to a zero offset.
         """
         ls_id = getattr(stall, "id", -1)
-        info = _stall_centroid_and_length(stall)
+        info = _stall_centroid_and_length(stall, offset=offset)
         if info is None:
             logger.warning(
                 "Parking stall LineString %s is degenerate, skipping",
@@ -427,6 +451,7 @@ class ParkingLot:
     def construct_all_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
         config: ParkingLotConfig,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> List["ParkingLot"]:
         """Discover parking lots and assign stalls to the nearest lot.
 
@@ -434,6 +459,12 @@ class ParkingLot:
         parking-lot area are dropped with a warning.  Areas with no
         nearby stalls remain in the result with an empty ``stalls``
         list (the synthetic road is still emitted, with no objects).
+
+        Args:
+            lanelet_map: The Lanelet2 map to search for parking lots.
+            config: Parking-lot emission configuration.
+            offset: Coordinate offset to subtract from extracted points.
+                Defaults to a zero offset.
         """
         if not config.enabled:
             return []
@@ -451,7 +482,7 @@ class ParkingLot:
         # nearest-area search does not pay the extract_points cost
         # per stall.
         lots: List[ParkingLot] = [ParkingLot(area=area) for area in areas]
-        polygons: List[np.ndarray] = [_area_polygon_xy(a) for a in areas]
+        polygons: List[np.ndarray] = [_area_polygon_xy(a, offset=offset) for a in areas]
 
         stalls = (
             _filter_parking_space_linestrings(ls_layer) if ls_layer is not None else []
@@ -459,7 +490,7 @@ class ParkingLot:
 
         threshold = float(config.nearest_area_threshold_m)
         for stall in stalls:
-            info = _stall_centroid_and_length(stall)
+            info = _stall_centroid_and_length(stall, offset=offset)
             if info is None:
                 logger.warning(
                     "Parking stall LineString %s is degenerate, skipping",
@@ -496,6 +527,7 @@ class ParkingLot:
         self,
         road_id: int,
         config: ParkingLotConfig,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> Tuple[Optional[Road], List[ParkingSpaceObject]]:
         """Build a synthetic Road + ParkingSpaceObjects for this lot.
 
@@ -503,8 +535,14 @@ class ParkingLot:
         (below ``config.min_area_polygon_m2``).  An area with no
         stalls within range still produces a road; the caller may
         decide whether to keep it.
+
+        Args:
+            road_id: OpenDRIVE road ID to assign to the synthetic road.
+            config: Parking-lot emission configuration.
+            offset: Coordinate offset to subtract from extracted points.
+                Defaults to a zero offset.
         """
-        polygon_xy = _area_polygon_xy(self.area)
+        polygon_xy = _area_polygon_xy(self.area, offset=offset)
         area_value = _polygon_area(polygon_xy)
         area_id = getattr(self.area, "id", -1)
 
@@ -535,6 +573,7 @@ class ParkingLot:
                 road=road,
                 object_id=object_id,
                 default_width=float(config.default_stall_width),
+                offset=offset,
             )
             if obj is not None:
                 objects_out.append(obj)
@@ -638,6 +677,7 @@ def construct_parking_roads(
     lanelet_map: lanelet2.core.LaneletMap,
     starting_road_id: int,
     config: ParkingLotConfig,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> List[Road]:
     """Build synthetic parking-lot roads from a Lanelet2 map.
 
@@ -647,6 +687,8 @@ def construct_parking_roads(
             consume sequential IDs.
         config: ``ParkingLotConfig`` controlling thresholds and
             stall width defaults.
+        offset: Coordinate offset to subtract from extracted points.
+            Defaults to a zero offset.
 
     Returns:
         A list of synthetic ``Road`` objects, one per parking lot
@@ -658,14 +700,14 @@ def construct_parking_roads(
     if not config.enabled:
         return []
 
-    lots = ParkingLot.construct_all_from_lanelet_map(lanelet_map, config)
+    lots = ParkingLot.construct_all_from_lanelet_map(lanelet_map, config, offset=offset)
     if not lots:
         return []
 
     roads: List[Road] = []
     next_id = int(starting_road_id)
     for lot in lots:
-        road, _objects = lot.to_road_and_objects(next_id, config)
+        road, _objects = lot.to_road_and_objects(next_id, config, offset=offset)
         if road is None:
             continue
         roads.append(road)

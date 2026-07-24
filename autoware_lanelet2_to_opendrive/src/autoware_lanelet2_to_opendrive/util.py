@@ -9,7 +9,7 @@ from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from lanelet2.geometry import intersects2d
 import numpy as np
 
-from .config import COORDINATE_OFFSET
+from .config import CoordinateOffset
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +17,19 @@ logger = logging.getLogger(__name__)
 def extract_points(
     boundary: lanelet2.core.LineString3d,
     dimensions: Literal[2, 3] = 3,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> np.ndarray:
     """Extract points from a Lanelet2 boundary with coordinate offset applied.
 
     This function extracts coordinates from a Lanelet2 LineString3d
-    and applies the global coordinate offset (subtracting offset values).
+    and applies the given coordinate offset (subtracting offset values).
 
     Args:
         boundary: Lanelet2 LineString3d to extract points from
         dimensions: Number of dimensions to extract (2 or 3)
+        offset: Coordinate offset to subtract from the extracted points.
+            Defaults to a zero offset (no-op) for callers that do not need
+            offset handling.
 
     Returns:
         numpy array of shape (N, dimensions) with coordinates,
@@ -36,50 +40,62 @@ def extract_points(
     """
     if dimensions == 3:
         points = np.array([[p.x, p.y, p.z] for p in boundary])
-        if COORDINATE_OFFSET.is_active:
-            points[:, 0] -= COORDINATE_OFFSET.x
-            points[:, 1] -= COORDINATE_OFFSET.y
-            points[:, 2] -= COORDINATE_OFFSET.z
+        if offset.is_active:
+            points[:, 0] -= offset.x
+            points[:, 1] -= offset.y
+            points[:, 2] -= offset.z
     elif dimensions == 2:
         points = np.array([[p.x, p.y] for p in boundary])
-        if COORDINATE_OFFSET.is_active:
-            points[:, 0] -= COORDINATE_OFFSET.x
-            points[:, 1] -= COORDINATE_OFFSET.y
+        if offset.is_active:
+            points[:, 0] -= offset.x
+            points[:, 1] -= offset.y
     else:
         raise ValueError(f"Dimensions must be 2 or 3, got {dimensions}")
     return points
 
 
-def extract_points_3d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
+def extract_points_3d(
+    boundary: lanelet2.core.LineString3d,
+    offset: CoordinateOffset = CoordinateOffset(),
+) -> np.ndarray:
     """Extract 3D points from a Lanelet2 boundary with coordinate offset applied.
 
     This function extracts X, Y, Z coordinates from a Lanelet2 LineString3d
-    and applies the global coordinate offset (subtracting offset values).
+    and applies the given coordinate offset (subtracting offset values).
 
     Args:
         boundary: Lanelet2 LineString3d to extract points from
+        offset: Coordinate offset to subtract from the extracted points.
+            Defaults to a zero offset (no-op) for callers that do not need
+            offset handling.
 
     Returns:
         numpy array of shape (N, 3) with [x, y, z] coordinates,
         with coordinate offset applied
     """
-    return extract_points(boundary, dimensions=3)
+    return extract_points(boundary, dimensions=3, offset=offset)
 
 
-def extract_points_2d(boundary: lanelet2.core.LineString3d) -> np.ndarray:
+def extract_points_2d(
+    boundary: lanelet2.core.LineString3d,
+    offset: CoordinateOffset = CoordinateOffset(),
+) -> np.ndarray:
     """Extract 2D points from a Lanelet2 boundary with coordinate offset applied.
 
     This function extracts X, Y coordinates from a Lanelet2 LineString3d
-    and applies the global coordinate offset (subtracting offset values).
+    and applies the given coordinate offset (subtracting offset values).
 
     Args:
         boundary: Lanelet2 LineString3d to extract points from
+        offset: Coordinate offset to subtract from the extracted points.
+            Defaults to a zero offset (no-op) for callers that do not need
+            offset handling.
 
     Returns:
         numpy array of shape (N, 2) with [x, y] coordinates,
         with coordinate offset applied
     """
-    return extract_points(boundary, dimensions=2)
+    return extract_points(boundary, dimensions=2, offset=offset)
 
 
 # Type aliases for common lanelet collection types
