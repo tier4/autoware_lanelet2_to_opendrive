@@ -66,10 +66,9 @@ class ResolvedProjection:
     how the origin was specified; the offset defaults to zero.
 
     ``projector_type`` selects the projector :meth:`make_projector` builds and
-    how :attr:`geo_reference` is derived. It defaults to ``"MGRS"`` so every
-    existing call site (which never set it) keeps its prior behavior.
-    ``scale_factor`` is only meaningful for ``projector_type ==
-    "TransverseMercator"`` (issue #541).
+    how :attr:`geo_reference` is derived; it defaults to ``"MGRS"`` so
+    existing call sites keep their prior behavior. ``scale_factor`` only
+    applies when ``projector_type == "TransverseMercator"``.
     """
 
     origin: lanelet2.io.Origin
@@ -303,12 +302,11 @@ def _resolve_transverse_mercator(info_path: Path, data: dict) -> ResolvedProject
 def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjection]:
     """Build a :class:`ResolvedProjection` from a ``map_projector_info.yaml``.
 
-    ``projector_type: MGRS`` (issue #542) and ``projector_type:
-    TransverseMercator`` (issue #541) are wired. For an MGRS grid this
-    reproduces the exact projector/geoReference of the equivalent explicit
-    ``mgrs_grid`` config, so existing MGRS outputs are byte-identical. Other
-    projector types return ``None`` so the caller falls back to the explicit
-    origin keys.
+    ``projector_type: MGRS`` and ``projector_type: TransverseMercator`` are
+    wired. For an MGRS grid this reproduces the exact projector/geoReference
+    of the equivalent explicit ``mgrs_grid`` config, so existing MGRS
+    outputs stay byte-identical. Other projector types return ``None`` so
+    the caller falls back to the explicit origin keys.
 
     Args:
         info_path: Path to the ``map_projector_info.yaml`` file.

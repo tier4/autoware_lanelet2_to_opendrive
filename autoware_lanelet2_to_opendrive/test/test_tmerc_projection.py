@@ -1,24 +1,12 @@
-"""Tests for the TransverseMercator projector (issue #541).
+"""Tests for the TransverseMercator projector.
 
-Autoware's Python binding for ``TransverseMercatorProjector`` accepts an
-explicit ``scale_factor`` argument (defaulting to ``0.9996``, UTM's fixed
-scale). These tests lock:
-
-* Resolution of a TransverseMercator ``map_projector_info.yaml`` into a
-  :class:`ResolvedProjection`, for both the UTM-style ``k=0.9996`` fixture
-  and a Japan plane rectangular coordinate system ``k=0.9999`` fixture.
-* The exact PROJ geoReference string produced for each (contractual).
-* A pyproj round trip through each PROJ string, as an independent check that
-  the string is a well-formed, self-consistent Transverse Mercator
-  definition.
-* End-to-end ``.osm`` -> ``.xodr`` conversion for the ``k=0.9999`` fixture.
-* That the underlying C++ projector binding actually applies ``scale_factor``
-  (not just the PROJ-string formatting).
-* Rejection of a missing ``map_origin`` and of a non-positive/non-finite
-  ``scale_factor``.
-* That the MGRS resolution path is unaffected (additive-contract guard).
-* That the cached map-resolution path (``map_resolver``) refuses a
-  TransverseMercator map rather than silently mis-projecting it.
+Covers resolving a TransverseMercator ``map_projector_info.yaml`` (for both
+a UTM-style ``k=0.9996`` fixture and a Japan plane rectangular coordinate
+system ``k=0.9999`` fixture), the exact geoReference PROJ string, a pyproj
+round trip, end-to-end ``.osm`` -> ``.xodr`` conversion, that the C++
+projector binding actually applies ``scale_factor``, error handling for
+invalid ``map_origin``/``scale_factor``, and that the MGRS path and the
+cached map-resolution path are unaffected.
 """
 
 import math
@@ -198,15 +186,11 @@ def test_tm_k9999_conversion_to_xodr_succeeds(tmp_path):
 def test_tm_projector_binding_actually_uses_scale_factor():
     """The C++ ``TransverseMercatorProjector`` binding must honor scale_factor.
 
-    ``test_tm_geo_reference_string_exact``/``test_tm_k9999_geo_reference_string_exact``
-    only check the PROJ string produced by ``latlon_to_tmerc_proj_string`` --
-    pure string formatting, independent of the Autoware binding. This test
-    exercises the actual C++ projector (via ``make_projector()``) so a
-    binding that silently ignored ``scale_factor`` would be caught.
-
-    Both fixtures share the exact same origin (only ``scale_factor`` differs:
-    0.9996 vs 0.9999), so forward-projecting the same off-origin point through
-    each projector isolates the effect of the scale factor.
+    The geo-reference tests above only check PROJ-string formatting,
+    independent of the Autoware binding, so this exercises the actual C++
+    projector via ``make_projector()``. The two fixtures share the same
+    origin and differ only in ``scale_factor`` (0.9996 vs 0.9999), isolating
+    its effect on a forward-projected point.
     """
     resolved_k9996 = resolve_projection(_cfg(), TMERC_MINI_OSM)
     resolved_k9999 = resolve_projection(_cfg(), TMERC_MINI_K9999_OSM)
@@ -309,5 +293,5 @@ def test_map_resolver_rejects_tm_yaml(tmp_path):
         f"  longitude: {EXPECTED_LON}\n"
         "scale_factor: 0.9996\n",
     )
-    with pytest.raises(RuntimeError, match="#541"):
+    with pytest.raises(RuntimeError, match="TransverseMercator"):
         _convert_lanelet2_to_xodr_cached(osm)

@@ -39,11 +39,10 @@ class OriginSpec:
       hold the offset-adjusted position while ``mgrs_code`` retains the
       grid zone for reference. The geoReference uses ``lat``/``lon``.
     * ``lat`` + ``lon`` + ``scale_factor`` + ``geo_reference`` – a
-      TransverseMercator origin (issue #541). ``scale_factor`` is the
-      central-meridian scale factor (Autoware's Python binding locks this
-      at ``0.9996``); ``geo_reference`` carries the already-resolved PROJ
-      string through from :class:`~.projection_resolver.ResolvedProjection`
-      so it does not need to be re-derived here.
+      TransverseMercator origin. ``geo_reference`` carries the
+      already-resolved PROJ string through from
+      :class:`~.projection_resolver.ResolvedProjection` so it does not need
+      to be re-derived here.
 
     Attributes:
         mgrs_code: MGRS grid square (e.g. ``"54SUE"``), when the origin was

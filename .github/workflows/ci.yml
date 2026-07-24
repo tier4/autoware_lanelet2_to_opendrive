@@ -196,7 +196,7 @@ jobs:
           --output nishishinjuku_carla_qc_report.xqar \
           | tee analyze_result.txt
 
-    - name: Convert TransverseMercator fixture map (scale_factor=0.9999, issue #541)
+    - name: Convert TransverseMercator fixture map (scale_factor=0.9999)
       run: |
         uv run convert \
           map=example_mgrs_offset \
