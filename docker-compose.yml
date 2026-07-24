@@ -9,13 +9,8 @@ x-dev-base: &dev-base
     # interpreter path doesn't pollute the bind-mounted source tree.
     - venv-cache:/workspace/.venv
     - uv-cache:/root/.cache/uv
-    # If `.` is a git worktree, its `.git` file points to an absolute host
-    # path under the main repository's `.git/worktrees/<name>` directory,
-    # which lives outside `.:/workspace` and is otherwise invisible to the
-    # container. Mounting the worktree's git-common-dir at the SAME
-    # absolute path lets that pointer resolve. Export GIT_COMMON_DIR before
-    # running compose (see docs/docker.md); it is a no-op default for the
-    # common case of a regular (non-worktree) checkout.
+    # Makes a worktree's .git file (which points outside .:/workspace)
+    # resolve inside the container. See docs/docker.md#running-from-a-git-worktree.
     - ${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}:${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}
   working_dir: /workspace
 

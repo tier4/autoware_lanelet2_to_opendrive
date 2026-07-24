@@ -18,10 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libgl1 \
       git ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-# Bind-mounted .git directories (main checkout or, for worktrees, the
-# common .git dir mounted via GIT_COMMON_DIR in docker-compose.yml) are
-# owned by the host UID, not the container's root, so git would otherwise
-# refuse to operate on them ("detected dubious ownership").
+# Avoid "dubious ownership" errors from git on the host-owned bind-mounted
+# .git (see docs/docker.md#running-from-a-git-worktree).
 RUN git config --system --add safe.directory '*'
 COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /uvx /usr/local/bin/
 WORKDIR /workspace
