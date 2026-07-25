@@ -22,6 +22,7 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     MappingMismatchError,
     ProjectionMetadata,
     _RoadCandidates,
+    _compute_all_candidates,
     build_mapping,
     _resolve_conflicts,
     _sample_reference_line_from_road,
@@ -366,6 +367,108 @@ class TestComputeAllCandidatesDirectedFallback:
         assert no_candidate_diag == {}
         assert len(all_rc) == 1
         assert all_rc[0].candidates[0][1] == 100
+
+
+class TestComputeAllCandidatesFallbackPolicy:
+    """Direction-consistent candidates must not be hidden by fallback order."""
+
+    @staticmethod
+    def _lht_line_road(length: float = 20.0) -> list[Road]:
+        import lxml.etree as ET
+
+        xodr = (
+            "<OpenDRIVE><road id='100' junction='-1'><planView>"
+            f"<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='{length}'>"
+            "<line/></geometry></planView><lanes><laneSection s='0.0'>"
+            "<left><lane id='1' type='driving' level='false'/></left>"
+            "<center><lane id='0' type='none' level='false'/></center>"
+            "</laneSection></lanes></road></OpenDRIVE>"
+        )
+        return parse_roads_from_xodr(Path("unused.xodr"), xodr_root=ET.fromstring(xodr))
+
+    @staticmethod
+    def _bbox(points: np.ndarray) -> tuple[float, float, float, float]:
+        return (
+            float(points[:, 0].min()),
+            float(points[:, 1].min()),
+            float(points[:, 0].max()),
+            float(points[:, 1].max()),
+        )
+
+    def test_preserves_direction_consistent_directed_candidate(self) -> None:
+        true_lid = 100
+        wrong_lid = 200
+        dense_reversed = np.column_stack(
+            (np.linspace(20.0, 0.0, 41), np.full(41, 0.25))
+        )
+        lanelet_right = {
+            # Sparse but endpoint-aligned: directed-close, symmetric-far.
+            true_lid: np.array([[0.0, 0.0], [20.0, 0.0]]),
+            # Dense and nearby, but opposite direction.
+            wrong_lid: dense_reversed,
+        }
+
+        all_rc, no_candidate_diag, skipped = _compute_all_candidates(
+            self._lht_line_road(),
+            lanelet_left={},
+            lanelet_right=lanelet_right,
+            lanelet_left_bbox={},
+            lanelet_right_bbox={
+                lid: self._bbox(points) for lid, points in lanelet_right.items()
+            },
+        )
+
+        assert skipped == set()
+        assert no_candidate_diag == {}
+        assert len(all_rc) == 1
+        assert all_rc[0].candidates[0][1] == true_lid
+
+    def test_same_direction_partial_branch_does_not_beat_full_shape(self) -> None:
+        true_lid = 100
+        wrong_lid = 200
+        lanelet_right = {
+            true_lid: np.column_stack((np.linspace(0.0, 20.0, 41), np.full(41, 1.0))),
+            # Same direction and directed-close, but only touches the road start.
+            wrong_lid: np.column_stack((np.linspace(0.0, 2.0, 9), np.zeros(9))),
+        }
+
+        all_rc, no_candidate_diag, skipped = _compute_all_candidates(
+            self._lht_line_road(),
+            lanelet_left={},
+            lanelet_right=lanelet_right,
+            lanelet_left_bbox={},
+            lanelet_right_bbox={
+                lid: self._bbox(points) for lid, points in lanelet_right.items()
+            },
+        )
+
+        assert skipped == set()
+        assert no_candidate_diag == {}
+        assert len(all_rc) == 1
+        assert all_rc[0].candidates[0][1] == true_lid
+
+    def test_directionless_symmetric_fallback_is_preserved(self) -> None:
+        reversed_lid = 100
+        lanelet_right = {
+            reversed_lid: np.column_stack(
+                (np.linspace(20.0, 0.0, 41), np.full(41, 0.25))
+            )
+        }
+
+        all_rc, no_candidate_diag, skipped = _compute_all_candidates(
+            self._lht_line_road(),
+            lanelet_left={},
+            lanelet_right=lanelet_right,
+            lanelet_left_bbox={},
+            lanelet_right_bbox={
+                lid: self._bbox(points) for lid, points in lanelet_right.items()
+            },
+        )
+
+        assert skipped == set()
+        assert no_candidate_diag == {}
+        assert len(all_rc) == 1
+        assert all_rc[0].candidates[0][1] == reversed_lid
 
 
 # ---------------------------------------------------------------------------

@@ -693,25 +693,6 @@ def _compute_all_candidates(
         bboxes = lanelet_left_bbox if is_rht else lanelet_right_bbox
         ref_bbox = _bbox(ref_line)
 
-        # Progressive fallback search with 4 levels:
-        #   1. Symmetric distance + direction check  (strictest)
-        #   2. Symmetric distance, no direction check (curved/long roads)
-        #   3. Directed distance + direction check   (length mismatch)
-        #   4. Directed distance, no direction check  (last resort)
-        #
-        # Symmetric distance is preferred because it penalises partial
-        # overlaps (e.g. an adjacent lane boundary covering part of a long
-        # reference line).  Directed distance is used for roads where the
-        # reference line is much longer than any single lanelet boundary.
-        # Keep the direction-agnostic directed pass as the last resort for
-        # cases where the global direction check is unreliable.
-        _FALLBACK_LEVELS: list[tuple[bool, str]] = [
-            (True, "symmetric"),
-            (False, "symmetric"),
-            (True, "directed"),
-            (False, "directed"),
-        ]
-
         candidates: list[tuple[float, int]] = []
         raw_dists: dict[int, float] = {}
         best_rejected_dist: float = float("inf")
@@ -723,56 +704,125 @@ def _compute_all_candidates(
         ref_start = ref_line[0]
         ref_end = ref_line[-1]
 
-        for require_dir, metric in _FALLBACK_LEVELS:
-            candidates.clear()
-            raw_dists.clear()
-            best_rejected_dist = float("inf")
-            best_rejected_lid = None
-            n_bbox_skip = 0
-            n_dir_skip = 0
+        def add_candidate(
+            bucket: dict[int, tuple[float, float]],
+            lid: int,
+            raw_dist: float,
+            endpoint_penalty: float,
+        ) -> None:
+            ranking_dist = raw_dist + endpoint_penalty
+            current = bucket.get(lid)
+            if current is None or ranking_dist < current[0]:
+                bucket[lid] = (ranking_dist, raw_dist)
 
-            for lid, boundary in boundaries.items():
-                if not _bboxes_overlap(ref_bbox, bboxes[lid]):
-                    n_bbox_skip += 1
-                    continue
-                if require_dir and not _same_direction(ref_line, boundary):
-                    n_dir_skip += 1
-                    continue
-                if metric == "symmetric":
-                    dist = _symmetric_mean_distance(boundary, ref_line)
-                else:
-                    dist = _directed_mean_distance(boundary, ref_line)
-                if dist <= _MATCH_THRESHOLD:
-                    # Endpoint proximity penalty for candidate ranking.
-                    # Correct matches have aligned start/end points;
-                    # wrong junction lanelets connect different roads and
-                    # have divergent endpoints.
-                    ep_start = min(
-                        float(np.linalg.norm(ref_start - boundary[0])),
-                        float(np.linalg.norm(ref_start - boundary[-1])),
-                    )
-                    ep_end = min(
-                        float(np.linalg.norm(ref_end - boundary[0])),
-                        float(np.linalg.norm(ref_end - boundary[-1])),
-                    )
-                    ranking_dist = dist + (ep_start + ep_end) * _ENDPOINT_WEIGHT
-                    candidates.append((ranking_dist, lid))
-                    raw_dists[lid] = dist
-                elif dist < best_rejected_dist:
-                    best_rejected_dist = dist
-                    best_rejected_lid = lid
+        same_direction_candidates: dict[int, tuple[float, float]] = {}
+        directionless_symmetric_candidates: dict[int, tuple[float, float]] = {}
+        same_direction_directed_candidates: dict[int, tuple[float, float]] = {}
+        directionless_directed_candidates: dict[int, tuple[float, float]] = {}
 
-            if candidates:
-                if metric != "symmetric" or not require_dir:
-                    logger.debug(
-                        "Road %d: found %d candidates at fallback level "
-                        "(dir=%s, metric=%s)",
-                        road.id,
-                        len(candidates),
-                        require_dir,
-                        metric,
-                    )
-                break  # found candidates, no need to fall back further
+        for lid, boundary in boundaries.items():
+            if not _bboxes_overlap(ref_bbox, bboxes[lid]):
+                n_bbox_skip += 1
+                continue
+
+            same_direction = _same_direction(ref_line, boundary)
+            if not same_direction:
+                n_dir_skip += 1
+
+            symmetric_dist = _symmetric_mean_distance(boundary, ref_line)
+            directed_dist = _directed_mean_distance(boundary, ref_line)
+            best_dist = min(symmetric_dist, directed_dist)
+            if best_dist < best_rejected_dist:
+                best_rejected_dist = best_dist
+                best_rejected_lid = lid
+
+            # Endpoint proximity penalty for candidate ranking. Correct
+            # matches have aligned start/end points; wrong junction lanelets
+            # connect different roads and have divergent endpoints.
+            ep_start = min(
+                float(np.linalg.norm(ref_start - boundary[0])),
+                float(np.linalg.norm(ref_start - boundary[-1])),
+            )
+            ep_end = min(
+                float(np.linalg.norm(ref_end - boundary[0])),
+                float(np.linalg.norm(ref_end - boundary[-1])),
+            )
+            endpoint_penalty = (ep_start + ep_end) * _ENDPOINT_WEIGHT
+            endpoints_supported = (
+                ep_start <= _MATCH_THRESHOLD and ep_end <= _MATCH_THRESHOLD
+            )
+
+            if same_direction and symmetric_dist <= _MATCH_THRESHOLD:
+                add_candidate(
+                    same_direction_candidates,
+                    lid,
+                    symmetric_dist,
+                    endpoint_penalty,
+                )
+            if (
+                same_direction
+                and directed_dist <= _MATCH_THRESHOLD
+                and endpoints_supported
+            ):
+                add_candidate(
+                    same_direction_candidates,
+                    lid,
+                    directed_dist,
+                    endpoint_penalty,
+                )
+            if symmetric_dist <= _MATCH_THRESHOLD:
+                add_candidate(
+                    directionless_symmetric_candidates,
+                    lid,
+                    symmetric_dist,
+                    endpoint_penalty,
+                )
+            if same_direction and directed_dist <= _MATCH_THRESHOLD:
+                add_candidate(
+                    same_direction_directed_candidates,
+                    lid,
+                    directed_dist,
+                    endpoint_penalty,
+                )
+            if directed_dist <= _MATCH_THRESHOLD:
+                add_candidate(
+                    directionless_directed_candidates,
+                    lid,
+                    directed_dist,
+                    endpoint_penalty,
+                )
+
+        candidate_source = None
+        selected_candidates: dict[int, tuple[float, float]]
+        if same_direction_candidates:
+            selected_candidates = same_direction_candidates
+            candidate_source = "direction_consistent"
+        elif directionless_symmetric_candidates:
+            selected_candidates = directionless_symmetric_candidates
+            candidate_source = "symmetric"
+        elif same_direction_directed_candidates:
+            selected_candidates = same_direction_directed_candidates
+            candidate_source = "directed_direction_consistent"
+        else:
+            selected_candidates = directionless_directed_candidates
+            if selected_candidates:
+                candidate_source = "directed"
+
+        if selected_candidates:
+            candidates = [
+                (ranking_dist, lid)
+                for lid, (ranking_dist, _) in selected_candidates.items()
+            ]
+            raw_dists = {
+                lid: raw_dist for lid, (_, raw_dist) in selected_candidates.items()
+            }
+            if candidate_source != "direction_consistent":
+                logger.debug(
+                    "Road %d: found %d candidates at fallback level (%s)",
+                    road.id,
+                    len(candidates),
+                    candidate_source,
+                )
 
         candidates.sort()  # ascending by distance
 
