@@ -11,6 +11,7 @@ import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.objects import (
     StopLineObject,
+    find_best_road_for_stop_line,
     find_nearest_road_for_linestring,
 )
 
@@ -46,6 +47,28 @@ def _make_mock_road(road_id: int, wx: float, wy: float, s: float = 0.0) -> Magic
 
     road = MagicMock()
     road.id = road_id
+    road.length = 10.0
+    road.plan_view = plan_view
+    road.get_elevation_at_s.return_value = 0.0
+    return road
+
+
+def _make_mock_line_road(
+    road_id: int,
+    x: float,
+    y: float,
+    hdg: float,
+    length: float,
+) -> MagicMock:
+    """Build a minimal straight Road for stop-line road selection tests."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import Line
+
+    plan_view = MagicMock()
+    plan_view.geometries = [Line(s=0.0, x=x, y=y, hdg=hdg, length=length)]
+
+    road = MagicMock()
+    road.id = road_id
+    road.length = length
     road.plan_view = plan_view
     road.get_elevation_at_s.return_value = 0.0
     return road
@@ -287,6 +310,96 @@ def test_find_nearest_road_for_linestring_beyond_threshold():
         result = find_nearest_road_for_linestring(ls, [road_far], threshold_m=50.0)
 
     assert result is None
+
+
+def test_find_best_road_for_stop_line_prefers_semantic_candidate_over_adjacent_branch():
+    """Semantic candidates should beat unrelated nearby branches at junctions."""
+    unrelated = _make_mock_line_road(road_id=10, x=0.2, y=0.0, hdg=0.0, length=10.0)
+    semantic = _make_mock_line_road(road_id=20, x=-5.0, y=1.0, hdg=0.0, length=10.0)
+    pts_2d = np.array([[-0.5, 0.0], [0.5, 0.0]])
+    ls = MagicMock()
+    ls.id = 7007
+
+    from unittest.mock import patch
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.return_value = pts_2d
+        result = find_best_road_for_stop_line(
+            ls,
+            [unrelated, semantic],
+            related_roads=[semantic],
+        )
+
+    assert result is not None
+    assert result.id == semantic.id
+
+
+def test_find_best_road_for_stop_line_prefers_incoming_predecessor_at_junction_boundary():
+    """A stop line at a junction entry belongs to the incoming road endpoint."""
+    incoming = _make_mock_line_road(
+        road_id=30,
+        x=-10.0,
+        y=0.0,
+        hdg=0.0,
+        length=10.0,
+    )
+    connecting = _make_mock_line_road(
+        road_id=40,
+        x=0.2,
+        y=0.0,
+        hdg=0.0,
+        length=10.0,
+    )
+    pts_2d = np.array([[-0.5, 0.0], [0.5, 0.0]])
+    pts_3d = np.array([[-0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
+    ls = MagicMock()
+    ls.id = 8008
+
+    from unittest.mock import patch
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.side_effect = lambda linestring, dimensions: (
+            pts_2d if dimensions == 2 else pts_3d
+        )
+        result = find_best_road_for_stop_line(
+            ls,
+            [connecting, incoming],
+            related_roads=[connecting],
+            predecessor_roads=[incoming],
+            endpoint_tolerance=0.5,
+        )
+
+        assert result is not None
+        assert result.id == incoming.id
+
+        obj = StopLineObject.construct_from_linestring(ls, result, object_id=ls.id)
+        assert obj is not None
+        assert obj.s == pytest.approx(incoming.length)
+        assert obj.t == pytest.approx(0.0)
+
+
+def test_find_best_road_for_stop_line_preserves_nearest_fallback_without_semantics():
+    """Without semantic/topological candidates, keep the previous nearest-road behavior."""
+    road_near = _make_mock_line_road(road_id=50, x=-5.0, y=0.0, hdg=0.0, length=10.0)
+    road_far = _make_mock_line_road(road_id=60, x=-5.0, y=5.0, hdg=0.0, length=10.0)
+    pts_2d = np.array([[-0.5, 0.0], [0.5, 0.0]])
+    ls = MagicMock()
+    ls.id = 9009
+
+    from unittest.mock import patch
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.return_value = pts_2d
+        result = find_best_road_for_stop_line(ls, [road_far, road_near])
+
+    assert result is not None
+    assert result.id == road_near.id
 
 
 # ---------------------------------------------------------------------------

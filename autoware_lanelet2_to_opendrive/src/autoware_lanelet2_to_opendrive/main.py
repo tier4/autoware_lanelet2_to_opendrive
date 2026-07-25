@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 
 import hydra
+import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
 # Import autoware extensions before loading maps to ensure proper registration.
@@ -29,6 +30,7 @@ from autoware_lanelet2_to_opendrive.projection_resolver import (
 )
 from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
+    extract_points,
 )
 from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
 from autoware_lanelet2_to_opendrive.geometry import compute_point_layer_bounds
@@ -701,6 +703,116 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return road_marking_stop_line_ids
 
+    @staticmethod
+    def _regulatory_element_linestring_ids(reg_elem) -> Set[int]:
+        """Return LineString IDs referenced by a regulatory element."""
+        linestring_ids: Set[int] = set()
+
+        if hasattr(reg_elem, "stopLine"):
+            try:
+                stop_line = reg_elem.stopLine
+                if stop_line is not None:
+                    linestring_ids.add(stop_line.id)
+            except Exception:
+                pass
+
+        try:
+            params = reg_elem.parameters
+            for role_values in params.values():
+                for primitive in role_values:
+                    if hasattr(primitive, "id") and hasattr(primitive, "attributes"):
+                        linestring_ids.add(primitive.id)
+        except Exception:
+            pass
+
+        return linestring_ids
+
+    def _build_stop_line_related_lanelets(
+        self,
+    ) -> Dict[int, List[lanelet2.core.Lanelet]]:
+        """Map stop-line LineString IDs to lanelets that reference them."""
+        related: Dict[int, Dict[int, lanelet2.core.Lanelet]] = {}
+        for lanelet in self.lanelet_map.laneletLayer:
+            for reg_elem in lanelet.regulatoryElements:
+                for linestring_id in self._regulatory_element_linestring_ids(reg_elem):
+                    related.setdefault(linestring_id, {})[lanelet.id] = lanelet
+        return {
+            linestring_id: list(lanelets_by_id.values())
+            for linestring_id, lanelets_by_id in related.items()
+        }
+
+    @staticmethod
+    def _stop_line_matches_lanelet_start(
+        linestring: lanelet2.core.LineString3d,
+        lanelet: lanelet2.core.Lanelet,
+        endpoint_tolerance: float,
+    ) -> bool:
+        """Return True when a stop line coincides with a lanelet start boundary."""
+        stop_pts = extract_points(linestring, dimensions=2)
+        left_pts = extract_points(lanelet.leftBound, dimensions=2)
+        right_pts = extract_points(lanelet.rightBound, dimensions=2)
+        if len(stop_pts) < 2 or len(left_pts) == 0 or len(right_pts) == 0:
+            return False
+
+        direct = max(
+            float(np.linalg.norm(stop_pts[0] - left_pts[0])),
+            float(np.linalg.norm(stop_pts[-1] - right_pts[0])),
+        )
+        reverse = max(
+            float(np.linalg.norm(stop_pts[0] - right_pts[0])),
+            float(np.linalg.norm(stop_pts[-1] - left_pts[0])),
+        )
+        return min(direct, reverse) <= endpoint_tolerance
+
+    def _mapped_roads_for_lanelets(
+        self,
+        lanelets: List[lanelet2.core.Lanelet],
+        lanelet_to_road_and_lane: Dict[int, Tuple[int, int]],
+        road_by_id: Dict[int, Road],
+    ) -> List[Road]:
+        """Return mapped roads for lanelets, preserving first-seen order."""
+        roads: List[Road] = []
+        seen_road_ids: Set[int] = set()
+        for lanelet in lanelets:
+            mapping = lanelet_to_road_and_lane.get(lanelet.id)
+            if mapping is None:
+                continue
+            road_id = mapping[0]
+            if road_id in seen_road_ids:
+                continue
+            road = road_by_id.get(road_id)
+            if road is None:
+                continue
+            seen_road_ids.add(road_id)
+            roads.append(road)
+        return roads
+
+    def _incoming_predecessors_for_stop_line(
+        self,
+        linestring: lanelet2.core.LineString3d,
+        related_lanelets: List[lanelet2.core.Lanelet],
+        routing_graph: Optional[RoutingGraph],
+        endpoint_tolerance: float,
+    ) -> List[lanelet2.core.Lanelet]:
+        """Return direct predecessors when the stop line is at lanelet starts."""
+        if routing_graph is None:
+            return []
+
+        predecessors: Dict[int, lanelet2.core.Lanelet] = {}
+        for lanelet in related_lanelets:
+            if not self._stop_line_matches_lanelet_start(
+                linestring,
+                lanelet,
+                endpoint_tolerance,
+            ):
+                continue
+            try:
+                for predecessor in routing_graph.previous(lanelet):
+                    predecessors[predecessor.id] = predecessor
+            except Exception:
+                continue
+        return list(predecessors.values())
+
     def _extract_and_assign_stop_lines(
         self,
         all_roads: List[Road],
@@ -708,6 +820,8 @@ class _Lanelet2ToOpenDRIVEConverter:
         stop_sign_stop_line_ids: Optional[Set[int]] = None,
         starting_signal_id: int = 0,
         road_marking_stop_line_ids: Optional[Set[int]] = None,
+        lanelet_to_road_and_lane: Optional[Dict[int, Tuple[int, int]]] = None,
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> Tuple[Dict[int, List[int]], Dict, Dict]:
         """Extract stop line linestrings and assign them as objects to nearest roads.
 
@@ -748,8 +862,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         """
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
             StopLineObject,
-            find_nearest_road_for_linestring,
+            find_best_road_for_stop_line,
         )
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
         from autoware_lanelet2_to_opendrive.opendrive.signal import (
             Signal,
             Dependency,
@@ -784,6 +899,10 @@ class _Lanelet2ToOpenDRIVEConverter:
         yield_sign_205_count = 0
         road_marking_294_count = 0
         signal_country = self.config.signal.country
+        endpoint_tolerance = DEFAULT_CONFIG.geometry.divergence_endpoint_tolerance
+        road_by_id = {road.id: road for road in all_roads}
+        stop_line_related_lanelets = self._build_stop_line_related_lanelets()
+        resolved_lanelet_to_road_and_lane = lanelet_to_road_and_lane or {}
 
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
@@ -792,7 +911,32 @@ class _Lanelet2ToOpenDRIVEConverter:
                 continue
             stop_line_ids_seen.add(ls.id)
 
-            best_road = find_nearest_road_for_linestring(ls, all_roads)
+            related_lanelets = stop_line_related_lanelets.get(ls.id, [])
+            predecessor_lanelets = self._incoming_predecessors_for_stop_line(
+                ls,
+                related_lanelets,
+                routing_graph,
+                endpoint_tolerance,
+            )
+            best_road = find_best_road_for_stop_line(
+                ls,
+                all_roads,
+                related_roads=self._mapped_roads_for_lanelets(
+                    related_lanelets,
+                    resolved_lanelet_to_road_and_lane,
+                    road_by_id,
+                ),
+                predecessor_roads=self._mapped_roads_for_lanelets(
+                    predecessor_lanelets,
+                    resolved_lanelet_to_road_and_lane,
+                    road_by_id,
+                ),
+                endpoint_tolerance=endpoint_tolerance,
+                longitudinal_tolerance=max(
+                    self.config.stopline.width / 2.0,
+                    DEFAULT_CONFIG.geometry.point_distance_threshold,
+                ),
+            )
             if best_road is None:
                 skipped_stop_lines[ls.id] = SkippedStopLineEntry(
                     reason="no_nearest_road"
@@ -1209,6 +1353,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             stop_sign_stop_line_ids,
             next_signal_id,
             road_marking_stop_line_ids=road_marking_stop_line_ids,
+            lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+            routing_graph=regular_result.routing_graph,
         )
 
         # Step 6.8: Add back-links to traffic light signals pointing to stop lines.
