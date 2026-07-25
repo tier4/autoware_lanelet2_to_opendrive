@@ -647,19 +647,22 @@ def _compute_all_candidates(
         bboxes = lanelet_left_bbox if is_rht else lanelet_right_bbox
         ref_bbox = _bbox(ref_line)
 
-        # Progressive fallback search with 3 levels:
+        # Progressive fallback search with 4 levels:
         #   1. Symmetric distance + direction check  (strictest)
         #   2. Symmetric distance, no direction check (curved/long roads)
-        #   3. Directed distance, no direction check  (length mismatch)
+        #   3. Directed distance + direction check   (length mismatch)
+        #   4. Directed distance, no direction check  (last resort)
         #
         # Symmetric distance is preferred because it penalises partial
         # overlaps (e.g. an adjacent lane boundary covering part of a long
-        # reference line).  Directed distance is only used as a last resort
-        # for roads where the reference line is much longer than any single
-        # lanelet boundary.
+        # reference line).  Directed distance is used for roads where the
+        # reference line is much longer than any single lanelet boundary.
+        # Keep the direction-agnostic directed pass as the last resort for
+        # cases where the global direction check is unreliable.
         _FALLBACK_LEVELS: list[tuple[bool, str]] = [
             (True, "symmetric"),
             (False, "symmetric"),
+            (True, "directed"),
             (False, "directed"),
         ]
 

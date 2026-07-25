@@ -232,6 +232,97 @@ class TestComputeAllCandidatesSyntheticSkip:
         assert _synthetic_connector_road_ids(roads) == {100}
 
 
+class TestComputeAllCandidatesDirectedFallback:
+    """Directed fallback should not prefer an opposite-direction overlap.
+
+    Regression coverage for the Odaiba phase1_tight reciprocal road swap:
+    when symmetric matching rejects short partial overlaps, the final directed
+    fallback used to ignore direction and could choose a nearby/opposite road
+    group before the same-direction source boundary.
+    """
+
+    def test_directed_fallback_prefers_same_direction_candidate(self) -> None:
+        import lxml.etree as ET
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _compute_all_candidates,
+        )
+
+        xodr = (
+            "<OpenDRIVE><road id='100' junction='-1'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='20.0'>"
+            "<line/></geometry></planView><lanes><laneSection s='0.0'>"
+            "<left><lane id='1' type='driving' level='false'/></left>"
+            "<center><lane id='0' type='none' level='false'/></center>"
+            "</laneSection></lanes></road></OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+        # LHT road with positive lane IDs searches right boundaries. Both
+        # candidates partially overlap the long reference line, so symmetric
+        # distance rejects them; only directed fallback can recover a match.
+        same_direction_lid = 200
+        opposite_direction_lid = 100
+        lanelet_right = {
+            opposite_direction_lid: np.array([[11.0, 0.0], [9.0, 0.0]]),
+            same_direction_lid: np.array([[9.0, 0.0], [11.0, 0.0]]),
+        }
+        lanelet_right_bbox = {
+            lid: (float(pts[:, 0].min()), 0.0, float(pts[:, 0].max()), 0.0)
+            for lid, pts in lanelet_right.items()
+        }
+
+        all_rc, no_candidate_diag, skipped = _compute_all_candidates(
+            roads,
+            lanelet_left={},
+            lanelet_right=lanelet_right,
+            lanelet_left_bbox={},
+            lanelet_right_bbox=lanelet_right_bbox,
+        )
+
+        assert skipped == set()
+        assert no_candidate_diag == {}
+        assert len(all_rc) == 1
+        assert all_rc[0].candidates[0][1] == same_direction_lid
+
+    def test_directed_fallback_still_allows_opposite_direction_if_needed(
+        self,
+    ) -> None:
+        import lxml.etree as ET
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            _compute_all_candidates,
+        )
+
+        xodr = (
+            "<OpenDRIVE><road id='100' junction='-1'><planView>"
+            "<geometry s='0.0' x='0.0' y='0.0' hdg='0.0' length='20.0'>"
+            "<line/></geometry></planView><lanes><laneSection s='0.0'>"
+            "<left><lane id='1' type='driving' level='false'/></left>"
+            "<center><lane id='0' type='none' level='false'/></center>"
+            "</laneSection></lanes></road></OpenDRIVE>"
+        )
+        roads = parse_roads_from_xodr(
+            Path("unused.xodr"), xodr_root=ET.fromstring(xodr)
+        )
+        lanelet_right = {100: np.array([[11.0, 0.0], [9.0, 0.0]])}
+        lanelet_right_bbox = {100: (9.0, 0.0, 11.0, 0.0)}
+
+        all_rc, no_candidate_diag, skipped = _compute_all_candidates(
+            roads,
+            lanelet_left={},
+            lanelet_right=lanelet_right,
+            lanelet_left_bbox={},
+            lanelet_right_bbox=lanelet_right_bbox,
+        )
+
+        assert skipped == set()
+        assert no_candidate_diag == {}
+        assert len(all_rc) == 1
+        assert all_rc[0].candidates[0][1] == 100
+
+
 # ---------------------------------------------------------------------------
 # MappingMismatchError
 # ---------------------------------------------------------------------------
