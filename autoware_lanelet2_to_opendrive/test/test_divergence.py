@@ -432,3 +432,310 @@ def test_apply_divergence_synthesis_falls_back_on_gate_failure(monkeypatch):
     args, kwargs = roads_by_id[185].add_successor.call_args
     assert kwargs["element_type"] == ElementType.ROAD
     assert kwargs["element_id"] == 186
+
+
+def test_apply_divergence_synthesis_uses_lane_aware_endpoint_gate_for_merge(
+    monkeypatch,
+):
+    """A valid multi-lane merge may connect to a non-reference lane anchor.
+
+    The source road's reference start lies on lane -1.  Candidate road 11
+    merges into source lane -2, whose lane anchor is one lane-width away from
+    the source reference endpoint.  A reference-endpoint-only gate would reject
+    this as a 3m mismatch even though the lane-aware anchors coincide.
+    """
+    sites = [
+        DivergenceSite(
+            road_id=42,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=[10, 11],
+        )
+    ]
+
+    def lane_anchor_stub(
+        road_id: int,
+        *,
+        start_xyz=(0.0, 0.0, 0.0),
+        end_xyz=(0.0, 0.0, 0.0),
+        sorted_lanelet_ids=None,
+        anchors=None,
+    ):
+        road = _build_road_stub(road_id, start_xyz=start_xyz, end_xyz=end_xyz)
+        road.sorted_lanelet_ids = sorted_lanelet_ids or [road_id]
+        anchors = anchors or {}
+
+        def evaluate_lane_anchor_xyz(sorted_index: int, at_start: bool):
+            return anchors[(sorted_index, at_start)]
+
+        road.evaluate_lane_anchor_xyz.side_effect = evaluate_lane_anchor_xyz
+        return road
+
+    roads_by_id = {
+        # Source lane -1 starts at the road reference endpoint.  Lane -2 starts
+        # one lane-width away.
+        42: lane_anchor_stub(
+            42,
+            start_xyz=(0.0, 0.0, 0.0),
+            sorted_lanelet_ids=[4201, 4202],
+            anchors={
+                (0, True): (0.0, 0.0, 0.0),
+                (1, True): (3.0, 0.0, 0.0),
+            },
+        ),
+        10: lane_anchor_stub(
+            10,
+            end_xyz=(0.0, 0.0, 0.0),
+            anchors={(0, False): (0.0, 0.0, 0.0)},
+        ),
+        11: lane_anchor_stub(
+            11,
+            # Reference endpoint is far from source road's reference endpoint,
+            # but matches source lane -2's anchor.
+            end_xyz=(3.0, 0.0, 0.0),
+            anchors={(0, False): (3.0, 0.0, 0.0)},
+        ),
+    }
+
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lambda *_a, **_kw: (
+            [(-1, 10, -1), (-2, 11, -1)],
+            {10, 11},
+        ),
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert len(result.junctions) == 1
+    assert len(result.connecting_roads) == 2
+    roads_by_id[42].add_predecessor.assert_called_once()
+    _, kwargs = roads_by_id[42].add_predecessor.call_args
+    assert kwargs["element_type"] == ElementType.JUNCTION
+    assert kwargs["element_id"] == 2000
+    roads_by_id[10].add_successor.assert_called_once()
+    roads_by_id[11].add_successor.assert_called_once()
+
+
+def test_apply_divergence_synthesis_rejects_distant_lane_aware_endpoint(
+    monkeypatch,
+):
+    """Lane-aware endpoint gating still rejects genuinely distant lane anchors."""
+    sites = [
+        DivergenceSite(
+            road_id=42,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=[10, 11],
+        )
+    ]
+
+    def lane_anchor_stub(
+        road_id: int,
+        *,
+        start_xyz=(0.0, 0.0, 0.0),
+        end_xyz=(0.0, 0.0, 0.0),
+        sorted_lanelet_ids=None,
+        anchors=None,
+    ):
+        road = _build_road_stub(road_id, start_xyz=start_xyz, end_xyz=end_xyz)
+        road.sorted_lanelet_ids = sorted_lanelet_ids or [road_id]
+        anchors = anchors or {}
+
+        def evaluate_lane_anchor_xyz(sorted_index: int, at_start: bool):
+            return anchors[(sorted_index, at_start)]
+
+        road.evaluate_lane_anchor_xyz.side_effect = evaluate_lane_anchor_xyz
+        return road
+
+    roads_by_id = {
+        42: lane_anchor_stub(
+            42,
+            start_xyz=(0.0, 0.0, 0.0),
+            sorted_lanelet_ids=[4201, 4202],
+            anchors={
+                (0, True): (0.0, 0.0, 0.0),
+                (1, True): (3.0, 0.0, 0.0),
+            },
+        ),
+        10: lane_anchor_stub(
+            10,
+            end_xyz=(0.0, 0.0, 0.0),
+            anchors={(0, False): (0.0, 0.0, 0.0)},
+        ),
+        11: lane_anchor_stub(
+            11,
+            end_xyz=(3.0, 0.0, 0.0),
+            # Candidate 11 is close at road-reference level, but the actual
+            # lane anchor is still too far from source lane -2.
+            anchors={(0, False): (4.0, 0.0, 0.0)},
+        ),
+    }
+
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lambda *_a, **_kw: (
+            [(-1, 10, -1), (-2, 11, -1)],
+            {10, 11},
+        ),
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert result.junctions == []
+    assert result.connecting_roads == []
+    roads_by_id[42].add_predecessor.assert_called_once()
+    _, kwargs = roads_by_id[42].add_predecessor.call_args
+    assert kwargs["element_type"] == ElementType.ROAD
+    assert kwargs["element_id"] == 10
+
+
+def test_apply_divergence_synthesis_canonicalizes_overlapping_merge_and_split(
+    monkeypatch,
+):
+    """Overlapping predecessor/successor sites for one boundary share a junction."""
+    sites = [
+        DivergenceSite(
+            road_id=31,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=[28, 29],
+        ),
+        DivergenceSite(
+            road_id=29,
+            side=DivergenceSide.SUCCESSOR,
+            candidate_road_ids=[31, 32],
+        ),
+    ]
+
+    def lane_anchor_stub(
+        road_id: int,
+        *,
+        start_xyz=(0.0, 0.0, 0.0),
+        end_xyz=(0.0, 0.0, 0.0),
+        sorted_lanelet_ids=None,
+        anchors=None,
+    ):
+        road = _build_road_stub(road_id, start_xyz=start_xyz, end_xyz=end_xyz)
+        road.sorted_lanelet_ids = sorted_lanelet_ids or [road_id]
+        anchors = anchors or {}
+
+        def evaluate_lane_anchor_xyz(sorted_index: int, at_start: bool):
+            return anchors[(sorted_index, at_start)]
+
+        road.evaluate_lane_anchor_xyz.side_effect = evaluate_lane_anchor_xyz
+        return road
+
+    roads_by_id = {
+        28: lane_anchor_stub(
+            28,
+            end_xyz=(0.0, 3.0, 0.0),
+            anchors={(0, False): (0.0, 3.0, 0.0)},
+        ),
+        29: lane_anchor_stub(
+            29,
+            end_xyz=(0.0, 0.0, 0.0),
+            anchors={(0, False): (0.0, 0.0, 0.0)},
+        ),
+        31: lane_anchor_stub(
+            31,
+            start_xyz=(0.0, 0.0, 0.0),
+            sorted_lanelet_ids=[3101, 3102],
+            anchors={
+                (0, True): (0.0, 0.0, 0.0),
+                (1, True): (0.0, 3.0, 0.0),
+            },
+        ),
+        32: lane_anchor_stub(
+            32,
+            start_xyz=(0.0, 0.0, 0.0),
+            anchors={(0, True): (0.0, 0.0, 0.0)},
+        ),
+    }
+
+    def lane_pairs_for_site(site, *_a, **_kw):
+        if site.road_id == 31:
+            return [(-1, 29, -1), (-2, 28, -1)], {28, 29}
+        if site.road_id == 29:
+            return [(-1, 31, -1), (-1, 32, -1)], {31, 32}
+        raise AssertionError(f"unexpected site {site}")
+
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lane_pairs_for_site,
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert len(result.junctions) == 1
+    assert len(result.connecting_roads) == 3
+    junction_id = result.junctions[0].id
+
+    expected_edges = {
+        (29, -1, 31, -1),
+        (28, -1, 31, -2),
+        (29, -1, 32, -1),
+    }
+    actual_edges = set()
+    for road in result.connecting_roads:
+        lane_section = road.lanes.lane_sections[0]
+        lanes = {
+            **lane_section.left_lanes,
+            **lane_section.right_lanes,
+        }
+        lane = next(lane for lane in lanes.values() if lane.lane_id != 0)
+        actual_edges.add(
+            (
+                road.link.predecessor.element_id,
+                lane.predecessor.id,
+                road.link.successor.element_id,
+                lane.successor.id,
+            )
+        )
+        assert road.junction == junction_id
+
+    assert actual_edges == expected_edges
+    assert len(result.junctions[0].connections) == 3
+
+    _, kwargs = roads_by_id[31].add_predecessor.call_args
+    assert kwargs["element_type"] == ElementType.JUNCTION
+    assert kwargs["element_id"] == junction_id
+    _, kwargs = roads_by_id[32].add_predecessor.call_args
+    assert kwargs["element_type"] == ElementType.JUNCTION
+    assert kwargs["element_id"] == junction_id
+    _, kwargs = roads_by_id[28].add_successor.call_args
+    assert kwargs["element_type"] == ElementType.JUNCTION
+    assert kwargs["element_id"] == junction_id
+    _, kwargs = roads_by_id[29].add_successor.call_args
+    assert kwargs["element_type"] == ElementType.JUNCTION
+    assert kwargs["element_id"] == junction_id
