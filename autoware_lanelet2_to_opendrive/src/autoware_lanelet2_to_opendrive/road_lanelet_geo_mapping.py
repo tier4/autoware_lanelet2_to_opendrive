@@ -19,7 +19,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
 from tqdm import tqdm
@@ -1005,6 +1005,64 @@ def _resolve_conflicts(
     return valid
 
 
+def _walk_lane_group_from_seed(
+    rc: _RoadCandidates,
+    seed_lanelet_id: int,
+    right_neighbor: Callable[[int], Optional[int]],
+    left_neighbor: Callable[[int], Optional[int]],
+    blocked_lanelets: set[int],
+) -> list[tuple[int, int, int]]:
+    """Reconstruct a road's lateral lanelet group around an arbitrary seed.
+
+    ``rc.walk_lane_ids`` is ordered from the road reference edge outward.  The
+    rescue seed can be an interior lane, so first walk toward the reference
+    edge, then outward, and assign lane IDs from that ordered group.
+    """
+    expected_count = len(rc.walk_lane_ids)
+    if expected_count == 0:
+        return []
+
+    def is_blocked(lanelet_id: int) -> bool:
+        return lanelet_id in blocked_lanelets
+
+    if rc.is_rht:
+        toward_reference_edge = left_neighbor
+        outward_from_reference_edge = right_neighbor
+    else:
+        toward_reference_edge = right_neighbor
+        outward_from_reference_edge = left_neighbor
+
+    seen = {seed_lanelet_id}
+
+    def collect(start: int, step: Callable[[int], Optional[int]]) -> list[int]:
+        current = start
+        result: list[int] = []
+        for _ in range(expected_count - 1):
+            next_lanelet = step(current)
+            if next_lanelet is None or next_lanelet in seen or is_blocked(next_lanelet):
+                break
+            result.append(next_lanelet)
+            seen.add(next_lanelet)
+            current = next_lanelet
+        return result
+
+    before_seed = collect(seed_lanelet_id, toward_reference_edge)
+    after_seed = collect(seed_lanelet_id, outward_from_reference_edge)
+    ordered_lanelets = list(reversed(before_seed)) + [seed_lanelet_id] + after_seed
+
+    if len(ordered_lanelets) > expected_count:
+        seed_index = len(before_seed)
+        first_start = max(0, seed_index - expected_count + 1)
+        selected = ordered_lanelets[first_start : first_start + expected_count]
+    else:
+        selected = ordered_lanelets
+
+    return [
+        (lanelet_id, int(rc.road_id), lane_id)
+        for lanelet_id, lane_id in zip(selected, rc.walk_lane_ids)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Build mapping
 # ---------------------------------------------------------------------------
@@ -1290,17 +1348,13 @@ def build_mapping(
                 best_lid = lid
 
         if best_lid is not None:
-            # Assign reference lanelet and walk
-            current = best_lid
-            walk_result_rescue: list[tuple[int, int, int]] = []
-            for lane_id in rc.walk_lane_ids:
-                walk_result_rescue.append((current, int(rc.road_id), lane_id))
-                next_ll = (
-                    _right_neighbor(current) if rc.is_rht else _left_neighbor(current)
-                )
-                if next_ll is None or next_ll in matched_lanelets:
-                    break
-                current = next_ll
+            walk_result_rescue = _walk_lane_group_from_seed(
+                rc,
+                best_lid,
+                _right_neighbor,
+                _left_neighbor,
+                matched_lanelets,
+            )
             for lid, rid, lane_id in walk_result_rescue:
                 mapping[lid] = (rid, lane_id)
                 matched_lanelets.add(lid)

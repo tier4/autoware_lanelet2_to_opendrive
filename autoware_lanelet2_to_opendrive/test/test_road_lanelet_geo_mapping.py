@@ -24,6 +24,7 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     _RoadCandidates,
     _resolve_conflicts,
     _sample_reference_line_from_road,
+    _walk_lane_group_from_seed,
     parse_roads_from_xodr,
     save_mapping_json,
     validate_mapping_consistency,
@@ -401,6 +402,108 @@ def _make_rc(
         raw_dists=raw_dists or {lid: dist for dist, lid in candidates},
         walk_lane_ids=[-1],
     )
+
+
+def _make_lht_walk_rc(road_id: int, lane_ids: list[int]) -> _RoadCandidates:
+    """Helper to build a minimal LHT _RoadCandidates for lateral walk tests."""
+    return _RoadCandidates(
+        road=MagicMock(),
+        road_id=road_id,
+        lane_ids=lane_ids,
+        is_rht=False,
+        ref_line=MagicMock(),
+        candidates=[],
+        raw_dists={},
+        walk_lane_ids=list(lane_ids),
+    )
+
+
+def _make_rht_walk_rc(road_id: int, lane_ids: list[int]) -> _RoadCandidates:
+    """Helper to build a minimal RHT _RoadCandidates for lateral walk tests."""
+    return _RoadCandidates(
+        road=MagicMock(),
+        road_id=road_id,
+        lane_ids=lane_ids,
+        is_rht=True,
+        ref_line=MagicMock(),
+        candidates=[],
+        raw_dists={},
+        walk_lane_ids=list(lane_ids),
+    )
+
+
+class TestWalkLaneGroupFromSeed:
+    """Lateral lane reconstruction must not assume the seed is the edge lane."""
+
+    def test_reconstructs_lht_three_lane_group_from_any_seed(self) -> None:
+        rc = _make_lht_walk_rc(100, [1, 2, 3])
+        left_neighbors = {10: 20, 20: 30}
+        right_neighbors = {30: 20, 20: 10}
+
+        def left_neighbor(lanelet_id: int) -> int | None:
+            return left_neighbors.get(lanelet_id)
+
+        def right_neighbor(lanelet_id: int) -> int | None:
+            return right_neighbors.get(lanelet_id)
+
+        expected = [(10, 100, 1), (20, 100, 2), (30, 100, 3)]
+        for seed in (10, 20, 30):
+            assert (
+                _walk_lane_group_from_seed(
+                    rc,
+                    seed,
+                    right_neighbor,
+                    left_neighbor,
+                    blocked_lanelets=set(),
+                )
+                == expected
+            )
+
+    def test_reconstructs_rht_three_lane_group_from_any_seed(self) -> None:
+        rc = _make_rht_walk_rc(100, [-1, -2, -3])
+        left_neighbors = {30: 20, 20: 10}
+        right_neighbors = {10: 20, 20: 30}
+
+        def left_neighbor(lanelet_id: int) -> int | None:
+            return left_neighbors.get(lanelet_id)
+
+        def right_neighbor(lanelet_id: int) -> int | None:
+            return right_neighbors.get(lanelet_id)
+
+        expected = [(10, 100, -1), (20, 100, -2), (30, 100, -3)]
+        for seed in (10, 20, 30):
+            assert (
+                _walk_lane_group_from_seed(
+                    rc,
+                    seed,
+                    right_neighbor,
+                    left_neighbor,
+                    blocked_lanelets=set(),
+                )
+                == expected
+            )
+
+    def test_rescue_seed_on_inner_lane_preserves_lane_order(self) -> None:
+        rc = _make_lht_walk_rc(31, [1, 2])
+
+        assert _walk_lane_group_from_seed(
+            rc,
+            20,
+            right_neighbor=lambda lanelet_id: 10 if lanelet_id == 20 else None,
+            left_neighbor=lambda lanelet_id: None,
+            blocked_lanelets=set(),
+        ) == [(10, 31, 1), (20, 31, 2)]
+
+    def test_blocked_adjacent_lane_is_not_crossed(self) -> None:
+        rc = _make_lht_walk_rc(31, [1, 2])
+
+        assert _walk_lane_group_from_seed(
+            rc,
+            20,
+            right_neighbor=lambda lanelet_id: 10 if lanelet_id == 20 else None,
+            left_neighbor=lambda lanelet_id: 99 if lanelet_id == 20 else None,
+            blocked_lanelets={99},
+        ) == [(10, 31, 1), (20, 31, 2)]
 
 
 class TestResolveConflicts:
