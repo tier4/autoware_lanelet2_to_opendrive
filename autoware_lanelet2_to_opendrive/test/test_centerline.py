@@ -1,13 +1,27 @@
 """Tests for centerline functions."""
 
+import math
+
+import lanelet2
 import numpy as np
+import pytest
 from autoware_lanelet2_to_opendrive.centerline import (
     extract_centerline_as_spline,
     estimate_lanelet_width_as_spline,
 )
 from autoware_lanelet2_to_opendrive.conversion_config import (
+    ParamPoly3Config,
     WidthEstimationConfig,
     WidthReference,
+)
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    Arc,
+    ParamPoly3,
+    evaluate_plan_view_world,
+)
+from autoware_lanelet2_to_opendrive.opendrive.road import (
+    Road,
+    _evaluate_planview_endpoint_with_heading,
 )
 
 
@@ -89,3 +103,119 @@ def test_extract_centerline_as_spline(lanelet_map):
     # Test that spline can be evaluated at specific arc length
     point_mid = spline.evaluate(total_length / 2)
     assert point_mid.shape[0] == 3, "Spline should return 3D points"
+
+
+def _make_degenerate_endpoint_lanelet(
+    *,
+    degenerate_at: str,
+) -> tuple[lanelet2.core.LaneletMap, lanelet2.core.Lanelet]:
+    """Build a straight +Y lanelet whose start or end width collapses to zero."""
+    if degenerate_at == "start":
+        left_xy = [(0.0, 0.0), (0.0, 10.0)]
+        right_xy = [(0.0, 0.0), (2.0, 10.0)]
+    elif degenerate_at == "end":
+        left_xy = [(0.0, 0.0), (0.0, 10.0)]
+        right_xy = [(2.0, 0.0), (0.0, 10.0)]
+    else:
+        raise ValueError(f"Unsupported degenerate endpoint: {degenerate_at}")
+
+    def make_points(points: list[tuple[float, float]]) -> list[lanelet2.core.Point3d]:
+        return [
+            lanelet2.core.Point3d(lanelet2.core.getId(), x, y, 0.0) for x, y in points
+        ]
+
+    left_bound = lanelet2.core.LineString3d(lanelet2.core.getId(), make_points(left_xy))
+    right_bound = lanelet2.core.LineString3d(
+        lanelet2.core.getId(), make_points(right_xy)
+    )
+    lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), left_bound, right_bound)
+    lanelet.attributes["subtype"] = "road"
+
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelet_map.add(lanelet)
+    return lanelet_map, lanelet
+
+
+def _sample_plan_view_xy(road: Road) -> list[tuple[float, float]]:
+    """Sample world XY positions from a road planView."""
+    plan_view = road.plan_view
+    assert plan_view is not None
+    samples = []
+    for geometry in plan_view.geometries:
+        coeffs = None
+        arc_curvature = None
+        if isinstance(geometry, ParamPoly3):
+            coeffs = (
+                geometry.aU,
+                geometry.bU,
+                geometry.cU,
+                geometry.dU,
+                geometry.aV,
+                geometry.bV,
+                geometry.cV,
+                geometry.dV,
+            )
+        elif isinstance(geometry, Arc):
+            arc_curvature = geometry.curvature
+        for p in np.linspace(0.0, geometry.length, 5):
+            xy = evaluate_plan_view_world(
+                geometry.x,
+                geometry.y,
+                geometry.hdg,
+                float(p),
+                coeffs,
+                arc_curvature,
+            )
+            assert xy is not None
+            samples.append((float(xy[0]), float(xy[1])))
+    return samples
+
+
+def _heading_error(actual: float, expected: float) -> float:
+    """Return wrapped absolute angular error in radians."""
+    return abs(math.atan2(math.sin(actual - expected), math.cos(actual - expected)))
+
+
+@pytest.mark.parametrize("degenerate_at", ["start", "end"])
+def test_degenerate_endpoint_width_preserves_reference_line_direction(
+    degenerate_at: str,
+) -> None:
+    """A zero-width lanelet endpoint must not twist the road reference line."""
+    lanelet_map, lanelet = _make_degenerate_endpoint_lanelet(
+        degenerate_at=degenerate_at
+    )
+
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        {lanelet},
+        road_id=0,
+        traffic_rule="RHT",
+        parampoly3_config=ParamPoly3Config(enabled=False),
+    )
+
+    samples = _sample_plan_view_xy(road)
+    max_lateral_error = max(abs(x) for x, _y in samples)
+    plan_view = road.plan_view
+    assert plan_view is not None
+    start = _evaluate_planview_endpoint_with_heading(plan_view, at_start=True)
+    end = _evaluate_planview_endpoint_with_heading(plan_view, at_start=False)
+    assert start is not None
+    assert end is not None
+
+    errors = []
+    if max_lateral_error >= 0.25:
+        errors.append(
+            f"reference line loops away from the source boundary: "
+            f"max |x|={max_lateral_error:.3f} m"
+        )
+    expected_heading = math.pi / 2
+    start_heading_error = _heading_error(start[2], expected_heading)
+    end_heading_error = _heading_error(end[2], expected_heading)
+    if start_heading_error >= 0.15:
+        errors.append(
+            f"start heading {start[2]:.3f} rad is not aligned with +Y direction"
+        )
+    if end_heading_error >= 0.15:
+        errors.append(f"end heading {end[2]:.3f} rad is not aligned with +Y direction")
+
+    assert not errors, "\n".join(errors)

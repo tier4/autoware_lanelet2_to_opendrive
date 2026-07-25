@@ -104,6 +104,79 @@ def _calculate_boundary_velocity_vector(boundary, at_start: bool) -> np.ndarray:
     return direction / length
 
 
+def _normalize_xy_direction(direction: np.ndarray) -> Optional[np.ndarray]:
+    """Normalize an XY direction and return it as a 3D vector with zero Z."""
+    if not np.all(np.isfinite(direction)):
+        return None
+
+    length = np.linalg.norm(direction)
+    if length < DEFAULT_CONFIG.geometry.epsilon:
+        return None
+
+    direction_2d = direction / length
+    return np.array([direction_2d[0], direction_2d[1], 0.0])
+
+
+def _calculate_local_linestring_velocity(
+    linestring, at_start: bool
+) -> Optional[np.ndarray]:
+    """Return the first usable local XY tangent near a linestring endpoint."""
+    if len(linestring) < 2:
+        return None
+
+    if at_start:
+        endpoint = np.array([linestring[0].x, linestring[0].y])
+        neighbor_indices = range(1, len(linestring))
+        for neighbor_idx in neighbor_indices:
+            neighbor = np.array(
+                [linestring[neighbor_idx].x, linestring[neighbor_idx].y]
+            )
+            velocity = _normalize_xy_direction(neighbor - endpoint)
+            if velocity is not None:
+                return velocity
+    else:
+        endpoint = np.array([linestring[-1].x, linestring[-1].y])
+        neighbor_indices = range(len(linestring) - 2, -1, -1)
+        for neighbor_idx in neighbor_indices:
+            neighbor = np.array(
+                [linestring[neighbor_idx].x, linestring[neighbor_idx].y]
+            )
+            velocity = _normalize_xy_direction(endpoint - neighbor)
+            if velocity is not None:
+                return velocity
+
+    return None
+
+
+def _calculate_degenerate_centerline_velocity(
+    lanelet: lanelet2.core.Lanelet, at_start: bool
+) -> np.ndarray:
+    """Fallback to lanelet-local tangents when an endpoint has zero lane width."""
+    boundary_velocities = []
+    for boundary in (lanelet.leftBound, lanelet.rightBound):
+        velocity = _calculate_local_linestring_velocity(boundary, at_start)
+        if velocity is not None:
+            boundary_velocities.append(velocity)
+
+    if boundary_velocities:
+        combined_velocity = _normalize_xy_direction(
+            np.sum(boundary_velocities, axis=0)[:2]
+        )
+        if combined_velocity is not None:
+            return combined_velocity
+
+    centerline_velocity = _calculate_local_linestring_velocity(
+        lanelet.centerline, at_start
+    )
+    if centerline_velocity is not None:
+        return centerline_velocity
+
+    if boundary_velocities:
+        return boundary_velocities[0]
+
+    return np.array([1.0, 0.0, 0.0])
+
+
 def _calculate_centerline_velocity_vector(
     lanelet: lanelet2.core.Lanelet, at_start: bool
 ) -> np.ndarray:
@@ -112,6 +185,8 @@ def _calculate_centerline_velocity_vector(
 
     This function computes a velocity vector perpendicular to the line segment
     connecting the left and right boundaries at either the start or end of the lanelet.
+    If the lane width collapses to zero at that endpoint, it falls back to the
+    local boundary tangent so the spline still follows the lanelet direction.
 
     Args:
         lanelet: A Lanelet2 lanelet object
@@ -145,8 +220,7 @@ def _calculate_centerline_velocity_vector(
     # Normalize to unit vector
     length = np.linalg.norm(perp_2d)
     if length < DEFAULT_CONFIG.geometry.epsilon:
-        # Fallback to default direction if boundaries are parallel
-        perp_2d = np.array([1.0, 0.0])
+        return _calculate_degenerate_centerline_velocity(lanelet, at_start)
     else:
         perp_2d = perp_2d / length
 
