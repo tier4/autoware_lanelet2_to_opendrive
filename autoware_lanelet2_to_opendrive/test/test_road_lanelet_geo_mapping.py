@@ -22,6 +22,7 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     MappingMismatchError,
     ProjectionMetadata,
     _RoadCandidates,
+    build_mapping,
     _resolve_conflicts,
     _sample_reference_line_from_road,
     _walk_lane_group_from_seed,
@@ -430,6 +431,158 @@ def _make_rht_walk_rc(road_id: int, lane_ids: list[int]) -> _RoadCandidates:
         raw_dists={},
         walk_lane_ids=list(lane_ids),
     )
+
+
+class _MockPoint:
+    def __init__(self, x: float, y: float) -> None:
+        self.x = x
+        self.y = y
+
+
+class _MockLineString(list):
+    def __init__(self, line_id: int, y: float) -> None:
+        super().__init__([_MockPoint(x * 0.5, y) for x in range(21)])
+        self.id = line_id
+
+
+class _MockLanelet:
+    def __init__(
+        self,
+        lanelet_id: int,
+        left_bound: _MockLineString,
+        right_bound: _MockLineString,
+    ) -> None:
+        self.id = lanelet_id
+        self.leftBound = left_bound
+        self.rightBound = right_bound
+
+
+class _MockLaneletLayer:
+    def __init__(self, lanelets: list[_MockLanelet]) -> None:
+        self._lanelets = {lanelet.id: lanelet for lanelet in lanelets}
+
+    def __iter__(self):
+        return iter(self._lanelets.values())
+
+    def __getitem__(self, lanelet_id: int) -> _MockLanelet:
+        return self._lanelets[lanelet_id]
+
+
+class _MockLaneletMap:
+    def __init__(self, lanelets: list[_MockLanelet]) -> None:
+        self.laneletLayer = _MockLaneletLayer(lanelets)
+
+
+def _parse_lht_line_roads(roads: list[tuple[int, float, int]]) -> list[Road]:
+    """Build LHT roads whose positive lane IDs walk left from the reference."""
+    road_xml = []
+    for road_id, y, lane_count in roads:
+        lane_xml = "".join(
+            f"<lane id='{lane_id}' type='driving' level='false'/>"
+            for lane_id in range(1, lane_count + 1)
+        )
+        road_xml.append(
+            f"<road id='{road_id}' junction='-1'>"
+            f"<planView><geometry s='0.0' x='0.0' y='{y}' hdg='0.0' "
+            "length='10.0'><line/></geometry></planView>"
+            f"<lanes><laneSection s='0.0'><left>{lane_xml}</left>"
+            "<center><lane id='0' type='none' level='false'/></center>"
+            "</laneSection></lanes></road>"
+        )
+    import lxml.etree as ET
+
+    return parse_roads_from_xodr(
+        Path("unused.xodr"),
+        xodr_root=ET.fromstring("<OpenDRIVE>" + "".join(road_xml) + "</OpenDRIVE>"),
+    )
+
+
+def _mapping_by_road(mapping: GeoRoadLaneletMapping) -> dict[int, dict[int, int]]:
+    result: dict[int, dict[int, int]] = {}
+    for lanelet_id, (road_id, lane_id) in mapping.lanelet_to_road_and_lane.items():
+        result.setdefault(road_id, {})[lane_id] = lanelet_id
+    return result
+
+
+class TestPhase2OwnershipCompletion:
+    """Phase 2 seed ownership must not split a complete lateral lane group."""
+
+    def test_partial_false_seed_does_not_block_full_lateral_group(self) -> None:
+        right = _MockLineString(1, 0.0)
+        shared = _MockLineString(2, 3.0)
+        left = _MockLineString(3, 6.0)
+        lanelet_map = _MockLaneletMap(
+            [
+                _MockLanelet(101, shared, right),
+                _MockLanelet(102, left, shared),
+            ]
+        )
+        roads = _parse_lht_line_roads(
+            [
+                (10, -2.5, 2),  # False road: locally sees lanelet 101 only.
+                (20, 0.0, 2),  # True road: 101 -> 102 forms a full group.
+            ]
+        )
+
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        assert _mapping_by_road(mapping)[20] == {1: 101, 2: 102}
+        assert 101 not in _mapping_by_road(mapping).get(10, {}).values()
+
+    def test_partial_false_seed_resolution_is_candidate_order_independent(
+        self,
+    ) -> None:
+        right = _MockLineString(1, 0.0)
+        shared = _MockLineString(2, 3.0)
+        left = _MockLineString(3, 6.0)
+        lanelet_map = _MockLaneletMap(
+            [
+                _MockLanelet(101, shared, right),
+                _MockLanelet(102, left, shared),
+            ]
+        )
+
+        forward = build_mapping(
+            lanelet_map,
+            _parse_lht_line_roads([(10, -2.5, 2), (20, 0.0, 2)]),
+            (0.0, 0.0),
+            "x",
+            "o",
+        )
+        reverse = build_mapping(
+            lanelet_map,
+            _parse_lht_line_roads([(20, 0.0, 2), (10, -2.5, 2)]),
+            (0.0, 0.0),
+            "x",
+            "o",
+        )
+
+        assert forward.lanelet_to_road_and_lane == reverse.lanelet_to_road_and_lane
+
+    def test_adjacent_road_on_reference_edge_stays_separate(self) -> None:
+        edge = _MockLineString(1, 0.0)
+        road_boundary = _MockLineString(2, 3.0)
+        shared = _MockLineString(3, 6.0)
+        left = _MockLineString(4, 9.0)
+        lanelet_map = _MockLaneletMap(
+            [
+                _MockLanelet(101, road_boundary, edge),
+                _MockLanelet(201, shared, road_boundary),
+                _MockLanelet(202, left, shared),
+            ]
+        )
+        roads = _parse_lht_line_roads(
+            [
+                (10, 0.0, 1),
+                (20, 3.0, 2),
+            ]
+        )
+
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        by_road = _mapping_by_road(mapping)
+        assert by_road[10] == {1: 101}
+        assert by_road[20] == {1: 201, 2: 202}
 
 
 class TestWalkLaneGroupFromSeed:

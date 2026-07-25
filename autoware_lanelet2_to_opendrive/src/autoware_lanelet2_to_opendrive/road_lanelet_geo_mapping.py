@@ -150,6 +150,7 @@ class _RoadCandidates:
     candidates: list[tuple[float, int]]  # [(ranking_dist, lanelet_id), ...] ascending
     raw_dists: dict[int, float] = field(default_factory=dict)  # lid -> raw distance
     walk_lane_ids: list[int] = field(default_factory=list)  # Geometric walk order
+    candidate_lanelet_groups: dict[int, tuple[int, ...]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -834,6 +835,44 @@ def _resolve_conflicts(
     # assignment[rc_idx] = index into all_rc[rc_idx].candidates
     assignment: dict[int, int] = {i: 0 for i in range(len(all_rc))}
 
+    def candidate_lid(rc_idx: int, cand_idx: int) -> int:
+        return all_rc[rc_idx].candidates[cand_idx][1]
+
+    def candidate_group(rc_idx: int, cand_idx: int) -> tuple[int, ...]:
+        rc = all_rc[rc_idx]
+        lid = candidate_lid(rc_idx, cand_idx)
+        return rc.candidate_lanelet_groups.get(lid, (lid,))
+
+    def candidate_completes_walk(rc_idx: int, cand_idx: int) -> bool:
+        return len(candidate_group(rc_idx, cand_idx)) >= len(
+            all_rc[rc_idx].walk_lane_ids
+        )
+
+    def saving_loser_would_split_winner_group(
+        winner_idx: int,
+        winner_cand_idx: int,
+        next_winner_idx: int,
+        loser_idx: int,
+    ) -> bool:
+        """Return True when save-the-drowning would split a complete lane group.
+
+        The rescue rule is useful when a close road can move to another viable
+        seed and keep a weaker exhausted road alive.  It is harmful when the
+        close road's current seed already reconstructs its full lateral lane
+        group and the proposed "alternative" is simply another lanelet in that
+        same group.  Advancing the winner then assigns one road's lane group to
+        multiple roads and Phase 3 must stop at the artificial ownership split.
+        """
+        if len(all_rc[winner_idx].walk_lane_ids) <= 1:
+            return False
+        if len(all_rc[loser_idx].walk_lane_ids) <= 1:
+            return False
+        if not candidate_completes_walk(winner_idx, winner_cand_idx):
+            return False
+
+        next_winner_lid = candidate_lid(winner_idx, next_winner_idx)
+        return next_winner_lid in candidate_group(winner_idx, winner_cand_idx)
+
     while True:
         # Build claims: lanelet_id -> [(rc_idx, distance), ...]
         claims: dict[int, list[tuple[int, float]]] = {}
@@ -863,6 +902,23 @@ def _resolve_conflicts(
                 winner_exhausted = next_winner >= len(all_rc[winner_idx].candidates)
 
                 if loser_exhausted and not winner_exhausted:
+                    if saving_loser_would_split_winner_group(
+                        winner_idx,
+                        assignment[winner_idx],
+                        next_winner,
+                        loser_idx,
+                    ):
+                        logger.debug(
+                            "Conflict on lanelet %d: keep full lane group for "
+                            "road %d — drop exhausted road %d",
+                            lid,
+                            all_rc[winner_idx].road_id,
+                            all_rc[loser_idx].road_id,
+                        )
+                        assignment[loser_idx] += 1
+                        had_conflict = True
+                        continue
+
                     # Save the loser: advance the winner instead
                     logger.debug(
                         "Conflict on lanelet %d: save-the-drowning — "
@@ -1063,6 +1119,32 @@ def _walk_lane_group_from_seed(
     ]
 
 
+def _walk_outward_lanelet_group_from_reference_seed(
+    rc: _RoadCandidates,
+    seed_lanelet_id: int,
+    right_neighbor: Callable[[int], Optional[int]],
+    left_neighbor: Callable[[int], Optional[int]],
+) -> tuple[int, ...]:
+    """Walk from a candidate reference-edge seed outward along the road lanes."""
+    expected_count = len(rc.walk_lane_ids)
+    if expected_count == 0:
+        return ()
+
+    outward = right_neighbor if rc.is_rht else left_neighbor
+    group = [seed_lanelet_id]
+    seen = {seed_lanelet_id}
+    current = seed_lanelet_id
+    for _ in range(expected_count - 1):
+        next_lanelet = outward(current)
+        if next_lanelet is None or next_lanelet in seen:
+            break
+        group.append(next_lanelet)
+        seen.add(next_lanelet)
+        current = next_lanelet
+
+    return tuple(group)
+
+
 # ---------------------------------------------------------------------------
 # Build mapping
 # ---------------------------------------------------------------------------
@@ -1208,6 +1290,16 @@ def build_mapping(
         lanelet_left_bbox,
         lanelet_right_bbox,
     )
+    for rc in all_rc:
+        rc.candidate_lanelet_groups = {
+            lid: _walk_outward_lanelet_group_from_reference_seed(
+                rc,
+                lid,
+                _right_neighbor,
+                _left_neighbor,
+            )
+            for _, lid in rc.candidates
+        }
 
     # Phase 2: resolve conflicts iteratively
     assignment = _resolve_conflicts(all_rc)
