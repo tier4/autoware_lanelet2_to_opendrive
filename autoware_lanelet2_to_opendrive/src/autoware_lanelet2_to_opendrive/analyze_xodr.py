@@ -352,25 +352,51 @@ def _load_validation_context(
 
     tree = ET.parse(str(xodr_path))
     geo_ref_elem = tree.find(".//geoReference")
-    if geo_ref_elem is None or geo_ref_elem.text is None:
-        print("  WARNING: No geoReference in XODR; skipping validation.")
-        return None
+    projection_metadata = conv_mapping.projection_metadata
+    if (
+        projection_metadata is not None
+        and projection_metadata.projector_type == "MGRSProjector"
+        and projection_metadata.origin_lat is not None
+        and projection_metadata.origin_lon is not None
+    ):
+        origin_lat = projection_metadata.origin_lat
+        origin_lon = projection_metadata.origin_lon
+        offset_x = projection_metadata.offset_x
+        offset_y = projection_metadata.offset_y
+    else:
+        if (
+            projection_metadata is not None
+            and projection_metadata.projector_type != "MGRSProjector"
+        ):
+            print(
+                "  WARNING: Unsupported projection metadata "
+                f"projector_type={projection_metadata.projector_type}; "
+                "falling back to geoReference."
+            )
+        if geo_ref_elem is None or geo_ref_elem.text is None:
+            print("  WARNING: No geoReference in XODR; skipping validation.")
+            return None
 
-    proj_string = geo_ref_elem.text.strip()
-    lat_match = re.search(r"\+lat_0=([\d.eE+-]+)", proj_string)
-    lon_match = re.search(r"\+lon_0=([\d.eE+-]+)", proj_string)
-    if not lat_match or not lon_match:
-        print("  WARNING: Cannot parse lat_0/lon_0 from geoReference; skipping.")
-        return None
+        proj_string = geo_ref_elem.text.strip()
+        lat_match = re.search(r"\+lat_0=([\d.eE+-]+)", proj_string)
+        lon_match = re.search(r"\+lon_0=([\d.eE+-]+)", proj_string)
+        if not lat_match or not lon_match:
+            print("  WARNING: Cannot parse lat_0/lon_0 from geoReference; skipping.")
+            return None
 
-    origin_lat = float(lat_match.group(1))
-    origin_lon = float(lon_match.group(1))
+        origin_lat = float(lat_match.group(1))
+        origin_lon = float(lon_match.group(1))
+        fallback_origin = latlon_to_lanelet2_origin(origin_lat, origin_lon)
+        fallback_projector = MGRSProjector(fallback_origin)
+        fwd = fallback_projector.forward(
+            lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0)
+        )
+        offset_x = fwd.x
+        offset_y = fwd.y
 
     origin = latlon_to_lanelet2_origin(origin_lat, origin_lon)
     projector = MGRSProjector(origin)
     lanelet_map = lanelet2.io.load(str(effective_osm), projector)
-
-    fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
 
     # Restore TrafficLightConfig from the mapping sidecar (if saved)
     tl_config = None
@@ -387,8 +413,8 @@ def _load_validation_context(
 
     return ValidationContext(
         lanelet_map=lanelet_map,
-        offset_x=fwd.x,
-        offset_y=fwd.y,
+        offset_x=offset_x,
+        offset_y=offset_y,
         conv_mapping=conv_mapping,
         effective_osm=effective_osm,
         xodr_root=tree.getroot(),

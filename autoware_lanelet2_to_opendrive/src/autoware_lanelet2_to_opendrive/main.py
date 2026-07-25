@@ -1604,6 +1604,7 @@ def preprocess_and_convert_with_hydra(
     # Save mapping JSON and cross-validate against geometric mapping
     if conversion_config.output_path:
         from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            ProjectionMetadata,
             _preprocessed_osm_path_for,
             validate_and_save_mapping,
         )
@@ -1629,6 +1630,15 @@ def preprocess_and_convert_with_hydra(
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
             traffic_light_config=tl_config_dict,
+            projection_metadata=ProjectionMetadata(
+                projector_type="MGRSProjector",
+                mgrs_code=mgrs_code,
+                origin_lat=origin_lat,
+                origin_lon=origin_lon,
+                offset_x=offset_x,
+                offset_y=offset_y,
+                offset_z=offset_z,
+            ),
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`

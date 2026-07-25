@@ -20,6 +20,7 @@ from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     GeoRoadLaneletMapping,
     MappingMismatchError,
+    ProjectionMetadata,
     _RoadCandidates,
     _resolve_conflicts,
     _sample_reference_line_from_road,
@@ -164,6 +165,48 @@ class TestSaveMappingJson:
         assert data["skipped_synthetic_roads"] == [274, 290, 303]
         restored = GeoRoadLaneletMapping.from_dict(data)
         assert restored.skipped_synthetic_roads == [274, 290, 303]
+
+    def test_round_trip_preserves_projection_metadata(self, tmp_path: Path) -> None:
+        """Projection metadata preserves the converter-time local frame exactly."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, 1)},
+            projection_metadata=ProjectionMetadata(
+                projector_type="MGRSProjector",
+                mgrs_code="54SUE",
+                origin_lat=35.64594559004192,
+                origin_lon=139.80712515470023,
+                offset_x=92008.5,
+                offset_y=45335.1,
+                offset_z=7.25,
+            ),
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["projection_metadata"]["offset_x"] == 92008.5
+        assert data["projection_metadata"]["offset_y"] == 45335.1
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.projection_metadata is not None
+        assert restored.projection_metadata.offset_x == 92008.5
+        assert restored.projection_metadata.offset_y == 45335.1
+        assert restored.projection_metadata.offset_z == 7.25
+
+    def test_from_dict_accepts_mapping_without_projection_metadata(self) -> None:
+        """Old sidecars without projection metadata remain readable."""
+        mapping = GeoRoadLaneletMapping.from_dict(
+            {
+                "xodr_sha256": "abc",
+                "osm_sha256": "def",
+                "lanelet_to_road_and_lane": {"10": [1, 1]},
+            }
+        )
+
+        assert mapping.projection_metadata is None
 
 
 # ---------------------------------------------------------------------------

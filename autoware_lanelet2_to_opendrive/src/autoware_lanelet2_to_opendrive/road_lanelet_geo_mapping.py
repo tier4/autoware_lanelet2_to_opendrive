@@ -99,6 +99,40 @@ class SkippedStopLineEntry:
         return cls(**data)
 
 
+@dataclass
+class ProjectionMetadata:
+    """Resolved coordinate frame recorded during conversion.
+
+    The OpenDRIVE ``geoReference`` stores the geographic origin, but it is not a
+    lossless representation of the local XY offset used by the converter.  The
+    mapping validator needs the exact same offset to compare Lanelet2 geometry
+    against saved XODR geometry.
+    """
+
+    projector_type: str = "MGRSProjector"
+    mgrs_code: str | None = None
+    origin_lat: float | None = None
+    origin_lon: float | None = None
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+    offset_z: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ProjectionMetadata":
+        return cls(
+            projector_type=data.get("projector_type", "MGRSProjector"),
+            mgrs_code=data.get("mgrs_code"),
+            origin_lat=data.get("origin_lat"),
+            origin_lon=data.get("origin_lon"),
+            offset_x=data.get("offset_x", 0.0),
+            offset_y=data.get("offset_y", 0.0),
+            offset_z=data.get("offset_z", 0.0),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Internal dataclass for 3-phase matching
 # ---------------------------------------------------------------------------
@@ -139,6 +173,7 @@ class GeoRoadLaneletMapping:
     #: apart from genuine mapping failures (#493).
     skipped_synthetic_roads: list[int] | None = None
     traffic_light_config: dict | None = None
+    projection_metadata: ProjectionMetadata | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
         init=False,
@@ -182,6 +217,8 @@ class GeoRoadLaneletMapping:
             result["preprocessing_log"] = self.preprocessing_log
         if self.traffic_light_config is not None:
             result["traffic_light_config"] = self.traffic_light_config
+        if self.projection_metadata is not None:
+            result["projection_metadata"] = self.projection_metadata.to_dict()
         return result
 
     @classmethod
@@ -202,6 +239,13 @@ class GeoRoadLaneletMapping:
                 int(k): SkippedStopLineEntry.from_dict(v) for k, v in raw_ssl.items()
             }
 
+        raw_projection = data.get("projection_metadata")
+        projection_metadata = (
+            ProjectionMetadata.from_dict(raw_projection)
+            if raw_projection is not None
+            else None
+        )
+
         return cls(
             xodr_sha256=data["xodr_sha256"],
             osm_sha256=data["osm_sha256"],
@@ -214,6 +258,7 @@ class GeoRoadLaneletMapping:
             skipped_stop_lines=skipped_stop_lines,
             skipped_synthetic_roads=data.get("skipped_synthetic_roads"),
             traffic_light_config=data.get("traffic_light_config"),
+            projection_metadata=projection_metadata,
         )
 
 
@@ -1500,6 +1545,7 @@ def validate_and_save_mapping(
     stop_line_mapping: dict[int, StopLineMappingEntry] | None = None,
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None,
     traffic_light_config: dict | None = None,
+    projection_metadata: ProjectionMetadata | None = None,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
@@ -1529,6 +1575,9 @@ def validate_and_save_mapping(
         traffic_light_config: Optional dict of TrafficLightConfig fields
             (offset_x, offset_y, offset_z, hdg_offset) persisted for the
             ``analyze`` command to reverse the spawn offset.
+        projection_metadata: Optional resolved coordinate frame persisted for
+            the ``analyze`` command to reproduce the converter-time local XY
+            frame exactly.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
@@ -1554,6 +1603,7 @@ def validate_and_save_mapping(
         skipped_stop_lines=skipped_stop_lines,
         skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
         traffic_light_config=traffic_light_config,
+        projection_metadata=projection_metadata,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)
