@@ -529,3 +529,148 @@ def test_project_point_onto_arc_road_recovers_s():
     s, t, _hdg = result
     assert abs(s - (s0 + p_target)) < 1e-6, f"recovered s={s}, expected {s0 + p_target}"
     assert abs(t) < 1e-6, f"point on the reference line should have t~0, got {t}"
+
+
+def test_project_point_onto_straight_road_uses_continuous_projection():
+    """Projection must not quantize object origins to sampled road points."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import Line
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        _SAMPLE_POINTS_PER_GEOMETRY,
+        _project_point_onto_road,
+    )
+
+    plan_view = MagicMock()
+    plan_view.geometries = [Line(s=0.0, x=10.0, y=20.0, hdg=0.0, length=10.0)]
+    road = MagicMock()
+    road.id = 1
+    road.plan_view = plan_view
+
+    p_target = 5.5
+    point = np.array([10.0 + p_target, 22.0])
+    sample_spacing = 10.0 / (_SAMPLE_POINTS_PER_GEOMETRY - 1)
+    nearest_sample = round(p_target / sample_spacing) * sample_spacing
+    assert abs(nearest_sample - p_target) > 0.05
+
+    result = _project_point_onto_road(point, road)
+    assert result is not None
+    s, t, hdg = result
+    assert s == pytest.approx(p_target, abs=1e-10)
+    assert t == pytest.approx(2.0, abs=1e-10)
+    assert hdg == pytest.approx(0.0, abs=1e-10)
+
+
+def test_project_point_onto_parampoly3_road_recovers_offset_point():
+    """Curved ParamPoly3 projection should recover a normal-offset point."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+        ParamPoly3,
+        evaluate_plan_view_world,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        _project_point_onto_road,
+    )
+
+    geom = ParamPoly3(
+        s=3.0,
+        x=20.0,
+        y=30.0,
+        hdg=0.2,
+        length=10.0,
+        aU=0.0,
+        bU=1.0,
+        cU=0.0,
+        dU=0.0,
+        aV=0.0,
+        bV=0.0,
+        cV=0.02,
+        dV=0.0,
+    )
+    plan_view = MagicMock()
+    plan_view.geometries = [geom]
+    road = MagicMock()
+    road.id = 2
+    road.plan_view = plan_view
+
+    p_target = 4.2
+    t_target = 1.25
+    wx, wy = evaluate_plan_view_world(
+        geom.x,
+        geom.y,
+        geom.hdg,
+        p_target,
+        param_poly3_coeffs=(
+            geom.aU,
+            geom.bU,
+            geom.cU,
+            geom.dU,
+            geom.aV,
+            geom.bV,
+            geom.cV,
+            geom.dV,
+        ),
+    )
+    du = geom.bU + 2.0 * geom.cU * p_target + 3.0 * geom.dU * p_target**2
+    dv = geom.bV + 2.0 * geom.cV * p_target + 3.0 * geom.dV * p_target**2
+    cos_h = math.cos(geom.hdg)
+    sin_h = math.sin(geom.hdg)
+    tx = du * cos_h - dv * sin_h
+    ty = du * sin_h + dv * cos_h
+    tangent_norm = math.hypot(tx, ty)
+    left_normal = np.array([-ty / tangent_norm, tx / tangent_norm])
+    point = np.array([wx, wy]) + t_target * left_normal
+
+    result = _project_point_onto_road(point, road)
+    assert result is not None
+    s, t, hdg = result
+    assert s == pytest.approx(geom.s + p_target, abs=1e-8)
+    assert t == pytest.approx(t_target, abs=1e-8)
+    assert hdg == pytest.approx(geom.hdg + math.atan2(dv, du), abs=1e-8)
+
+
+def test_project_point_onto_segment_boundary_uses_nearest_continuous_segment():
+    """Projection near a boundary should not snap back to a sampled endpoint."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import Line
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        _project_point_onto_road,
+    )
+
+    plan_view = MagicMock()
+    plan_view.geometries = [
+        Line(s=0.0, x=0.0, y=0.0, hdg=0.0, length=10.0),
+        Line(s=10.0, x=10.0, y=0.0, hdg=0.0, length=10.0),
+    ]
+    road = MagicMock()
+    road.id = 3
+    road.plan_view = plan_view
+
+    result = _project_point_onto_road(np.array([10.02, -1.0]), road)
+    assert result is not None
+    s, t, hdg = result
+    assert s == pytest.approx(10.02, abs=1e-10)
+    assert t == pytest.approx(-1.0, abs=1e-10)
+    assert hdg == pytest.approx(0.0, abs=1e-10)
+
+
+def test_project_point_onto_road_clamps_to_endpoints():
+    """Projection outside the road should stay on the finite road segment."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import Line
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        _project_point_onto_road,
+    )
+
+    plan_view = MagicMock()
+    plan_view.geometries = [Line(s=0.0, x=0.0, y=0.0, hdg=0.0, length=10.0)]
+    road = MagicMock()
+    road.id = 4
+    road.plan_view = plan_view
+
+    start_result = _project_point_onto_road(np.array([-0.7, 2.0]), road)
+    assert start_result is not None
+    start_s, start_t, _ = start_result
+    assert start_s == pytest.approx(0.0, abs=1e-10)
+    assert start_t == pytest.approx(2.0, abs=1e-10)
+
+    end_result = _project_point_onto_road(np.array([11.0, -3.0]), road)
+    assert end_result is not None
+    end_s, end_t, _ = end_result
+    assert end_s == pytest.approx(10.0, abs=1e-10)
+    assert end_t == pytest.approx(-3.0, abs=1e-10)

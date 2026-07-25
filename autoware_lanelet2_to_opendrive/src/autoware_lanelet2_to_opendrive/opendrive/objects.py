@@ -12,7 +12,7 @@ import lxml.etree as ET
 import numpy as np
 
 from ..util import extract_points
-from .geometry import Arc, ParamPoly3, evaluate_plan_view_world
+from .geometry import Arc, GeometryBase, ParamPoly3, evaluate_plan_view_world
 
 if TYPE_CHECKING:
     from .road import Road
@@ -23,6 +23,14 @@ _NEAREST_ROAD_THRESHOLD_M = (
     50.0  # Max distance (m) to associate a crosswalk with a road
 )
 _SAMPLE_POINTS_PER_GEOMETRY = 10  # Number of sample points per geometry segment
+
+
+@dataclass(frozen=True)
+class _ProjectionCandidate:
+    s: float
+    t: float
+    hdg: float
+    distance_sq: float
 
 
 @dataclass
@@ -259,13 +267,209 @@ def _sample_road_points(road: Road) -> List[tuple]:
     return samples
 
 
+def _geometry_epsilon() -> float:
+    from ..config import DEFAULT_CONFIG
+
+    return DEFAULT_CONFIG.geometry.epsilon
+
+
+def _parampoly3_coefficients(
+    geom: ParamPoly3,
+) -> tuple[float, float, float, float, float, float, float, float]:
+    return (
+        geom.aU,
+        geom.bU,
+        geom.cU,
+        geom.dU,
+        geom.aV,
+        geom.bV,
+        geom.cV,
+        geom.dV,
+    )
+
+
+def _evaluate_geometry_at(
+    geom: GeometryBase,
+    p: float,
+) -> tuple[float, float, float]:
+    """Evaluate a planView geometry and tangent heading at local parameter p."""
+    p = max(0.0, min(float(p), float(getattr(geom, "length", 0.0))))
+
+    if isinstance(geom, ParamPoly3):
+        wx, wy = evaluate_plan_view_world(
+            geom.x,
+            geom.y,
+            geom.hdg,
+            p,
+            param_poly3_coeffs=_parampoly3_coefficients(geom),
+        )
+        du = geom.bU + 2.0 * geom.cU * p + 3.0 * geom.dU * p * p
+        dv = geom.bV + 2.0 * geom.cV * p + 3.0 * geom.dV * p * p
+        if math.hypot(du, dv) <= _geometry_epsilon():
+            hdg = geom.hdg
+        else:
+            hdg = geom.hdg + math.atan2(dv, du)
+        return float(wx), float(wy), float(hdg)
+
+    if isinstance(geom, Arc):
+        wx, wy = evaluate_plan_view_world(
+            geom.x, geom.y, geom.hdg, p, arc_curvature=geom.curvature
+        )
+        return float(wx), float(wy), float(geom.hdg + geom.curvature * p)
+
+    wx, wy = evaluate_plan_view_world(geom.x, geom.y, geom.hdg, p)
+    return float(wx), float(wy), float(geom.hdg)
+
+
+def _projection_from_geometry_at(
+    point: np.ndarray,
+    geom: GeometryBase,
+    p: float,
+) -> _ProjectionCandidate:
+    wx, wy, hdg = _evaluate_geometry_at(geom, p)
+    dx = float(point[0]) - wx
+    dy = float(point[1]) - wy
+    sin_h = math.sin(hdg)
+    cos_h = math.cos(hdg)
+    t = -dx * sin_h + dy * cos_h
+    return _ProjectionCandidate(
+        s=float(getattr(geom, "s", 0.0)) + p,
+        t=t,
+        hdg=hdg,
+        distance_sq=dx * dx + dy * dy,
+    )
+
+
+def _project_point_onto_line_geometry(
+    point: np.ndarray,
+    geom: GeometryBase,
+) -> Optional[_ProjectionCandidate]:
+    length = float(getattr(geom, "length", 0.0))
+    if length <= 0.0 or not math.isfinite(length):
+        return None
+
+    px = float(point[0])
+    py = float(point[1])
+    cos_h = math.cos(geom.hdg)
+    sin_h = math.sin(geom.hdg)
+    dx = px - geom.x
+    dy = py - geom.y
+    p = max(0.0, min(length, dx * cos_h + dy * sin_h))
+    return _projection_from_geometry_at(point, geom, p)
+
+
+def _project_point_onto_arc_geometry(
+    point: np.ndarray,
+    geom: Arc,
+) -> Optional[_ProjectionCandidate]:
+    length = float(geom.length)
+    if length <= 0.0 or not math.isfinite(length):
+        return None
+    if abs(geom.curvature) <= _geometry_epsilon():
+        return _project_point_onto_line_geometry(point, geom)
+
+    px = float(point[0])
+    py = float(point[1])
+    dx = px - geom.x
+    dy = py - geom.y
+    cos_h = math.cos(geom.hdg)
+    sin_h = math.sin(geom.hdg)
+
+    # Transform the query point into the geometry-local UV frame.
+    local_u = dx * cos_h + dy * sin_h
+    local_v = -dx * sin_h + dy * cos_h
+
+    radius_signed = 1.0 / geom.curvature
+    vx = local_u
+    vy = local_v - radius_signed
+    if math.hypot(vx, vy) <= _geometry_epsilon():
+        # The circle center has no unique nearest angle; fall back to the
+        # nearer endpoint, which keeps s inside the road.
+        start = _projection_from_geometry_at(point, geom, 0.0)
+        end = _projection_from_geometry_at(point, geom, length)
+        return start if start.distance_sq <= end.distance_sq else end
+
+    theta = math.atan2(geom.curvature * vx, -geom.curvature * vy)
+    period = 2.0 * math.pi
+    p_candidates = [0.0, length]
+    for k in range(-1, 2):
+        p = (theta + k * period) / geom.curvature
+        if -_geometry_epsilon() <= p <= length + _geometry_epsilon():
+            p_candidates.append(max(0.0, min(length, p)))
+
+    return min(
+        (_projection_from_geometry_at(point, geom, p) for p in p_candidates),
+        key=lambda candidate: candidate.distance_sq,
+    )
+
+
+def _project_point_onto_parampoly3_geometry(
+    point: np.ndarray,
+    geom: ParamPoly3,
+) -> Optional[_ProjectionCandidate]:
+    length = float(geom.length)
+    if length <= 0.0 or not math.isfinite(length):
+        return None
+
+    cos_h = math.cos(geom.hdg)
+    sin_h = math.sin(geom.hdg)
+    dx = float(point[0]) - geom.x
+    dy = float(point[1]) - geom.y
+    query_u = dx * cos_h + dy * sin_h
+    query_v = -dx * sin_h + dy * cos_h
+
+    # Minimize squared distance in local UV coordinates. For cubic U/V curves,
+    # d(distance^2)/dp is a quintic polynomial, so all stationary points are
+    # recoverable from its real roots plus the segment endpoints.
+    u_minus_q = np.array([geom.aU - query_u, geom.bU, geom.cU, geom.dU], dtype=float)
+    v_minus_q = np.array([geom.aV - query_v, geom.bV, geom.cV, geom.dV], dtype=float)
+    du = np.array([geom.bU, 2.0 * geom.cU, 3.0 * geom.dU], dtype=float)
+    dv = np.array([geom.bV, 2.0 * geom.cV, 3.0 * geom.dV], dtype=float)
+    derivative_poly = np.polynomial.polynomial.polyadd(
+        np.polynomial.polynomial.polymul(u_minus_q, du),
+        np.polynomial.polynomial.polymul(v_minus_q, dv),
+    )
+
+    from ..config import DEFAULT_CONFIG
+
+    coeff_epsilon = DEFAULT_CONFIG.parampoly3.coefficient_epsilon
+    while len(derivative_poly) > 1 and abs(derivative_poly[-1]) <= coeff_epsilon:
+        derivative_poly = derivative_poly[:-1]
+
+    candidates = [0.0, length]
+    if len(derivative_poly) > 1:
+        roots = np.roots(derivative_poly[::-1])
+        for root in roots:
+            if abs(float(np.imag(root))) > coeff_epsilon:
+                continue
+            p = float(np.real(root))
+            if -coeff_epsilon <= p <= length + coeff_epsilon:
+                candidates.append(max(0.0, min(length, p)))
+
+    return min(
+        (_projection_from_geometry_at(point, geom, p) for p in candidates),
+        key=lambda candidate: candidate.distance_sq,
+    )
+
+
+def _project_point_onto_geometry(
+    point: np.ndarray,
+    geom: GeometryBase,
+) -> Optional[_ProjectionCandidate]:
+    if isinstance(geom, ParamPoly3):
+        return _project_point_onto_parampoly3_geometry(point, geom)
+    if isinstance(geom, Arc):
+        return _project_point_onto_arc_geometry(point, geom)
+    return _project_point_onto_line_geometry(point, geom)
+
+
 def _project_point_onto_road(
     point: np.ndarray,
     road: Road,
 ) -> Optional[tuple]:
     """Project a 2D point onto the road reference line.
 
-    Finds the closest sample point on the road reference line and returns
+    Finds the closest point on the continuous road reference line and returns
     the corresponding (s, t, heading) values.
 
     Args:
@@ -275,31 +479,20 @@ def _project_point_onto_road(
     Returns:
         (s, t, road_hdg) tuple, or None if the road has no geometry.
     """
-    samples = _sample_road_points(road)
-    if not samples:
+    if road.plan_view is None or not road.plan_view.geometries:
         return None
 
-    px, py = float(point[0]), float(point[1])
-    best_dist = float("inf")
-    best_s = 0.0
-    best_t = 0.0
-    best_hdg = 0.0
+    best: Optional[_ProjectionCandidate] = None
+    for geom in road.plan_view.geometries:
+        candidate = _project_point_onto_geometry(point, geom)
+        if candidate is None:
+            continue
+        if best is None or candidate.distance_sq < best.distance_sq:
+            best = candidate
 
-    for wx, wy, s, hdg in samples:
-        dist = math.hypot(px - wx, py - wy)
-        if dist < best_dist:
-            best_dist = dist
-            dx = px - wx
-            dy = py - wy
-            cos_h = math.cos(hdg)
-            sin_h = math.sin(hdg)
-            # Signed lateral offset: positive = left side of road
-            t = -dx * sin_h + dy * cos_h
-            best_s = s
-            best_t = t
-            best_hdg = hdg
-
-    return best_s, best_t, best_hdg
+    if best is None:
+        return None
+    return best.s, best.t, best.hdg
 
 
 def _compute_corner_locals(
