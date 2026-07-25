@@ -664,8 +664,13 @@ class ParamPoly3(GeometryBase):
 
             # Skip segments that are too short
             min_length = config.min_segment_length
+            allow_short_whole_spline = (
+                num_segments == 1
+                and 0.0 < total_length < min_length
+                and np.isclose(actual_segment_length, total_length)
+            )
 
-            if actual_segment_length < min_length:
+            if actual_segment_length < min_length and not allow_short_whole_spline:
                 warnings.warn(
                     f"Skipping segment with length {actual_segment_length:.6f}m "
                     f"(below minimum {min_length}m) at s={s_start:.3f}",
@@ -683,7 +688,10 @@ class ParamPoly3(GeometryBase):
 
             # Validate segment before adding
             is_valid, error_msg = cls._validate_segment(
-                segment, min_segment_length=config.min_segment_length
+                segment,
+                min_segment_length=0.0
+                if allow_short_whole_spline
+                else config.min_segment_length,
             )
             if not is_valid:
                 warnings.warn(

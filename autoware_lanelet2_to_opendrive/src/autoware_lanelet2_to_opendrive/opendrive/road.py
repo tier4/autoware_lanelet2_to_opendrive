@@ -90,6 +90,25 @@ def _build_planview_geometries(
             out.extend(_emit_paramPoly3_run(spline, run, pp3_cfg))
         else:
             raise TypeError(f"Unknown ClassifiedSegment type: {type(run)!r}")
+    if not out and 0.0 < spline.total_length < pp3_cfg.min_segment_length:
+        segment = ParamPoly3.from_spline_window(
+            spline,
+            s_start=0.0,
+            s_end=spline.total_length,
+            coefficient_epsilon=pp3_cfg.coefficient_epsilon,
+        )
+        is_valid, error_msg = ParamPoly3._validate_segment(
+            segment, min_segment_length=0.0
+        )
+        if not is_valid:
+            import warnings
+
+            warnings.warn(
+                f"Skipping invalid short full-spline segment: {error_msg}",
+                UserWarning,
+            )
+        else:
+            out.append(segment)
     return out
 
 

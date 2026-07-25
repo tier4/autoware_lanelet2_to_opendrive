@@ -4,6 +4,7 @@ import sys
 
 import numpy as np
 import pytest
+from autoware_lanelet2_to_opendrive.conversion_config import ParamPoly3Config
 from autoware_lanelet2_to_opendrive.spline import Splines
 from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3
 from autoware_lanelet2_to_opendrive.opendrive.xml_utils import replace_subnormal
@@ -133,6 +134,50 @@ class TestParamPoly3DynamicSegments:
         assert len(param_polys) == 1
         assert param_polys[0].length >= 0.5
         assert param_polys[0].length == pytest.approx(spline.total_length, rel=1e-3)
+
+    def test_nonzero_spline_below_minimum_emits_single_segment(self):
+        """A valid non-zero reference line must not disappear when sub-minimum.
+
+        ``min_segment_length`` protects ordinary segmentation, but when the
+        entire reference line is shorter than that threshold, dropping the only
+        segment produces an invalid empty planView downstream.
+        """
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+            ]
+        )
+        spline = Splines(points, num_control_points=4)
+        config = ParamPoly3Config(
+            min_segment_length=0.5,
+            default_segment_length=1.0,
+            max_segments=100,
+            min_segments=1,
+            enabled=True,
+        )
+
+        param_polys = ParamPoly3.from_spline(spline, config=config)
+
+        assert len(param_polys) == 1
+        assert 0.0 < param_polys[0].length < config.min_segment_length
+        assert param_polys[0].length == pytest.approx(spline.total_length, rel=1e-6)
+        assert all(
+            np.isfinite(value)
+            for value in (
+                param_polys[0].x,
+                param_polys[0].y,
+                param_polys[0].hdg,
+                param_polys[0].aU,
+                param_polys[0].bU,
+                param_polys[0].cU,
+                param_polys[0].dU,
+                param_polys[0].aV,
+                param_polys[0].bV,
+                param_polys[0].cV,
+                param_polys[0].dV,
+            )
+        )
 
     def test_dynamic_segments_medium_road(self):
         """Test that medium roads get appropriate segment count."""

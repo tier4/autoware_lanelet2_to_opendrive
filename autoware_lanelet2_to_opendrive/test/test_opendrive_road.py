@@ -1,6 +1,42 @@
 """Tests for OpenDRIVE lane section functions."""
 
+import math
+from pathlib import Path
+
+import lanelet2
+import lxml.etree as ET
+import pytest
+
+from autoware_lanelet2_to_opendrive.conversion_config import ParamPoly3Config
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+    parse_roads_from_xodr,
+)
+
+
+def _make_short_valid_lanelet(
+    *,
+    length: float = 0.3,
+    width: float = 2.0,
+) -> tuple[lanelet2.core.LaneletMap, lanelet2.core.Lanelet]:
+    """Build a valid road lanelet whose reference line is shorter than 0.5 m."""
+    left_points = [
+        lanelet2.core.Point3d(lanelet2.core.getId(), 0.0, 0.0, 0.0),
+        lanelet2.core.Point3d(lanelet2.core.getId(), length, 0.0, 0.0),
+    ]
+    right_points = [
+        lanelet2.core.Point3d(lanelet2.core.getId(), 0.0, width, 0.0),
+        lanelet2.core.Point3d(lanelet2.core.getId(), length, width, 0.0),
+    ]
+    left_bound = lanelet2.core.LineString3d(lanelet2.core.getId(), left_points)
+    right_bound = lanelet2.core.LineString3d(lanelet2.core.getId(), right_points)
+    lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), left_bound, right_bound)
+    lanelet.attributes["subtype"] = "road"
+    lanelet.attributes["one_way"] = "yes"
+
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelet_map.add(lanelet)
+    return lanelet_map, lanelet
 
 
 def test_construct_road_from_two_lanes(lanelet_map):
@@ -19,6 +55,61 @@ def test_construct_road_from_two_lanes(lanelet_map):
     # from lxml import etree
     # print("")
     # print(etree.tostring(road.to_xml(), pretty_print=True).decode())
+
+
+def test_short_valid_lanelet_emits_non_empty_planview() -> None:
+    """Sub-minimum but valid lanelets must produce schema-valid road geometry."""
+    lanelet_map, lanelet = _make_short_valid_lanelet(length=0.3, width=2.0)
+    parampoly3_config = ParamPoly3Config(
+        min_segment_length=0.5,
+        default_segment_length=1.0,
+        max_segments=100,
+        min_segments=1,
+        enabled=True,
+    )
+
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        road_id=7,
+        s_offset=0.0,
+        traffic_rule="RHT",
+        parampoly3_config=parampoly3_config,
+    )
+
+    assert road.length > 0.0
+    assert road.length < parampoly3_config.min_segment_length
+    assert road.plan_view is not None
+    assert len(road.plan_view.geometries) == 1
+
+    geometry = road.plan_view.geometries[0]
+    assert geometry.length == pytest.approx(road.length)
+    assert geometry.length > 0.0
+    assert all(
+        math.isfinite(value)
+        for value in (
+            geometry.s,
+            geometry.x,
+            geometry.y,
+            geometry.hdg,
+            geometry.length,
+        )
+    )
+
+    assert road.elevation_profile is not None
+    assert len(road.elevation_profile.elevations) >= 1
+
+    assert road.lanes is not None
+    lane_section = road.lanes.lane_sections[0]
+    lane = lane_section.right_lanes[-1]
+    assert lane.lanelet_id == lanelet.id
+    assert lane.widths
+    assert lane.widths[0].a == pytest.approx(2.0, abs=1e-2)
+
+    root = ET.Element("OpenDRIVE")
+    root.append(road.to_xml())
+    parsed_roads = parse_roads_from_xodr(Path("unused.xodr"), xodr_root=root)
+    assert [parsed_road.id for parsed_road in parsed_roads] == [7]
 
 
 def test_elevation_profile_extraction(lanelet_map):
