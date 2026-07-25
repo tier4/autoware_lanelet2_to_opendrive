@@ -479,6 +479,17 @@ def _project_point_onto_road(
     Returns:
         (s, t, road_hdg) tuple, or None if the road has no geometry.
     """
+    best = _project_point_onto_road_with_distance(point, road)
+    if best is None:
+        return None
+    return best.s, best.t, best.hdg
+
+
+def _project_point_onto_road_with_distance(
+    point: np.ndarray,
+    road: Road,
+) -> Optional[_ProjectionCandidate]:
+    """Project a 2D point onto a road and retain the squared distance."""
     if road.plan_view is None or not road.plan_view.geometries:
         return None
 
@@ -492,7 +503,180 @@ def _project_point_onto_road(
 
     if best is None:
         return None
-    return best.s, best.t, best.hdg
+    return best
+
+
+def _road_length(road: Road) -> float:
+    try:
+        length = float(getattr(road, "length"))
+        if math.isfinite(length) and length >= 0.0:
+            return length
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    if road.plan_view is None or not road.plan_view.geometries:
+        return 0.0
+    return max(float(geom.s) + float(geom.length) for geom in road.plan_view.geometries)
+
+
+@dataclass(frozen=True)
+class _StopLineRoadCandidate:
+    road: Road
+    projection: _ProjectionCandidate
+    road_length: float
+
+    @property
+    def distance(self) -> float:
+        return math.sqrt(self.projection.distance_sq)
+
+    @property
+    def distance_to_end(self) -> float:
+        return abs(self.road_length - self.projection.s)
+
+    @property
+    def longitudinal_residual(self) -> float:
+        residual_sq = max(
+            0.0,
+            self.projection.distance_sq - self.projection.t * self.projection.t,
+        )
+        return math.sqrt(residual_sq)
+
+
+def _stop_line_road_candidates(
+    centroid: np.ndarray,
+    roads: List[Road],
+    threshold_m: float,
+) -> List[_StopLineRoadCandidate]:
+    candidates: List[_StopLineRoadCandidate] = []
+    seen_road_ids: set[int] = set()
+    for road in roads:
+        road_id = int(getattr(road, "id", -1))
+        if road_id in seen_road_ids:
+            continue
+        seen_road_ids.add(road_id)
+        projection = _project_point_onto_road_with_distance(centroid, road)
+        if projection is None:
+            continue
+        candidate = _StopLineRoadCandidate(
+            road=road,
+            projection=projection,
+            road_length=_road_length(road),
+        )
+        if candidate.distance <= threshold_m:
+            candidates.append(candidate)
+    return candidates
+
+
+def find_best_road_for_stop_line(
+    linestring: lanelet2.core.LineString3d,
+    all_roads: List["Road"],
+    *,
+    related_roads: Optional[List["Road"]] = None,
+    predecessor_roads: Optional[List["Road"]] = None,
+    endpoint_tolerance: float = 0.5,
+    longitudinal_tolerance: float = 0.05,
+    threshold_m: float = _NEAREST_ROAD_THRESHOLD_M,
+) -> Optional["Road"]:
+    """Select the OpenDRIVE road that should own a stop-line object.
+
+    Stop lines at the start boundary of junction/turn lanelets physically mark
+    the end of the incoming road. Prefer such direct-predecessor roads when the
+    projected stop-line centroid falls near their end; otherwise prefer roads
+    mapped from lanelets that reference the regulatory element. The historical
+    nearest-road search remains the fallback when no semantic/topological
+    candidate is available.
+    """
+    pts = extract_points(linestring, dimensions=2)
+    if len(pts) == 0:
+        return None
+
+    centroid = np.mean(pts, axis=0)
+
+    fallback_road = find_nearest_road_for_linestring(
+        linestring,
+        all_roads,
+        threshold_m=threshold_m,
+    )
+    fallback_candidate = None
+    if fallback_road is not None:
+        fallback_projection = _project_point_onto_road_with_distance(
+            centroid,
+            fallback_road,
+        )
+        if fallback_projection is not None:
+            fallback_candidate = _StopLineRoadCandidate(
+                road=fallback_road,
+                projection=fallback_projection,
+                road_length=_road_length(fallback_road),
+            )
+
+    predecessor_candidates = _stop_line_road_candidates(
+        centroid,
+        predecessor_roads or [],
+        threshold_m,
+    )
+    incoming_candidates = [
+        candidate
+        for candidate in predecessor_candidates
+        if candidate.distance_to_end <= endpoint_tolerance
+    ]
+    related_candidates = _stop_line_road_candidates(
+        centroid,
+        related_roads or [],
+        threshold_m,
+    )
+
+    if fallback_candidate is None:
+        semantic_candidates = incoming_candidates or related_candidates
+        if semantic_candidates:
+            return min(
+                semantic_candidates,
+                key=lambda candidate: (
+                    candidate.longitudinal_residual,
+                    candidate.distance,
+                ),
+            ).road
+        return None
+
+    # Preserve the historical nearest-road assignment unless that road can
+    # represent the stop line only by clamping to an endpoint. This keeps
+    # ordinary mid-road stop lines stable while allowing semantic/topological
+    # ownership to repair junction-boundary outliers.
+    if fallback_candidate.longitudinal_residual <= longitudinal_tolerance:
+        return fallback_road
+
+    improving_incoming = [
+        candidate
+        for candidate in incoming_candidates
+        if candidate.longitudinal_residual + longitudinal_tolerance
+        < fallback_candidate.longitudinal_residual
+    ]
+    if improving_incoming:
+        return min(
+            improving_incoming,
+            key=lambda candidate: (
+                candidate.longitudinal_residual,
+                candidate.distance_to_end,
+                candidate.distance,
+            ),
+        ).road
+
+    improving_related = [
+        candidate
+        for candidate in related_candidates
+        if candidate.longitudinal_residual + longitudinal_tolerance
+        < fallback_candidate.longitudinal_residual
+    ]
+    if improving_related:
+        return min(
+            improving_related,
+            key=lambda candidate: (
+                candidate.longitudinal_residual,
+                candidate.distance,
+            ),
+        ).road
+
+    return fallback_road
 
 
 def _compute_corner_locals(
