@@ -1099,6 +1099,35 @@ def estimate_lanelet_width_with_emission_geometry(
             pose.xy,
             side_direction,
         )
+        is_start = abs(float(s_emission)) <= DEFAULT_CONFIG.geometry.epsilon
+        is_end = (
+            abs(float(s_emission) - emission_geometry.length)
+            <= DEFAULT_CONFIG.geometry.epsilon
+        )
+        if width is not None and abs(width) <= DEFAULT_CONFIG.geometry.epsilon:
+            endpoint_width = None
+            if is_start or is_end:
+                endpoint_width = _boundary_cross_section_width(
+                    anchor_points[:, :2],
+                    other_points[:, :2],
+                    pose.xy,
+                    side_direction,
+                )
+                if (
+                    endpoint_width is None
+                    or endpoint_width <= DEFAULT_CONFIG.geometry.epsilon
+                ):
+                    endpoint_width = _lateral_endpoint_cap_width(
+                        anchor_points[0 if is_start else -1, :2],
+                        other_points[0 if is_start else -1, :2],
+                        pose.heading,
+                        side_direction,
+                    )
+            if (
+                endpoint_width is not None
+                and endpoint_width > DEFAULT_CONFIG.geometry.epsilon
+            ):
+                width = endpoint_width
         if width is None:
             width = _boundary_cross_section_width(
                 anchor_points[:, :2],

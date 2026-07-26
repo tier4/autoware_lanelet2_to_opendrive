@@ -34,7 +34,7 @@ from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
     extract_points,
 )
-from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
+from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET, DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.geometry import compute_point_layer_bounds
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
@@ -46,9 +46,25 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
     Header,
     save_opendrive_to_file,
 )
+from autoware_lanelet2_to_opendrive.opendrive.enums import (
+    ContactPoint,
+    ElementType,
+    TrafficRule,
+)
+from autoware_lanelet2_to_opendrive.opendrive.elevation import (
+    Elevation,
+    ElevationProfile,
+)
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    ParamPoly3,
+    PlanView,
+)
+from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     ConstructedRoadsResult,
     Road,
+    _evaluate_lane_width,
+    _evaluate_planview_endpoint_with_heading,
 )
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
@@ -473,7 +489,514 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"Emitted {emitted_count} source-backed road(s); "
             f"skipped {skipped_count}"
         )
+        self._align_connecting_roads_after_emission(
+            emitted_roads,
+            road_to_lanelets,
+            lanelet_by_id,
+            routing_graph,
+        )
         return emitted_roads
+
+    def _traffic_rule_enum(self) -> TrafficRule:
+        return (
+            TrafficRule.LHT
+            if (self.config.traffic_rule or "RHT").upper() == "LHT"
+            else TrafficRule.RHT
+        )
+
+    @staticmethod
+    def _non_center_lanes(road: Road) -> List:
+        if road.lanes is None or not road.lanes.lane_sections:
+            return []
+        lanes = []
+        for lane_section in road.lanes.lane_sections:
+            lanes.extend(lane_section.left_lanes.values())
+            lanes.extend(lane_section.right_lanes.values())
+        return lanes
+
+    @staticmethod
+    def _lane_by_id(road: Road, lane_id: int):
+        if road.lanes is None or not road.lanes.lane_sections:
+            return None
+        for lane_section in road.lanes.lane_sections:
+            if lane_id > 0 and lane_id in lane_section.left_lanes:
+                return lane_section.left_lanes[lane_id]
+            if lane_id < 0 and lane_id in lane_section.right_lanes:
+                return lane_section.right_lanes[lane_id]
+        return None
+
+    @staticmethod
+    def _target_endpoint_is_start(endpoint_link, side: str) -> bool:
+        if endpoint_link.contact_point is ContactPoint.START:
+            return True
+        if endpoint_link.contact_point is ContactPoint.END:
+            return False
+        # OpenDRIVE links should normally carry a contactPoint for road-to-road
+        # links. Preserve the existing default semantics for defensive callers.
+        return side == "end"
+
+    def _linked_lane_endpoint_constraint(
+        self,
+        road: Road,
+        lane,
+        side: str,
+        roads_by_id: Dict[int, Road],
+    ) -> Tuple[Optional[Tuple[float, float, float]], Optional[float]]:
+        if road.link is None:
+            return None, None
+        endpoint_link = (
+            road.link.predecessor if side == "start" else road.link.successor
+        )
+        lane_link = lane.predecessor if side == "start" else lane.successor
+        if endpoint_link is None or lane_link is None:
+            return None, None
+        if endpoint_link.element_type is not ElementType.ROAD:
+            return None, None
+
+        target_road = roads_by_id.get(endpoint_link.element_id)
+        if target_road is None:
+            return None, None
+
+        target_at_start = self._target_endpoint_is_start(endpoint_link, side)
+        from autoware_lanelet2_to_opendrive.divergence import _lane_anchor_xyz
+
+        anchor = _lane_anchor_xyz(
+            target_road,
+            lane_link.id,
+            at_start=target_at_start,
+            traffic_rule=self._traffic_rule_enum(),
+        )
+        if anchor is None:
+            anchor = (
+                target_road.reference_start_xyz
+                if target_at_start
+                else target_road.reference_end_xyz
+            )
+
+        target_lane = self._lane_by_id(target_road, lane_link.id)
+        width = None
+        if target_lane is not None:
+            target_s = 0.0 if target_at_start else target_road.length
+            width = _evaluate_lane_width(target_lane, target_s)
+            if width is not None and not math.isfinite(width):
+                width = None
+
+        return anchor, width
+
+    def _linked_lane_endpoint_heading(
+        self,
+        road: Road,
+        lane,
+        side: str,
+        roads_by_id: Dict[int, Road],
+    ) -> Optional[float]:
+        if road.link is None:
+            return None
+        endpoint_link = (
+            road.link.predecessor if side == "start" else road.link.successor
+        )
+        lane_link = lane.predecessor if side == "start" else lane.successor
+        if endpoint_link is None or lane_link is None:
+            return None
+        if endpoint_link.element_type is not ElementType.ROAD:
+            return None
+
+        target_road = roads_by_id.get(endpoint_link.element_id)
+        if target_road is None:
+            return None
+
+        endpoint = _evaluate_planview_endpoint_with_heading(
+            target_road.plan_view,
+            at_start=self._target_endpoint_is_start(endpoint_link, side),
+        )
+        if endpoint is None or not math.isfinite(endpoint[2]):
+            return None
+        return float(endpoint[2])
+
+    @staticmethod
+    def _mean_heading(headings: List[float]) -> Optional[float]:
+        finite = [heading for heading in headings if math.isfinite(heading)]
+        if not finite:
+            return None
+        x = sum(math.cos(heading) for heading in finite)
+        y = sum(math.sin(heading) for heading in finite)
+        if math.hypot(x, y) <= DEFAULT_CONFIG.geometry.epsilon:
+            return finite[0]
+        return math.atan2(y, x)
+
+    def _connecting_reference_overrides(
+        self,
+        road: Road,
+        roads_by_id: Dict[int, Road],
+    ) -> Tuple[
+        Optional[Tuple[float, float, float]],
+        Optional[Tuple[float, float, float]],
+    ]:
+        return (
+            self._connecting_reference_override_for_side(
+                road,
+                roads_by_id,
+                side="start",
+            ),
+            self._connecting_reference_override_for_side(
+                road,
+                roads_by_id,
+                side="end",
+            ),
+        )
+
+    def _connecting_reference_override_for_side(
+        self,
+        road: Road,
+        roads_by_id: Dict[int, Road],
+        *,
+        side: str,
+    ) -> Optional[Tuple[float, float, float]]:
+        endpoint = _evaluate_planview_endpoint_with_heading(
+            road.plan_view,
+            at_start=(side == "start"),
+        )
+        if endpoint is None:
+            return None
+
+        normal = np.array(
+            [-math.sin(endpoint[2]), math.cos(endpoint[2])],
+            dtype=float,
+        )
+        candidates = []
+        for lane in self._non_center_lanes(road):
+            anchor, _width = self._linked_lane_endpoint_constraint(
+                road,
+                lane,
+                side,
+                roads_by_id,
+            )
+            if anchor is None:
+                continue
+            offset = self._lane_anchor_offset(road, lane.lane_id, side, roads_by_id)
+            if offset is None:
+                continue
+            ref_xy = np.asarray(anchor[:2], dtype=float) - offset * normal
+            candidates.append((ref_xy, float(anchor[2])))
+
+        if not candidates:
+            return None
+
+        xy_values = np.asarray([candidate[0] for candidate in candidates], dtype=float)
+        mean_xy = np.mean(xy_values, axis=0)
+        max_spread = float(np.max(np.linalg.norm(xy_values - mean_xy, axis=1)))
+        if max_spread > DEFAULT_CONFIG.geometry.point_distance_threshold:
+            return None
+
+        z = float(np.mean([candidate[1] for candidate in candidates]))
+        return (float(mean_xy[0]), float(mean_xy[1]), z)
+
+    def _lane_anchor_offset(
+        self,
+        road: Road,
+        lane_id: int,
+        side: str,
+        roads_by_id: Dict[int, Road],
+    ) -> Optional[float]:
+        if road.lanes is None or not road.lanes.lane_sections:
+            return None
+        lane_section = road.lanes.lane_sections[0]
+        s = 0.0 if side == "start" else road.length
+
+        if lane_id > 0:
+            offset = 0.0
+            for inner_lane_id in range(1, lane_id):
+                lane = lane_section.left_lanes.get(inner_lane_id)
+                if lane is None:
+                    return None
+                _anchor, linked_width = self._linked_lane_endpoint_constraint(
+                    road,
+                    lane,
+                    side,
+                    roads_by_id,
+                )
+                width = (
+                    self._evaluate_width_or_zero(lane, s)
+                    if linked_width is None
+                    else max(0.0, linked_width)
+                )
+                offset += width
+            return offset
+
+        if lane_id < 0:
+            offset = 0.0
+            for inner_lane_id in range(-1, lane_id, -1):
+                lane = lane_section.right_lanes.get(inner_lane_id)
+                if lane is None:
+                    return None
+                _anchor, linked_width = self._linked_lane_endpoint_constraint(
+                    road,
+                    lane,
+                    side,
+                    roads_by_id,
+                )
+                width = (
+                    self._evaluate_width_or_zero(lane, s)
+                    if linked_width is None
+                    else max(0.0, linked_width)
+                )
+                offset -= width
+            return offset
+
+        return None
+
+    @staticmethod
+    def _evaluate_width_or_zero(lane, s: float) -> float:
+        width = _evaluate_lane_width(lane, s)
+        if width is None or not math.isfinite(width):
+            return 0.0
+        return max(0.0, float(width))
+
+    def _apply_lane_width_endpoint_constraints(
+        self,
+        road: Road,
+        roads_by_id: Dict[int, Road],
+    ) -> bool:
+        changed = False
+        if road.length <= 0.0:
+            return False
+
+        for lane in self._non_center_lanes(road):
+            start_anchor, start_width = self._linked_lane_endpoint_constraint(
+                road, lane, "start", roads_by_id
+            )
+            end_anchor, end_width = self._linked_lane_endpoint_constraint(
+                road, lane, "end", roads_by_id
+            )
+            if start_anchor is None and end_anchor is None:
+                continue
+
+            current_start = self._evaluate_width_or_zero(lane, 0.0)
+            current_end = self._evaluate_width_or_zero(lane, road.length)
+            target_start = (
+                current_start if start_width is None else max(0.0, start_width)
+            )
+            target_end = current_end if end_width is None else max(0.0, end_width)
+
+            if (
+                abs(target_start - current_start)
+                <= DEFAULT_CONFIG.geometry.point_distance_threshold
+                and abs(target_end - current_end)
+                <= DEFAULT_CONFIG.geometry.point_distance_threshold
+            ):
+                continue
+
+            stations = {0.0, float(road.length)}
+            for width_record in lane.widths:
+                if 0.0 < width_record.s_offset < road.length:
+                    stations.add(float(width_record.s_offset))
+            ordered = sorted(stations)
+            if len(ordered) < 2:
+                lane.widths = [LaneWidth(s_offset=0.0, a=target_start)]
+                changed = True
+                continue
+
+            values = []
+            for station in ordered:
+                if math.isclose(station, 0.0, abs_tol=1e-12):
+                    values.append(target_start)
+                elif math.isclose(station, road.length, abs_tol=1e-12):
+                    values.append(target_end)
+                else:
+                    values.append(self._evaluate_width_or_zero(lane, station))
+
+            new_widths = []
+            for i in range(len(ordered) - 1):
+                s0 = ordered[i]
+                s1 = ordered[i + 1]
+                ds = s1 - s0
+                if ds <= DEFAULT_CONFIG.geometry.epsilon:
+                    continue
+                w0 = max(0.0, values[i])
+                w1 = max(0.0, values[i + 1])
+                new_widths.append(
+                    LaneWidth(
+                        s_offset=s0,
+                        a=w0,
+                        b=(w1 - w0) / ds,
+                        c=0.0,
+                        d=0.0,
+                    )
+                )
+
+            if new_widths:
+                lane.widths = new_widths
+                changed = True
+
+        return changed
+
+    def _align_unmapped_connecting_road(
+        self,
+        road: Road,
+        roads_by_id: Dict[int, Road],
+    ) -> bool:
+        lanes = self._non_center_lanes(road)
+        if road.junction < 0 or len(lanes) != 1:
+            return False
+
+        lane = lanes[0]
+        start, _start_width = self._linked_lane_endpoint_constraint(
+            road, lane, "start", roads_by_id
+        )
+        end, _end_width = self._linked_lane_endpoint_constraint(
+            road, lane, "end", roads_by_id
+        )
+        if start is None or end is None:
+            return False
+        linked_heading = self._mean_heading(
+            [
+                heading
+                for heading in (
+                    self._linked_lane_endpoint_heading(
+                        road, lane, "start", roads_by_id
+                    ),
+                    self._linked_lane_endpoint_heading(road, lane, "end", roads_by_id),
+                )
+                if heading is not None
+            ]
+        )
+
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        raw_length = math.hypot(dx, dy)
+        if raw_length > DEFAULT_CONFIG.geometry.epsilon:
+            length = raw_length
+            heading = math.atan2(dy, dx)
+            b_u = 1.0
+        else:
+            length = DEFAULT_CONFIG.geometry.divergence_min_segment_length
+            endpoint = _evaluate_planview_endpoint_with_heading(
+                road.plan_view, at_start=True
+            )
+            heading = (
+                linked_heading
+                if linked_heading is not None
+                else endpoint[2]
+                if endpoint is not None
+                else 0.0
+            )
+            b_u = 0.0
+
+        road.plan_view = PlanView(
+            geometries=[
+                ParamPoly3(
+                    s=0.0,
+                    x=start[0],
+                    y=start[1],
+                    hdg=heading,
+                    length=length,
+                    aU=0.0,
+                    bU=b_u,
+                    cU=0.0,
+                    dU=0.0,
+                    aV=0.0,
+                    bV=0.0,
+                    cV=0.0,
+                    dV=0.0,
+                    pRange="arcLength",
+                )
+            ]
+        )
+        road.length = length
+        dz_ds = (end[2] - start[2]) / length if length > 0.0 else 0.0
+        road.elevation_profile = ElevationProfile(
+            elevations=[Elevation(s=0.0, a=start[2], b=dz_ds, c=0.0, d=0.0)]
+        )
+        road.elevation_offset = start[2]
+        road.reference_start_xyz = start
+        road.reference_end_xyz = (
+            end
+            if raw_length > DEFAULT_CONFIG.geometry.epsilon
+            else (start[0], start[1], end[2])
+        )
+        return True
+
+    def _align_connecting_roads_after_emission(
+        self,
+        emitted_roads: List[Road],
+        road_to_lanelets: Dict[int, List[int]],
+        lanelet_by_id: Dict[int, lanelet2.core.Lanelet],
+        routing_graph: Optional[RoutingGraph],
+    ) -> None:
+        source_backed_inputs: Dict[int, List[lanelet2.core.Lanelet]] = {}
+        for road_id, lanelet_ids in road_to_lanelets.items():
+            lanelet_group = [
+                lanelet_by_id[lanelet_id]
+                for lanelet_id in lanelet_ids
+                if lanelet_id in lanelet_by_id
+            ]
+            if len(lanelet_group) == len(lanelet_ids):
+                source_backed_inputs[road_id] = lanelet_group
+
+        roads_by_id = {road.id: road for road in emitted_roads}
+        realigned_source = 0
+        realigned_synthetic = 0
+        width_constrained = 0
+
+        from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
+            RoadEmissionContext,
+        )
+
+        for index, road in enumerate(list(emitted_roads)):
+            if road.junction < 0 or road.id not in source_backed_inputs:
+                continue
+            start_override, end_override = self._connecting_reference_overrides(
+                road, roads_by_id
+            )
+            if start_override is None and end_override is None:
+                continue
+            lanelet_group = source_backed_inputs[road.id]
+            try:
+                context = RoadEmissionContext.from_lanelet_groups(
+                    self.lanelet_map,
+                    lanelet_group,
+                    traffic_rule=self.config.traffic_rule,
+                    routing_graph=routing_graph,
+                    start_xyz_override=start_override,
+                    end_xyz_override=end_override,
+                )
+                emitted = road.copy_with_emission_context(
+                    lanelet_map=self.lanelet_map,
+                    lanelet_group=lanelet_group,
+                    emission_context=context,
+                    traffic_rule=self.config.traffic_rule,
+                    width_config=self.config.width_estimation,
+                    routing_graph=routing_graph,
+                    start_xyz_override=start_override,
+                    end_xyz_override=end_override,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Road %d: post-freeze endpoint realignment skipped: %s",
+                    road.id,
+                    exc,
+                )
+                continue
+            emitted_roads[index] = emitted
+            roads_by_id[emitted.id] = emitted
+            realigned_source += 1
+
+        for road in emitted_roads:
+            if road.junction < 0:
+                continue
+            if road.id not in source_backed_inputs:
+                if self._align_unmapped_connecting_road(road, roads_by_id):
+                    realigned_synthetic += 1
+            if self._apply_lane_width_endpoint_constraints(road, roads_by_id):
+                width_constrained += 1
+
+        if realigned_source or realigned_synthetic or width_constrained:
+            print(
+                "\n=== Aligning post-freeze connecting-road physical endpoints ===\n"
+                f"Re-emitted {realigned_source} source-backed connecting road(s); "
+                f"realigned {realigned_synthetic} synthetic connector(s); "
+                f"constrained widths on {width_constrained} connecting road(s)"
+            )
 
     def _preserve_topology_roads_for_stop_line_fidelity(
         self,

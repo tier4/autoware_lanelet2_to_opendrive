@@ -19,6 +19,10 @@ from autoware_lanelet2_to_opendrive.opendrive.geometry import (
     PlanView,
     evaluate_plan_view_world,
 )
+from autoware_lanelet2_to_opendrive.opendrive.enums import (
+    ContactPoint,
+    TrafficRule,
+)
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
@@ -35,6 +39,7 @@ from autoware_lanelet2_to_opendrive.divergence import (
     DivergenceSide,
     DivergenceSite,
     SanityGateInputs,
+    _make_zero_length_connecting_road,
     sanity_gate_passes,
 )
 from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
@@ -673,6 +678,43 @@ def test_emission_width_uses_polygon_cross_sections_for_staggered_outer_start() 
     assert _width_at(lane, 20.0) == pytest.approx(3.0, abs=1e-9)
 
 
+def test_emission_width_uses_endpoint_cap_for_oblique_nonzero_start() -> None:
+    right_reference = np.array(
+        [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]],
+        dtype=float,
+    )
+    left_outer = np.array(
+        [[0.05, 3.0, 0.0], [20.05, 3.0, 0.0]],
+        dtype=float,
+    )
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+    )
+
+    topology_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        road_id=52,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+    road = topology_road.copy_with_emission_context(
+        lanelet_map=lanelet_map,
+        lanelet_group=[lanelet],
+        emission_context=context,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+
+    assert road.lanes is not None
+    lane = road.lanes.lane_sections[0].left_lanes[1]
+    assert _width_at(lane, 0.0) == pytest.approx(3.0, abs=1e-9)
+    assert _width_at(lane, road.length) == pytest.approx(3.0, abs=1e-9)
+
+
 def test_emission_width_uses_polygon_cross_sections_for_outer_end_drop() -> None:
     right_reference = np.array(
         [[0.0, 0.0, 0.0], [15.0, 0.0, 0.0], [30.0, 0.0, 0.0]],
@@ -1080,6 +1122,166 @@ def test_production_emission_helper_returns_copies_after_topology_freeze() -> No
     assert emitted_roads[1].emission_context is None
     assert _topology_fingerprint(topology_roads) == baseline
     assert _topology_fingerprint(emitted_roads) == baseline
+
+
+def test_post_freeze_emission_reapplies_connecting_road_endpoint_pin() -> None:
+    pred_map, pred_lanelet = _make_lanelet_from_reference(
+        np.array([[-12.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=float),
+        width=4.0,
+        lanelet_id=1101,
+    )
+    conn_map, conn_lanelet = _make_lanelet_from_reference(
+        np.array([[0.0, 1.0, 0.0], [8.0, 1.0, 0.0]], dtype=float),
+        width=2.0,
+        lanelet_id=1102,
+    )
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelet_map.add(pred_lanelet)
+    lanelet_map.add(conn_lanelet)
+
+    predecessor = Road.construct_from_lanelet_groups(
+        pred_map,
+        [pred_lanelet],
+        road_id=1,
+        traffic_rule="RHT",
+    )
+    connecting = Road.construct_from_lanelet_groups(
+        conn_map,
+        [conn_lanelet],
+        road_id=2,
+        traffic_rule="RHT",
+    )
+    connecting.junction = 100
+    connecting.add_predecessor(
+        element_id=predecessor.id,
+        contact_point=ContactPoint.END,
+    )
+    assert connecting.lanes is not None
+    conn_lane = connecting.lanes.lane_sections[0].right_lanes[-1]
+    conn_lane.predecessor = LaneLink(id=-1)
+
+    converter = _Lanelet2ToOpenDRIVEConverter(
+        lanelet_map,
+        ConversionConfig(
+            traffic_rule="RHT",
+            emission_geometry=EmissionGeometryConfig(enabled=True),
+        ),
+    )
+    emitted = converter._build_emitted_roads_after_topology_freeze(
+        [predecessor, connecting],
+        RoadLaneletMapping(
+            road_to_lanelets={
+                predecessor.id: [pred_lanelet.id],
+                connecting.id: [conn_lanelet.id],
+            },
+            lanelet_to_road={
+                pred_lanelet.id: predecessor.id,
+                conn_lanelet.id: connecting.id,
+            },
+        ),
+        routing_graph=None,
+    )
+
+    emitted_predecessor = emitted[0]
+    emitted_connecting = emitted[1]
+    assert emitted_predecessor.lanes is not None
+    assert emitted_connecting.lanes is not None
+    expected_start = emitted_predecessor.evaluate_lane_anchor_xyz(
+        sorted_index=0,
+        at_start=False,
+    )
+
+    assert expected_start is not None
+    assert emitted_connecting.reference_start_xyz is not None
+    assert (
+        np.linalg.norm(
+            np.asarray(emitted_connecting.reference_start_xyz[:2])
+            - np.asarray(expected_start[:2])
+        )
+        <= 1e-9
+    )
+
+    emitted_lane = emitted_connecting.lanes.lane_sections[0].right_lanes[-1]
+    predecessor_width = (
+        emitted_predecessor.lanes.lane_sections[0].right_lanes[-1].widths[0].a
+    )
+    assert emitted_lane.widths[0].a == pytest.approx(predecessor_width)
+    assert _topology_fingerprint([predecessor, connecting]) == _topology_fingerprint(
+        emitted
+    )
+
+
+def test_post_freeze_synthetic_connector_uses_emitted_lane_endpoint_constraints() -> (
+    None
+):
+    lanelet_map = lanelet2.core.LaneletMap()
+    pred_map, pred_lanelet = _make_lanelet_from_reference(
+        np.array([[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=float),
+        width=4.0,
+        lanelet_id=1201,
+    )
+    succ_map, succ_lanelet = _make_lanelet_from_reference(
+        np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]], dtype=float),
+        width=2.0,
+        lanelet_id=1202,
+    )
+    lanelet_map.add(pred_lanelet)
+    lanelet_map.add(succ_lanelet)
+
+    predecessor = Road.construct_from_lanelet_groups(
+        pred_map,
+        [pred_lanelet],
+        road_id=10,
+        traffic_rule="RHT",
+    )
+    successor = Road.construct_from_lanelet_groups(
+        succ_map,
+        [succ_lanelet],
+        road_id=11,
+        traffic_rule="RHT",
+    )
+    connector = _make_zero_length_connecting_road(
+        road_id=12,
+        junction_id=1000,
+        incoming_road_id=predecessor.id,
+        outgoing_road_id=successor.id,
+        incoming_contact=ContactPoint.END,
+        outgoing_contact=ContactPoint.START,
+        start_xyz=(0.0, 3.0, 0.0),
+        end_xyz=(0.0, 3.2, 0.0),
+        min_segment_length=0.01,
+        traffic_rule=TrafficRule.RHT,
+        from_lane=-1,
+        to_lane=-1,
+        fallback_heading=math.pi / 2.0,
+        lane_width=3.5,
+    )
+
+    converter = _Lanelet2ToOpenDRIVEConverter(
+        lanelet_map,
+        ConversionConfig(
+            traffic_rule="RHT",
+            emission_geometry=EmissionGeometryConfig(enabled=True),
+        ),
+    )
+    roads_by_id = {road.id: road for road in [predecessor, successor, connector]}
+
+    assert converter._align_unmapped_connecting_road(connector, roads_by_id)
+    assert converter._apply_lane_width_endpoint_constraints(connector, roads_by_id)
+
+    assert connector.reference_start_xyz is not None
+    assert connector.reference_end_xyz is not None
+    assert np.linalg.norm(np.asarray(connector.reference_start_xyz[:2])) <= 1e-9
+    assert np.linalg.norm(np.asarray(connector.reference_end_xyz[:2])) <= 1e-9
+    assert connector.plan_view is not None
+    assert connector.plan_view.geometries[0].hdg == pytest.approx(0.0)
+
+    assert connector.lanes is not None
+    connector_lane = connector.lanes.lane_sections[0].right_lanes[-1]
+    start_width = converter._evaluate_width_or_zero(connector_lane, 0.0)
+    end_width = converter._evaluate_width_or_zero(connector_lane, connector.length)
+    assert start_width == pytest.approx(4.0)
+    assert end_width == pytest.approx(2.0)
 
 
 def test_production_emission_gate_keeps_standard_stop_line_emission_roads() -> None:
