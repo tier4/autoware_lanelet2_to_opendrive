@@ -234,6 +234,20 @@ class ParkingLotConfig:
 
 
 @dataclass
+class EmissionGeometryConfig:
+    """Configuration for post-freeze physical OpenDRIVE geometry emission.
+
+    Attributes:
+        enabled: If True, source-backed roads are copied after topology freeze
+            and their planView/elevation/lane widths are emitted from
+            EmissionReferenceGeometry. Defaults to False to preserve existing
+            output.
+    """
+
+    enabled: bool = False
+
+
+@dataclass
 class ConversionConfig:
     """Configuration for Lanelet2 to OpenDRIVE conversion.
 
@@ -262,6 +276,7 @@ class ConversionConfig:
             whether parking spaces and areas are emitted as OpenDRIVE objects,
             and the geometry parameters used for stall sizing and association.
         signal: Configuration for OpenDRIVE signal generation.
+        emission_geometry: Optional post-freeze physical geometry emission.
     """
 
     output_path: Optional[Path] = None
@@ -278,6 +293,9 @@ class ConversionConfig:
     traffic_light: TrafficLightConfig = field(default_factory=TrafficLightConfig)
     parking_lot: ParkingLotConfig = field(default_factory=ParkingLotConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)
+    emission_geometry: EmissionGeometryConfig = field(
+        default_factory=EmissionGeometryConfig
+    )
 
     def __post_init__(self):
         """Validate configuration after initialization."""

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Set, Optional, TYPE_CHECKING
 import lanelet2
 import lxml.etree as ET
+import numpy as np
 from lanelet2.routing import RoutingGraph
 
 from .signal import Signal, Controller, ControlEntry, PositionInertial
@@ -401,6 +402,14 @@ class SignalsAndControllers:
                 sum(float(light_linestring[i].z) for i in range(n)) / n
                 - COORDINATE_OFFSET.z
             )
+
+        if road is not None and getattr(road, "emission_context", None) is not None:
+            from .objects import _project_point_onto_road
+
+            projection = _project_point_onto_road(np.array([x, y]), road)
+            if projection is not None:
+                s, _frenet_t, _road_hdg_at_s = projection
+                return (s, road.get_half_width_at_s(s))
 
         # Build spline for this road
         from .reference_line import ReferenceLine

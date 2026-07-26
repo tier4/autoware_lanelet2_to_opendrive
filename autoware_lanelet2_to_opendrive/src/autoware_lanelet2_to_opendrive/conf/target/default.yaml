@@ -12,6 +12,11 @@ signal:
   # OpenDRIVE signal country code
   country: "DE"
 
+# Post-freeze physical geometry emission. Disabled by default to preserve
+# existing converter output.
+emission_geometry:
+  enabled: false
+
 # ParamPoly3 segment generation configuration
 parampoly3:
   # Enable dynamic segment calculation (recommended)

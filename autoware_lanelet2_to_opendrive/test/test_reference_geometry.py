@@ -1,13 +1,24 @@
 """Tests for topology/emission reference geometry separation."""
 
 import math
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import lanelet2
 import numpy as np
 import pytest
 
-from autoware_lanelet2_to_opendrive.conversion_config import WidthEstimationConfig
-from autoware_lanelet2_to_opendrive.opendrive.geometry import evaluate_plan_view_world
+from autoware_lanelet2_to_opendrive.conversion_config import (
+    ConversionConfig,
+    EmissionGeometryConfig,
+    WidthEstimationConfig,
+)
+from autoware_lanelet2_to_opendrive.main import _Lanelet2ToOpenDRIVEConverter
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    Line,
+    PlanView,
+    evaluate_plan_view_world,
+)
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
@@ -25,6 +36,7 @@ from autoware_lanelet2_to_opendrive.divergence import (
     SanityGateInputs,
     sanity_gate_passes,
 )
+from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
 
 
 SYNTHETIC_CASES = {
@@ -801,6 +813,106 @@ def test_copy_only_emission_keeps_topology_fingerprint_for_any_subset() -> None:
         ]
         assert _topology_fingerprint(roads) == baseline
         assert _topology_fingerprint(emitted_or_topology) == baseline
+
+
+def test_production_emission_helper_returns_copies_after_topology_freeze() -> None:
+    assert not ConversionConfig().emission_geometry.enabled
+
+    reference_points = np.array(
+        [[0.0, 0.0, 0.0], [20.0, 0.0, 0.2], [25.0, 1.0, 0.4]],
+        dtype=float,
+    )
+    lanelet_map, lanelet = _make_lanelet_from_reference(reference_points, width=3.0)
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        road_id=42,
+        traffic_rule="RHT",
+    )
+    unmapped_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        road_id=43,
+        traffic_rule="RHT",
+    )
+    topology_roads = [road, unmapped_road]
+    baseline = _topology_fingerprint(topology_roads)
+    converter = _Lanelet2ToOpenDRIVEConverter(
+        lanelet_map,
+        ConversionConfig(
+            traffic_rule="RHT",
+            emission_geometry=EmissionGeometryConfig(enabled=True),
+        ),
+    )
+    mapping = RoadLaneletMapping(
+        road_to_lanelets={road.id: [lanelet.id]},
+        lanelet_to_road={lanelet.id: road.id},
+    )
+
+    emitted_roads = converter._build_emitted_roads_after_topology_freeze(
+        topology_roads,
+        mapping,
+        routing_graph=None,
+    )
+
+    assert len(emitted_roads) == 2
+    assert emitted_roads[0] is not road
+    assert emitted_roads[1] is not unmapped_road
+    assert road.emission_context is None
+    assert unmapped_road.emission_context is None
+    assert emitted_roads[0].emission_context is not None
+    assert emitted_roads[1].emission_context is None
+    assert _topology_fingerprint(topology_roads) == baseline
+    assert _topology_fingerprint(emitted_roads) == baseline
+
+
+def test_production_emission_gate_preserves_topology_when_stop_line_clamps() -> None:
+    def _road(road_id: int, length: float, emitted: bool) -> MagicMock:
+        road = MagicMock()
+        road.id = road_id
+        road.length = length
+        road.plan_view = PlanView(
+            geometries=[Line(s=0.0, x=0.0, y=0.0, hdg=0.0, length=length)]
+        )
+        road.emission_context = object() if emitted else None
+        return road
+
+    class _StopLine:
+        id = 9001
+        attributes = {"type": "stop_line"}
+
+        def __iter__(self):
+            return iter(
+                [
+                    SimpleNamespace(x=10.0, y=-1.0, z=0.0),
+                    SimpleNamespace(x=10.0, y=1.0, z=0.0),
+                ]
+            )
+
+        def __len__(self):
+            return 2
+
+    stop_line = _StopLine()
+
+    lanelet_map = MagicMock()
+    lanelet_map.lineStringLayer = [stop_line]
+    lanelet_map.laneletLayer = []
+    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, ConversionConfig())
+
+    topology_road = _road(1, length=10.0, emitted=False)
+    emitted_road = _road(1, length=9.0, emitted=True)
+    filtered = converter._preserve_topology_roads_for_stop_line_fidelity(
+        [topology_road],
+        [emitted_road],
+        lanelet_to_road_and_lane={},
+        routing_graph=None,
+    )
+
+    assert len(filtered) == 1
+    assert filtered[0] is not emitted_road
+    assert filtered[0] is not topology_road
+    assert filtered[0].id == topology_road.id
+    assert filtered[0].emission_context is None
 
 
 def test_divergence_sanity_gate_uses_frozen_topology_after_emission_copy() -> None:

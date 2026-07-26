@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Main script to convert Lanelet2 maps to OpenDRIVE format."""
 
+import copy
 import shutil
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 import tempfile
 import logging
+import math
 from datetime import datetime
 
 import hydra
@@ -55,6 +57,7 @@ from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
 from autoware_lanelet2_to_opendrive.conversion_config import (
     ArcSpiralConfig,
     ConversionConfig,
+    EmissionGeometryConfig,
     OriginSpec,
     ParamPoly3Config,
     ParkingLotConfig,
@@ -388,6 +391,205 @@ class _Lanelet2ToOpenDRIVEConverter:
         lanelet_to_road_and_lane = Road.set_all_lane_links(self.lanelet_map, all_roads)
         return lanelet_to_road_and_lane
 
+    def _build_emitted_roads_after_topology_freeze(
+        self,
+        topology_roads: List[Road],
+        mapping: RoadLaneletMapping,
+        routing_graph: Optional[RoutingGraph],
+    ) -> List[Road]:
+        """Return final output roads with post-freeze emission copies applied.
+
+        The input ``topology_roads`` list is the frozen logical graph and is
+        never mutated here.  Source-backed roads get an emitted copy with
+        physical planView/elevation/lane widths rebuilt from the source
+        boundary. Roads without source lanelets, or with an invalid emission
+        context, still get a final-output copy so later signal/object assignment
+        cannot mutate the frozen topology graph.
+        """
+        from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
+            RoadEmissionContext,
+        )
+
+        lanelet_by_id = {
+            lanelet.id: lanelet for lanelet in self.lanelet_map.laneletLayer
+        }
+        road_to_lanelets = mapping.road_to_lanelets
+        emitted_roads: List[Road] = []
+        emitted_count = 0
+        skipped_count = 0
+
+        for road in topology_roads:
+            lanelet_ids = road_to_lanelets.get(road.id)
+            if not lanelet_ids:
+                emitted_roads.append(copy.deepcopy(road))
+                continue
+
+            lanelet_group = [
+                lanelet_by_id[lanelet_id]
+                for lanelet_id in lanelet_ids
+                if lanelet_id in lanelet_by_id
+            ]
+            if len(lanelet_group) != len(lanelet_ids):
+                logger.warning(
+                    "Road %d: emission skipped because %d/%d source lanelets "
+                    "could be resolved",
+                    road.id,
+                    len(lanelet_group),
+                    len(lanelet_ids),
+                )
+                skipped_count += 1
+                emitted_roads.append(copy.deepcopy(road))
+                continue
+
+            try:
+                context = RoadEmissionContext.from_lanelet_groups(
+                    self.lanelet_map,
+                    lanelet_group,
+                    traffic_rule=self.config.traffic_rule,
+                    routing_graph=routing_graph,
+                )
+                emitted_roads.append(
+                    road.copy_with_emission_context(
+                        lanelet_map=self.lanelet_map,
+                        lanelet_group=lanelet_group,
+                        emission_context=context,
+                        traffic_rule=self.config.traffic_rule,
+                        width_config=self.config.width_estimation,
+                        routing_graph=routing_graph,
+                    )
+                )
+                emitted_count += 1
+            except Exception as exc:
+                logger.warning(
+                    "Road %d: emission skipped after topology freeze: %s",
+                    road.id,
+                    exc,
+                )
+                skipped_count += 1
+                emitted_roads.append(copy.deepcopy(road))
+
+        print(
+            "\n=== Applying post-freeze emission geometry ===\n"
+            f"Emitted {emitted_count} source-backed road(s); "
+            f"skipped {skipped_count}"
+        )
+        return emitted_roads
+
+    def _preserve_topology_roads_for_stop_line_fidelity(
+        self,
+        topology_roads: List[Road],
+        emitted_roads: List[Road],
+        lanelet_to_road_and_lane: Dict[int, Tuple[int, int]],
+        routing_graph: Optional[RoutingGraph],
+    ) -> List[Road]:
+        """Fallback individual emitted roads when stop lines become unrepresentable.
+
+        Emission geometry is road-local.  A stop line that is well represented
+        in the frozen topology domain can become an endpoint-clamped object if
+        the emitted physical reference no longer spans that regulatory line.
+        In that case, keep a copied topology-domain road for output rather than
+        mixing topology s/t into an emitted road.
+        """
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+        from autoware_lanelet2_to_opendrive.opendrive.objects import (
+            _project_point_onto_road_with_distance,
+            find_best_road_for_stop_line,
+        )
+
+        topology_by_id = {road.id: road for road in topology_roads}
+        emitted_by_id = {road.id: road for road in emitted_roads}
+        endpoint_tolerance = DEFAULT_CONFIG.geometry.divergence_endpoint_tolerance
+        fidelity_tolerance = max(
+            self.config.stopline.width / 2.0,
+            DEFAULT_CONFIG.geometry.point_distance_threshold,
+        )
+        stop_line_related_lanelets = self._build_stop_line_related_lanelets()
+        blocked_road_to_stop_lines: Dict[int, List[int]] = {}
+
+        def _projection_longitudinal_residual(
+            linestring: lanelet2.core.LineString3d,
+            road: Road,
+        ) -> Optional[float]:
+            pts = extract_points(linestring, dimensions=2)
+            if len(pts) == 0:
+                return None
+            projection = _project_point_onto_road_with_distance(
+                np.mean(pts, axis=0),
+                road,
+            )
+            if projection is None:
+                return None
+            residual_sq = max(
+                0.0,
+                projection.distance_sq - projection.t * projection.t,
+            )
+            return math.sqrt(residual_sq)
+
+        for ls in self.lanelet_map.lineStringLayer:
+            if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
+                continue
+            related_lanelets = stop_line_related_lanelets.get(ls.id, [])
+            predecessor_lanelets = self._incoming_predecessors_for_stop_line(
+                ls,
+                related_lanelets,
+                routing_graph,
+                endpoint_tolerance,
+            )
+            topology_road = find_best_road_for_stop_line(
+                ls,
+                topology_roads,
+                related_roads=self._mapped_roads_for_lanelets(
+                    related_lanelets,
+                    lanelet_to_road_and_lane,
+                    topology_by_id,
+                ),
+                predecessor_roads=self._mapped_roads_for_lanelets(
+                    predecessor_lanelets,
+                    lanelet_to_road_and_lane,
+                    topology_by_id,
+                ),
+                endpoint_tolerance=endpoint_tolerance,
+                longitudinal_tolerance=fidelity_tolerance,
+            )
+            if topology_road is None:
+                continue
+            emitted_road = emitted_by_id.get(topology_road.id)
+            if emitted_road is None or emitted_road.emission_context is None:
+                continue
+
+            topology_residual = _projection_longitudinal_residual(ls, topology_road)
+            emission_residual = _projection_longitudinal_residual(ls, emitted_road)
+            if topology_residual is None or emission_residual is None:
+                continue
+            if (
+                topology_residual <= fidelity_tolerance
+                and emission_residual > fidelity_tolerance
+                and emission_residual > topology_residual + fidelity_tolerance
+            ):
+                blocked_road_to_stop_lines.setdefault(topology_road.id, []).append(
+                    ls.id
+                )
+
+        if not blocked_road_to_stop_lines:
+            return emitted_roads
+
+        blocked_road_ids = set(blocked_road_to_stop_lines)
+        filtered_roads = [
+            copy.deepcopy(topology_by_id[road.id])
+            if road.id in blocked_road_ids
+            else road
+            for road in emitted_roads
+        ]
+        blocked_summary = {
+            road_id: sorted(stop_line_ids)
+            for road_id, stop_line_ids in sorted(blocked_road_to_stop_lines.items())
+        }
+        print(
+            "\n=== Preserving topology geometry for stop-line fidelity ===\n"
+            f"Preserved {len(blocked_road_ids)} road(s): {blocked_summary}"
+        )
+        return filtered_roads
+
     def _extract_and_assign_signals(
         self,
         all_roads: List[Road],
@@ -514,7 +716,11 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"Associated {controllers_assigned_count} controller references across {len(junctions)} junctions"
         )
 
-    def _extract_and_assign_crosswalks(self, all_roads: List[Road]) -> None:
+    def _extract_and_assign_crosswalks(
+        self,
+        all_roads: List[Road],
+        topology_roads: Optional[List[Road]] = None,
+    ) -> None:
         """Extract crosswalk lanelets and assign them as objects to the nearest roads.
 
         For each lanelet with subtype="crosswalk", this method:
@@ -538,12 +744,15 @@ class _Lanelet2ToOpenDRIVEConverter:
         )
         print(f"Found {len(crosswalk_lanelets)} crosswalk lanelets")
 
+        selection_roads = topology_roads if topology_roads is not None else all_roads
+        output_road_by_id = {road.id: road for road in all_roads}
         road_objects: Dict[int, List] = {}
 
         for lanelet in crosswalk_lanelets:
-            best_road = find_nearest_road(lanelet, all_roads)
-            if best_road is None:
+            topology_road = find_nearest_road(lanelet, selection_roads)
+            if topology_road is None:
                 continue
+            best_road = output_road_by_id.get(topology_road.id, topology_road)
             obj = CrosswalkObject.construct_from_crosswalk_lanelet(
                 lanelet, best_road, object_id=lanelet.id
             )
@@ -822,6 +1031,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_marking_stop_line_ids: Optional[Set[int]] = None,
         lanelet_to_road_and_lane: Optional[Dict[int, Tuple[int, int]]] = None,
         routing_graph: Optional[RoutingGraph] = None,
+        topology_roads: Optional[List[Road]] = None,
     ) -> Tuple[Dict[int, List[int]], Dict, Dict]:
         """Extract stop line linestrings and assign them as objects to nearest roads.
 
@@ -900,7 +1110,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_marking_294_count = 0
         signal_country = self.config.signal.country
         endpoint_tolerance = DEFAULT_CONFIG.geometry.divergence_endpoint_tolerance
-        road_by_id = {road.id: road for road in all_roads}
+        selection_roads = topology_roads if topology_roads is not None else all_roads
+        road_by_id = {road.id: road for road in selection_roads}
+        output_road_by_id = {road.id: road for road in all_roads}
         stop_line_related_lanelets = self._build_stop_line_related_lanelets()
         resolved_lanelet_to_road_and_lane = lanelet_to_road_and_lane or {}
 
@@ -920,7 +1132,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             )
             best_road = find_best_road_for_stop_line(
                 ls,
-                all_roads,
+                selection_roads,
                 related_roads=self._mapped_roads_for_lanelets(
                     related_lanelets,
                     resolved_lanelet_to_road_and_lane,
@@ -943,9 +1155,10 @@ class _Lanelet2ToOpenDRIVEConverter:
                 )
                 continue
 
+            output_road = output_road_by_id.get(best_road.id, best_road)
             obj = StopLineObject.construct_from_linestring(
                 linestring=ls,
-                road=best_road,
+                road=output_road,
                 object_id=ls.id,
                 width=self.config.stopline.width,
                 carla_format=self.config.stopline.carla_stop_line,
@@ -956,11 +1169,11 @@ class _Lanelet2ToOpenDRIVEConverter:
                 )
                 continue
 
-            road_objects.setdefault(best_road.id, []).append(obj)
+            road_objects.setdefault(output_road.id, []).append(obj)
             current_signal_types: List[int] = []
 
             # Use half of road width at s for signal t coordinate
-            signal_t = best_road.get_half_width_at_s(obj.s)
+            signal_t = output_road.get_half_width_at_s(obj.s)
 
             def _make_signal(
                 signal_type: int,
@@ -999,7 +1212,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                         for tl_sig_id in tl_signal_ids
                     ],
                 )
-                road_stop_line_signals.setdefault(best_road.id, []).append(
+                road_stop_line_signals.setdefault(output_road.id, []).append(
                     stop_line_signal
                 )
 
@@ -1020,7 +1233,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     signal_type=SignalType.STOP_SIGN,
                     name=f"StopSign_{ls.id}",
                 )
-                road_stop_line_signals.setdefault(best_road.id, []).append(
+                road_stop_line_signals.setdefault(output_road.id, []).append(
                     stop_sign_signal
                 )
                 stop_line_signal_id_counter += 1
@@ -1039,7 +1252,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     signal_type=SignalType.YIELD_SIGN,
                     name=f"YieldSign_{ls.id}",
                 )
-                road_stop_line_signals.setdefault(best_road.id, []).append(
+                road_stop_line_signals.setdefault(output_road.id, []).append(
                     yield_sign_signal
                 )
                 yield_sign_id = stop_line_signal_id_counter
@@ -1052,7 +1265,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     name=f"StopLine_{ls.id}",
                     dependencies=[Dependency(id=yield_sign_id, type="yieldSign")],
                 )
-                road_stop_line_signals.setdefault(best_road.id, []).append(
+                road_stop_line_signals.setdefault(output_road.id, []).append(
                     rm_stop_line_signal
                 )
                 stop_line_signal_id_counter += 1
@@ -1063,7 +1276,7 @@ class _Lanelet2ToOpenDRIVEConverter:
 
             # Record mapping for this successfully converted stop line
             stop_line_mapping[ls.id] = StopLineMappingEntry(
-                road_id=best_road.id,
+                road_id=output_road.id,
                 signal_types=current_signal_types,
             )
 
@@ -1294,18 +1507,41 @@ class _Lanelet2ToOpenDRIVEConverter:
             routing_graph=regular_result.routing_graph,
         )
 
+        # Topology freeze point: from here on, ``topology_roads`` is the
+        # immutable logical graph used for ownership/reference decisions.
+        topology_roads = all_roads
+        if self.config.emission_geometry.enabled:
+            final_roads = self._build_emitted_roads_after_topology_freeze(
+                topology_roads,
+                mapping,
+                regular_result.routing_graph,
+            )
+            final_roads = self._preserve_topology_roads_for_stop_line_fidelity(
+                topology_roads,
+                final_roads,
+                lanelet_to_road_and_lane,
+                regular_result.routing_graph,
+            )
+        else:
+            final_roads = topology_roads
+
         # Step 5: Extract and assign signals
         signals_and_controllers = self._extract_and_assign_signals(
-            all_roads, mapping, junction_lanelets
+            final_roads, mapping, junction_lanelets
         )
 
         # Step 6: Create and assign controllers
         self._assign_controllers_to_junctions(
-            signals_and_controllers, junctions, all_roads
+            signals_and_controllers, junctions, final_roads
         )
 
         # Step 6.5: Extract crosswalks and assign as road objects
-        self._extract_and_assign_crosswalks(all_roads)
+        self._extract_and_assign_crosswalks(
+            final_roads,
+            topology_roads=topology_roads
+            if final_roads is not topology_roads
+            else None,
+        )
 
         # Step 6.6: Build stop line -> traffic light signal associations
         print("\n=== Building stop line to traffic light associations ===")
@@ -1348,13 +1584,16 @@ class _Lanelet2ToOpenDRIVEConverter:
             stop_line_mapping,
             skipped_stop_lines,
         ) = self._extract_and_assign_stop_lines(
-            all_roads,
+            final_roads,
             stop_line_to_tl_signal_ids,
             stop_sign_stop_line_ids,
             next_signal_id,
             road_marking_stop_line_ids=road_marking_stop_line_ids,
             lanelet_to_road_and_lane=lanelet_to_road_and_lane,
             routing_graph=regular_result.routing_graph,
+            topology_roads=topology_roads
+            if final_roads is not topology_roads
+            else None,
         )
 
         # Step 6.8: Add back-links to traffic light signals pointing to stop lines.
@@ -1386,7 +1625,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             validate_no_duplicate_road_ids,
         )
 
-        dup_result = validate_no_duplicate_road_ids(all_roads)
+        dup_result = validate_no_duplicate_road_ids(final_roads)
         if not dup_result.is_valid:
             print(f"\nWARNING: {dup_result.get_error_summary()}")
 
@@ -1397,18 +1636,20 @@ class _Lanelet2ToOpenDRIVEConverter:
         # starting ID is computed from the final set of real roads.
         if self.config.parking_lot.enabled:
             print("\n=== Building parking lots ===")
-            starting_id = (max(road.id for road in all_roads) + 1) if all_roads else 0
+            starting_id = (
+                (max(road.id for road in final_roads) + 1) if final_roads else 0
+            )
             parking_roads = construct_parking_roads(
                 self.lanelet_map,
                 starting_id,
                 self.config.parking_lot,
             )
-            all_roads.extend(parking_roads)
+            final_roads.extend(parking_roads)
             print(f"Built {len(parking_roads)} parking roads")
 
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(
-            all_roads, junctions, signals_and_controllers
+            final_roads, junctions, signals_and_controllers
         )
 
         return (
@@ -1712,6 +1953,16 @@ def preprocess_and_convert_with_hydra(
         f"nearest_area_threshold={parking_config.nearest_area_threshold_m}m"
     )
 
+    # Build EmissionGeometryConfig from Hydra config
+    # Priority: map config > target config > default
+    emission_dict = cfg.map.get("emission_geometry") or cfg.target.get(
+        "emission_geometry", {}
+    )
+    emission_config = EmissionGeometryConfig(
+        enabled=emission_dict.get("enabled", False) if emission_dict else False
+    )
+    logger.info(f"Emission geometry config: enabled={emission_config.enabled}")
+
     # Build ConversionConfig from parameters
     conversion_config = ConversionConfig(
         output_path=output_file,
@@ -1729,6 +1980,7 @@ def preprocess_and_convert_with_hydra(
         traffic_light=tl_config,
         parking_lot=parking_config,
         signal=signal_config,
+        emission_geometry=emission_config,
     )
 
     # mgrs_code is already stored in conversion_config.origin.mgrs_code;
