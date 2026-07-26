@@ -1,5 +1,6 @@
 """OpenDRIVE road definitions."""
 
+import copy
 import logging
 from dataclasses import dataclass
 from typing import (
@@ -40,6 +41,7 @@ from .geometry import (
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .lane_sections import Lanes
 from .reference_line import ReferenceLine
+from .reference_geometry import RoadEmissionContext
 from .road_links import Predecessor, RoadLink, Successor
 
 logger = logging.getLogger(__name__)
@@ -460,6 +462,7 @@ class Road:
     # correct rendered lane edge rather than the regular road's reference
     # line — see :meth:`evaluate_lane_anchor_xyz` and #437.
     sorted_lanelet_ids: Optional[List[int]] = None
+    emission_context: Optional[RoadEmissionContext] = None
 
     def evaluate_lane_anchor_xyz(
         self,
@@ -649,6 +652,121 @@ class Road:
             mapping.update(section_mapping)
 
         return mapping
+
+    def copy_with_emission_context(
+        self,
+        *,
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet_group: LaneletInput,
+        emission_context: RoadEmissionContext,
+        traffic_rule: Optional[str] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
+        routing_graph: Optional[RoutingGraph] = None,
+        start_xyz_override: Optional[Tuple[float, float, float]] = None,
+        end_xyz_override: Optional[Tuple[float, float, float]] = None,
+    ) -> "Road":
+        """Return an emitted copy of this already-frozen topology road.
+
+        Topology synthesis must keep using the original road.  This method
+        copies the road first, then applies emission-domain planView,
+        elevation, and lane widths to that copy. Road links, junction
+        ownership, lane IDs, and lanelet mapping are preserved.
+        """
+        emitted = copy.deepcopy(self)
+        emitted._apply_emission_context_in_place(
+            lanelet_map=lanelet_map,
+            lanelet_group=lanelet_group,
+            emission_context=emission_context,
+            traffic_rule=traffic_rule,
+            width_config=width_config,
+            routing_graph=routing_graph,
+            start_xyz_override=start_xyz_override,
+            end_xyz_override=end_xyz_override,
+        )
+        return emitted
+
+    def _apply_emission_context_in_place(
+        self,
+        *,
+        lanelet_map: lanelet2.core.LaneletMap,
+        lanelet_group: LaneletInput,
+        emission_context: RoadEmissionContext,
+        traffic_rule: Optional[str] = None,
+        width_config: Optional[WidthEstimationConfig] = None,
+        routing_graph: Optional[RoutingGraph] = None,
+        start_xyz_override: Optional[Tuple[float, float, float]] = None,
+        end_xyz_override: Optional[Tuple[float, float, float]] = None,
+    ) -> None:
+        """Apply emission geometry to an isolated emitted road representation.
+
+        Use :meth:`copy_with_emission_context` for normal callers. This helper
+        mutates only the copied road, after topology freeze.
+        """
+        validation = emission_context.validate()
+        if not validation.valid:
+            raise ValueError(
+                "Invalid emission road context: " + "; ".join(validation.errors)
+            )
+
+        old_lane_links: Dict[
+            int,
+            Tuple[Optional[LaneLink], Optional[LaneLink]],
+        ] = {}
+        if self.lanes is not None:
+            for lane_section in self.lanes.lane_sections:
+                for lane in list(lane_section.left_lanes.values()) + list(
+                    lane_section.right_lanes.values()
+                ):
+                    if lane.lanelet_id is not None:
+                        old_lane_links[lane.lanelet_id] = (
+                            lane.predecessor,
+                            lane.successor,
+                        )
+
+        from .lane_section import LaneSection
+
+        lane_section = LaneSection.construct_from_lanelet_groups(
+            lanelet_map,
+            lanelet_group,
+            s_offset=0.0,
+            traffic_rule=traffic_rule,
+            width_config=width_config,
+            routing_graph=routing_graph,
+            start_xyz_override=start_xyz_override,
+            end_xyz_override=end_xyz_override,
+            emission_context=emission_context,
+        )
+        for lane in list(lane_section.left_lanes.values()) + list(
+            lane_section.right_lanes.values()
+        ):
+            if lane.lanelet_id is None:
+                continue
+            links = old_lane_links.get(lane.lanelet_id)
+            if links is None:
+                continue
+            lane.predecessor, lane.successor = links
+
+        self.plan_view = emission_context.to_plan_view()
+        self.length = emission_context.length
+        self.elevation_profile = emission_context.to_elevation_profile()
+        self.elevation_offset = emission_context.elevation_offset
+        self.lanes = Lanes(lane_sections=[lane_section])
+        self.emission_context = emission_context
+
+        rendered_start_xyz = _evaluate_plan_view_world(self.plan_view, at_start=True)
+        rendered_end_xyz = _evaluate_plan_view_world(self.plan_view, at_start=False)
+        if self.elevation_profile is not None and rendered_start_xyz is not None:
+            self.reference_start_xyz = (
+                rendered_start_xyz[0],
+                rendered_start_xyz[1],
+                _evaluate_elevation_profile(self.elevation_profile, 0.0),
+            )
+        if self.elevation_profile is not None and rendered_end_xyz is not None:
+            self.reference_end_xyz = (
+                rendered_end_xyz[0],
+                rendered_end_xyz[1],
+                _evaluate_elevation_profile(self.elevation_profile, self.length),
+            )
 
     def get_elevation_at_s(self, s: float) -> float:
         """Calculate road surface elevation at a given s-coordinate.
@@ -1185,6 +1303,7 @@ class Road:
 
         # Get elevation profile from reference line, aligned with geometry boundaries
         elevation_profile = reference_line.get_elevation_profile(geometry_s_values)
+        elevation_offset = reference_line.elevation_offset
 
         # Extract speed limit and road type from lanelets
         road_types_list = Road._extract_road_types_from_lanelets(lanelet_list)
@@ -1248,7 +1367,7 @@ class Road:
             plan_view=plan_view,
             elevation_profile=elevation_profile,
             lanes=get_lanes(),
-            elevation_offset=reference_line.elevation_offset,
+            elevation_offset=elevation_offset,
             road_types=road_types_list,
             reference_start_xyz=rendered_start_xyz,
             reference_end_xyz=rendered_end_xyz,

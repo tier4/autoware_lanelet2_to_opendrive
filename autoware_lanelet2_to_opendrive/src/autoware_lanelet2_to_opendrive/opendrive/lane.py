@@ -1,7 +1,7 @@
 """Lane implementation for OpenDRIVE conversion."""
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import lanelet2
 import lxml.etree as ET
 
@@ -23,6 +23,9 @@ from .opendrive_dataclass import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from .reference_geometry import EmissionReferenceGeometry
 
 
 _PARTICIPANT_TO_RESTRICTION: Dict[str, str] = {
@@ -207,6 +210,7 @@ class Lane:
         rule: Optional[str] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         reference_line_spline: Optional["Splines"] = None,
+        emission_geometry: Optional["EmissionReferenceGeometry"] = None,
         anchor_start_override: Optional[Tuple[float, float, float]] = None,
         anchor_end_override: Optional[Tuple[float, float, float]] = None,
     ) -> "Lane":
@@ -225,6 +229,9 @@ class Lane:
             reference_line_spline: Road reference line spline for s-coordinate alignment.
                                   If provided, width s-coordinates will be aligned to
                                   the road reference line instead of lanelet boundaries.
+            emission_geometry: Optional emission-domain reference geometry. When
+                provided, widths are rebuilt from source lane boundaries in the
+                emission station domain instead of remapping old topology widths.
             anchor_start_override: Optional (x, y, z) override for the anchor
                 boundary's first point.  Set by the junction phase only for
                 the OUTERMOST lanelet (whose anchor IS the road reference
@@ -291,7 +298,19 @@ class Lane:
             )
 
         # Use reference line-based width calculation if reference line is provided
-        if reference_line_spline is not None:
+        if emission_geometry is not None:
+            from .reference_geometry import (
+                estimate_lanelet_width_with_emission_geometry,
+            )
+
+            width_spline = estimate_lanelet_width_with_emission_geometry(
+                lanelet,
+                emission_geometry,
+                config,
+                anchor_start_override=anchor_start_override,
+                anchor_end_override=anchor_end_override,
+            )
+        elif reference_line_spline is not None:
             from ..centerline import estimate_lanelet_width_with_reference_line
 
             width_spline = estimate_lanelet_width_with_reference_line(

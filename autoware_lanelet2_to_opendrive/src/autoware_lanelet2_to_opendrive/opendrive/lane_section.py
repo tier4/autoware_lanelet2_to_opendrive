@@ -7,6 +7,7 @@ from lanelet2.routing import RoutingGraph
 
 if TYPE_CHECKING:
     from .lane import Lane
+    from .reference_geometry import RoadEmissionContext
 from .reference_line import ReferenceLine
 from ..conversion_config import WidthEstimationConfig
 from .enums import RoadMarkType, RoadMarkLaneChange
@@ -85,6 +86,7 @@ class LaneSection:
         routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
         end_xyz_override: Optional[Tuple[float, float, float]] = None,
+        emission_context: Optional["RoadEmissionContext"] = None,
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -103,6 +105,8 @@ class LaneSection:
                 to the OUTERMOST lane's width calculation (P0-2 junction
                 endpoint fidelity, lane-width side).
             end_xyz_override: Optional analogous override for the s=length end.
+            emission_context: Optional emission-domain context. When supplied,
+                lane widths are rebuilt against the emission reference geometry.
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -192,6 +196,11 @@ class LaneSection:
                 rule=traffic_rule_normalized,
                 width_config=width_config,
                 reference_line_spline=reference_line_spline,
+                emission_geometry=(
+                    emission_context.emission_geometry
+                    if emission_context is not None
+                    else None
+                ),
                 anchor_start_override=(start_xyz_override if is_outermost else None),
                 anchor_end_override=(end_xyz_override if is_outermost else None),
             )
