@@ -1082,7 +1082,7 @@ def test_production_emission_helper_returns_copies_after_topology_freeze() -> No
     assert _topology_fingerprint(emitted_roads) == baseline
 
 
-def test_production_emission_gate_preserves_topology_when_stop_line_clamps() -> None:
+def test_production_emission_gate_keeps_standard_stop_line_emission_roads() -> None:
     def _road(road_id: int, length: float, emitted: bool) -> MagicMock:
         road = MagicMock()
         road.id = road_id
@@ -1114,6 +1114,55 @@ def test_production_emission_gate_preserves_topology_when_stop_line_clamps() -> 
     lanelet_map.lineStringLayer = [stop_line]
     lanelet_map.laneletLayer = []
     converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, ConversionConfig())
+
+    topology_road = _road(1, length=10.0, emitted=False)
+    emitted_road = _road(1, length=9.0, emitted=True)
+    filtered = converter._preserve_topology_roads_for_stop_line_fidelity(
+        [topology_road],
+        [emitted_road],
+        lanelet_to_road_and_lane={},
+        routing_graph=None,
+    )
+
+    assert len(filtered) == 1
+    assert filtered[0] is emitted_road
+    assert filtered[0].emission_context is not None
+
+
+def test_production_emission_gate_preserves_topology_for_carla_stop_line_clamp() -> (
+    None
+):
+    def _road(road_id: int, length: float, emitted: bool) -> MagicMock:
+        road = MagicMock()
+        road.id = road_id
+        road.length = length
+        road.plan_view = PlanView(
+            geometries=[Line(s=0.0, x=0.0, y=0.0, hdg=0.0, length=length)]
+        )
+        road.emission_context = object() if emitted else None
+        return road
+
+    class _StopLine:
+        id = 9002
+        attributes = {"type": "stop_line"}
+
+        def __iter__(self):
+            return iter(
+                [
+                    SimpleNamespace(x=10.0, y=-1.0, z=0.0),
+                    SimpleNamespace(x=10.0, y=1.0, z=0.0),
+                ]
+            )
+
+        def __len__(self):
+            return 2
+
+    config = ConversionConfig()
+    config.stopline.carla_stop_line = True
+    lanelet_map = MagicMock()
+    lanelet_map.lineStringLayer = [_StopLine()]
+    lanelet_map.laneletLayer = []
+    converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config)
 
     topology_road = _road(1, length=10.0, emitted=False)
     emitted_road = _road(1, length=9.0, emitted=True)

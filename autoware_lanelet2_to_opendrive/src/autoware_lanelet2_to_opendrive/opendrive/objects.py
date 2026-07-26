@@ -714,6 +714,70 @@ def _compute_corner_locals(
     return corners
 
 
+def _normalize_angle(angle: float) -> float:
+    return (angle + math.pi) % (2 * math.pi) - math.pi
+
+
+def _evaluate_road_reference_at_s(
+    road: "Road",
+    s: float,
+) -> Optional[tuple[float, float, float]]:
+    """Evaluate a road reference line at global road station s."""
+    if road.plan_view is None or not road.plan_view.geometries:
+        return None
+
+    best_geom: Optional[GeometryBase] = None
+    best_p = 0.0
+    best_error = float("inf")
+    for geom in road.plan_view.geometries:
+        geom_s = float(getattr(geom, "s", 0.0))
+        geom_length = float(getattr(geom, "length", 0.0))
+        if geom_length <= 0.0 or not math.isfinite(geom_length):
+            continue
+        p = max(0.0, min(geom_length, float(s) - geom_s))
+        error = abs((geom_s + p) - float(s))
+        if error < best_error:
+            best_error = error
+            best_geom = geom
+            best_p = p
+
+    if best_geom is None:
+        return None
+    return _evaluate_geometry_at(best_geom, best_p)
+
+
+def _compute_stop_line_outline_corners(
+    anchor: np.ndarray,
+    stop_line_dir: np.ndarray,
+    p0: np.ndarray,
+    p1: np.ndarray,
+    width: float,
+) -> List[CornerLocal]:
+    """Compute a painted stop-line rectangle around the source LineString."""
+    normal = np.array([-stop_line_dir[1], stop_line_dir[0]])
+    half_width = 0.5 * max(0.0, float(width))
+    vertices = [
+        p0 - half_width * normal,
+        p1 - half_width * normal,
+        p1 + half_width * normal,
+        p0 + half_width * normal,
+    ]
+
+    corners: List[CornerLocal] = []
+    for vertex in vertices:
+        delta = vertex - anchor
+        corners.append(
+            CornerLocal(
+                u=float(np.dot(delta, stop_line_dir)),
+                v=float(np.dot(delta, normal)),
+                z=0.0,
+            )
+        )
+    if corners:
+        corners.append(corners[0])
+    return corners
+
+
 @dataclass
 class StopLineObject:
     """OpenDRIVE object representing a stop line.
@@ -737,6 +801,7 @@ class StopLineObject:
     )
     length: float = 0.0  # extent in u-direction (along stop line heading = across road)
     carla_format: bool = False  # If True, output CARLA Stencil_STOP format
+    corners: List[CornerLocal] = field(default_factory=list)
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element.
@@ -764,6 +829,12 @@ class StopLineObject:
         elem.set("orientation", orientation)
         elem.set("width", str(self.width))
         elem.set("length", str(self.length))
+
+        if not self.carla_format and self.corners:
+            outline_elem = ET.SubElement(elem, "outline")
+            for corner in self.corners:
+                outline_elem.append(corner.to_xml())
+
         return elem
 
     @staticmethod
@@ -773,6 +844,7 @@ class StopLineObject:
         object_id: int,
         width: float = 0.1,
         carla_format: bool = False,
+        use_physical_outline: bool = False,
     ) -> Optional["StopLineObject"]:
         """Construct a StopLineObject from a stop_line linestring and its nearest road.
 
@@ -782,6 +854,8 @@ class StopLineObject:
             object_id: ID for the resulting object (typically linestring.id)
             width: Painted width of the stop line in v-direction (along road), meters
             carla_format: If True, create a CARLA Stencil_STOP formatted object
+            use_physical_outline: If True, encode the source stop-line rectangle as
+                a local outline when the projected anchor is endpoint-clamped.
 
         Returns:
             StopLineObject if construction succeeds, None on failure.
@@ -797,13 +871,13 @@ class StopLineObject:
             # Centroid of all points
             centroid = np.mean(pts, axis=0)
 
-            projection = _project_point_onto_road(centroid, road)
+            projection = _project_point_onto_road_with_distance(centroid, road)
             if projection is None:
                 logger.warning(
                     f"Could not project stop line {linestring.id} centroid onto road {road.id}"
                 )
                 return None
-            s, t, road_hdg_at_s = projection
+            s, t, road_hdg_at_s = projection.s, projection.t, projection.hdg
 
             # Compute z_offset from 3D points vs road elevation
             pts_3d = extract_points(linestring, dimensions=3)
@@ -813,12 +887,43 @@ class StopLineObject:
 
             # Heading: direction of the stop line (from first to last point)
             direction = pts[-1] - pts[0]
-            stop_line_angle = math.atan2(float(direction[1]), float(direction[0]))
-            hdg = (stop_line_angle - road_hdg_at_s + math.pi) % (2 * math.pi) - math.pi
-
             # length = span along heading (u-axis = across road)
             # width = painted thickness in v-direction (along road)
             length = float(np.linalg.norm(pts[-1] - pts[0]))
+            stop_line_angle = math.atan2(float(direction[1]), float(direction[0]))
+            hdg = _normalize_angle(stop_line_angle - road_hdg_at_s)
+            corners: List[CornerLocal] = []
+
+            longitudinal_residual = math.sqrt(
+                max(0.0, projection.distance_sq - projection.t * projection.t)
+            )
+            from ..config import DEFAULT_CONFIG
+
+            outline_threshold = max(
+                float(width) / 2.0,
+                DEFAULT_CONFIG.geometry.point_distance_threshold,
+            )
+            if (
+                use_physical_outline
+                and not carla_format
+                and longitudinal_residual > outline_threshold
+                and length > _geometry_epsilon()
+            ):
+                road_pose = _evaluate_road_reference_at_s(road, s)
+                if road_pose is not None:
+                    anchor_x, anchor_y, _ = road_pose
+                    road_normal = np.array(
+                        [-math.sin(road_hdg_at_s), math.cos(road_hdg_at_s)]
+                    )
+                    anchor = np.array([anchor_x, anchor_y]) + t * road_normal
+                    stop_line_dir = direction / length
+                    corners = _compute_stop_line_outline_corners(
+                        anchor,
+                        stop_line_dir,
+                        pts[0],
+                        pts[-1],
+                        width,
+                    )
 
             return StopLineObject(
                 id=object_id,
@@ -830,6 +935,7 @@ class StopLineObject:
                 width=width,
                 length=length,
                 carla_format=carla_format,
+                corners=corners,
             )
 
         except Exception as e:

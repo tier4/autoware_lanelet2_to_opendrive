@@ -484,12 +484,14 @@ class _Lanelet2ToOpenDRIVEConverter:
     ) -> List[Road]:
         """Fallback individual emitted roads when stop lines become unrepresentable.
 
-        Emission geometry is road-local.  A stop line that is well represented
-        in the frozen topology domain can become an endpoint-clamped object if
-        the emitted physical reference no longer spans that regulatory line.
-        In that case, keep a copied topology-domain road for output rather than
-        mixing topology s/t into an emitted road.
+        Standard OpenDRIVE stopLine objects can keep a valid in-domain anchor
+        while using an outline for the physical painted geometry.  CARLA's
+        Stencil_STOP format is anchor-only, so keep the existing road-level
+        fallback for that consumer-specific representation.
         """
+        if not self.config.stopline.carla_stop_line:
+            return emitted_roads
+
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
             _project_point_onto_road_with_distance,
@@ -1162,6 +1164,10 @@ class _Lanelet2ToOpenDRIVEConverter:
                 object_id=ls.id,
                 width=self.config.stopline.width,
                 carla_format=self.config.stopline.carla_stop_line,
+                use_physical_outline=(
+                    not self.config.stopline.carla_stop_line
+                    and getattr(output_road, "emission_context", None) is not None
+                ),
             )
             if obj is None:
                 skipped_stop_lines[ls.id] = SkippedStopLineEntry(

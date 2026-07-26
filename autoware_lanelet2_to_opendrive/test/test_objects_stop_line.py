@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.objects import (
+    CornerLocal,
     StopLineObject,
     find_best_road_for_stop_line,
     find_nearest_road_for_linestring,
@@ -106,6 +107,66 @@ def _make_mock_linestring(
     return ls
 
 
+def _object_origin_world(
+    obj: StopLineObject, road: MagicMock
+) -> tuple[np.ndarray, float]:
+    """Return object origin and absolute heading for simple test roads."""
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        _evaluate_geometry_at,
+    )
+
+    geom = road.plan_view.geometries[0]
+    x, y, road_hdg = _evaluate_geometry_at(geom, obj.s - geom.s)
+    normal = np.array([-math.sin(road_hdg), math.cos(road_hdg)])
+    origin = np.array([x, y]) + obj.t * normal
+    return origin, road_hdg + obj.hdg
+
+
+def _outline_world_points(obj: StopLineObject, road: MagicMock) -> np.ndarray:
+    origin, hdg = _object_origin_world(obj, road)
+    tangent = np.array([math.cos(hdg), math.sin(hdg)])
+    normal = np.array([-math.sin(hdg), math.cos(hdg)])
+    return np.asarray(
+        [origin + corner.u * tangent + corner.v * normal for corner in obj.corners]
+    )
+
+
+def _expected_stop_line_rectangle(
+    p0: np.ndarray,
+    p1: np.ndarray,
+    width: float,
+) -> np.ndarray:
+    direction = p1 - p0
+    direction = direction / np.linalg.norm(direction)
+    normal = np.array([-direction[1], direction[0]])
+    half_width = 0.5 * width
+    return np.asarray(
+        [
+            p0 - half_width * normal,
+            p1 - half_width * normal,
+            p1 + half_width * normal,
+            p0 + half_width * normal,
+            p0 - half_width * normal,
+        ]
+    )
+
+
+def _assert_outline_matches_source_rectangle(
+    obj: StopLineObject,
+    road: MagicMock,
+    p0: np.ndarray,
+    p1: np.ndarray,
+    width: float,
+) -> None:
+    actual = _outline_world_points(obj, road)
+    expected = _expected_stop_line_rectangle(p0, p1, width)
+    assert actual.shape == expected.shape
+    assert np.max(np.linalg.norm(actual - expected, axis=1)) == pytest.approx(
+        0.0,
+        abs=1e-9,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Unit tests – StopLineObject dataclass
 # ---------------------------------------------------------------------------
@@ -149,6 +210,36 @@ def test_stop_line_object_to_xml():
     elem = obj.to_xml()
     assert elem.tag == "object"
     assert elem.get("type") == "stopLine"
+
+
+def test_stop_line_object_to_xml_emits_standard_outline():
+    """Standard stopLine objects may use outline/cornerLocal for physical geometry."""
+    obj = StopLineObject(
+        id=43,
+        name="stop_line_43",
+        s=0.0,
+        t=0.0,
+        z_offset=0.0,
+        hdg=0.0,
+        width=0.1,
+        length=2.0,
+        corners=[
+            CornerLocal(u=-1.0, v=-0.05),
+            CornerLocal(u=1.0, v=-0.05),
+            CornerLocal(u=1.0, v=0.05),
+            CornerLocal(u=-1.0, v=0.05),
+            CornerLocal(u=-1.0, v=-0.05),
+        ],
+    )
+
+    elem = obj.to_xml()
+
+    outline = elem.find("outline")
+    assert outline is not None
+    corners = outline.findall("cornerLocal")
+    assert len(corners) == 5
+    assert float(corners[0].get("u")) == pytest.approx(-1.0)
+    assert float(corners[0].get("v")) == pytest.approx(-0.05)
 
 
 def test_stop_line_object_xml_attributes():
@@ -214,6 +305,130 @@ def test_construct_from_linestring_basic():
     assert result.length == pytest.approx(4.0, rel=0.01)
     # Width defaults to 0.1 (painted thickness in v-direction)
     assert result.width == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize(
+    ("x", "expected_s"),
+    [
+        (5.0, 5.0),  # safely inside the road domain
+        (0.0, 0.0),  # exactly at road start
+        (10.0, 10.0),  # exactly at road end
+    ],
+)
+def test_construct_from_linestring_in_domain_keeps_standard_line_object(
+    x: float,
+    expected_s: float,
+):
+    """In-domain stop lines do not need an outline fallback."""
+    road = _make_mock_line_road(road_id=1, x=0.0, y=0.0, hdg=0.0, length=10.0)
+    pts_2d = np.array([[x, -2.0], [x, 2.0]])
+    pts_3d = np.array([[x, -2.0, 0.0], [x, 2.0, 0.0]])
+    ls = MagicMock()
+    ls.id = 1010
+
+    from unittest.mock import patch
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.side_effect = lambda linestring, dimensions: (
+            pts_2d if dimensions == 2 else pts_3d
+        )
+        result = StopLineObject.construct_from_linestring(
+            linestring=ls,
+            road=road,
+            object_id=ls.id,
+            use_physical_outline=True,
+        )
+
+    assert result is not None
+    assert result.s == pytest.approx(expected_s)
+    assert result.t == pytest.approx(0.0)
+    assert result.length == pytest.approx(4.0)
+    assert result.corners == []
+
+
+@pytest.mark.parametrize(
+    ("x", "expected_s"),
+    [
+        (-0.2, 0.0),  # slightly before road start
+        (10.2, 10.0),  # slightly after road end
+    ],
+)
+def test_construct_from_linestring_endpoint_clamp_uses_physical_outline(
+    x: float,
+    expected_s: float,
+):
+    """Endpoint-clamped standard stop lines keep their physical rectangle."""
+    road = _make_mock_line_road(road_id=2, x=0.0, y=0.0, hdg=0.0, length=10.0)
+    pts_2d = np.array([[x, -2.0], [x, 2.0]])
+    pts_3d = np.array([[x, -2.0, 0.0], [x, 2.0, 0.0]])
+    ls = MagicMock()
+    ls.id = 2020
+
+    from unittest.mock import patch
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.side_effect = lambda linestring, dimensions: (
+            pts_2d if dimensions == 2 else pts_3d
+        )
+        result = StopLineObject.construct_from_linestring(
+            linestring=ls,
+            road=road,
+            object_id=ls.id,
+            width=0.1,
+            use_physical_outline=True,
+        )
+
+    assert result is not None
+    assert result.s == pytest.approx(expected_s)
+    assert len(result.corners) == 5
+    _assert_outline_matches_source_rectangle(
+        result,
+        road,
+        pts_2d[0],
+        pts_2d[-1],
+        width=0.1,
+    )
+
+
+def test_construct_from_linestring_oblique_endpoint_clamp_uses_physical_outline():
+    """The outline fallback preserves oblique stop-line endpoints and heading."""
+    road = _make_mock_line_road(road_id=3, x=0.0, y=0.0, hdg=0.0, length=10.0)
+    pts_2d = np.array([[10.2, -1.0], [10.7, 1.0]])
+    pts_3d = np.array([[10.2, -1.0, 0.0], [10.7, 1.0, 0.0]])
+    ls = MagicMock()
+    ls.id = 3030
+
+    from unittest.mock import patch
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.side_effect = lambda linestring, dimensions: (
+            pts_2d if dimensions == 2 else pts_3d
+        )
+        result = StopLineObject.construct_from_linestring(
+            linestring=ls,
+            road=road,
+            object_id=ls.id,
+            width=0.1,
+            use_physical_outline=True,
+        )
+
+    assert result is not None
+    assert result.s == pytest.approx(10.0)
+    assert result.hdg == pytest.approx(math.atan2(2.0, 0.5))
+    assert result.length == pytest.approx(math.hypot(0.5, 2.0))
+    _assert_outline_matches_source_rectangle(
+        result,
+        road,
+        pts_2d[0],
+        pts_2d[-1],
+        width=0.1,
+    )
 
 
 def test_construct_from_linestring_insufficient_points():
@@ -485,6 +700,7 @@ def test_construct_from_linestring_carla_format():
 
     assert result is not None
     assert result.carla_format is True
+    assert result.corners == []
 
     elem = result.to_xml()
     assert elem.get("type") == "-1"
@@ -492,6 +708,7 @@ def test_construct_from_linestring_carla_format():
     assert elem.get("orientation") == "-"
     assert float(elem.get("zOffset")) == pytest.approx(0.0)
     assert float(elem.get("width")) == pytest.approx(2.0)
+    assert elem.find("outline") is None
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +859,68 @@ def test_project_point_onto_arc_road_recovers_s():
     s, t, _hdg = result
     assert abs(s - (s0 + p_target)) < 1e-6, f"recovered s={s}, expected {s0 + p_target}"
     assert abs(t) < 1e-6, f"point on the reference line should have t~0, got {t}"
+
+
+def test_construct_from_linestring_inside_curved_reference_keeps_line_object():
+    """Curved roads still use ordinary s/t/hdg when the line is in-domain."""
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+        evaluate_plan_view_world,
+    )
+
+    curvature, length, s0 = 0.04, 20.0, 5.0
+    road = _make_arc_road(curvature, length, s=s0)
+    road.length = s0 + length
+    road.get_elevation_at_s.return_value = 0.0
+    geom = road.plan_view.geometries[0]
+    p_target = 6.0
+    center = np.asarray(
+        evaluate_plan_view_world(
+            geom.x,
+            geom.y,
+            geom.hdg,
+            p_target,
+            arc_curvature=curvature,
+        )
+    )
+    road_hdg = geom.hdg + curvature * p_target
+    stop_dir = np.array([-math.sin(road_hdg), math.cos(road_hdg)])
+    pts_2d = np.asarray([center - 2.0 * stop_dir, center + 2.0 * stop_dir])
+    pts_3d = np.column_stack([pts_2d, np.zeros(2)])
+    ls = MagicMock()
+    ls.id = 4040
+
+    from unittest.mock import patch
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.side_effect = lambda linestring, dimensions: (
+            pts_2d if dimensions == 2 else pts_3d
+        )
+        result = StopLineObject.construct_from_linestring(
+            linestring=ls,
+            road=road,
+            object_id=ls.id,
+            use_physical_outline=True,
+        )
+
+    assert result is not None
+    assert result.s == pytest.approx(s0 + p_target, abs=1e-8)
+    assert result.t == pytest.approx(0.0, abs=1e-8)
+    assert result.corners == []
+
+    origin, abs_hdg = _object_origin_world(result, road)
+    tangent = np.array([math.cos(abs_hdg), math.sin(abs_hdg)])
+    actual = np.asarray(
+        [
+            origin - 0.5 * result.length * tangent,
+            origin + 0.5 * result.length * tangent,
+        ]
+    )
+    assert np.max(np.linalg.norm(actual - pts_2d, axis=1)) == pytest.approx(
+        0.0,
+        abs=1e-8,
+    )
 
 
 def test_project_point_onto_straight_road_uses_continuous_projection():
