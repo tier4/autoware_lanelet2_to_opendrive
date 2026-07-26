@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 import numpy as np
 
@@ -340,6 +340,51 @@ def _piecewise_linear_width_segments(
         b = float((widths[idx + 1] - widths[idx]) / length)
         segments.append((float(stations[idx]), a, b, 0.0, 0.0))
     return segments
+
+
+def _refine_piecewise_linear_width_samples(
+    stations: np.ndarray,
+    widths: np.ndarray,
+    measure_width: Callable[[float], float],
+    *,
+    max_samples: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Insert local width samples where linear width emission would drift."""
+    refined_stations = [float(station) for station in stations]
+    refined_widths = {
+        float(station): float(width) for station, width in zip(stations, widths)
+    }
+    tolerance = DEFAULT_CONFIG.geometry.emission_width_refinement_tolerance
+    min_interval = DEFAULT_CONFIG.geometry.emission_width_refinement_min_interval
+
+    for _ in range(DEFAULT_CONFIG.geometry.emission_width_refinement_max_iterations):
+        additions: list[tuple[float, float, float]] = []
+        for start, end in zip(refined_stations, refined_stations[1:]):
+            if len(refined_stations) + len(additions) >= max_samples:
+                break
+            if end - start <= min_interval:
+                continue
+            midpoint = 0.5 * (start + end)
+            midpoint_width = float(measure_width(midpoint))
+            linear_width = 0.5 * (refined_widths[start] + refined_widths[end])
+            error = abs(midpoint_width - linear_width)
+            if error > tolerance:
+                additions.append((error, midpoint, midpoint_width))
+
+        if not additions:
+            break
+
+        remaining = max_samples - len(refined_stations)
+        for _error, station, width in sorted(additions, reverse=True)[:remaining]:
+            refined_widths[station] = width
+            refined_stations.append(station)
+        refined_stations = _unique_sorted_values(refined_stations)
+
+    refined_width_array = np.asarray(
+        [refined_widths[station] for station in refined_stations],
+        dtype=float,
+    )
+    return np.asarray(refined_stations, dtype=float), refined_width_array
 
 
 class _PiecewiseLinearWidthAdapter:
@@ -1045,28 +1090,15 @@ def estimate_lanelet_width_with_emission_geometry(
 
     widths = []
     polygon_points = np.vstack((anchor_points[:, :2], other_points[::-1, :2]))
-    for s_emission in width_stations:
+
+    def measure_width(s_emission: float) -> float:
         pose = emission_geometry.evaluate(float(s_emission))
         side_direction = side_sign * _left_normal(pose.heading)
-        if abs(float(s_emission)) <= DEFAULT_CONFIG.geometry.epsilon:
-            width = _lateral_endpoint_cap_width(
-                anchor_points[0, :2],
-                other_points[0, :2],
-                pose.heading,
-                side_direction,
-            )
-        elif (
-            abs(float(s_emission) - emission_geometry.length)
-            <= DEFAULT_CONFIG.geometry.epsilon
-        ):
-            width = _lateral_endpoint_cap_width(
-                anchor_points[-1, :2],
-                other_points[-1, :2],
-                pose.heading,
-                side_direction,
-            )
-        else:
-            width = None
+        width = _polygon_cross_section_width(
+            polygon_points,
+            pose.xy,
+            side_direction,
+        )
         if width is None:
             width = _boundary_cross_section_width(
                 anchor_points[:, :2],
@@ -1075,11 +1107,23 @@ def estimate_lanelet_width_with_emission_geometry(
                 side_direction,
             )
         if width is None:
-            width = _polygon_cross_section_width(
-                polygon_points,
-                pose.xy,
-                side_direction,
-            )
+            if abs(float(s_emission)) <= DEFAULT_CONFIG.geometry.epsilon:
+                width = _lateral_endpoint_cap_width(
+                    anchor_points[0, :2],
+                    other_points[0, :2],
+                    pose.heading,
+                    side_direction,
+                )
+            elif (
+                abs(float(s_emission) - emission_geometry.length)
+                <= DEFAULT_CONFIG.geometry.epsilon
+            ):
+                width = _lateral_endpoint_cap_width(
+                    anchor_points[-1, :2],
+                    other_points[-1, :2],
+                    pose.heading,
+                    side_direction,
+                )
         if width is None:
             t_norm = float(s_emission / emission_geometry.length)
             anchor_s = float(t_norm * anchor_stations[-1])
@@ -1095,11 +1139,31 @@ def estimate_lanelet_width_with_emission_geometry(
                 other_s,
             )
             width = float(np.linalg.norm(anchor_pos[:2] - other_pos[:2]))
-        widths.append(width)
+        return float(width)
+
+    for s_emission in width_stations:
+        widths.append(measure_width(float(s_emission)))
 
     widths_array = np.asarray(widths, dtype=float)
     widths_array[np.abs(widths_array) <= DEFAULT_CONFIG.geometry.epsilon] = 0.0
     widths_array = np.maximum(widths_array, 0.0)
+
+    if config.adaptive_sampling:
+        max_refined_samples = (
+            max(
+                len(width_stations),
+                config.max_samples,
+            )
+            * DEFAULT_CONFIG.geometry.emission_width_refinement_sample_multiplier
+        )
+        width_stations, widths_array = _refine_piecewise_linear_width_samples(
+            width_stations,
+            widths_array,
+            measure_width,
+            max_samples=max_refined_samples,
+        )
+        widths_array[np.abs(widths_array) <= DEFAULT_CONFIG.geometry.epsilon] = 0.0
+        widths_array = np.maximum(widths_array, 0.0)
 
     return _PiecewiseLinearWidthAdapter(width_stations, widths_array)
 

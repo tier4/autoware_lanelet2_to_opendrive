@@ -28,6 +28,7 @@ from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
     TopologyReferenceGeometry,
     measure_reference_domain_coverage,
     reproject_source_point_to_emission,
+    _polygon_cross_section_width,
 )
 from autoware_lanelet2_to_opendrive.spline import Splines
 from autoware_lanelet2_to_opendrive.divergence import (
@@ -264,6 +265,65 @@ def _width_at(lane, s: float) -> float:
             segment = width
     ds = s - segment.s_offset
     return float(segment.a + segment.b * ds + segment.c * ds * ds + segment.d * ds**3)
+
+
+def _pose_on_source_reference(
+    reference_points: np.ndarray,
+    station: float,
+) -> tuple[np.ndarray, float]:
+    cumulative = np.concatenate(
+        (
+            [0.0],
+            np.cumsum(np.linalg.norm(np.diff(reference_points[:, :2], axis=0), axis=1)),
+        )
+    )
+    station = float(np.clip(station, 0.0, cumulative[-1]))
+    idx = int(np.searchsorted(cumulative, station, side="right") - 1)
+    idx = max(0, min(idx, len(reference_points) - 2))
+    segment = reference_points[idx + 1, :2] - reference_points[idx, :2]
+    segment_length = float(np.linalg.norm(segment))
+    ratio = (
+        0.0 if segment_length <= 0.0 else (station - cumulative[idx]) / segment_length
+    )
+    point = reference_points[idx, :2] + ratio * segment
+    heading = math.atan2(float(segment[1]), float(segment[0]))
+    return point, heading
+
+
+def _source_polygon_width_at(
+    reference_points: np.ndarray,
+    outer_points: np.ndarray,
+    station: float,
+    side_sign: float,
+) -> float:
+    origin, heading = _pose_on_source_reference(reference_points, station)
+    side_direction = side_sign * np.array([-math.sin(heading), math.cos(heading)])
+    polygon_points = np.vstack((reference_points[:, :2], outer_points[::-1, :2]))
+    width = _polygon_cross_section_width(polygon_points, origin, side_direction)
+    assert width is not None
+    return width
+
+
+def _assert_emitted_width_matches_source_polygon(
+    lane,
+    reference_points: np.ndarray,
+    outer_points: np.ndarray,
+    side_sign: float,
+) -> None:
+    reference_length = _polyline_length(reference_points[:, :2])
+    stations = np.linspace(0.25, reference_length - 0.25, 81)
+    errors = []
+    for station in stations:
+        expected = _source_polygon_width_at(
+            reference_points,
+            outer_points,
+            float(station),
+            side_sign,
+        )
+        errors.append(abs(_width_at(lane, float(station)) - expected))
+
+    assert np.percentile(errors, 95) <= 0.05
+    assert max(errors) <= 0.08
 
 
 def _lane_link_id(link) -> int | None:
@@ -650,6 +710,162 @@ def test_emission_width_uses_polygon_cross_sections_for_outer_end_drop() -> None
     assert _width_at(lane, 20.0) == pytest.approx(3.0, abs=1e-9)
     assert _width_at(lane, 25.0) == pytest.approx(1.5, abs=1e-9)
     assert _width_at(lane, 30.0) == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("traffic_rule", ["LHT", "RHT"])
+def test_emission_width_refines_oblique_outer_boundary_on_both_sides(
+    traffic_rule: str,
+) -> None:
+    reference = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [5.0, 0.0, 0.0],
+            [9.0, 5.0, 0.0],
+            [14.0, 2.5, 0.0],
+            [20.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    outer = np.array(
+        [
+            [0.0, 3.0, 0.0],
+            [3.0, 6.0, 0.0],
+            [8.0, 20.0, 0.0],
+            [15.0, 6.0, 0.0],
+            [20.0, 3.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    if traffic_rule == "LHT":
+        lanelet_map, lanelet = _make_lanelet_from_bounds(outer, reference)
+        side_sign = 1.0
+        reference_points = reference
+        outer_points = outer
+        expected_lane_id = 1
+    else:
+        lanelet_map, lanelet = _make_lanelet_from_bounds(
+            -reference * np.array([-1.0, 1.0, -1.0]),
+            -outer * np.array([-1.0, 1.0, -1.0]),
+        )
+        side_sign = -1.0
+        reference_points = -reference * np.array([-1.0, 1.0, -1.0])
+        outer_points = -outer * np.array([-1.0, 1.0, -1.0])
+        expected_lane_id = -1
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule=traffic_rule,
+    )
+    topology_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        road_id=275,
+        traffic_rule=traffic_rule,
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+    road = topology_road.copy_with_emission_context(
+        lanelet_map=lanelet_map,
+        lanelet_group=[lanelet],
+        emission_context=context,
+        traffic_rule=traffic_rule,
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+
+    assert road.lanes is not None
+    lane_section = road.lanes.lane_sections[0]
+    lane = (
+        lane_section.left_lanes[expected_lane_id]
+        if expected_lane_id > 0
+        else lane_section.right_lanes[expected_lane_id]
+    )
+    assert len(lane.widths) > 11
+    _assert_emitted_width_matches_source_polygon(
+        lane,
+        reference_points,
+        outer_points,
+        side_sign,
+    )
+
+
+def test_emission_width_refinement_preserves_lht_multilane_widths() -> None:
+    lanelet_map = lanelet2.core.LaneletMap()
+
+    def linestring(points_array: np.ndarray) -> lanelet2.core.LineString3d:
+        points = [
+            lanelet2.core.Point3d(lanelet2.core.getId(), float(x), float(y), float(z))
+            for x, y, z in points_array
+        ]
+        return lanelet2.core.LineString3d(lanelet2.core.getId(), points)
+
+    right_reference = np.array([[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]], dtype=float)
+    middle = np.array([[0.0, 2.0, 0.0], [20.0, 2.0, 0.0]], dtype=float)
+    left_outer = np.array([[0.0, 5.0, 0.0], [20.0, 5.0, 0.0]], dtype=float)
+
+    right_bound = linestring(right_reference)
+    middle_bound = linestring(middle)
+    left_bound = linestring(left_outer)
+
+    right_lane = lanelet2.core.Lanelet(1001, middle_bound, right_bound)
+    left_lane = lanelet2.core.Lanelet(1002, left_bound, middle_bound)
+    for lanelet in (right_lane, left_lane):
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+
+    lanelets = [left_lane, right_lane]
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        lanelets,
+        traffic_rule="LHT",
+    )
+    topology_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        lanelets,
+        road_id=20,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+    road = topology_road.copy_with_emission_context(
+        lanelet_map=lanelet_map,
+        lanelet_group=lanelets,
+        emission_context=context,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+
+    assert road.lanes is not None
+    lane_section = road.lanes.lane_sections[0]
+    inner_lane = lane_section.left_lanes[1]
+    outer_lane = lane_section.left_lanes[2]
+    for station in np.linspace(0.0, road.length, 7):
+        assert _width_at(inner_lane, float(station)) == pytest.approx(2.0)
+        assert _width_at(outer_lane, float(station)) == pytest.approx(3.0)
+
+
+def test_polygon_cross_section_width_uses_near_side_interval() -> None:
+    polygon_points = np.array(
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 2.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+            [10.0, 4.0],
+            [10.0, 6.0],
+            [0.0, 6.0],
+        ],
+        dtype=float,
+    )
+
+    width = _polygon_cross_section_width(
+        polygon_points,
+        origin=np.array([5.0, 0.0]),
+        side_direction=np.array([0.0, 1.0]),
+    )
+
+    assert width == pytest.approx(2.0)
 
 
 def test_road_copy_with_emission_context_preserves_topology_road_and_lane_links() -> (

@@ -28,6 +28,18 @@ class GeometryConstants:
             ``type=curbstone`` or ``type=road_border``. Both ``inner`` and
             ``outer`` of the emitted ``<height>`` are set to this value, so
             the sidewalk surface sits flat on top of the curb. Issue #469.
+        emission_width_refinement_tolerance: Maximum allowed width error (m)
+            between the source lane polygon cross-section and the emitted
+            piecewise-linear width record before inserting another local
+            width sample.
+        emission_width_refinement_min_interval: Minimum station interval (m)
+            considered for width-sample refinement. Prevents excessive
+            subdivision near discontinuities.
+        emission_width_refinement_max_iterations: Upper bound on recursive
+            midpoint refinement passes for emission-domain width samples.
+        emission_width_refinement_sample_multiplier: Limit refined width
+            sample count to a small multiple of the initial/source-driven
+            sample count.
     """
 
     epsilon: float = 1e-10
@@ -36,6 +48,10 @@ class GeometryConstants:
     divergence_min_segment_length: float = 0.01
     divergence_default_lane_width: float = 3.5
     sidewalk_height: float = 0.15
+    emission_width_refinement_tolerance: float = 0.01
+    emission_width_refinement_min_interval: float = 0.02
+    emission_width_refinement_max_iterations: int = 12
+    emission_width_refinement_sample_multiplier: int = 4
 
 
 @dataclass(frozen=True)
