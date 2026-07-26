@@ -152,6 +152,23 @@ def _calculate_degenerate_centerline_velocity(
     lanelet: lanelet2.core.Lanelet, at_start: bool
 ) -> np.ndarray:
     """Fallback to lanelet-local tangents when an endpoint has zero lane width."""
+    boundary_velocity = _calculate_boundary_tangent_velocity(lanelet, at_start)
+    if boundary_velocity is not None:
+        return boundary_velocity
+
+    centerline_velocity = _calculate_local_linestring_velocity(
+        lanelet.centerline, at_start
+    )
+    if centerline_velocity is not None:
+        return centerline_velocity
+
+    return np.array([1.0, 0.0, 0.0])
+
+
+def _calculate_boundary_tangent_velocity(
+    lanelet: lanelet2.core.Lanelet, at_start: bool
+) -> Optional[np.ndarray]:
+    """Return a combined local tangent from the lanelet boundaries."""
     boundary_velocities = []
     for boundary in (lanelet.leftBound, lanelet.rightBound):
         velocity = _calculate_local_linestring_velocity(boundary, at_start)
@@ -164,17 +181,9 @@ def _calculate_degenerate_centerline_velocity(
         )
         if combined_velocity is not None:
             return combined_velocity
-
-    centerline_velocity = _calculate_local_linestring_velocity(
-        lanelet.centerline, at_start
-    )
-    if centerline_velocity is not None:
-        return centerline_velocity
-
-    if boundary_velocities:
         return boundary_velocities[0]
 
-    return np.array([1.0, 0.0, 0.0])
+    return None
 
 
 def _calculate_centerline_velocity_vector(
@@ -185,6 +194,8 @@ def _calculate_centerline_velocity_vector(
 
     This function computes a velocity vector perpendicular to the line segment
     connecting the left and right boundaries at either the start or end of the lanelet.
+    If the endpoint pair is longitudinally staggered rather than a lateral
+    cross-section, it uses the local boundary tangent instead.
     If the lane width collapses to zero at that endpoint, it falls back to the
     local boundary tangent so the spline still follows the lanelet direction.
 
@@ -223,6 +234,15 @@ def _calculate_centerline_velocity_vector(
         return _calculate_degenerate_centerline_velocity(lanelet, at_start)
     else:
         perp_2d = perp_2d / length
+
+    boundary_velocity = _calculate_boundary_tangent_velocity(lanelet, at_start)
+    segment_direction = _normalize_xy_direction(segment)
+    if boundary_velocity is not None and segment_direction is not None:
+        boundary_2d = boundary_velocity[:2]
+        if abs(np.dot(segment_direction[:2], boundary_2d)) > abs(
+            np.dot(perp_2d, boundary_2d)
+        ):
+            return boundary_velocity
 
     # Convert to 3D by adding z=0
     return np.array([perp_2d[0], perp_2d[1], 0.0])

@@ -32,6 +32,25 @@ def create_test_lanelet_with_curved_boundaries():
     return lanelet2.core.Lanelet(1, left_bound, right_bound)
 
 
+def create_lanelet_with_longitudinally_staggered_endpoints():
+    """Create a lanelet whose boundary endpoints are not lateral cross-sections."""
+    left_points = [
+        lanelet2.core.Point3d(101, 0.0, 12.0, 0.0),
+        lanelet2.core.Point3d(102, 0.0, 24.0, 0.0),
+        lanelet2.core.Point3d(103, 0.0, 40.0, 0.0),
+    ]
+    left_bound = lanelet2.core.LineString3d(101, left_points)
+
+    right_points = [
+        lanelet2.core.Point3d(201, 2.0, 0.0, 0.0),
+        lanelet2.core.Point3d(202, 2.0, 24.0, 0.0),
+        lanelet2.core.Point3d(203, 2.0, 52.0, 0.0),
+    ]
+    right_bound = lanelet2.core.LineString3d(201, right_points)
+
+    return lanelet2.core.Lanelet(101, left_bound, right_bound)
+
+
 def test_boundary_velocity_discrepancy():
     """
     Test that current implementation creates different velocity vectors for left and right boundaries.
@@ -95,6 +114,18 @@ def test_centerline_velocity_consistency():
     # Verify the vector is normalized
     length = np.linalg.norm(correct_start_vel)
     assert abs(length - 1.0) < 1e-10, f"Expected unit vector, got length={length}"
+
+
+def test_centerline_velocity_uses_boundary_tangent_for_staggered_endpoints():
+    """Endpoint pairs that are longitudinally staggered must not define tangent."""
+    lanelet = create_lanelet_with_longitudinally_staggered_endpoints()
+
+    start_vel = _calculate_centerline_velocity_vector(lanelet, at_start=True)[:2]
+    end_vel = _calculate_centerline_velocity_vector(lanelet, at_start=False)[:2]
+
+    expected = np.array([0.0, 1.0])
+    assert np.dot(start_vel, expected) > 0.99
+    assert np.dot(end_vel, expected) > 0.99
 
 
 def test_spline_tangent_alignment_with_correct_velocity():
