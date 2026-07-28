@@ -395,8 +395,9 @@ def _refine_piecewise_linear_width_samples(
             midpoint_width = float(measure_width(midpoint))
             linear_width = 0.5 * (refined_widths[start] + refined_widths[end])
             error = abs(midpoint_width - linear_width)
-            if error > tolerance:
-                additions.append((error, midpoint, midpoint_width))
+            if error <= tolerance:
+                continue
+            additions.append((error, midpoint, midpoint_width))
 
         if not additions:
             break
@@ -672,6 +673,68 @@ def _terminal_heading_honored(
     return _heading_delta(pose.heading, heading) <= 1e-8
 
 
+def _try_absorb_terminal_override(
+    points_3d: np.ndarray,
+    heading_override: float,
+    *,
+    at_start: bool,
+    lateral_extent: Optional[float],
+    start_heading: Optional[float],
+    end_heading: Optional[float],
+) -> Optional[np.ndarray]:
+    """Honor a terminal heading override by absorbing leading source points.
+
+    When neither the terminal blend pair nor the distributed multi-segment
+    blend can honor an override below the fold curvature limit (the first
+    source segment is too short to swing back onto the corridor), a single
+    terminal Bezier spanning several source points can: interior points
+    near the terminal are dropped so the blend gets a longer anchored
+    segment. The dropped points must stay within the corner-cut bound of
+    the resulting curve, so the geometry never leaves the source corridor.
+
+    Returns the reduced point array on success, ``None`` when no bounded
+    absorption satisfies the curvature and fidelity gates.
+    """
+    max_cut = DEFAULT_CONFIG.geometry.emission_interior_kink_max_corner_cut
+    total = len(points_3d)
+    for drop in range(1, min(total - 2, 8)):
+        if at_start:
+            candidate = np.vstack((points_3d[:1], points_3d[1 + drop :]))
+            dropped = points_3d[1 : 1 + drop]
+        else:
+            candidate = np.vstack((points_3d[: total - 1 - drop], points_3d[-1:]))
+            dropped = points_3d[total - 1 - drop : total - 1]
+        try:
+            trial = EmissionReferenceGeometry.from_source_boundary(
+                candidate,
+                start_heading=start_heading,
+                end_heading=end_heading,
+                lateral_extent=lateral_extent,
+            )
+        except ValueError:
+            continue
+        if not _terminal_heading_honored(
+            trial,
+            heading_override,
+            at_start=at_start,
+        ):
+            continue
+        if lateral_extent is not None and not _terminal_blend_curvature_ok(
+            trial,
+            at_start=at_start,
+            lateral_extent=float(lateral_extent),
+        ):
+            continue
+        preferred = 0.0 if at_start else trial.length
+        if any(
+            trial.project(point[:2], preferred_s=preferred).distance > max_cut
+            for point in dropped
+        ):
+            continue
+        return candidate
+    return None
+
+
 def _terminal_blend_curvature_ok(
     emission_geometry: "EmissionReferenceGeometry",
     *,
@@ -794,6 +857,234 @@ def _evaluate_bezier_controls(
     return point, derivative, second_derivative
 
 
+def _collapse_interior_micro_segments(
+    points: np.ndarray,
+    fold_margin: float,
+) -> np.ndarray:
+    """Collapse interior points on micro segments that sit on the chord.
+
+    Source boundaries occasionally carry centimetre-scale segments whose
+    headings are pure digitization noise (a 1 cm segment bent tens of
+    degrees). Such joints cannot be filleted (no arm length) yet fold
+    offset lane boundaries. An interior point adjacent to a micro segment
+    is dropped when it lies within the fold margin of its neighbours'
+    chord, so the geometry change is bounded by the margin. Terminal micro
+    tails are preserved: they carry the road's end tangent and are governed
+    by the terminal micro-kink machinery.
+    """
+    micro_length = DEFAULT_CONFIG.geometry.emission_micro_segment_collapse_length
+    epsilon = DEFAULT_CONFIG.geometry.epsilon
+    result = [np.asarray(point, dtype=float) for point in points]
+    changed = True
+    while changed and len(result) > 3:
+        changed = False
+        for joint in range(1, len(result) - 1):
+            previous_length = float(
+                np.linalg.norm(result[joint][:2] - result[joint - 1][:2])
+            )
+            next_length = float(
+                np.linalg.norm(result[joint + 1][:2] - result[joint][:2])
+            )
+            if previous_length >= micro_length and next_length >= micro_length:
+                continue
+            if joint == 1 and previous_length < micro_length:
+                continue
+            if joint == len(result) - 2 and next_length < micro_length:
+                continue
+            chord = result[joint + 1][:2] - result[joint - 1][:2]
+            chord_length = float(np.linalg.norm(chord))
+            if chord_length <= epsilon:
+                continue
+            offset = result[joint][:2] - result[joint - 1][:2]
+            distance = abs(
+                float(chord[0] * offset[1] - chord[1] * offset[0]) / chord_length
+            )
+            if distance > fold_margin:
+                continue
+            del result[joint]
+            changed = True
+            break
+    return np.asarray(result, dtype=float)
+
+
+def _insert_interior_kink_fillets(
+    points: np.ndarray,
+    lateral_extent: float,
+    *,
+    protect_start_joint: bool = False,
+    protect_end_joint: bool = False,
+) -> tuple[np.ndarray, dict[int, tuple[float, float]]]:
+    """Round interior discretization kinks that would fold offset lanes.
+
+    A polyline joint with heading step ``delta`` drags a lane boundary at
+    lateral offset ``t`` backwards by roughly ``t * delta``, folding the
+    emitted lane surface. Joints where that exceeds
+    ``emission_interior_kink_fold_margin`` and whose kink stays below the
+    true-corner threshold (``terminal_micro_kink_min_heading_delta``) are
+    C1-smoothed with one of two fillets:
+
+    - Through-vertex (preferred): two support points are inserted around
+      the joint and the emitted curve passes exactly through the source
+      vertex with the averaged joint tangent. Its peak curvature is about
+      ``2 * delta / arm``, so it is only used while that stays below the
+      boundary fold limit ``safety / lateral_extent``.
+    - Corner-cut arc (fallback): a single near-arc Bezier between the two
+      support points with uniform curvature ``~delta / (2 * arm)``. The
+      corner cut is bounded by the fold margin.
+
+    Returns the updated polyline and a mapping of fillet segment index to
+    its (start, end) tangent headings.
+    """
+    fold_margin = DEFAULT_CONFIG.geometry.emission_interior_kink_fold_margin
+    extent = max(float(lateral_extent), 1.0)
+    kink_tolerance = fold_margin / extent
+    corner_threshold = DEFAULT_CONFIG.geometry.terminal_micro_kink_min_heading_delta
+    curvature_limit = (
+        DEFAULT_CONFIG.geometry.emission_terminal_blend_fold_safety / extent
+    )
+    epsilon = DEFAULT_CONFIG.geometry.epsilon
+    points = _collapse_interior_micro_segments(points, fold_margin)
+    signed_turns: dict[int, float] = {}
+    for joint in range(1, len(points) - 1):
+        before = (
+            np.asarray(points[joint], dtype=float)[:2]
+            - np.asarray(points[joint - 1], dtype=float)[:2]
+        )
+        after = (
+            np.asarray(points[joint + 1], dtype=float)[:2]
+            - np.asarray(points[joint], dtype=float)[:2]
+        )
+        if (
+            float(np.linalg.norm(before)) <= epsilon
+            or float(np.linalg.norm(after)) <= epsilon
+        ):
+            continue
+        heading_before = _heading_from_vector(before)
+        heading_after = _heading_from_vector(after)
+        signed_turns[joint] = math.atan2(
+            math.sin(heading_after - heading_before),
+            math.cos(heading_after - heading_before),
+        )
+    output: list[np.ndarray] = [np.asarray(points[0], dtype=float)]
+    fillets: dict[int, tuple[float, float]] = {}
+    for joint in range(1, len(points) - 1):
+        vertex = np.asarray(points[joint], dtype=float)
+        next_point = np.asarray(points[joint + 1], dtype=float)
+        previous_vector = vertex - output[-1]
+        next_vector = next_point - vertex
+        previous_length = float(np.linalg.norm(previous_vector[:2]))
+        next_length = float(np.linalg.norm(next_vector[:2]))
+        if previous_length <= epsilon or next_length <= epsilon:
+            output.append(vertex)
+            continue
+        # Terminal heading overrides blend across the first/last segment
+        # pair with their own curvature gate; filleting those joints would
+        # fragment the blend span and concentrate its curvature.
+        if (joint == 1 and protect_start_joint) or (
+            joint == len(points) - 2 and protect_end_joint
+        ):
+            output.append(vertex)
+            continue
+        previous_heading = _heading_from_vector(previous_vector[:2])
+        next_heading = _heading_from_vector(next_vector[:2])
+        kink = _heading_delta(previous_heading, next_heading)
+        # A kink that continues an adjacent same-direction turn is curve
+        # discretization (e.g. a tight urban turn sampled coarsely), not an
+        # isolated true corner, so it may bend up to twice the threshold.
+        turn_here = signed_turns.get(joint, 0.0)
+        curve_run = any(
+            turn_here * neighbour > 0.0 and abs(neighbour) >= 0.25 * kink
+            for neighbour in (
+                signed_turns.get(joint - 1),
+                signed_turns.get(joint + 1),
+            )
+            if neighbour is not None
+        )
+        joint_corner_threshold = corner_threshold * (2.0 if curve_run else 1.0)
+        if kink <= kink_tolerance or kink >= joint_corner_threshold:
+            output.append(vertex)
+            continue
+        half_sine = math.sin(0.5 * kink)
+        arm_max = 0.5 * min(previous_length, next_length)
+        turn = math.atan2(
+            math.sin(next_heading - previous_heading),
+            math.cos(next_heading - previous_heading),
+        )
+        joint_heading = previous_heading + 0.5 * turn
+        # Through-vertex peak curvature ~2*kink/arm; its deviation from the
+        # source polyline ~0.3*arm*sin(kink/2) is capped at the fold margin.
+        # The arm stays close to the curvature-driven need — longer arms
+        # would only grow the deviation.
+        arm_through_needed = 2.0 * kink / curvature_limit
+        arm_through_cap = fold_margin / max(0.3 * half_sine, epsilon)
+        arm = min(arm_max, arm_through_cap, 1.25 * arm_through_needed)
+        if arm >= arm_through_needed:
+            if arm <= DEFAULT_CONFIG.geometry.point_distance_threshold:
+                output.append(vertex)
+                continue
+            entry = vertex - previous_vector * (arm / previous_length)
+            exit_point = vertex + next_vector * (arm / next_length)
+            fillets[len(output)] = (previous_heading, joint_heading)
+            fillets[len(output) + 1] = (joint_heading, next_heading)
+            output.append(entry)
+            output.append(vertex)
+            output.append(exit_point)
+            continue
+        # Corner-cut fallback: near-arc Bezier with curvature ~kink/(2*arm).
+        # The cut depth arm*sin(kink/2) stays within the fold margin, except
+        # when a bounded deeper cut actually achieves fold-freedom: such a
+        # cut on a coarse discretization kink is comparable to the
+        # discretization sagitta already present in the source polyline,
+        # while a fold destroys the lane surface outright.
+        # Exact circular-fillet geometry: an arc of radius 1/curvature_limit
+        # tangent to both chords needs arm = R*tan(kink/2).
+        arm_margin = fold_margin / max(half_sine, epsilon)
+        arm_cut_needed = 1.05 * math.tan(0.5 * kink) / curvature_limit
+        max_cut = DEFAULT_CONFIG.geometry.emission_interior_kink_max_corner_cut
+        arm_extended = min(arm_max, arm_cut_needed)
+        if arm_extended > arm_margin and arm_extended * half_sine <= max_cut:
+            arm = arm_extended
+        else:
+            arm = min(arm_max, arm_margin)
+        if arm <= DEFAULT_CONFIG.geometry.point_distance_threshold:
+            output.append(vertex)
+            continue
+        entry = vertex - previous_vector * (arm / previous_length)
+        exit_point = vertex + next_vector * (arm / next_length)
+        fillets[len(output)] = (previous_heading, next_heading)
+        output.append(entry)
+        output.append(exit_point)
+    output.append(np.asarray(points[-1], dtype=float))
+    return np.asarray(output, dtype=float), fillets
+
+
+def _polyline_max_lateral_extent(
+    reference_points: np.ndarray,
+    outer_points: np.ndarray,
+) -> float:
+    """Largest distance from the outer boundary to the reference polyline."""
+    reference_xy = np.asarray(reference_points, dtype=float)[:, :2]
+    outer_xy = np.asarray(outer_points, dtype=float)[:, :2]
+    if len(reference_xy) < 2 or len(outer_xy) == 0:
+        return 0.0
+    starts = reference_xy[:-1]
+    directions = reference_xy[1:] - starts
+    lengths_squared = np.einsum("ij,ij->i", directions, directions)
+    lengths_squared = np.maximum(lengths_squared, DEFAULT_CONFIG.geometry.epsilon)
+    max_extent = 0.0
+    for point in outer_xy:
+        offsets = point[np.newaxis, :] - starts
+        parameters = np.clip(
+            np.einsum("ij,ij->i", offsets, directions) / lengths_squared,
+            0.0,
+            1.0,
+        )
+        closest = starts + parameters[:, np.newaxis] * directions
+        distance = float(np.min(np.linalg.norm(point - closest, axis=1)))
+        max_extent = max(max_extent, distance)
+    return max_extent
+
+
 class EmissionReferenceGeometry:
     """Piecewise-linear emission reference geometry from source Lanelet2 points.
 
@@ -809,6 +1100,7 @@ class EmissionReferenceGeometry:
         *,
         start_heading: Optional[float] = None,
         end_heading: Optional[float] = None,
+        lateral_extent: Optional[float] = None,
     ):
         points = _as_xy_array(source_points)
         if points.shape[1] == 2:
@@ -841,6 +1133,35 @@ class EmissionReferenceGeometry:
                 points = np.delete(points, -2, axis=0)
                 collapsed_end_heading = support_heading
 
+        interior_fillets: dict[int, tuple[float, float]] = {}
+        if lateral_extent is not None and len(points) >= 3:
+            # Terminal joints only need protection when the override
+            # actually deviates from the terminal chord (a blend or point
+            # move will reshape that region).
+            protect_start = (
+                start_heading is not None
+                and _heading_delta(
+                    _heading_from_vector(points[1, :2] - points[0, :2]),
+                    float(start_heading),
+                )
+                > 1e-9
+            )
+            protect_end = (
+                end_heading is not None
+                and _heading_delta(
+                    _heading_from_vector(points[-1, :2] - points[-2, :2]),
+                    float(end_heading),
+                )
+                > 1e-9
+            )
+            points, interior_fillets = _insert_interior_kink_fillets(
+                points,
+                float(lateral_extent),
+                protect_start_joint=protect_start,
+                protect_end_joint=protect_end,
+            )
+
+        self._lateral_extent = None if lateral_extent is None else float(lateral_extent)
         self._points_3d = points
         self._points = self._points_3d[:, :2]
         self._segments = np.diff(self._points, axis=0)
@@ -856,7 +1177,7 @@ class EmissionReferenceGeometry:
         use_bezier = len(self._points) == 2 and (
             start_heading is not None or end_heading is not None
         )
-        curve_headings: dict[int, tuple[float, float]] = {}
+        curve_headings: dict[int, tuple[float, float]] = dict(interior_fillets)
 
         if use_bezier:
             source_heading = _heading_from_vector(self._segments[0])
@@ -884,6 +1205,24 @@ class EmissionReferenceGeometry:
                 and end_heading is not None
                 and len(self._segments) < 4
             )
+            if (
+                start_heading is not None
+                and end_heading is not None
+                and len(self._segments) == 2
+                and not curve_headings
+                and float(min(source_segment_lengths)) >= min_curve_length
+            ):
+                # Two segments with both terminal overrides: honor each
+                # deviating override with its own Bezier, bending only the
+                # outer end of that segment. The interior joint keeps the
+                # source chord tangents on both sides, preserving the source
+                # vertex angle exactly, and no support point has to move (the
+                # historic point-move alternative makes both ends compete for
+                # the single interior point).
+                if _heading_delta(float(start_heading), segment_headings[0]) > 1e-9:
+                    curve_headings[0] = (float(start_heading), segment_headings[0])
+                if _heading_delta(segment_headings[1], float(end_heading)) > 1e-9:
+                    curve_headings[1] = (segment_headings[1], float(end_heading))
             if start_heading is not None and not overlapping_endpoint_pairs:
                 candidate_pairs.append(
                     (0, 1, float(start_heading), segment_headings[1])
@@ -927,6 +1266,89 @@ class EmissionReferenceGeometry:
                 curve_headings[first_index] = (first_heading, shared_heading)
                 curve_headings[second_index] = (shared_heading, second_heading)
                 occupied.update(indices)
+
+            # A terminal override whose blend pair was blocked (interior
+            # kink fillet on the partner segment, or terminal segments too
+            # short for the pair) can still be honored by distributing the
+            # override rotation over as many leading segments as the fold
+            # curvature limit requires. Every source point stays in place;
+            # only the joint tangents rotate towards the override.
+            last_index = len(self._segments) - 1
+            if lateral_extent is not None:
+                curvature_limit = (
+                    DEFAULT_CONFIG.geometry.emission_terminal_blend_fold_safety
+                    / max(float(lateral_extent), 1.0)
+                )
+                for at_start, override in (
+                    (True, start_heading),
+                    (False, end_heading),
+                ):
+                    terminal_index = 0 if at_start else last_index
+                    if override is None or terminal_index in occupied:
+                        continue
+                    chord_heading = segment_headings[terminal_index]
+                    delta_signed = math.atan2(
+                        math.sin(chord_heading - float(override)),
+                        math.cos(chord_heading - float(override)),
+                    )
+                    if not at_start:
+                        delta_signed = -delta_signed
+                    if abs(delta_signed) <= 1e-9 or abs(delta_signed) > blend_tolerance:
+                        continue
+                    span_needed = 4.0 * abs(delta_signed) / curvature_limit
+                    step = 1 if at_start else -1
+                    cover: list[int] = []
+                    covered_length = 0.0
+                    index = terminal_index
+                    while 0 <= index <= last_index:
+                        if index in occupied:
+                            break
+                        cover.append(index)
+                        covered_length += float(source_segment_lengths[index])
+                        if covered_length >= span_needed:
+                            break
+                        index += step
+                    if not cover or covered_length <= (DEFAULT_CONFIG.geometry.epsilon):
+                        continue
+                    # End the blend C1-aligned with the first uncovered
+                    # segment so the blend boundary joint carries no kink:
+                    # match that segment's already-assigned tangent (an
+                    # interior fillet may own it), falling back to its
+                    # chord. Only the outermost covered segment's own chord
+                    # remains as the target when the blend covers the whole
+                    # road.
+                    beyond = cover[-1] + step
+                    if 0 <= beyond <= last_index:
+                        assigned = curve_headings.get(beyond)
+                        if assigned is not None:
+                            blend_target = assigned[0] if at_start else assigned[1]
+                        else:
+                            blend_target = segment_headings[beyond]
+                    else:
+                        blend_target = segment_headings[cover[-1]]
+                    rotation = math.atan2(
+                        math.sin(blend_target - float(override)),
+                        math.cos(blend_target - float(override)),
+                    )
+                    walked = 0.0
+                    for cover_index in cover:
+                        segment_length = float(source_segment_lengths[cover_index])
+                        near_fraction = walked / covered_length
+                        far_fraction = (walked + segment_length) / (covered_length)
+                        near_heading = blend_target - rotation * (1.0 - near_fraction)
+                        far_heading = blend_target - rotation * (1.0 - far_fraction)
+                        if at_start:
+                            curve_headings[cover_index] = (
+                                near_heading,
+                                far_heading,
+                            )
+                        else:
+                            curve_headings[cover_index] = (
+                                far_heading,
+                                near_heading,
+                            )
+                        occupied.add(cover_index)
+                        walked += segment_length
 
         if curve_headings:
             start_station = 0.0
@@ -1020,13 +1442,20 @@ class EmissionReferenceGeometry:
         *,
         start_heading: Optional[float] = None,
         end_heading: Optional[float] = None,
+        lateral_extent: Optional[float] = None,
     ) -> "EmissionReferenceGeometry":
         """Build emission geometry from the selected Lanelet2 reference boundary."""
         return cls(
             source_points,
             start_heading=start_heading,
             end_heading=end_heading,
+            lateral_extent=lateral_extent,
         )
+
+    @property
+    def lateral_extent(self) -> Optional[float]:
+        """Largest lateral lane offset used for kink-fillet fold limits."""
+        return self._lateral_extent
 
     @property
     def source_points(self) -> np.ndarray:
@@ -1579,14 +2008,28 @@ class RoadEmissionContext:
         # unconditional Bezier pair then smooths the moved joint instead of
         # leaving a raw reference kink.
         joint_bezier = len(source_points_3d) == 2
+        road_lateral_extent = _polyline_max_lateral_extent(
+            source_points_3d,
+            oriented_outer_points,
+        )
         emission_geometry = EmissionReferenceGeometry.from_source_boundary(
             source_points_3d,
             start_heading=start_heading_override,
             end_heading=end_heading_override,
+            lateral_extent=road_lateral_extent,
         )
         if not joint_bezier:
             blend_tolerance = (
                 DEFAULT_CONFIG.geometry.emission_heading_override_blend_tolerance
+            )
+            # A three-point road with both terminal overrides is emitted as a
+            # dual terminal Bezier; the legacy point move would make both
+            # ends compete for the single interior point, so the chord gate
+            # does not apply there.
+            dual_terminal_bezier = (
+                start_heading_override is not None
+                and end_heading_override is not None
+                and len(source_points_3d) == 3
             )
             moved = False
             for at_start, heading_override in (
@@ -1601,11 +2044,14 @@ class RoadEmissionContext:
                     else source_points_3d[-1, :2] - source_points_3d[-2, :2]
                 )
                 if (
-                    _heading_delta(
-                        _heading_from_vector(terminal_chord),
-                        heading_override,
+                    (
+                        dual_terminal_bezier
+                        or _heading_delta(
+                            _heading_from_vector(terminal_chord),
+                            heading_override,
+                        )
+                        <= blend_tolerance
                     )
-                    <= blend_tolerance
                     and _terminal_heading_honored(
                         emission_geometry,
                         heading_override,
@@ -1623,6 +2069,25 @@ class RoadEmissionContext:
                     )
                 ):
                     continue
+                # Before the legacy point move, try absorbing terminal
+                # source points into one longer bounded blend Bezier.
+                absorbed = _try_absorb_terminal_override(
+                    source_points_3d,
+                    float(heading_override),
+                    at_start=at_start,
+                    lateral_extent=road_lateral_extent,
+                    start_heading=start_heading_override,
+                    end_heading=end_heading_override,
+                )
+                if absorbed is not None:
+                    source_points_3d = absorbed
+                    emission_geometry = EmissionReferenceGeometry.from_source_boundary(
+                        source_points_3d,
+                        start_heading=start_heading_override,
+                        end_heading=end_heading_override,
+                        lateral_extent=road_lateral_extent,
+                    )
+                    continue
                 source_points_3d = _align_terminal_segment_to_heading(
                     source_points_3d,
                     heading_override,
@@ -1634,6 +2099,7 @@ class RoadEmissionContext:
                     source_points_3d,
                     start_heading=start_heading_override,
                     end_heading=end_heading_override,
+                    lateral_extent=road_lateral_extent,
                 )
 
         if topology_spline is None:

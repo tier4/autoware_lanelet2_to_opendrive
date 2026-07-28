@@ -189,9 +189,11 @@ def _fixed_endpoint_headings(
             continue
 
         # With two points, changing either endpoint segment changes the whole
-        # road. With three points and both ends constrained, both adjustments
-        # compete for the same middle point. Preserve the source tangents and
-        # propagate them to a neighbouring road that has local freedom.
+        # road: preserve the source chord and propagate it to a neighbouring
+        # road that has local freedom. Three-point roads with both ends
+        # constrained no longer need protection — emission honors both
+        # overrides with a dual terminal Bezier that keeps the interior point
+        # and its source vertex angle intact.
         if len(points) == 2:
             fixed[(road_id, True)] = math.atan2(
                 float(points[1, 1] - points[0, 1]),
@@ -199,15 +201,6 @@ def _fixed_endpoint_headings(
             )
             fixed[(road_id, False)] = fixed[(road_id, True)]
             curve_capable.update(((road_id, True), (road_id, False)))
-        elif len(points) == 3 and sides == {True, False}:
-            fixed[(road_id, True)] = math.atan2(
-                float(points[1, 1] - points[0, 1]),
-                float(points[1, 0] - points[0, 0]),
-            )
-            fixed[(road_id, False)] = math.atan2(
-                float(points[2, 1] - points[1, 1]),
-                float(points[2, 0] - points[1, 0]),
-            )
     return fixed, curve_capable
 
 
@@ -380,6 +373,27 @@ def _lane_correspondences(
     return tuple(correspondences)
 
 
+def _lane_source_lanelet_id(
+    road: Road,
+    lane,
+    *,
+    at_start: bool,
+) -> Optional[int]:
+    """Resolve the source lanelet at one end of a lane.
+
+    Chain-merged connecting roads carry a synthetic merged lanelet on the
+    lane; the physical seam at either end belongs to the first / last
+    original chain lanelet.
+    """
+    if road.chain_source_lanelet_ids:
+        return (
+            road.chain_source_lanelet_ids[0]
+            if at_start
+            else road.chain_source_lanelet_ids[-1]
+        )
+    return lane.lanelet_id
+
+
 def _junction_incoming_lane_correspondences(
     from_road: Road,
     to_road: Road,
@@ -392,9 +406,10 @@ def _junction_incoming_lane_correspondences(
 
     correspondences = []
     for to_lane in to_lanes:
+        to_lanelet_id = _lane_source_lanelet_id(to_road, to_lane, at_start=True)
         if (
             to_lane.lane_id is None
-            or to_lane.lanelet_id is None
+            or to_lanelet_id is None
             or to_lane.predecessor is None
         ):
             return None
@@ -404,12 +419,52 @@ def _junction_incoming_lane_correspondences(
             or from_lane.lane_id is None
             or from_lane.lanelet_id is None
             or from_lane.successor is None
-            or from_lane.successor.id != to_lane.lane_id
+            or (
+                from_lane.successor.id != to_lane.lane_id
+                # An incoming lane feeding several connectors (junction
+                # fan) can only point its single successor field at one of
+                # them; the connector-side predecessor is authoritative for
+                # chain-merged connectors.
+                and not to_road.chain_source_lanelet_ids
+            )
         ):
             return None
         correspondences.append(
             LogicalLaneCorrespondence(
                 from_lanelet_id=from_lane.lanelet_id,
+                from_lane_id=from_lane.lane_id,
+                to_lanelet_id=to_lanelet_id,
+                to_lane_id=to_lane.lane_id,
+            )
+        )
+    return tuple(correspondences)
+
+
+def _junction_outgoing_lane_correspondences(
+    from_road: Road,
+    to_road: Road,
+) -> Optional[Tuple[LogicalLaneCorrespondence, ...]]:
+    """Map one connecting road's terminal lanes onto the outgoing road."""
+    from_lanes = _ordered_one_side_lanes(from_road, at_start=False)
+    to_lanes = _non_center_lanes(to_road, at_start=True)
+    if not from_lanes or not to_lanes:
+        return None
+
+    correspondences = []
+    for from_lane in from_lanes:
+        from_lanelet_id = _lane_source_lanelet_id(from_road, from_lane, at_start=False)
+        if (
+            from_lane.lane_id is None
+            or from_lanelet_id is None
+            or from_lane.successor is None
+        ):
+            return None
+        to_lane = to_lanes.get(from_lane.successor.id)
+        if to_lane is None or to_lane.lane_id is None or to_lane.lanelet_id is None:
+            return None
+        correspondences.append(
+            LogicalLaneCorrespondence(
+                from_lanelet_id=from_lanelet_id,
                 from_lane_id=from_lane.lane_id,
                 to_lanelet_id=to_lane.lanelet_id,
                 to_lane_id=to_lane.lane_id,
@@ -479,24 +534,57 @@ def _shared_cross_section(
     )
     if float(np.dot(tangent, road_direction)) < 0.0:
         tangent = -tangent
-    heading = math.atan2(float(tangent[1]), float(tangent[0]))
-    side_direction = lane_sign * np.array([-tangent[1], tangent[0]], dtype=float)
+    cap_heading = math.atan2(float(tangent[1]), float(tangent[0]))
+    heading = cap_heading
 
-    widths = []
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
-        width = float(np.dot(end[:2] - start[:2], side_direction))
-        if not math.isfinite(width) or width <= DEFAULT_CONFIG.geometry.epsilon:
-            return None
-        widths.append(width)
+    # An oblique terminal cap does not mean the reference heading is oblique:
+    # the cap-normal heading above is only trustworthy while it agrees with
+    # the source travel direction through the seam. When it deviates (an
+    # oblique cap, or a cap aligned with only one side of a true source
+    # turn), share the miter direction — the circular mean of both sides'
+    # source terminal travel tangents — so neither road's reference is bent
+    # by more than half the actual source turn.
+    from_travel = _source_terminal_heading(from_road, lanelet_by_id, at_start=False)
+    to_travel = _source_terminal_heading(to_road, lanelet_by_id, at_start=True)
+    if from_travel is not None and to_travel is not None:
+        mean_sin = math.sin(from_travel) + math.sin(to_travel)
+        mean_cos = math.cos(from_travel) + math.cos(to_travel)
+        if math.hypot(mean_sin, mean_cos) > DEFAULT_CONFIG.geometry.epsilon:
+            travel_heading = math.atan2(mean_sin, mean_cos)
+            if (
+                abs(
+                    math.atan2(
+                        math.sin(travel_heading - heading),
+                        math.cos(travel_heading - heading),
+                    )
+                )
+                > DEFAULT_CONFIG.geometry.terminal_micro_kink_support_heading_tolerance
+            ):
+                heading = travel_heading
 
-    return SharedPhysicalCrossSection(
-        reference_xyz=tuple(float(value) for value in boundaries[0]),
-        heading=heading,
-        boundary_xyz=tuple(
-            tuple(float(value) for value in boundary) for boundary in boundaries
-        ),
-        lane_widths=tuple(widths),
-    )
+    for candidate_heading in dict.fromkeys((heading, cap_heading)):
+        widths = _widths_for_heading(
+            SharedPhysicalCrossSection(
+                reference_xyz=tuple(float(value) for value in boundaries[0]),
+                heading=candidate_heading,
+                boundary_xyz=tuple(
+                    tuple(float(value) for value in boundary) for boundary in boundaries
+                ),
+                lane_widths=(),
+            ),
+            candidate_heading,
+            lane_sign,
+        )
+        if widths is not None:
+            return SharedPhysicalCrossSection(
+                reference_xyz=tuple(float(value) for value in boundaries[0]),
+                heading=candidate_heading,
+                boundary_xyz=tuple(
+                    tuple(float(value) for value in boundary) for boundary in boundaries
+                ),
+                lane_widths=widths,
+            )
+    return None
 
 
 def _road_source_cross_section(
@@ -587,6 +675,105 @@ def _unify_junction_incoming_cross_sections(
             continue
         lane_index = {int(lane_id): index for index, lane_id in enumerate(lane_ids)}
         lane_sign = 1 if int(lane_ids[0]) > 0 else -1
+
+        # An oblique junction cap does not rotate the incoming reference: the
+        # incoming road keeps its source travel tangent and the junction
+        # connecting roads adapt. Only trust the cap-normal heading while it
+        # agrees with the source travel direction.
+        travel_heading = _source_terminal_heading(
+            from_road,
+            lanelet_by_id,
+            at_start=False,
+        )
+        if (
+            travel_heading is not None
+            and abs(
+                math.atan2(
+                    math.sin(travel_heading - full_section.heading),
+                    math.cos(travel_heading - full_section.heading),
+                )
+            )
+            > DEFAULT_CONFIG.geometry.junction_cap_obliqueness_tolerance
+        ):
+            travel_widths = _widths_for_heading(
+                full_section,
+                travel_heading,
+                lane_sign,
+            )
+            if travel_widths is not None:
+                full_section = replace(
+                    full_section,
+                    heading=travel_heading,
+                    lane_widths=travel_widths,
+                )
+
+        # When a connecting road's own source tangent deviates from the
+        # incoming travel tangent beyond what its terminal blend can absorb
+        # fold-free (a real cap corner on a tight turn connector), rotate
+        # the shared cross-section to the minimax compromise between the
+        # incoming road and all its connectors, each weighted by its own
+        # fold-free rotation budget. Every participant then bends within
+        # its budget instead of one side folding or point-moving.
+        incoming_extent = float(sum(full_section.lane_widths))
+        incoming_capacity = _terminal_blend_capacity(
+            from_road,
+            lanelet_by_id,
+            at_start=False,
+            lateral_extent=incoming_extent,
+        )
+        connector_capacities: List[Tuple[float, float]] = []
+        needs_compromise = False
+        for plan in plans:
+            if plan.from_road_id != from_road_id:
+                continue
+            to_road = roads_by_id.get(plan.to_road_id)
+            if to_road is None:
+                continue
+            to_section = _road_source_cross_section(
+                to_road,
+                lanelet_by_id,
+                at_start=True,
+            )
+            if to_section is None:
+                continue
+            capacity = _terminal_blend_capacity(
+                to_road,
+                lanelet_by_id,
+                at_start=True,
+                lateral_extent=float(sum(to_section.lane_widths)),
+            )
+            if capacity is None:
+                continue
+            connector_capacities.append(capacity)
+            heading_gap = abs(
+                math.atan2(
+                    math.sin(capacity[0] - full_section.heading),
+                    math.cos(capacity[0] - full_section.heading),
+                )
+            )
+            if heading_gap > capacity[1]:
+                needs_compromise = True
+        if needs_compromise and incoming_capacity is not None:
+            compromise = _minimax_compromise_heading(
+                [
+                    (full_section.heading, incoming_capacity[1]),
+                    *connector_capacities,
+                ],
+                full_section.heading,
+            )
+            if compromise is not None:
+                compromise_widths = _widths_for_heading(
+                    full_section,
+                    compromise,
+                    lane_sign,
+                )
+                if compromise_widths is not None:
+                    full_section = replace(
+                        full_section,
+                        heading=compromise,
+                        lane_widths=compromise_widths,
+                    )
+
         tangent = np.array(
             [math.cos(full_section.heading), math.sin(full_section.heading)],
             dtype=float,
@@ -788,6 +975,84 @@ def build_junction_incoming_physical_connection_plans(
         roads,
         lanelet_by_id,
     )
+
+
+def _terminal_blend_capacity(
+    road: Road,
+    lanelet_by_id: Dict[int, lanelet2.core.Lanelet],
+    *,
+    at_start: bool,
+    lateral_extent: float,
+) -> Optional[Tuple[float, float]]:
+    """Source terminal heading and the fold-free tangent rotation budget.
+
+    A terminal blend rotating the reference tangent by ``delta`` over the
+    terminal source span produces peak curvature ~``4 * delta / span``; the
+    offset boundary at the road's lateral extent folds at curvature
+    ``safety / extent``. The budget is therefore
+    ``safety / extent * span / 4``.
+    """
+    heading = _source_terminal_heading(road, lanelet_by_id, at_start=at_start)
+    if heading is None:
+        return None
+    points = _oriented_reference_points(road, lanelet_by_id)
+    if points is None:
+        return None
+    min_span = DEFAULT_CONFIG.parampoly3.min_segment_length
+    anchor = points[0] if at_start else points[-1]
+    ordered = points if at_start else points[::-1]
+    span = 0.0
+    for other in ordered[1:]:
+        span = float(np.linalg.norm(other[:2] - anchor[:2]))
+        if span >= min_span:
+            break
+    curvature_limit = DEFAULT_CONFIG.geometry.emission_terminal_blend_fold_safety / max(
+        float(lateral_extent), 1.0
+    )
+    return heading, curvature_limit * span / 4.0
+
+
+def _minimax_compromise_heading(
+    participants: Sequence[Tuple[float, float]],
+    base_heading: float,
+) -> Optional[float]:
+    """Heading minimizing the worst budget-relative rotation, if feasible.
+
+    Each participant is a (preferred heading, rotation budget) pair. The
+    cost ``max_i |h - h_i| / budget_i`` is convex in ``h``; the minimizer
+    is found by ternary search over the participants' heading interval
+    (unwrapped around ``base_heading``). Returns ``None`` when even the
+    optimum overruns some participant's budget.
+    """
+    if not participants:
+        return None
+
+    def unwrap(heading: float) -> float:
+        return base_heading + math.atan2(
+            math.sin(heading - base_heading),
+            math.cos(heading - base_heading),
+        )
+
+    unwrapped = [
+        (unwrap(heading), max(budget, 1e-9)) for heading, budget in participants
+    ]
+
+    def cost(candidate: float) -> float:
+        return max(abs(candidate - heading) / budget for heading, budget in unwrapped)
+
+    low = min(heading for heading, _budget in unwrapped)
+    high = max(heading for heading, _budget in unwrapped)
+    for _iteration in range(80):
+        first = low + (high - low) / 3.0
+        second = high - (high - low) / 3.0
+        if cost(first) <= cost(second):
+            high = second
+        else:
+            low = first
+    optimum = 0.5 * (low + high)
+    if cost(optimum) > 1.0:
+        return None
+    return optimum
 
 
 def _source_terminal_heading(
@@ -1168,6 +1433,192 @@ def build_divergence_physical_connection_plans(
             continue
         plans.extend(reconciled)
     return plans
+
+
+def _unify_junction_outgoing_cross_sections(
+    plans: Sequence[PhysicalConnectionPlan],
+    roads: Sequence[Road],
+    lanelet_by_id: Dict[int, lanelet2.core.Lanelet],
+) -> List[PhysicalConnectionPlan]:
+    """Give every connector feeding one outgoing road the same start section.
+
+    Mirror of :func:`_unify_junction_incoming_cross_sections`: the outgoing
+    road's source start cross-section is canonical; each connecting road's
+    terminal constraint is the sub-block of outgoing lanes its own lane
+    correspondences cover, so multiple connectors (including fan-in and
+    multi-lane merges) tile the outgoing start without double boundaries.
+    """
+    roads_by_id = {road.id: road for road in roads}
+    unified = []
+    for to_road_id in sorted({plan.to_road_id for plan in plans}):
+        to_road = roads_by_id.get(to_road_id)
+        if to_road is None:
+            continue
+        full_section = _road_source_cross_section(
+            to_road,
+            lanelet_by_id,
+            at_start=True,
+        )
+        lanes = _ordered_one_side_lanes(to_road, at_start=True)
+        lane_ids = [lane.lane_id for lane in lanes]
+        if full_section is None or any(lane_id is None for lane_id in lane_ids):
+            continue
+        lane_index = {int(lane_id): index for index, lane_id in enumerate(lane_ids)}
+        lane_sign = 1 if int(lane_ids[0]) > 0 else -1
+
+        # The outgoing road keeps its own source travel direction; an
+        # oblique junction cap must not rotate its reference (connectors are
+        # turns whose end tangent naturally aligns with the outgoing road).
+        travel_heading = _source_terminal_heading(
+            to_road,
+            lanelet_by_id,
+            at_start=True,
+        )
+        if (
+            travel_heading is not None
+            and abs(
+                math.atan2(
+                    math.sin(travel_heading - full_section.heading),
+                    math.cos(travel_heading - full_section.heading),
+                )
+            )
+            > DEFAULT_CONFIG.geometry.terminal_micro_kink_support_heading_tolerance
+        ):
+            travel_widths = _widths_for_heading(
+                full_section,
+                travel_heading,
+                lane_sign,
+            )
+            if travel_widths is not None:
+                full_section = replace(
+                    full_section,
+                    heading=travel_heading,
+                    lane_widths=travel_widths,
+                )
+
+        tangent = np.array(
+            [math.cos(full_section.heading), math.sin(full_section.heading)],
+            dtype=float,
+        )
+        side_direction = lane_sign * np.array(
+            [-tangent[1], tangent[0]],
+            dtype=float,
+        )
+        reference = np.asarray(full_section.reference_xyz, dtype=float)
+        offsets = np.concatenate(([0.0], np.cumsum(full_section.lane_widths)))
+        canonical_boundaries = tuple(
+            (
+                float(reference[0] + offset * side_direction[0]),
+                float(reference[1] + offset * side_direction[1]),
+                full_section.boundary_xyz[index][2],
+            )
+            for index, offset in enumerate(offsets)
+        )
+
+        for plan in plans:
+            if plan.to_road_id != to_road_id:
+                continue
+            indices = [
+                lane_index.get(correspondence.to_lane_id)
+                for correspondence in plan.lane_correspondences
+            ]
+            if any(index is None for index in indices):
+                continue
+            concrete_indices = [int(index) for index in indices]
+            first = min(concrete_indices)
+            last = max(concrete_indices)
+            if sorted(concrete_indices) != list(range(first, last + 1)):
+                continue
+            cross_section = SharedPhysicalCrossSection(
+                reference_xyz=canonical_boundaries[first],
+                heading=full_section.heading,
+                boundary_xyz=canonical_boundaries[first : last + 2],
+                lane_widths=full_section.lane_widths[first : last + 1],
+            )
+            unified.append(
+                replace(
+                    plan,
+                    cross_section=cross_section,
+                    from_endpoint=RoadEndpointConstraint(
+                        road_id=plan.from_road_id,
+                        at_start=False,
+                        reference_xyz=cross_section.reference_xyz,
+                        heading=cross_section.heading,
+                    ),
+                    to_endpoint=RoadEndpointConstraint(
+                        road_id=plan.to_road_id,
+                        at_start=True,
+                        reference_xyz=full_section.reference_xyz,
+                        heading=full_section.heading,
+                    ),
+                )
+            )
+    return unified
+
+
+def build_junction_outgoing_physical_connection_plans(
+    roads: Sequence[Road],
+    lanelet_by_id: Dict[int, lanelet2.core.Lanelet],
+    *,
+    protected_road_endpoints: Optional[Iterable[Tuple[int, bool]]] = None,
+) -> List[PhysicalConnectionPlan]:
+    """Plan source-backed connecting-road to outgoing-road interfaces."""
+    protected = set(protected_road_endpoints or ())
+    roads_by_id = {road.id: road for road in roads}
+    plans = []
+    for from_road in roads:
+        successor = from_road.link.successor if from_road.link else None
+        if (
+            from_road.junction < 0
+            or (from_road.id, False) in protected
+            or successor is None
+            or successor.element_type is not ElementType.ROAD
+            or successor.contact_point is not ContactPoint.START
+        ):
+            continue
+        to_road = roads_by_id.get(successor.element_id)
+        if to_road is None or to_road.junction >= 0 or (to_road.id, True) in protected:
+            continue
+        correspondences = _junction_outgoing_lane_correspondences(
+            from_road,
+            to_road,
+        )
+        if correspondences is None:
+            continue
+        cross_section = _shared_cross_section(
+            from_road,
+            to_road,
+            correspondences,
+            lanelet_by_id,
+        )
+        if cross_section is None:
+            continue
+        plans.append(
+            PhysicalConnectionPlan(
+                from_road_id=from_road.id,
+                to_road_id=to_road.id,
+                connection_type=PhysicalConnectionType.JUNCTION_OUTGOING,
+                lane_correspondences=correspondences,
+                cross_section=cross_section,
+                from_endpoint=RoadEndpointConstraint(
+                    road_id=from_road.id,
+                    at_start=False,
+                    reference_xyz=cross_section.reference_xyz,
+                    heading=cross_section.heading,
+                ),
+                to_endpoint=RoadEndpointConstraint(
+                    road_id=to_road.id,
+                    at_start=True,
+                    reference_xyz=cross_section.reference_xyz,
+                    heading=cross_section.heading,
+                ),
+            )
+        )
+    return _unify_junction_outgoing_cross_sections(
+        plans,
+        roads,
+        lanelet_by_id,
+    )
 
 
 def endpoint_constraints_by_road(

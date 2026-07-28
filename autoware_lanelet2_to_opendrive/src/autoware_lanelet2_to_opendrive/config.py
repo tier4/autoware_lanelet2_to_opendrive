@@ -40,6 +40,22 @@ class GeometryConstants:
         emission_width_refinement_sample_multiplier: Limit refined width
             sample count to a small multiple of the initial/source-driven
             sample count.
+        emission_interior_kink_fold_margin: Maximum backward displacement (m)
+            a source polyline joint kink may impose on the road's widest
+            lateral boundary before the joint tangents are C1-blended. A
+            joint with heading step ``delta`` displaces a boundary at offset
+            ``t`` backwards by roughly ``t * delta``; joints where this
+            exceeds the margin get a shared average tangent on the emitted
+            Bezier pair while every source vertex stays exactly in place.
+        emission_interior_kink_max_corner_cut: Maximum corner-cut depth (m)
+            an interior kink fillet may take beyond the fold margin when
+            the deeper cut provably removes an offset-boundary fold. Kinks
+            whose fold-free cut would exceed this keep the margin-bounded
+            cut instead.
+        emission_micro_segment_collapse_length: Interior source segments
+            shorter than this (m) are digitization-noise candidates; their
+            joints are collapsed onto the neighbour chord when the removed
+            point sits within the interior kink fold margin of that chord.
         terminal_micro_kink_min_heading_delta: Minimum heading discontinuity
             (rad) before a very short endpoint segment can be treated as an
             unstable terminal tangent rather than source geometry.
@@ -53,11 +69,17 @@ class GeometryConstants:
         emission_heading_override_blend_tolerance: Maximum tangent change
             (rad) an endpoint heading override may demand from the terminal
             source segments before the override is refused to protect source
-            fidelity. Slightly larger than the micro-kink support tolerance
-            so a deliberate physical-connection tangent (e.g. absorbing a
-            two-point neighbour road) can bend the terminal Bezier pair, but
-            small enough that the blended curve stays on the source corridor;
-            larger demands (oblique junction caps) keep the source tangent.
+            fidelity. Large enough that a deliberate physical-connection
+            tangent (e.g. a junction cross-section on a curved connector
+            cap) can bend the terminal Bezier pair — the blend curvature
+            gate still rejects fold-inducing blends — but small enough that
+            the blended curve stays on the source corridor; larger demands
+            (strongly oblique junction caps) keep the source tangent.
+        junction_cap_obliqueness_tolerance: Maximum angle (rad) between a
+            junction incoming road's terminal cap normal and its source
+            travel tangent before the shared junction cross-section keeps the
+            travel tangent instead of rotating the incoming reference onto
+            the oblique cap normal.
         emission_terminal_blend_fold_safety: Fraction of the fold limit the
             terminal blend Beziers may use. An offset boundary folds when
             ``lateral_offset * curvature`` reaches 1, so the blend curvature
@@ -92,11 +114,15 @@ class GeometryConstants:
     emission_width_refinement_min_interval: float = 0.02
     emission_width_refinement_max_iterations: int = 12
     emission_width_refinement_sample_multiplier: int = 4
+    emission_interior_kink_fold_margin: float = 0.03
+    emission_interior_kink_max_corner_cut: float = 0.08
+    emission_micro_segment_collapse_length: float = 0.3
     terminal_micro_kink_min_heading_delta: float = 0.17453292519943295
     terminal_micro_kink_support_heading_tolerance: float = 0.08726646259971647
     physical_connection_bezier_handle_length: float = 3.0
-    emission_heading_override_blend_tolerance: float = 0.105
-    emission_terminal_blend_fold_safety: float = 0.8
+    emission_heading_override_blend_tolerance: float = 0.15
+    emission_terminal_blend_fold_safety: float = 0.85
+    junction_cap_obliqueness_tolerance: float = 0.2
     emission_bezier_arc_length_samples: int = 257
     emission_bezier_projection_seed_samples: int = 129
     emission_bezier_projection_newton_iterations: int = 12

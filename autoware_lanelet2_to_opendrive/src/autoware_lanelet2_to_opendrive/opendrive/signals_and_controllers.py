@@ -431,6 +431,17 @@ class SignalsAndControllers:
         if not lanelets:
             return (0.0, -4.0)
 
+        if road is not None and getattr(road, "chain_source_lanelet_ids", None):
+            # Chain-merged connecting roads own longitudinally consecutive
+            # lanelets; project onto the road geometry directly instead of
+            # rebuilding a lateral reference line.
+            from .objects import _project_point_onto_road_with_distance
+
+            projection = _project_point_onto_road_with_distance(np.array([x, y]), road)
+            if projection is None:
+                return (0.0, -4.0)
+            return (projection.s, road.get_half_width_at_s(projection.s))
+
         try:
             reference_line = ReferenceLine.construct_from_lanelet_groups(
                 lanelet_map, lanelets, routing_graph=routing_graph

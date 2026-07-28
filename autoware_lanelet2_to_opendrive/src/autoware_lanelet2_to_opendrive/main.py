@@ -197,6 +197,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         Dict[int, List[int]],
         Dict[int, int],
         List[lanelet2.core.Lanelet],
+        Dict[int, List[int]],
     ]:
         """
         Build junction structure from junction lanelets.
@@ -238,6 +239,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             connecting_roads,
             junction_to_roads,
             junction_lanelet_to_road,
+            junction_chain_traces,
         ) = Road.construct_connecting_roads_from_junctions(
             lanelet_map=self.lanelet_map,
             junction_groups=junction_groups,
@@ -315,6 +317,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_to_roads,
             junction_lanelet_to_road,
             junction_lanelets,
+            junction_chain_traces,
         )
 
     def _build_road_lanelet_mappings(
@@ -435,6 +438,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             apply_physical_connection_width_constraints,
             build_divergence_physical_connection_plans,
             build_junction_incoming_physical_connection_plans,
+            build_junction_outgoing_physical_connection_plans,
             build_ordinary_physical_connection_plans,
             endpoint_constraints_by_road,
         )
@@ -458,9 +462,15 @@ class _Lanelet2ToOpenDRIVEConverter:
             lanelet_by_id,
             protected_road_endpoints=protected_road_endpoints,
         )
+        junction_outgoing_plans = build_junction_outgoing_physical_connection_plans(
+            topology_roads,
+            lanelet_by_id,
+            protected_road_endpoints=protected_road_endpoints,
+        )
         physical_connection_plans = [
             *ordinary_connection_plans,
             *junction_incoming_plans,
+            *junction_outgoing_plans,
             *divergence_plans,
         ]
         endpoint_constraints = endpoint_constraints_by_road(physical_connection_plans)
@@ -475,28 +485,52 @@ class _Lanelet2ToOpenDRIVEConverter:
         emitted_count = 0
         skipped_count = 0
 
-        for road in topology_roads:
-            lanelet_ids = road_to_lanelets.get(road.id)
-            if not lanelet_ids:
-                emitted_roads.append(copy.deepcopy(road))
-                continue
+        from autoware_lanelet2_to_opendrive.opendrive.road import (
+            _concatenate_chain_lanelet,
+        )
 
-            lanelet_group = [
-                lanelet_by_id[lanelet_id]
-                for lanelet_id in lanelet_ids
-                if lanelet_id in lanelet_by_id
-            ]
-            if len(lanelet_group) != len(lanelet_ids):
-                logger.warning(
-                    "Road %d: emission skipped because %d/%d source lanelets "
-                    "could be resolved",
-                    road.id,
-                    len(lanelet_group),
-                    len(lanelet_ids),
-                )
-                skipped_count += 1
-                emitted_roads.append(copy.deepcopy(road))
-                continue
+        for road in topology_roads:
+            if road.chain_source_lanelet_ids:
+                # Chain-merged connectors emit from the concatenated source
+                # chain so the full pipeline (reference emission, station
+                # mapping, width reconstruction, endpoint constraints)
+                # applies to the whole in-junction maneuver.
+                chain_lanelets = [
+                    lanelet_by_id[lanelet_id]
+                    for lanelet_id in road.chain_source_lanelet_ids
+                    if lanelet_id in lanelet_by_id
+                ]
+                if len(chain_lanelets) != len(road.chain_source_lanelet_ids):
+                    logger.warning(
+                        "Road %d: chain emission skipped; source lanelets " "missing",
+                        road.id,
+                    )
+                    skipped_count += 1
+                    emitted_roads.append(copy.deepcopy(road))
+                    continue
+                lanelet_group = [_concatenate_chain_lanelet(chain_lanelets)]
+            else:
+                lanelet_ids = road_to_lanelets.get(road.id)
+                if not lanelet_ids:
+                    emitted_roads.append(copy.deepcopy(road))
+                    continue
+
+                lanelet_group = [
+                    lanelet_by_id[lanelet_id]
+                    for lanelet_id in lanelet_ids
+                    if lanelet_id in lanelet_by_id
+                ]
+                if len(lanelet_group) != len(lanelet_ids):
+                    logger.warning(
+                        "Road %d: emission skipped because %d/%d source "
+                        "lanelets could be resolved",
+                        road.id,
+                        len(lanelet_group),
+                        len(lanelet_ids),
+                    )
+                    skipped_count += 1
+                    emitted_roads.append(copy.deepcopy(road))
+                    continue
 
             try:
                 road_constraints = endpoint_constraints.get(road.id, {})
@@ -578,7 +612,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"Emitted {emitted_count} source-backed road(s); "
             f"skipped {skipped_count}; "
             f"planned {len(ordinary_connection_plans)} complete direct "
-            f"continuation, {len(junction_incoming_plans)} junction-incoming "
+            f"continuation, {len(junction_incoming_plans)} junction-incoming, "
+            f"{len(junction_outgoing_plans)} junction-outgoing "
             f"and {len(divergence_plans)} divergence-partition interface(s); "
             f"constrained {width_constraints} lane-width endpoint(s)"
         )
@@ -1122,6 +1157,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 road.junction < 0
                 or road.id in protected_road_ids
                 or road.id not in source_backed_inputs
+                or road.chain_source_lanelet_ids
             ):
                 continue
             start_override, end_override = self._connecting_reference_overrides(
@@ -1176,7 +1212,11 @@ class _Lanelet2ToOpenDRIVEConverter:
             realigned_source += 1
 
         for road in emitted_roads:
-            if road.junction < 0 or road.id in protected_road_ids:
+            if (
+                road.junction < 0
+                or road.id in protected_road_ids
+                or road.chain_source_lanelet_ids
+            ):
                 continue
             if road.id not in source_backed_inputs:
                 if self._align_unmapped_connecting_road(road, roads_by_id):
@@ -2171,6 +2211,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_to_roads,
             junction_lanelet_to_road,
             junction_lanelets,
+            junction_chain_traces,
         ) = self._build_junction_structure(
             regular_roads, lanelet_to_road_id, num_groups_after_synthesis
         )
@@ -2268,6 +2309,48 @@ class _Lanelet2ToOpenDRIVEConverter:
                 lanelet_to_road_and_lane,
                 junction_emission_plans,
             )
+
+        if junction_chain_traces:
+            # Chain-merged connecting roads may duplicate shared chain-prefix
+            # lanelets across several emitted roads; ownership stays 1:1 in
+            # lanelet_to_road_and_lane while the sidecar trace records every
+            # emitted road traversing the lanelet.
+            roads_by_id = {road.id: road for road in all_roads}
+            traces = mapping.lanelet_to_emitted_segments or {}
+            for road_id, chain_lanelet_ids in sorted(junction_chain_traces.items()):
+                road = roads_by_id.get(road_id)
+                if road is None:
+                    continue
+                lane_ids = road.get_lanelet_to_lane_mapping()
+                for lanelet_id in chain_lanelet_ids:
+                    lane_id = lane_ids.get(lanelet_id)
+                    if lane_id is None:
+                        continue
+                    trace = traces.setdefault(
+                        lanelet_id,
+                        [
+                            {
+                                "road_id": lanelet_to_road_and_lane[lanelet_id][0],
+                                "lane_id": lanelet_to_road_and_lane[lanelet_id][1],
+                                "role": "source",
+                            }
+                        ]
+                        if lanelet_id in lanelet_to_road_and_lane
+                        else [],
+                    )
+                    key = (road_id, lane_id, "chain")
+                    if not any(
+                        (seg["road_id"], seg["lane_id"], seg["role"]) == key
+                        for seg in trace
+                    ):
+                        trace.append(
+                            {
+                                "road_id": road_id,
+                                "lane_id": lane_id,
+                                "role": "chain",
+                            }
+                        )
+            mapping.lanelet_to_emitted_segments = traces
 
         # Topology freeze point: from here on, ``topology_roads`` is the
         # immutable logical graph used for ownership/reference decisions.

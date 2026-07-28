@@ -2198,6 +2198,7 @@ def _trim_source_backed_road(
         points,
         start_heading=start_heading,
         end_heading=end_heading,
+        lateral_extent=context.emission_geometry.lateral_extent,
     )
     sliced_context = RoadEmissionContext(
         topology_geometry=context.topology_geometry,

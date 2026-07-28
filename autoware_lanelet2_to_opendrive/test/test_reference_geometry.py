@@ -258,6 +258,18 @@ def _sample_road_reference(road: Road, spacing: float = 0.05) -> np.ndarray:
     assert road.plan_view is not None
     samples = []
     for geometry in road.plan_view.geometries:
+        param_poly3_coeffs = None
+        if isinstance(geometry, ParamPoly3):
+            param_poly3_coeffs = (
+                geometry.aU,
+                geometry.bU,
+                geometry.cU,
+                geometry.dU,
+                geometry.aV,
+                geometry.bV,
+                geometry.cV,
+                geometry.dV,
+            )
         count = max(1, math.ceil(geometry.length / spacing))
         for i in range(count + 1):
             p = min(geometry.length, i * geometry.length / count)
@@ -267,7 +279,7 @@ def _sample_road_reference(road: Road, spacing: float = 0.05) -> np.ndarray:
                     geometry.y,
                     geometry.hdg,
                     p,
-                    None,
+                    param_poly3_coeffs,
                     getattr(geometry, "curvature", None),
                 )
             )
@@ -1479,9 +1491,17 @@ def test_three_point_emission_preserves_source_supported_terminal_tangents() -> 
     )
 
     plan_view = context.to_plan_view()
-    assert len(plan_view.geometries) == 2
-    assert all(isinstance(geometry, Line) for geometry in plan_view.geometries)
-    middle_station = context.emission_geometry.emission_stations[1]
+    # The interior joint folds offset lanes, so it is C1-filleted: the two
+    # terminal chords stay Lines and the joint becomes a Bezier pair that
+    # still passes exactly through the source vertex.
+    assert len(plan_view.geometries) == 4
+    assert isinstance(plan_view.geometries[0], Line)
+    assert isinstance(plan_view.geometries[-1], Line)
+    source_points = context.emission_geometry.source_points
+    middle_index = int(
+        np.argmin(np.linalg.norm(source_points - right_reference[1, :2], axis=1))
+    )
+    middle_station = context.emission_geometry.emission_stations[middle_index]
     assert context.evaluate(0.0).heading == pytest.approx(start_heading, abs=1e-9)
     assert context.evaluate(context.length).heading == pytest.approx(
         end_heading,
@@ -1513,9 +1533,12 @@ def test_emission_reference_preserves_continuous_short_terminal_curve() -> None:
         traffic_rule="LHT",
     )
 
+    # The micro-kink at the short terminal tail may be C1-filleted, which
+    # changes the arc length by micrometres; a collapsed tail would change
+    # it by centimetres.
     assert context.length == pytest.approx(
         _polyline_length(right_reference[:, :2]),
-        abs=1e-6,
+        abs=1e-4,
     )
     assert context.evaluate(context.length).heading == pytest.approx(
         math.radians(30.0),
@@ -3097,17 +3120,20 @@ def test_smooth_curved_source_emits_c1_under_terminal_heading_overrides() -> Non
         end_tangent, abs=1e-8
     )
 
-    # Interior source points are never displaced.
+    # Interior source points are never displaced: every source vertex lies
+    # exactly on the emitted geometry (kink fillets pass through vertices).
     chord = np.linalg.norm(np.diff(right_reference[:, :2], axis=0), axis=1)
-    chord_stations = np.concatenate(([0.0], np.cumsum(chord)))
+    source_points = context.emission_geometry.source_points
+    emitted_stations = context.emission_geometry.emission_stations
     for index in range(1, len(right_reference) - 1):
-        emitted_stations = context.emission_geometry.emission_stations
-        pose = context.evaluate(float(emitted_stations[index]))
-        assert pose.xy == pytest.approx(right_reference[index, :2], abs=1e-9)
+        vertex = right_reference[index, :2]
+        nearest = int(np.argmin(np.linalg.norm(source_points - vertex, axis=1)))
+        pose = context.evaluate(float(emitted_stations[nearest]))
+        assert pose.xy == pytest.approx(vertex, abs=1e-9)
 
     # Every internal joint stays within the source vertex bend budget.
     vertex_bend = math.degrees(chord[0] / radius)
-    for station in chord_stations[1:-1]:
+    for station in emitted_stations[1:-1]:
         assert _heading_jump_at(context, float(station)) <= vertex_bend + 0.1
 
 
@@ -3133,3 +3159,357 @@ def test_true_source_kink_is_preserved_by_emission() -> None:
         15.0,
         abs=0.1,
     )
+
+
+def _oblique_seam_fixture(
+    from_left,
+    from_right,
+    to_left,
+    to_right,
+    traffic_rule: str = "LHT",
+):
+    """Two linked single-lanelet roads sharing a terminal cap edge."""
+
+    def line(points):
+        return lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [
+                lanelet2.core.Point3d(lanelet2.core.getId(), *map(float, p))
+                for p in points
+            ],
+        )
+
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelets = []
+    roads = []
+    for index, (left, right) in enumerate(
+        ((from_left, from_right), (to_left, to_right))
+    ):
+        lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), line(left), line(right))
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+        lanelets.append(lanelet)
+        roads.append(
+            Road.construct_from_lanelet_groups(
+                lanelet_map,
+                [lanelet],
+                road_id=index + 1,
+                traffic_rule=traffic_rule,
+            )
+        )
+    from_road, to_road = roads
+    from_road.add_successor(to_road.id, contact_point=ContactPoint.START)
+    to_road.add_predecessor(from_road.id, contact_point=ContactPoint.END)
+    sections = []
+    for road in roads:
+        assert road.lanes is not None
+        sections.append(road.lanes.lane_sections[0])
+    lanes = [
+        next(iter((sec.left_lanes or sec.right_lanes).values())) for sec in sections
+    ]
+    assert lanes[0].lane_id is not None and lanes[1].lane_id is not None
+    lanes[0].successor = LaneLink(id=lanes[1].lane_id)
+    lanes[1].predecessor = LaneLink(id=lanes[0].lane_id)
+    lanelet_by_id = {lanelet.id: lanelet for lanelet in lanelets}
+    return lanelet_map, roads, lanelet_by_id
+
+
+def _straight(offset, x0, x1, cap_shift=0.0):
+    return [
+        [x0, offset, 0.0],
+        [(x0 + x1) / 2.0, offset, 0.0],
+        [x1 + cap_shift, offset, 0.0],
+    ]
+
+
+def test_oblique_cap_seam_keeps_source_travel_tangent() -> None:
+    """Case A: straight travel with a 30-deg oblique cap.
+
+    The physical terminal cross-section is oblique, but both roads travel
+    straight along x. The seam contract must keep the travel tangent instead
+    of rotating both references onto the cap normal.
+    """
+    cap_shift = 2.0  # left bound cap point sits 2 m further along x
+    lanelet_map, roads, lanelet_by_id = _oblique_seam_fixture(
+        from_left=_straight(3.5, 0.0, 20.0, cap_shift),
+        from_right=_straight(0.0, 0.0, 20.0),
+        to_left=[[22.0, 3.5, 0.0], [30.0, 3.5, 0.0], [40.0, 3.5, 0.0]],
+        to_right=[[20.0, 0.0, 0.0], [30.0, 0.0, 0.0], [40.0, 0.0, 0.0]],
+    )
+    plans = build_ordinary_physical_connection_plans(roads, lanelet_by_id)
+    assert len(plans) == 1
+    assert plans[0].cross_section.heading == pytest.approx(0.0, abs=math.radians(0.2))
+    assert plans[0].from_endpoint.heading == pytest.approx(0.0, abs=math.radians(0.2))
+
+    # The emitted from-road reference must stay straight: no zigzag pulled
+    # in by the oblique cap.
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet_by_id[min(lanelet_by_id)]],
+        traffic_rule="LHT",
+        end_heading_override=plans[0].from_endpoint.heading,
+    )
+    for station in np.linspace(0.0, context.length, 41):
+        assert abs(context.evaluate(float(station)).heading) <= math.radians(0.25)
+
+
+def test_perpendicular_cap_seam_keeps_cap_normal_heading() -> None:
+    """Case B: a perpendicular cap behaves exactly as before."""
+    _lanelet_map, roads, lanelet_by_id = _oblique_seam_fixture(
+        from_left=_straight(3.5, 0.0, 20.0),
+        from_right=_straight(0.0, 0.0, 20.0),
+        to_left=_straight(3.5, 20.0, 40.0),
+        to_right=_straight(0.0, 20.0, 40.0),
+    )
+    plans = build_ordinary_physical_connection_plans(roads, lanelet_by_id)
+    assert len(plans) == 1
+    assert plans[0].cross_section.heading == pytest.approx(0.0, abs=1e-9)
+    assert plans[0].cross_section.lane_widths == pytest.approx((3.5,))
+
+
+def test_true_source_turn_seam_uses_miter_heading() -> None:
+    """Case C: a genuine 20-deg source turn shares the miter direction."""
+    turn = math.radians(20.0)
+    direction = np.array([math.cos(turn), math.sin(turn)])
+
+    def turned(start):
+        base = np.asarray(start, dtype=float)
+        return [
+            list(base) + [0.0],
+            list(base + 10.0 * direction) + [0.0],
+            list(base + 20.0 * direction) + [0.0],
+        ]
+
+    lanelet_map, roads, lanelet_by_id = _oblique_seam_fixture(
+        from_left=_straight(3.5, 0.0, 20.0),
+        from_right=_straight(0.0, 0.0, 20.0),
+        to_left=turned([20.0, 3.5]),
+        to_right=turned([20.0, 0.0]),
+    )
+    plans = build_ordinary_physical_connection_plans(roads, lanelet_by_id)
+    assert len(plans) == 1
+    assert plans[0].cross_section.heading == pytest.approx(
+        turn / 2.0, abs=math.radians(0.5)
+    )
+
+
+def test_multi_lane_oblique_cap_seam_keeps_travel_tangent_and_widths() -> None:
+    """Cases D/E: multi-lane oblique cap, both lane orderings."""
+
+    def two_lane_roads(cap_shift):
+        def line(points):
+            return lanelet2.core.LineString3d(
+                lanelet2.core.getId(),
+                [
+                    lanelet2.core.Point3d(lanelet2.core.getId(), *map(float, p))
+                    for p in points
+                ],
+            )
+
+        lanelet_map = lanelet2.core.LaneletMap()
+        from_lines = {
+            0.0: line(_straight(0.0, 0.0, 20.0)),
+            3.5: line(_straight(3.5, 0.0, 20.0, cap_shift / 2.0)),
+            7.0: line(_straight(7.0, 0.0, 20.0, cap_shift)),
+        }
+        to_lines = {
+            0.0: line([[20.0, 0.0, 0.0], [30.0, 0.0, 0.0], [40.0, 0.0, 0.0]]),
+            3.5: line(
+                [
+                    [20.0 + cap_shift / 2.0, 3.5, 0.0],
+                    [30.0, 3.5, 0.0],
+                    [40.0, 3.5, 0.0],
+                ]
+            ),
+            7.0: line(
+                [[20.0 + cap_shift, 7.0, 0.0], [30.0, 7.0, 0.0], [40.0, 7.0, 0.0]]
+            ),
+        }
+        roads = []
+        lanelets = []
+        for road_id, lines in ((1, from_lines), (2, to_lines)):
+            group = []
+            for inner, outer in ((0.0, 3.5), (3.5, 7.0)):
+                lanelet = lanelet2.core.Lanelet(
+                    lanelet2.core.getId(), lines[outer], lines[inner]
+                )
+                lanelet.attributes["subtype"] = "road"
+                lanelet.attributes["one_way"] = "yes"
+                lanelet_map.add(lanelet)
+                group.append(lanelet)
+            lanelets.extend(group)
+            roads.append(
+                Road.construct_from_lanelet_groups(
+                    lanelet_map,
+                    group,
+                    road_id=road_id,
+                    traffic_rule="LHT",
+                )
+            )
+        from_road, to_road = roads
+        from_road.add_successor(to_road.id, contact_point=ContactPoint.START)
+        to_road.add_predecessor(from_road.id, contact_point=ContactPoint.END)
+        for from_lane, to_lane in zip(
+            sorted(
+                from_road.lanes.lane_sections[0].left_lanes.values(),
+                key=lambda lane: lane.lane_id,
+            ),
+            sorted(
+                to_road.lanes.lane_sections[0].left_lanes.values(),
+                key=lambda lane: lane.lane_id,
+            ),
+        ):
+            from_lane.successor = LaneLink(id=to_lane.lane_id)
+            to_lane.predecessor = LaneLink(id=from_lane.lane_id)
+        return roads, {lanelet.id: lanelet for lanelet in lanelets}
+
+    roads, lanelet_by_id = two_lane_roads(cap_shift=2.5)
+    plans = build_ordinary_physical_connection_plans(roads, lanelet_by_id)
+    assert len(plans) == 1
+    assert plans[0].cross_section.heading == pytest.approx(0.0, abs=math.radians(0.2))
+    assert plans[0].cross_section.lane_widths == pytest.approx((3.5, 3.5), abs=1e-6)
+
+
+# --- Junction connector physical geometry (synthetic suite A-E) ---
+
+
+def test_junction_geometry_a_multi_segment_blend_honors_override_c1() -> None:
+    """A: an incoming-seam override too sharp for the terminal blend pair is
+    distributed over leading segments without any artificial interior kink."""
+    reference = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.6, 0.0, 0.0],
+            [2.4, 0.09, 0.0],
+            [3.0, 0.18, 0.0],
+            [5.0, 0.55, 0.0],
+            [9.0, 1.5, 0.0],
+        ],
+        dtype=float,
+    )
+    lanelet_map, lanelet = _make_lanelet_from_reference(reference, width=3.5)
+    override = -0.09  # ~5.2 deg below the first chord (0.0)
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="RHT",
+        start_heading_override=override,
+    )
+    assert context.evaluate(0.0).heading == pytest.approx(override, abs=1e-8)
+    for station in context.emission_geometry.emission_stations[1:-1]:
+        assert _heading_jump_at(context, float(station)) <= 0.5
+
+
+def test_junction_geometry_b_absorbed_blend_stays_on_source_corridor() -> None:
+    """B: when the per-segment blend folds (short anchored terminal
+    segments), terminal points are absorbed into one bounded Bezier that
+    stays on the source corridor."""
+    reference = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+            [6.5, 0.0, 0.0],
+            [8.0, 0.0, 0.0],
+            [8.8, 0.0, 0.0],
+            [9.4, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    lanelet_map, lanelet = _make_lanelet_from_reference(reference, width=3.5)
+    override = 0.13
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="RHT",
+        end_heading_override=override,
+    )
+    assert context.evaluate(context.length).heading == pytest.approx(
+        override,
+        abs=1e-8,
+    )
+    max_cut = DEFAULT_CONFIG.geometry.emission_interior_kink_max_corner_cut
+    stations = np.linspace(0.0, context.length, 400)
+    samples = np.array([context.evaluate(float(s)).xy for s in stations])
+    for point in reference[:, :2]:
+        assert float(np.min(np.linalg.norm(samples - point, axis=1))) <= (
+            max_cut + 0.01
+        )
+
+
+def test_junction_geometry_c_minimax_compromise_heading() -> None:
+    """C: a shared junction cross-section splits an infeasible tangent gap
+    across the incoming road and its connectors within each fold budget."""
+    from autoware_lanelet2_to_opendrive.physical_connection import (
+        _minimax_compromise_heading,
+    )
+
+    incoming = (0.0, math.radians(4.0))
+    straight_connector = (0.0, math.radians(3.8))
+    turn_connector = (math.radians(7.5), math.radians(5.4))
+    compromise = _minimax_compromise_heading(
+        [incoming, straight_connector, turn_connector],
+        0.0,
+    )
+    assert compromise is not None
+    assert math.radians(2.1) <= compromise <= math.radians(3.8)
+    # An impossible split (every budget smaller than the gap) is refused.
+    assert (
+        _minimax_compromise_heading(
+            [(0.0, math.radians(1.0)), (math.radians(10.0), math.radians(1.0))],
+            0.0,
+        )
+        is None
+    )
+
+
+def test_junction_geometry_d_tight_turn_boundary_never_folds() -> None:
+    """D: a coarsely discretized tight turn emits fold-free offset lanes."""
+    radius = 9.0
+    angles = np.linspace(0.0, math.pi / 2.0, 10)
+    reference = np.column_stack(
+        [
+            radius * np.sin(angles),
+            radius * (1.0 - np.cos(angles)),
+            np.zeros_like(angles),
+        ]
+    )
+    lanelet_map, lanelet = _make_lanelet_from_reference(reference, width=3.5)
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+    )
+    stations = np.linspace(0.0, context.length, 800)
+    offset = 3.5  # left boundary of the single LHT lane
+    previous = None
+    for station in stations:
+        pose = context.evaluate(float(station))
+        normal = np.array(
+            [-math.sin(pose.heading), math.cos(pose.heading)],
+            dtype=float,
+        )
+        point = np.asarray(pose.xy, dtype=float) + offset * normal
+        if previous is not None:
+            step = point - previous
+            forward = float(
+                step[0] * math.cos(pose.heading) + step[1] * math.sin(pose.heading)
+            )
+            assert forward > -1e-6
+        previous = point
+
+
+def test_junction_geometry_e_isolated_true_corner_not_filleted() -> None:
+    """E: an isolated sharp source corner survives even with a wide road."""
+    kink = math.radians(15.0)
+    direction = np.array([math.cos(kink), math.sin(kink)])
+    first = np.array([[0.0, 0.0], [6.0, 0.0], [12.0, 0.0]])
+    second = np.array([first[-1] + 6.0 * direction, first[-1] + 12.0 * direction])
+    reference = np.column_stack([np.vstack([first, second]), np.zeros(5)])
+    lanelet_map, lanelet = _make_lanelet_from_reference(reference, width=3.5)
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="RHT",
+    )
+    assert _heading_jump_at(context, 12.0) == pytest.approx(15.0, abs=0.1)

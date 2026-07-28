@@ -469,7 +469,9 @@ def run_mapping_validation(
 
     try:
         validate_mapping_consistency(
-            ctx.conv_mapping.lanelet_to_road_and_lane, geo_mapping
+            ctx.conv_mapping.lanelet_to_road_and_lane,
+            geo_mapping,
+            lanelet_to_emitted_segments=ctx.conv_mapping.lanelet_to_emitted_segments,
         )
         print("  Mapping cross-validation: PASSED")
         return True
