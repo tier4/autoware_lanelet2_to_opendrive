@@ -211,6 +211,44 @@ class TestSaveMappingJson:
 
         assert mapping.projection_metadata is None
 
+    def test_round_trip_preserves_optional_emission_traceability(
+        self, tmp_path: Path
+    ) -> None:
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={101: (10, 1)},
+            lanelet_to_emitted_segments={
+                101: [
+                    {"road_id": 10, "lane_id": 1, "role": "source"},
+                    {
+                        "road_id": 30,
+                        "lane_id": 1,
+                        "role": "junction_connector",
+                    },
+                ]
+            },
+            junction_emission_plans=[
+                {
+                    "junction_id": 50,
+                    "missing_maneuvers": [],
+                    "unintended_maneuvers": [],
+                }
+            ],
+        )
+
+        path = save_mapping_json(original, xodr_path)
+        restored = GeoRoadLaneletMapping.from_dict(
+            json.loads(path.read_text(encoding="utf-8"))
+        )
+
+        assert restored.lanelet_to_emitted_segments == (
+            original.lanelet_to_emitted_segments
+        )
+        assert restored.junction_emission_plans == original.junction_emission_plans
+
 
 # ---------------------------------------------------------------------------
 # _compute_all_candidates — synthetic divergence connector handling (#493)

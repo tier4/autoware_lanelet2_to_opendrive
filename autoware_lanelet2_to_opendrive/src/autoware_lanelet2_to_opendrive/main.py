@@ -162,6 +162,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         """
         self.lanelet_map = lanelet_map
         self.config = config
+        self._physical_connection_plans = []
+        self._physical_connection_road_ids: Set[int] = set()
+        self._physical_connection_endpoint_constraints = {}
 
     def _build_regular_roads(
         self,
@@ -412,6 +415,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         topology_roads: List[Road],
         mapping: RoadLaneletMapping,
         routing_graph: Optional[RoutingGraph],
+        *,
+        align_connecting_roads: bool = True,
+        protected_road_endpoints: Optional[Set[Tuple[int, bool]]] = None,
     ) -> List[Road]:
         """Return final output roads with post-freeze emission copies applied.
 
@@ -425,11 +431,46 @@ class _Lanelet2ToOpenDRIVEConverter:
         from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
             RoadEmissionContext,
         )
+        from autoware_lanelet2_to_opendrive.physical_connection import (
+            apply_physical_connection_width_constraints,
+            build_divergence_physical_connection_plans,
+            build_junction_incoming_physical_connection_plans,
+            build_ordinary_physical_connection_plans,
+            endpoint_constraints_by_road,
+        )
 
         lanelet_by_id = {
             lanelet.id: lanelet for lanelet in self.lanelet_map.laneletLayer
         }
         road_to_lanelets = mapping.road_to_lanelets
+        ordinary_connection_plans = build_ordinary_physical_connection_plans(
+            topology_roads,
+            lanelet_by_id,
+            protected_road_endpoints=protected_road_endpoints,
+        )
+        junction_incoming_plans = build_junction_incoming_physical_connection_plans(
+            topology_roads,
+            lanelet_by_id,
+            protected_road_endpoints=protected_road_endpoints,
+        )
+        divergence_plans = build_divergence_physical_connection_plans(
+            topology_roads,
+            lanelet_by_id,
+            protected_road_endpoints=protected_road_endpoints,
+        )
+        physical_connection_plans = [
+            *ordinary_connection_plans,
+            *junction_incoming_plans,
+            *divergence_plans,
+        ]
+        endpoint_constraints = endpoint_constraints_by_road(physical_connection_plans)
+        self._physical_connection_endpoint_constraints = endpoint_constraints
+        self._physical_connection_plans = physical_connection_plans
+        self._physical_connection_road_ids = {
+            road_id
+            for plan in ordinary_connection_plans
+            for road_id in (plan.from_road_id, plan.to_road_id)
+        }
         emitted_roads: List[Road] = []
         emitted_count = 0
         skipped_count = 0
@@ -458,11 +499,32 @@ class _Lanelet2ToOpenDRIVEConverter:
                 continue
 
             try:
+                road_constraints = endpoint_constraints.get(road.id, {})
+                start_constraint = road_constraints.get("start")
+                end_constraint = road_constraints.get("end")
                 context = RoadEmissionContext.from_lanelet_groups(
                     self.lanelet_map,
                     lanelet_group,
                     traffic_rule=self.config.traffic_rule,
                     routing_graph=routing_graph,
+                    start_xyz_override=(
+                        start_constraint.reference_xyz
+                        if start_constraint is not None
+                        else None
+                    ),
+                    end_xyz_override=(
+                        end_constraint.reference_xyz
+                        if end_constraint is not None
+                        else None
+                    ),
+                    start_heading_override=(
+                        start_constraint.heading
+                        if start_constraint is not None
+                        else None
+                    ),
+                    end_heading_override=(
+                        end_constraint.heading if end_constraint is not None else None
+                    ),
                 )
                 emitted_roads.append(
                     road.copy_with_emission_context(
@@ -472,6 +534,16 @@ class _Lanelet2ToOpenDRIVEConverter:
                         traffic_rule=self.config.traffic_rule,
                         width_config=self.config.width_estimation,
                         routing_graph=routing_graph,
+                        start_xyz_override=(
+                            start_constraint.reference_xyz
+                            if start_constraint is not None
+                            else None
+                        ),
+                        end_xyz_override=(
+                            end_constraint.reference_xyz
+                            if end_constraint is not None
+                            else None
+                        ),
                     )
                 )
                 emitted_count += 1
@@ -484,16 +556,31 @@ class _Lanelet2ToOpenDRIVEConverter:
                 skipped_count += 1
                 emitted_roads.append(copy.deepcopy(road))
 
+        width_constraints = apply_physical_connection_width_constraints(
+            physical_connection_plans,
+            emitted_roads,
+        )
+        if align_connecting_roads:
+            self._align_connecting_roads_after_emission(
+                emitted_roads,
+                road_to_lanelets,
+                lanelet_by_id,
+                routing_graph,
+                protected_road_ids=self._physical_connection_road_ids,
+                physical_endpoint_constraints=endpoint_constraints,
+            )
+            width_constraints += apply_physical_connection_width_constraints(
+                physical_connection_plans,
+                emitted_roads,
+            )
         print(
             "\n=== Applying post-freeze emission geometry ===\n"
             f"Emitted {emitted_count} source-backed road(s); "
-            f"skipped {skipped_count}"
-        )
-        self._align_connecting_roads_after_emission(
-            emitted_roads,
-            road_to_lanelets,
-            lanelet_by_id,
-            routing_graph,
+            f"skipped {skipped_count}; "
+            f"planned {len(ordinary_connection_plans)} complete direct "
+            f"continuation, {len(junction_incoming_plans)} junction-incoming "
+            f"and {len(divergence_plans)} divergence-partition interface(s); "
+            f"constrained {width_constraints} lane-width endpoint(s)"
         )
         return emitted_roads
 
@@ -605,13 +692,19 @@ class _Lanelet2ToOpenDRIVEConverter:
         if target_road is None:
             return None
 
+        target_at_start = self._target_endpoint_is_start(endpoint_link, side)
         endpoint = _evaluate_planview_endpoint_with_heading(
             target_road.plan_view,
-            at_start=self._target_endpoint_is_start(endpoint_link, side),
+            at_start=target_at_start,
         )
         if endpoint is None or not math.isfinite(endpoint[2]):
             return None
-        return float(endpoint[2])
+        heading = float(endpoint[2])
+        if (side == "start" and target_at_start) or (
+            side == "end" and not target_at_start
+        ):
+            heading += math.pi
+        return math.atan2(math.sin(heading), math.cos(heading))
 
     @staticmethod
     def _mean_heading(headings: List[float]) -> Optional[float]:
@@ -623,6 +716,39 @@ class _Lanelet2ToOpenDRIVEConverter:
         if math.hypot(x, y) <= DEFAULT_CONFIG.geometry.epsilon:
             return finite[0]
         return math.atan2(y, x)
+
+    @staticmethod
+    def _is_short_connector_against_linked_tangents(
+        dx: float,
+        dy: float,
+        raw_length: float,
+        start_heading: Optional[float],
+        end_heading: Optional[float],
+    ) -> bool:
+        if raw_length > DEFAULT_CONFIG.geometry.divergence_endpoint_tolerance:
+            return False
+        if start_heading is None or end_heading is None:
+            return False
+        if not (
+            math.isfinite(start_heading)
+            and math.isfinite(end_heading)
+            and math.isfinite(raw_length)
+        ):
+            return False
+
+        displacement = np.array([dx, dy], dtype=float)
+        start_tangent = np.array(
+            [math.cos(start_heading), math.sin(start_heading)], dtype=float
+        )
+        end_tangent = np.array(
+            [math.cos(end_heading), math.sin(end_heading)], dtype=float
+        )
+        return (
+            float(np.dot(displacement, start_tangent))
+            < -DEFAULT_CONFIG.geometry.point_distance_threshold
+            and float(np.dot(displacement, end_tangent))
+            < -DEFAULT_CONFIG.geometry.point_distance_threshold
+        )
 
     def _connecting_reference_overrides(
         self,
@@ -778,6 +904,27 @@ class _Lanelet2ToOpenDRIVEConverter:
             )
             target_end = current_end if end_width is None else max(0.0, end_width)
 
+            if self._uses_constant_width_for_short_connector(road):
+                target_width = (
+                    0.5 * (target_start + target_end)
+                    if start_width is not None and end_width is not None
+                    else target_start
+                    if start_width is not None
+                    else target_end
+                )
+                if (
+                    len(lane.widths) == 1
+                    and abs(lane.widths[0].a - target_width)
+                    <= DEFAULT_CONFIG.geometry.point_distance_threshold
+                    and abs(lane.widths[0].b) <= DEFAULT_CONFIG.geometry.epsilon
+                    and abs(lane.widths[0].c) <= DEFAULT_CONFIG.geometry.epsilon
+                    and abs(lane.widths[0].d) <= DEFAULT_CONFIG.geometry.epsilon
+                ):
+                    continue
+                lane.widths = [LaneWidth(s_offset=0.0, a=max(0.0, target_width))]
+                changed = True
+                continue
+
             if (
                 abs(target_start - current_start)
                 <= DEFAULT_CONFIG.geometry.point_distance_threshold
@@ -830,6 +977,16 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return changed
 
+    @staticmethod
+    def _uses_constant_width_for_short_connector(road: Road) -> bool:
+        return (
+            road.junction >= 0
+            and road.length > 0.0
+            and road.length
+            <= DEFAULT_CONFIG.geometry.divergence_min_segment_length
+            + DEFAULT_CONFIG.geometry.point_distance_threshold
+        )
+
     def _align_unmapped_connecting_road(
         self,
         road: Road,
@@ -848,25 +1005,32 @@ class _Lanelet2ToOpenDRIVEConverter:
         )
         if start is None or end is None:
             return False
+        start_heading = self._linked_lane_endpoint_heading(
+            road, lane, "start", roads_by_id
+        )
+        end_heading = self._linked_lane_endpoint_heading(road, lane, "end", roads_by_id)
         linked_heading = self._mean_heading(
-            [
-                heading
-                for heading in (
-                    self._linked_lane_endpoint_heading(
-                        road, lane, "start", roads_by_id
-                    ),
-                    self._linked_lane_endpoint_heading(road, lane, "end", roads_by_id),
-                )
-                if heading is not None
-            ]
+            [heading for heading in (start_heading, end_heading) if heading is not None]
         )
 
         dx = end[0] - start[0]
         dy = end[1] - start[1]
         raw_length = math.hypot(dx, dy)
-        if raw_length > DEFAULT_CONFIG.geometry.epsilon:
+        collapse_short_backward_chord = (
+            raw_length > DEFAULT_CONFIG.geometry.epsilon
+            and linked_heading is not None
+            and self._is_short_connector_against_linked_tangents(
+                dx, dy, raw_length, start_heading, end_heading
+            )
+        )
+        if (
+            raw_length > DEFAULT_CONFIG.geometry.epsilon
+            and not collapse_short_backward_chord
+        ):
             length = raw_length
             heading = math.atan2(dy, dx)
+            ref_start = start
+            ref_end = end
             b_u = 1.0
         else:
             length = DEFAULT_CONFIG.geometry.divergence_min_segment_length
@@ -880,14 +1044,25 @@ class _Lanelet2ToOpenDRIVEConverter:
                 if endpoint is not None
                 else 0.0
             )
+            if collapse_short_backward_chord:
+                midpoint = (
+                    (start[0] + end[0]) * 0.5,
+                    (start[1] + end[1]) * 0.5,
+                    (start[2] + end[2]) * 0.5,
+                )
+                ref_start = midpoint
+                ref_end = midpoint
+            else:
+                ref_start = start
+                ref_end = (start[0], start[1], end[2])
             b_u = 0.0
 
         road.plan_view = PlanView(
             geometries=[
                 ParamPoly3(
                     s=0.0,
-                    x=start[0],
-                    y=start[1],
+                    x=ref_start[0],
+                    y=ref_start[1],
                     hdg=heading,
                     length=length,
                     aU=0.0,
@@ -903,17 +1078,13 @@ class _Lanelet2ToOpenDRIVEConverter:
             ]
         )
         road.length = length
-        dz_ds = (end[2] - start[2]) / length if length > 0.0 else 0.0
+        dz_ds = (ref_end[2] - ref_start[2]) / length if length > 0.0 else 0.0
         road.elevation_profile = ElevationProfile(
-            elevations=[Elevation(s=0.0, a=start[2], b=dz_ds, c=0.0, d=0.0)]
+            elevations=[Elevation(s=0.0, a=ref_start[2], b=dz_ds, c=0.0, d=0.0)]
         )
-        road.elevation_offset = start[2]
-        road.reference_start_xyz = start
-        road.reference_end_xyz = (
-            end
-            if raw_length > DEFAULT_CONFIG.geometry.epsilon
-            else (start[0], start[1], end[2])
-        )
+        road.elevation_offset = ref_start[2]
+        road.reference_start_xyz = ref_start
+        road.reference_end_xyz = ref_end
         return True
 
     def _align_connecting_roads_after_emission(
@@ -922,7 +1093,11 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_to_lanelets: Dict[int, List[int]],
         lanelet_by_id: Dict[int, lanelet2.core.Lanelet],
         routing_graph: Optional[RoutingGraph],
+        protected_road_ids: Optional[Set[int]] = None,
+        physical_endpoint_constraints=None,
     ) -> None:
+        protected_road_ids = protected_road_ids or set()
+        physical_endpoint_constraints = physical_endpoint_constraints or {}
         source_backed_inputs: Dict[int, List[lanelet2.core.Lanelet]] = {}
         for road_id, lanelet_ids in road_to_lanelets.items():
             lanelet_group = [
@@ -943,11 +1118,22 @@ class _Lanelet2ToOpenDRIVEConverter:
         )
 
         for index, road in enumerate(list(emitted_roads)):
-            if road.junction < 0 or road.id not in source_backed_inputs:
+            if (
+                road.junction < 0
+                or road.id in protected_road_ids
+                or road.id not in source_backed_inputs
+            ):
                 continue
             start_override, end_override = self._connecting_reference_overrides(
                 road, roads_by_id
             )
+            road_constraints = physical_endpoint_constraints.get(road.id, {})
+            start_constraint = road_constraints.get("start")
+            end_constraint = road_constraints.get("end")
+            if start_constraint is not None:
+                start_override = start_constraint.reference_xyz
+            if end_constraint is not None:
+                end_override = end_constraint.reference_xyz
             if start_override is None and end_override is None:
                 continue
             lanelet_group = source_backed_inputs[road.id]
@@ -959,6 +1145,14 @@ class _Lanelet2ToOpenDRIVEConverter:
                     routing_graph=routing_graph,
                     start_xyz_override=start_override,
                     end_xyz_override=end_override,
+                    start_heading_override=(
+                        start_constraint.heading
+                        if start_constraint is not None
+                        else None
+                    ),
+                    end_heading_override=(
+                        end_constraint.heading if end_constraint is not None else None
+                    ),
                 )
                 emitted = road.copy_with_emission_context(
                     lanelet_map=self.lanelet_map,
@@ -982,7 +1176,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             realigned_source += 1
 
         for road in emitted_roads:
-            if road.junction < 0:
+            if road.junction < 0 or road.id in protected_road_ids:
                 continue
             if road.id not in source_backed_inputs:
                 if self._align_unmapped_connecting_road(road, roads_by_id):
@@ -2001,7 +2195,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         existing_road_ids = [r.id for r in (regular_roads + connecting_roads)]
         completion_start_id = (max(existing_road_ids) + 1) if existing_road_ids else 0
 
-        completion_roads, _completion_next_id = complete_direct_junction_lanelinks(
+        completion_roads, completion_next_id = complete_direct_junction_lanelinks(
             lanelet_map=self.lanelet_map,
             routing_graph=regular_result.routing_graph,
             all_roads=regular_roads + connecting_roads,
@@ -2013,6 +2207,34 @@ class _Lanelet2ToOpenDRIVEConverter:
             min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
         )
         connecting_roads = connecting_roads + completion_roads
+
+        junction_emission_plans = []
+        if self.config.emission_geometry.enabled:
+            from autoware_lanelet2_to_opendrive.junction_emission_plan import (
+                canonicalize_junction_emission,
+            )
+
+            (
+                connecting_roads,
+                junction_emission_plans,
+                _junction_emission_next_id,
+            ) = canonicalize_junction_emission(
+                lanelet_map=self.lanelet_map,
+                routing_graph=regular_result.routing_graph,
+                regular_roads=regular_roads,
+                connecting_roads=connecting_roads,
+                junctions=junctions,
+                lanelet_to_road_id=lanelet_to_road_id,
+                junction_lanelet_ids=junction_lanelet_id_set,
+                traffic_rule=traffic_rule_value,
+                starting_road_id=completion_next_id,
+            )
+            if junction_emission_plans:
+                print(
+                    "\n=== Planning junction-wide emission ===\n"
+                    f"Canonicalized {len(junction_emission_plans)} junction(s) "
+                    "with semantic-equivalent multi-lane connectors"
+                )
 
         # Step 3: Create bidirectional mappings
         mapping = self._build_road_lanelet_mappings(lanelet_to_road_id)
@@ -2035,16 +2257,97 @@ class _Lanelet2ToOpenDRIVEConverter:
             junctions,
             routing_graph=regular_result.routing_graph,
         )
+        if junction_emission_plans:
+            from autoware_lanelet2_to_opendrive.junction_emission_plan import (
+                apply_planned_topology_links,
+                build_emitted_traceability,
+            )
+
+            apply_planned_topology_links(junction_emission_plans, all_roads)
+            mapping.lanelet_to_emitted_segments = build_emitted_traceability(
+                lanelet_to_road_and_lane,
+                junction_emission_plans,
+            )
 
         # Topology freeze point: from here on, ``topology_roads`` is the
         # immutable logical graph used for ownership/reference decisions.
         topology_roads = all_roads
         if self.config.emission_geometry.enabled:
+            junction_plan_road_ids = {
+                road_id
+                for plan in junction_emission_plans
+                for group in plan.connecting_road_groups
+                for road_id in (
+                    group.incoming_road_id,
+                    group.connector_road_id,
+                    group.outgoing_road_id,
+                )
+            }
+            junction_plan_road_endpoints = {
+                endpoint
+                for plan in junction_emission_plans
+                for group in plan.connecting_road_groups
+                for endpoint in (
+                    (group.incoming_road_id, False),
+                    (group.connector_road_id, True),
+                    (group.connector_road_id, False),
+                    (group.outgoing_road_id, True),
+                )
+            }
             final_roads = self._build_emitted_roads_after_topology_freeze(
                 topology_roads,
                 mapping,
                 regular_result.routing_graph,
+                align_connecting_roads=not junction_emission_plans,
+                protected_road_endpoints=junction_plan_road_endpoints,
             )
+            if junction_emission_plans:
+                from autoware_lanelet2_to_opendrive.junction_emission_plan import (
+                    apply_junction_emission_plans,
+                    repair_invalid_sibling_connecting_road_surfaces,
+                )
+
+                apply_junction_emission_plans(
+                    junction_emission_plans,
+                    final_roads,
+                )
+                lanelet_by_id = {
+                    lanelet.id: lanelet for lanelet in self.lanelet_map.laneletLayer
+                }
+                self._align_connecting_roads_after_emission(
+                    final_roads,
+                    mapping.road_to_lanelets,
+                    lanelet_by_id,
+                    regular_result.routing_graph,
+                    protected_road_ids=(
+                        junction_plan_road_ids | self._physical_connection_road_ids
+                    ),
+                    physical_endpoint_constraints=(
+                        self._physical_connection_endpoint_constraints
+                    ),
+                )
+                from autoware_lanelet2_to_opendrive.physical_connection import (
+                    apply_physical_connection_width_constraints,
+                )
+
+                apply_physical_connection_width_constraints(
+                    self._physical_connection_plans,
+                    final_roads,
+                )
+                repaired_sibling_connectors = (
+                    repair_invalid_sibling_connecting_road_surfaces(
+                        junction_emission_plans,
+                        final_roads,
+                    )
+                )
+                if repaired_sibling_connectors:
+                    print(
+                        "Rebuilt invalid source-backed sibling connector "
+                        f"surface(s): {list(repaired_sibling_connectors)}"
+                    )
+                mapping.junction_emission_plans = [
+                    plan.to_summary_dict() for plan in junction_emission_plans
+                ]
             final_roads = self._preserve_topology_roads_for_stop_line_fidelity(
                 topology_roads,
                 final_roads,
@@ -2566,6 +2869,8 @@ def preprocess_and_convert_with_hydra(
                 offset_y=offset_y,
                 offset_z=offset_z,
             ),
+            lanelet_to_emitted_segments=mapping.lanelet_to_emitted_segments,
+            junction_emission_plans=mapping.junction_emission_plans,
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`

@@ -13,9 +13,11 @@ from autoware_lanelet2_to_opendrive.conversion_config import (
     EmissionGeometryConfig,
     WidthEstimationConfig,
 )
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.main import _Lanelet2ToOpenDRIVEConverter
 from autoware_lanelet2_to_opendrive.opendrive.geometry import (
     Line,
+    ParamPoly3,
     PlanView,
     evaluate_plan_view_world,
 )
@@ -23,7 +25,7 @@ from autoware_lanelet2_to_opendrive.opendrive.enums import (
     ContactPoint,
     TrafficRule,
 )
-from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink
+from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink, LaneWidth
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
     EmissionReferenceGeometry,
@@ -33,6 +35,15 @@ from autoware_lanelet2_to_opendrive.opendrive.reference_geometry import (
     measure_reference_domain_coverage,
     reproject_source_point_to_emission,
     _polygon_cross_section_width,
+)
+from autoware_lanelet2_to_opendrive.physical_connection import (
+    PhysicalConnectionType,
+    _constrain_width_endpoint,
+    _width_value_and_derivative,
+    build_divergence_physical_connection_plans,
+    build_junction_incoming_physical_connection_plans,
+    build_ordinary_physical_connection_plans,
+    endpoint_constraints_by_road,
 )
 from autoware_lanelet2_to_opendrive.spline import Splines
 from autoware_lanelet2_to_opendrive.divergence import (
@@ -713,6 +724,874 @@ def test_emission_width_uses_endpoint_cap_for_oblique_nonzero_start() -> None:
     lane = road.lanes.lane_sections[0].left_lanes[1]
     assert _width_at(lane, 0.0) == pytest.approx(3.0, abs=1e-9)
     assert _width_at(lane, road.length) == pytest.approx(3.0, abs=1e-9)
+    assert _width_at(lane, 0.025) == pytest.approx(3.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_multilane_staggered_cap_does_not_create_post_cap_width_hole(
+    reverse: bool,
+) -> None:
+    """A nearby cap intersection must not hide the actual outer boundary."""
+
+    def line(points: np.ndarray) -> lanelet2.core.LineString3d:
+        return lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [
+                lanelet2.core.Point3d(
+                    lanelet2.core.getId(),
+                    float(x),
+                    float(y),
+                    float(z),
+                )
+                for x, y, z in points
+            ],
+        )
+
+    boundaries = [
+        np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [-2.8303, 3.8470, 0.0],
+                [-5.5840, 7.5913, 0.0],
+                [-7.4718, 10.1508, 0.0],
+            ]
+        ),
+        np.array(
+            [
+                [-2.6849, -1.8586, 0.0],
+                [-5.4609, 1.9137, 0.0],
+                [-8.2120, 5.6580, 0.0],
+                [-10.0973, 8.2114, 0.0],
+            ]
+        ),
+        np.array(
+            [
+                [-5.3952, -3.7354, 0.0],
+                [-8.2134, 0.0806, 0.0],
+                [-10.9452, 3.7599, 0.0],
+                [-12.7884, 6.2634, 0.0],
+            ]
+        ),
+    ]
+    if reverse:
+        boundaries = [points[::-1].copy() for points in boundaries]
+    lines = [line(points) for points in boundaries]
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelets = [
+        lanelet2.core.Lanelet(
+            lanelet2.core.getId(),
+            lines[index + 1],
+            lines[index],
+        )
+        for index in range(2)
+    ]
+    for lanelet in lanelets:
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        lanelets,
+        traffic_rule="LHT",
+    )
+    topology_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        lanelets,
+        road_id=53,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+    road = topology_road.copy_with_emission_context(
+        lanelet_map=lanelet_map,
+        lanelet_group=lanelets,
+        emission_context=context,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+
+    assert road.lanes is not None
+    outer_lane = road.lanes.lane_sections[0].left_lanes[2]
+    endpoint_station = road.length if reverse else 0.0
+    start_width = _width_at(outer_lane, endpoint_station)
+    local_widths = [
+        _width_at(outer_lane, float(station))
+        for station in (
+            np.linspace(max(0.0, road.length - 0.25), road.length, 101)
+            if reverse
+            else np.linspace(0.0, 0.25, 101)
+        )
+    ]
+    assert start_width == pytest.approx(3.295, abs=0.02)
+    assert min(local_widths) >= start_width - 0.05
+
+
+def test_multilane_staggered_end_cap_with_heading_override_has_no_width_hole() -> None:
+    """A junction-aligned end heading must retain the full oblique cap."""
+
+    def line(points: np.ndarray) -> lanelet2.core.LineString3d:
+        return lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [
+                lanelet2.core.Point3d(
+                    lanelet2.core.getId(),
+                    float(x),
+                    float(y),
+                    float(z),
+                )
+                for x, y, z in points
+            ],
+        )
+
+    boundaries = [
+        np.array([[0.0, 0.0, 0.0], [27.549473, 0.0, 0.0]]),
+        np.array(
+            [
+                [0.758241, 3.911892, 0.0],
+                [5.162937, 3.728793, 0.0],
+                [11.176772, 3.493391, 0.0],
+                [15.157968, 3.410842, 0.0],
+                [22.472307, 3.247531, 0.0],
+                [26.468288, 3.136040, 0.0],
+            ]
+        ),
+        np.array(
+            [
+                [1.092061, 7.435056, 0.0],
+                [5.239077, 7.188106, 0.0],
+                [11.371843, 6.780294, 0.0],
+                [15.250496, 6.588049, 0.0],
+                [22.475603, 6.260103, 0.0],
+                [26.386426, 6.081731, 0.0],
+            ]
+        ),
+        np.array(
+            [
+                [1.433749, 10.746078, 0.0],
+                [5.453039, 10.498830, 0.0],
+                [11.391689, 10.087912, 0.0],
+                [15.554756, 9.794811, 0.0],
+                [22.688332, 9.309365, 0.0],
+                [26.742931, 8.929952, 0.0],
+            ]
+        ),
+    ]
+    lines = [line(points) for points in boundaries]
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelets = [
+        lanelet2.core.Lanelet(
+            lanelet2.core.getId(),
+            lines[index + 1],
+            lines[index],
+        )
+        for index in range(3)
+    ]
+    for lanelet in lanelets:
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        lanelets,
+        traffic_rule="LHT",
+        end_heading_override=0.0900743,
+    )
+    topology_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        lanelets,
+        road_id=54,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+    road = topology_road.copy_with_emission_context(
+        lanelet_map=lanelet_map,
+        lanelet_group=lanelets,
+        emission_context=context,
+        traffic_rule="LHT",
+        width_config=WidthEstimationConfig(adaptive_sampling=True),
+    )
+
+    assert road.lanes is not None
+    for lane in road.lanes.lane_sections[0].left_lanes.values():
+        endpoint_width = _width_at(lane, road.length)
+        local_widths = [
+            _width_at(lane, float(station))
+            for station in np.linspace(max(0.0, road.length - 1.5), road.length, 301)
+        ]
+        assert min(local_widths) >= 0.5 * endpoint_width
+
+
+def test_emission_reference_terminal_tangent_ignores_one_sided_micro_kink() -> None:
+    tiny_tail = np.array([0.008660254, 0.005, 0.0])
+    right_reference = np.array(
+        [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 0.0, 0.0] + tiny_tail],
+        dtype=float,
+    )
+    left_outer = np.array(
+        [[0.0, 3.0, 0.0], [20.0, 3.0, 0.0], [20.008660254, 3.0, 0.0]],
+        dtype=float,
+    )
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+    )
+
+    assert context.length == pytest.approx(20.0, abs=1e-6)
+    assert context.evaluate(context.length).heading == pytest.approx(0.0, abs=1e-6)
+    assert len(context.to_plan_view().geometries) == 1
+
+
+def test_emission_reference_aligns_multi_lane_continuation_to_shared_cross_section() -> (
+    None
+):
+    def line(points: np.ndarray) -> lanelet2.core.LineString3d:
+        return lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [
+                lanelet2.core.Point3d(
+                    lanelet2.core.getId(),
+                    float(x),
+                    float(y),
+                    float(z),
+                )
+                for x, y, z in points
+            ],
+        )
+
+    tail_y = math.tan(math.radians(10.0))
+    incoming_boundaries = [
+        np.array(
+            [[0.0, offset, 0.0], [10.0, offset, 0.0], [19.0, offset, 0.0]]
+            + [[20.0, offset + tail_y, 0.0]],
+            dtype=float,
+        )
+        for offset in (0.0, 3.0, 6.0)
+    ]
+    incoming_boundaries[1][-1, 0] += 0.1
+    incoming_boundaries[1][-2, 1] += tail_y
+    incoming_boundaries[2][-2, 1] += tail_y
+    outgoing_boundaries = [
+        np.array(
+            [
+                [20.0, offset + tail_y, 0.0],
+                [25.0, offset + tail_y, 0.0],
+                [30.0, offset + tail_y, 0.0],
+            ],
+            dtype=float,
+        )
+        for offset in (0.0, 3.0, 6.0)
+    ]
+    outgoing_boundaries[1][0, 0] += 0.1
+
+    incoming_lines = [line(points) for points in incoming_boundaries]
+    outgoing_lines = [line(points) for points in outgoing_boundaries]
+    lanelet_map = lanelet2.core.LaneletMap()
+    incoming_lanelets = [
+        lanelet2.core.Lanelet(
+            lanelet2.core.getId(),
+            incoming_lines[index + 1],
+            incoming_lines[index],
+        )
+        for index in range(2)
+    ]
+    outgoing_lanelets = [
+        lanelet2.core.Lanelet(
+            lanelet2.core.getId(),
+            outgoing_lines[index + 1],
+            outgoing_lines[index],
+        )
+        for index in range(2)
+    ]
+    for lanelet in incoming_lanelets + outgoing_lanelets:
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+
+    incoming_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        incoming_lanelets,
+        road_id=1,
+        traffic_rule="LHT",
+    )
+    outgoing_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        outgoing_lanelets,
+        road_id=2,
+        traffic_rule="LHT",
+    )
+    incoming_road.add_successor(
+        outgoing_road.id,
+        contact_point=ContactPoint.START,
+    )
+    outgoing_road.add_predecessor(
+        incoming_road.id,
+        contact_point=ContactPoint.END,
+    )
+    assert incoming_road.lanes is not None
+    assert outgoing_road.lanes is not None
+    incoming_by_lanelet = {
+        lane.lanelet_id: lane
+        for lane in incoming_road.lanes.lane_sections[0].left_lanes.values()
+    }
+    outgoing_by_lanelet = {
+        lane.lanelet_id: lane
+        for lane in outgoing_road.lanes.lane_sections[0].left_lanes.values()
+    }
+    for incoming_lanelet, outgoing_lanelet in zip(
+        incoming_lanelets,
+        outgoing_lanelets,
+    ):
+        incoming_lane = incoming_by_lanelet[incoming_lanelet.id]
+        outgoing_lane = outgoing_by_lanelet[outgoing_lanelet.id]
+        assert incoming_lane.lane_id is not None
+        assert outgoing_lane.lane_id is not None
+        incoming_lane.successor = LaneLink(id=outgoing_lane.lane_id)
+        outgoing_lane.predecessor = LaneLink(id=incoming_lane.lane_id)
+
+    converter = _Lanelet2ToOpenDRIVEConverter(
+        lanelet_map,
+        ConversionConfig(
+            traffic_rule="LHT",
+            emission_geometry=EmissionGeometryConfig(enabled=True),
+        ),
+    )
+    plans = build_ordinary_physical_connection_plans(
+        [incoming_road, outgoing_road],
+        {lanelet.id: lanelet for lanelet in incoming_lanelets + outgoing_lanelets},
+    )
+    assert len(plans) == 1
+    assert (
+        plans[0].connection_type
+        is PhysicalConnectionType.ORDINARY_MULTI_LANE_CONTINUATION
+    )
+    assert plans[0].cross_section.reference_xyz[:2] == pytest.approx(
+        incoming_boundaries[0][-1, :2]
+    )
+    assert plans[0].cross_section.heading == pytest.approx(0.0, abs=1e-9)
+    assert plans[0].cross_section.lane_widths == pytest.approx((3.0, 3.0))
+
+    outgoing_road.junction = 100
+    junction_plans = build_junction_incoming_physical_connection_plans(
+        [incoming_road, outgoing_road],
+        {lanelet.id: lanelet for lanelet in incoming_lanelets + outgoing_lanelets},
+    )
+    assert len(junction_plans) == 1
+    assert junction_plans[0].connection_type is PhysicalConnectionType.JUNCTION_INCOMING
+    junction_constraints = endpoint_constraints_by_road(junction_plans)
+    assert set(junction_constraints[incoming_road.id]) == {"end"}
+    assert set(junction_constraints[outgoing_road.id]) == {"start"}
+    outgoing_road.junction = -1
+
+    branch_road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [outgoing_lanelets[1]],
+        road_id=5,
+        traffic_rule="LHT",
+    )
+    branch_road.junction = 100
+    branch_road.add_predecessor(
+        incoming_road.id,
+        contact_point=ContactPoint.END,
+    )
+    assert branch_road.lanes is not None
+    branch_lane = next(iter(branch_road.lanes.lane_sections[0].left_lanes.values()))
+    incoming_outer_lane = incoming_by_lanelet[incoming_lanelets[1].id]
+    assert incoming_outer_lane.lane_id is not None
+    assert branch_lane.lane_id is not None
+    incoming_outer_lane.successor = LaneLink(id=branch_lane.lane_id)
+    branch_lane.predecessor = LaneLink(id=incoming_outer_lane.lane_id)
+    branch_plans = build_junction_incoming_physical_connection_plans(
+        [incoming_road, branch_road],
+        {lanelet.id: lanelet for lanelet in incoming_lanelets + outgoing_lanelets},
+    )
+    assert len(branch_plans) == 1
+    assert branch_plans[0].cross_section.reference_xyz[:2] == pytest.approx(
+        (20.0, 3.0 + tail_y),
+        abs=1e-9,
+    )
+    assert branch_plans[0].cross_section.reference_xyz[:2] != pytest.approx(
+        outgoing_boundaries[1][0, :2],
+        abs=1e-3,
+    )
+    outgoing_outer_lane_id = outgoing_by_lanelet[outgoing_lanelets[1].id].lane_id
+    assert outgoing_outer_lane_id is not None
+    incoming_outer_lane.successor = LaneLink(id=outgoing_outer_lane_id)
+
+    single_incoming = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [incoming_lanelets[0]],
+        road_id=3,
+        traffic_rule="LHT",
+    )
+    single_outgoing = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [outgoing_lanelets[0]],
+        road_id=4,
+        traffic_rule="LHT",
+    )
+    single_incoming.add_successor(4, contact_point=ContactPoint.START)
+    single_outgoing.add_predecessor(3, contact_point=ContactPoint.END)
+    assert single_incoming.lanes is not None
+    assert single_outgoing.lanes is not None
+    single_incoming_lane = next(
+        iter(single_incoming.lanes.lane_sections[0].left_lanes.values())
+    )
+    single_outgoing_lane = next(
+        iter(single_outgoing.lanes.lane_sections[0].left_lanes.values())
+    )
+    assert single_incoming_lane.lane_id is not None
+    assert single_outgoing_lane.lane_id is not None
+    single_incoming_lane.successor = LaneLink(id=single_outgoing_lane.lane_id)
+    single_outgoing_lane.predecessor = LaneLink(id=single_incoming_lane.lane_id)
+    single_plans = build_ordinary_physical_connection_plans(
+        [single_incoming, single_outgoing],
+        {
+            incoming_lanelets[0].id: incoming_lanelets[0],
+            outgoing_lanelets[0].id: outgoing_lanelets[0],
+        },
+    )
+    assert len(single_plans) == 1
+    assert (
+        single_plans[0].connection_type is PhysicalConnectionType.ORDINARY_CONTINUATION
+    )
+
+    emitted_incoming, emitted_outgoing = (
+        converter._build_emitted_roads_after_topology_freeze(
+            [incoming_road, outgoing_road],
+            RoadLaneletMapping(
+                road_to_lanelets={
+                    incoming_road.id: [lanelet.id for lanelet in incoming_lanelets],
+                    outgoing_road.id: [lanelet.id for lanelet in outgoing_lanelets],
+                },
+                lanelet_to_road={
+                    **{lanelet.id: incoming_road.id for lanelet in incoming_lanelets},
+                    **{lanelet.id: outgoing_road.id for lanelet in outgoing_lanelets},
+                },
+            ),
+            routing_graph=None,
+        )
+    )
+    assert emitted_incoming.emission_context is not None
+    assert emitted_outgoing.emission_context is not None
+    assert emitted_incoming.lanes is not None
+    assert emitted_outgoing.lanes is not None
+    incoming_pose = emitted_incoming.emission_context.evaluate(emitted_incoming.length)
+    outgoing_pose = emitted_outgoing.emission_context.evaluate(0.0)
+    normal = np.array(
+        [-math.sin(incoming_pose.heading), math.cos(incoming_pose.heading)]
+    )
+    incoming_lanes = sorted(
+        emitted_incoming.lanes.lane_sections[0].left_lanes.values(),
+        key=lambda lane: lane.lane_id or 0,
+    )
+    outgoing_lanes = sorted(
+        emitted_outgoing.lanes.lane_sections[0].left_lanes.values(),
+        key=lambda lane: lane.lane_id or 0,
+    )
+    incoming_offsets = np.cumsum(
+        [0.0] + [_width_at(lane, emitted_incoming.length) for lane in incoming_lanes]
+    )
+    outgoing_offsets = np.cumsum(
+        [0.0] + [_width_at(lane, 0.0) for lane in outgoing_lanes]
+    )
+    incoming_cap = np.asarray(
+        [incoming_pose.xy + offset * normal for offset in incoming_offsets]
+    )
+    outgoing_cap = np.asarray(
+        [outgoing_pose.xy + offset * normal for offset in outgoing_offsets]
+    )
+    assert incoming_cap == pytest.approx(outgoing_cap, abs=1e-9)
+    for lane in incoming_lanes:
+        terminal_widths = [
+            _width_at(lane, station)
+            for station in np.linspace(
+                emitted_incoming.length - 0.1,
+                emitted_incoming.length,
+                21,
+            )
+        ]
+        assert min(terminal_widths) > 2.9
+
+
+def test_physical_connection_preserves_two_point_road_in_continuation_chain() -> None:
+    def make_line(points: np.ndarray) -> lanelet2.core.LineString3d:
+        return lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [
+                lanelet2.core.Point3d(
+                    lanelet2.core.getId(),
+                    float(x),
+                    float(y),
+                    float(z),
+                )
+                for x, y, z in points
+            ],
+        )
+
+    right_bounds = [
+        np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [10.0, 0.0, 0.0]]),
+        np.array([[10.0, 0.0, 0.0], [20.0, 1.0, 0.0]]),
+        np.array([[20.0, 1.0, 0.0], [25.0, 1.5, 0.0], [30.0, 2.0, 0.0]]),
+    ]
+    left_bounds = [right + np.array([0.0, 3.0, 0.0]) for right in right_bounds]
+    lanelet_map = lanelet2.core.LaneletMap()
+    lanelets = []
+    roads = []
+    for index, (left, right) in enumerate(zip(left_bounds, right_bounds)):
+        lanelet = lanelet2.core.Lanelet(
+            2000 + index,
+            make_line(left),
+            make_line(right),
+        )
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+        lanelets.append(lanelet)
+        roads.append(
+            Road.construct_from_lanelet_groups(
+                lanelet_map,
+                [lanelet],
+                road_id=index + 1,
+                traffic_rule="LHT",
+            )
+        )
+
+    for from_road, to_road in zip(roads[:-1], roads[1:]):
+        from_road.add_successor(to_road.id, contact_point=ContactPoint.START)
+        to_road.add_predecessor(from_road.id, contact_point=ContactPoint.END)
+        assert from_road.lanes is not None
+        assert to_road.lanes is not None
+        from_lane = next(iter(from_road.lanes.lane_sections[0].left_lanes.values()))
+        to_lane = next(iter(to_road.lanes.lane_sections[0].left_lanes.values()))
+        assert from_lane.lane_id is not None
+        assert to_lane.lane_id is not None
+        from_lane.successor = LaneLink(id=to_lane.lane_id)
+        to_lane.predecessor = LaneLink(id=from_lane.lane_id)
+
+    plans = build_ordinary_physical_connection_plans(
+        roads,
+        {lanelet.id: lanelet for lanelet in lanelets},
+    )
+    assert len(plans) == 2
+    middle_heading = math.atan2(1.0, 10.0)
+    assert plans[0].from_endpoint.heading == pytest.approx(middle_heading)
+    assert plans[0].to_endpoint.heading == pytest.approx(middle_heading)
+    assert plans[1].from_endpoint.heading == pytest.approx(middle_heading)
+    assert plans[1].to_endpoint.heading == pytest.approx(middle_heading)
+    endpoint_protected_plans = build_ordinary_physical_connection_plans(
+        roads,
+        {lanelet.id: lanelet for lanelet in lanelets},
+        protected_road_endpoints={(roads[1].id, True)},
+    )
+    assert [
+        (plan.from_road_id, plan.to_road_id) for plan in endpoint_protected_plans
+    ] == [(roads[1].id, roads[2].id)]
+
+    converter = _Lanelet2ToOpenDRIVEConverter(
+        lanelet_map,
+        ConversionConfig(
+            traffic_rule="LHT",
+            emission_geometry=EmissionGeometryConfig(enabled=True),
+        ),
+    )
+    emitted = converter._build_emitted_roads_after_topology_freeze(
+        roads,
+        RoadLaneletMapping(
+            road_to_lanelets={
+                road.id: [lanelet.id] for road, lanelet in zip(roads, lanelets)
+            },
+            lanelet_to_road={
+                lanelet.id: road.id for road, lanelet in zip(roads, lanelets)
+            },
+        ),
+        routing_graph=None,
+    )
+
+    middle_context = emitted[1].emission_context
+    assert middle_context is not None
+    assert middle_context.evaluate(0.0).xy == pytest.approx(
+        right_bounds[1][0, :2],
+        abs=1e-9,
+    )
+    assert middle_context.evaluate(middle_context.length).xy == pytest.approx(
+        right_bounds[1][-1, :2],
+        abs=1e-9,
+    )
+    for from_road, to_road in zip(emitted[:-1], emitted[1:]):
+        assert from_road.emission_context is not None
+        assert to_road.emission_context is not None
+        from_pose = from_road.emission_context.evaluate(from_road.length)
+        to_pose = to_road.emission_context.evaluate(0.0)
+        assert from_pose.xy == pytest.approx(to_pose.xy, abs=1e-9)
+        assert from_pose.heading == pytest.approx(to_pose.heading, abs=1e-9)
+
+
+def test_two_point_emission_constraints_use_one_well_conditioned_cubic() -> None:
+    right_reference = np.array(
+        [[0.0, 0.0, 0.0], [20.0, 1.0, 0.0]],
+        dtype=float,
+    )
+    left_outer = right_reference + np.array([0.0, 3.0, 0.0])
+    lanelet_map, lanelet = _make_lanelet_from_bounds(
+        left_outer,
+        right_reference,
+    )
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+        start_heading_override=0.0,
+        end_heading_override=0.0,
+    )
+
+    plan_view = context.to_plan_view()
+    assert len(plan_view.geometries) == 1
+    geometry = plan_view.geometries[0]
+    assert isinstance(geometry, ParamPoly3)
+    assert geometry.pRange == "arcLength"
+    assert geometry.length > 0.5
+    assert context.evaluate(0.0).xy == pytest.approx(
+        right_reference[0, :2],
+        abs=1e-9,
+    )
+    assert context.evaluate(context.length).xy == pytest.approx(
+        right_reference[-1, :2],
+        abs=1e-9,
+    )
+    assert context.evaluate(0.0).heading == pytest.approx(0.0, abs=1e-9)
+    assert context.evaluate(context.length).heading == pytest.approx(0.0, abs=1e-9)
+
+    coefficients = (
+        geometry.aU,
+        geometry.bU,
+        geometry.cU,
+        geometry.dU,
+        geometry.aV,
+        geometry.bV,
+        geometry.cV,
+        geometry.dV,
+    )
+    samples = np.asarray(
+        [
+            evaluate_plan_view_world(
+                geometry.x,
+                geometry.y,
+                geometry.hdg,
+                float(station),
+                param_poly3_coeffs=coefficients,
+            )
+            for station in np.linspace(0.0, geometry.length, 1001)
+        ]
+    )
+    integrated_length = _polyline_length(samples)
+    assert integrated_length == pytest.approx(geometry.length, abs=2e-4)
+    assert samples[0] == pytest.approx(right_reference[0, :2], abs=1e-9)
+    assert samples[-1] == pytest.approx(right_reference[-1, :2], abs=1e-9)
+    assert np.min(np.linalg.norm(np.diff(samples, axis=0), axis=1)) > 0.0
+
+
+def test_physical_connection_absorbs_short_terminal_segment_without_micro_cubic() -> (
+    None
+):
+    right_reference = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [20.0, 0.0, 0.0],
+            [20.008, 0.004, 0.0],
+        ],
+        dtype=float,
+    )
+    left_outer = right_reference + np.array([0.0, 3.0, 0.0])
+    lanelet_map, lanelet = _make_lanelet_from_bounds(
+        left_outer,
+        right_reference,
+    )
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+        end_heading_override=0.0,
+    )
+
+    plan_view = context.to_plan_view()
+    assert all(geometry.length >= 0.5 for geometry in plan_view.geometries)
+    assert isinstance(plan_view.geometries[-1], ParamPoly3)
+    assert context.evaluate(context.length).xy == pytest.approx(
+        right_reference[-1, :2],
+        abs=1e-9,
+    )
+    assert context.evaluate(context.length).heading == pytest.approx(0.0, abs=1e-9)
+
+
+def test_width_constraint_skips_non_monotone_terminal_cap_support() -> None:
+    lane = SimpleNamespace(
+        widths=[
+            LaneWidth(0.0, 3.0, 0.0, 0.0, 0.0),
+            LaneWidth(9.3, 3.0, 0.1, 0.0, 0.0),
+            LaneWidth(9.75, 3.045, 3.0, 0.0, 0.0),
+        ]
+    )
+
+    changed = _constrain_width_endpoint(
+        lane,
+        10.0,
+        at_start=False,
+        width=3.05,
+        derivative=0.0,
+        transition_length=0.25,
+    )
+
+    assert changed
+    assert lane.widths[-1].s_offset == pytest.approx(9.3)
+    stations = np.linspace(9.3, 10.0, 101)
+    values = np.asarray(
+        [_width_value_and_derivative(lane, float(station))[0] for station in stations]
+    )
+    assert np.all(np.diff(values) >= -DEFAULT_CONFIG.geometry.epsilon)
+    assert values[0] == pytest.approx(3.0)
+    assert values[-1] == pytest.approx(3.05)
+    assert _width_value_and_derivative(lane, 10.0)[1] == pytest.approx(0.0)
+
+
+def test_three_point_emission_preserves_source_supported_terminal_tangents() -> None:
+    right_reference = np.array(
+        [[0.0, 0.0, 0.0], [10.0, 0.2, 0.0], [20.0, 1.0, 0.0]],
+        dtype=float,
+    )
+    left_outer = right_reference + np.array([0.0, 3.0, 0.0])
+    lanelet_map, lanelet = _make_lanelet_from_bounds(
+        left_outer,
+        right_reference,
+    )
+    start_heading = math.atan2(0.2, 10.0)
+    end_heading = math.atan2(0.8, 10.0)
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+        start_heading_override=start_heading,
+        end_heading_override=end_heading,
+    )
+
+    plan_view = context.to_plan_view()
+    assert len(plan_view.geometries) == 2
+    assert all(isinstance(geometry, Line) for geometry in plan_view.geometries)
+    middle_station = context.emission_geometry.emission_stations[1]
+    assert context.evaluate(0.0).heading == pytest.approx(start_heading, abs=1e-9)
+    assert context.evaluate(context.length).heading == pytest.approx(
+        end_heading,
+        abs=1e-9,
+    )
+    assert context.evaluate(float(middle_station)).xy == pytest.approx(
+        right_reference[1, :2],
+        abs=1e-9,
+    )
+
+
+def test_emission_reference_preserves_continuous_short_terminal_curve() -> None:
+    right_reference = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [20.0, 5.0, 0.0],
+            [20.008660254, 5.005, 0.0],
+        ],
+        dtype=float,
+    )
+    left_outer = right_reference.copy()
+    left_outer[:, 1] += 3.0
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+    )
+
+    assert context.length == pytest.approx(
+        _polyline_length(right_reference[:, :2]),
+        abs=1e-6,
+    )
+    assert context.evaluate(context.length).heading == pytest.approx(
+        math.radians(30.0),
+        abs=1e-5,
+    )
+
+
+def test_emission_reference_preserves_true_endpoint_corner() -> None:
+    right_reference = np.array(
+        [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 3.0, 0.0]],
+        dtype=float,
+    )
+    left_outer = np.array(
+        [[0.0, 3.0, 0.0], [20.0, 3.0, 0.0], [20.0, 6.0, 0.0]],
+        dtype=float,
+    )
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+    )
+
+    assert context.length == pytest.approx(23.0, abs=1e-6)
+    assert context.evaluate(context.length).heading == pytest.approx(
+        math.radians(90.0),
+        abs=1e-6,
+    )
+
+
+def test_emission_reference_preserves_micro_kink_supported_by_both_boundaries() -> None:
+    tiny_tail = np.array([0.008660254, 0.005, 0.0])
+    right_reference = np.array(
+        [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 0.0, 0.0] + tiny_tail],
+        dtype=float,
+    )
+    left_outer = np.array(
+        [[0.0, 3.0, 0.0], [20.0, 3.0, 0.0], [20.0, 3.0, 0.0] + tiny_tail],
+        dtype=float,
+    )
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+    )
+
+    assert context.length == pytest.approx(
+        _polyline_length(right_reference[:, :2]),
+        abs=1e-6,
+    )
+    assert context.evaluate(context.length).heading == pytest.approx(
+        math.radians(30.0),
+        abs=1e-5,
+    )
+
+
+def test_emission_reference_cleans_near_duplicate_endpoint() -> None:
+    right_reference = np.array(
+        [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0000001, 0.0, 0.0]],
+        dtype=float,
+    )
+    left_outer = right_reference.copy()
+    left_outer[:, 1] += 3.0
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+    )
+
+    assert context.length == pytest.approx(20.0, abs=1e-6)
+    assert context.evaluate(context.length).heading == pytest.approx(0.0, abs=1e-6)
 
 
 def test_emission_width_uses_polygon_cross_sections_for_outer_end_drop() -> None:
@@ -1280,8 +2159,210 @@ def test_post_freeze_synthetic_connector_uses_emitted_lane_endpoint_constraints(
     connector_lane = connector.lanes.lane_sections[0].right_lanes[-1]
     start_width = converter._evaluate_width_or_zero(connector_lane, 0.0)
     end_width = converter._evaluate_width_or_zero(connector_lane, connector.length)
-    assert start_width == pytest.approx(4.0)
-    assert end_width == pytest.approx(2.0)
+    assert start_width == pytest.approx(3.0)
+    assert end_width == pytest.approx(3.0)
+    assert connector_lane.widths[0].b == pytest.approx(0.0)
+
+
+def _make_single_lane_road(
+    reference: np.ndarray,
+    *,
+    road_id: int,
+    lanelet_id: int,
+    traffic_rule: str,
+    width: float = 3.0,
+) -> tuple[lanelet2.core.LaneletMap, lanelet2.core.Lanelet, Road]:
+    if traffic_rule.upper() == "LHT":
+        left = reference.copy()
+        left[:, 1] += width
+        lanelet_map, lanelet = _make_lanelet_from_bounds(
+            left,
+            reference,
+            lanelet_id=lanelet_id,
+        )
+    else:
+        lanelet_map, lanelet = _make_lanelet_from_reference(
+            reference,
+            width=width,
+            lanelet_id=lanelet_id,
+        )
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        road_id=road_id,
+        traffic_rule=traffic_rule,
+    )
+    return lanelet_map, lanelet, road
+
+
+def _align_source_less_connector(
+    predecessor: Road,
+    successor: Road,
+    *,
+    incoming_contact: ContactPoint = ContactPoint.END,
+    outgoing_contact: ContactPoint = ContactPoint.START,
+    traffic_rule: TrafficRule = TrafficRule.RHT,
+    from_lane: int = -1,
+    to_lane: int = -1,
+) -> Road:
+    connector = _make_zero_length_connecting_road(
+        road_id=102,
+        junction_id=1000,
+        incoming_road_id=predecessor.id,
+        outgoing_road_id=successor.id,
+        incoming_contact=incoming_contact,
+        outgoing_contact=outgoing_contact,
+        start_xyz=(0.0, 1.0, 0.0),
+        end_xyz=(0.1, 1.0, 0.0),
+        min_segment_length=0.01,
+        traffic_rule=traffic_rule,
+        from_lane=from_lane,
+        to_lane=to_lane,
+        fallback_heading=math.pi / 2.0,
+        lane_width=3.0,
+    )
+    lanelet_map = lanelet2.core.LaneletMap()
+    converter = _Lanelet2ToOpenDRIVEConverter(
+        lanelet_map,
+        ConversionConfig(
+            traffic_rule=traffic_rule.value,
+            emission_geometry=EmissionGeometryConfig(enabled=True),
+        ),
+    )
+    roads_by_id = {road.id: road for road in [predecessor, successor, connector]}
+    assert converter._align_unmapped_connecting_road(connector, roads_by_id)
+    return connector
+
+
+@pytest.mark.parametrize(
+    ("traffic_rule", "lane_id"),
+    [(TrafficRule.RHT, -1), (TrafficRule.LHT, 1)],
+)
+def test_source_less_short_backward_connector_uses_linked_physical_heading(
+    traffic_rule: TrafficRule,
+    lane_id: int,
+) -> None:
+    _pred_map, _pred_lanelet, predecessor = _make_single_lane_road(
+        np.array([[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=float),
+        road_id=100,
+        lanelet_id=1301,
+        traffic_rule=traffic_rule.value,
+    )
+    _succ_map, _succ_lanelet, successor = _make_single_lane_road(
+        np.array([[-0.2, 0.0, 0.0], [10.0, 0.0, 0.0]], dtype=float),
+        road_id=101,
+        lanelet_id=1302,
+        traffic_rule=traffic_rule.value,
+    )
+
+    connector = _align_source_less_connector(
+        predecessor,
+        successor,
+        traffic_rule=traffic_rule,
+        from_lane=lane_id,
+        to_lane=lane_id,
+    )
+
+    assert connector.length == pytest.approx(
+        DEFAULT_CONFIG.geometry.divergence_min_segment_length
+    )
+    assert connector.reference_start_xyz == pytest.approx((-0.1, 0.0, 0.0))
+    assert connector.reference_end_xyz == pytest.approx((-0.1, 0.0, 0.0))
+    assert connector.plan_view is not None
+    geometry = connector.plan_view.geometries[0]
+    assert isinstance(geometry, ParamPoly3)
+    assert geometry.x == pytest.approx(-0.1)
+    assert geometry.y == pytest.approx(0.0)
+    assert geometry.hdg == pytest.approx(0.0)
+    assert geometry.bU == pytest.approx(0.0)
+
+
+def test_source_less_short_backward_connector_normalizes_contact_point_heading() -> (
+    None
+):
+    _pred_map, _pred_lanelet, predecessor = _make_single_lane_road(
+        np.array([[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=float),
+        road_id=100,
+        lanelet_id=1401,
+        traffic_rule="RHT",
+    )
+    _succ_map, _succ_lanelet, successor = _make_single_lane_road(
+        np.array([[10.0, 0.0, 0.0], [-0.2, 0.0, 0.0]], dtype=float),
+        road_id=101,
+        lanelet_id=1402,
+        traffic_rule="RHT",
+    )
+
+    connector = _align_source_less_connector(
+        predecessor,
+        successor,
+        outgoing_contact=ContactPoint.END,
+    )
+
+    assert connector.length == pytest.approx(
+        DEFAULT_CONFIG.geometry.divergence_min_segment_length
+    )
+    assert connector.reference_start_xyz == pytest.approx((-0.1, 0.0, 0.0))
+    assert connector.reference_end_xyz == pytest.approx((-0.1, 0.0, 0.0))
+    assert connector.plan_view is not None
+    geometry = connector.plan_view.geometries[0]
+    assert isinstance(geometry, ParamPoly3)
+    assert geometry.hdg == pytest.approx(0.0)
+    assert geometry.bU == pytest.approx(0.0)
+
+
+def test_source_less_short_forward_connector_keeps_endpoint_line() -> None:
+    _pred_map, _pred_lanelet, predecessor = _make_single_lane_road(
+        np.array([[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=float),
+        road_id=100,
+        lanelet_id=1501,
+        traffic_rule="RHT",
+    )
+    _succ_map, _succ_lanelet, successor = _make_single_lane_road(
+        np.array([[0.2, 0.0, 0.0], [10.0, 1.0, 0.0]], dtype=float),
+        road_id=101,
+        lanelet_id=1502,
+        traffic_rule="RHT",
+    )
+
+    connector = _align_source_less_connector(predecessor, successor)
+
+    assert connector.length == pytest.approx(0.2)
+    assert connector.reference_start_xyz == pytest.approx((0.0, 0.0, 0.0))
+    assert connector.reference_end_xyz == pytest.approx((0.2, 0.0, 0.0))
+    assert connector.plan_view is not None
+    geometry = connector.plan_view.geometries[0]
+    assert isinstance(geometry, ParamPoly3)
+    assert geometry.hdg == pytest.approx(0.0)
+    assert geometry.bU == pytest.approx(1.0)
+
+
+def test_source_less_connector_keeps_line_for_genuinely_opposite_physical_tangents() -> (
+    None
+):
+    _pred_map, _pred_lanelet, predecessor = _make_single_lane_road(
+        np.array([[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=float),
+        road_id=100,
+        lanelet_id=1601,
+        traffic_rule="RHT",
+    )
+    _succ_map, _succ_lanelet, successor = _make_single_lane_road(
+        np.array([[0.2, 0.0, 0.0], [-10.0, 0.0, 0.0]], dtype=float),
+        road_id=101,
+        lanelet_id=1602,
+        traffic_rule="RHT",
+    )
+
+    connector = _align_source_less_connector(predecessor, successor)
+
+    assert connector.length == pytest.approx(0.2)
+    assert connector.reference_start_xyz == pytest.approx((0.0, 0.0, 0.0))
+    assert connector.reference_end_xyz == pytest.approx((0.2, 0.0, 0.0))
+    assert connector.plan_view is not None
+    geometry = connector.plan_view.geometries[0]
+    assert isinstance(geometry, ParamPoly3)
+    assert geometry.hdg == pytest.approx(0.0)
+    assert geometry.bU == pytest.approx(1.0)
 
 
 def test_production_emission_gate_keeps_standard_stop_line_emission_roads() -> None:
@@ -1624,3 +2705,431 @@ def test_reference_domain_coverage_detects_overhang_cases(
     ), case_name
     assert 0.0 <= coverage.source_coverage_ratio <= 1.0
     assert 0.0 <= coverage.domain_coverage_ratio <= 1.0
+
+
+def _divergence_partition_fixture():
+    """Two branch roads whose ends tile one trunk road start (LHT)."""
+
+    def line(points: np.ndarray) -> lanelet2.core.LineString3d:
+        return lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [
+                lanelet2.core.Point3d(
+                    lanelet2.core.getId(),
+                    float(x),
+                    float(y),
+                    float(z),
+                )
+                for x, y, z in points
+            ],
+        )
+
+    def bounds(x0: float, x1: float, offset: float) -> np.ndarray:
+        return np.array(
+            [
+                [x0, offset, 0.0],
+                [(x0 + x1) / 2.0, offset, 0.0],
+                [x1, offset, 0.0],
+            ],
+            dtype=float,
+        )
+
+    lanelet_map = lanelet2.core.LaneletMap()
+    # Adjacent lanelets must share boundary LineString objects so that road
+    # grouping recognizes them as one multi-lane road.
+    branch_lines = {
+        offset: line(bounds(0.0, 20.0, offset)) for offset in (0.0, 3.0, 6.0, 9.0)
+    }
+    trunk_lines = {
+        offset: line(bounds(20.0, 30.0, offset)) for offset in (0.0, 3.0, 6.0, 9.0)
+    }
+
+    def make_lanelet(lines, inner: float, outer: float):
+        lanelet = lanelet2.core.Lanelet(
+            lanelet2.core.getId(),
+            lines[outer],
+            lines[inner],
+        )
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+        return lanelet
+
+    branch_a_lanelets = [make_lanelet(branch_lines, 0.0, 3.0)]
+    branch_b_lanelets = [
+        make_lanelet(branch_lines, 3.0, 6.0),
+        make_lanelet(branch_lines, 6.0, 9.0),
+    ]
+    trunk_lanelets = [
+        make_lanelet(trunk_lines, 0.0, 3.0),
+        make_lanelet(trunk_lines, 3.0, 6.0),
+        make_lanelet(trunk_lines, 6.0, 9.0),
+    ]
+
+    branch_a = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        branch_a_lanelets,
+        road_id=1,
+        traffic_rule="LHT",
+    )
+    branch_b = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        branch_b_lanelets,
+        road_id=2,
+        traffic_rule="LHT",
+    )
+    trunk = Road.construct_from_lanelet_groups(
+        lanelet_map,
+        trunk_lanelets,
+        road_id=3,
+        traffic_rule="LHT",
+    )
+
+    def lane_id_for(road: Road, lanelet_id: int) -> int:
+        assert road.lanes is not None
+        for lane in road.lanes.lane_sections[0].left_lanes.values():
+            if lane.lanelet_id == lanelet_id:
+                assert lane.lane_id is not None
+                return lane.lane_id
+        raise AssertionError(f"no lane for lanelet {lanelet_id}")
+
+    stub_specs = [
+        (11, branch_a, branch_a_lanelets[0], trunk_lanelets[0]),
+        (12, branch_b, branch_b_lanelets[0], trunk_lanelets[1]),
+        (13, branch_b, branch_b_lanelets[1], trunk_lanelets[2]),
+    ]
+    stubs = []
+    for stub_id, branch, branch_lanelet, trunk_lanelet in stub_specs:
+        from_lane = lane_id_for(branch, branch_lanelet.id)
+        to_lane = lane_id_for(trunk, trunk_lanelet.id)
+        anchor = (20.0, float(branch_lanelet.rightBound[-1].y), 0.0)
+        stubs.append(
+            _make_zero_length_connecting_road(
+                road_id=stub_id,
+                junction_id=900,
+                incoming_road_id=branch.id,
+                outgoing_road_id=trunk.id,
+                incoming_contact=ContactPoint.END,
+                outgoing_contact=ContactPoint.START,
+                start_xyz=anchor,
+                end_xyz=anchor,
+                min_segment_length=(
+                    DEFAULT_CONFIG.geometry.divergence_min_segment_length
+                ),
+                traffic_rule=TrafficRule.LHT,
+                from_lane=from_lane,
+                to_lane=to_lane,
+            )
+        )
+
+    lanelet_by_id = {
+        lanelet.id: lanelet
+        for lanelet in branch_a_lanelets + branch_b_lanelets + trunk_lanelets
+    }
+    return branch_a, branch_b, trunk, stubs, lanelet_by_id
+
+
+def test_divergence_partition_plans_share_one_trunk_cross_section() -> None:
+    branch_a, branch_b, trunk, stubs, lanelet_by_id = _divergence_partition_fixture()
+
+    plans = build_divergence_physical_connection_plans(
+        [branch_a, branch_b, trunk, *stubs],
+        lanelet_by_id,
+    )
+
+    assert len(plans) == 2
+    plans_by_branch = {plan.from_road_id: plan for plan in plans}
+    assert set(plans_by_branch) == {branch_a.id, branch_b.id}
+
+    plan_a = plans_by_branch[branch_a.id]
+    assert plan_a.to_road_id == trunk.id
+    assert plan_a.connection_type is PhysicalConnectionType.MERGE
+    assert plan_a.cross_section.lane_widths == pytest.approx((3.0,))
+    assert plan_a.from_endpoint.reference_xyz[:2] == pytest.approx((20.0, 0.0))
+    assert plan_a.to_endpoint.reference_xyz[:2] == pytest.approx((20.0, 0.0))
+    assert plan_a.cross_section.heading == pytest.approx(0.0, abs=1e-9)
+
+    plan_b = plans_by_branch[branch_b.id]
+    assert plan_b.cross_section.lane_widths == pytest.approx((3.0, 3.0))
+    assert plan_b.from_endpoint.reference_xyz[:2] == pytest.approx((20.0, 3.0))
+    assert plan_b.to_endpoint.reference_xyz[:2] == pytest.approx((20.0, 0.0))
+    assert [
+        (pair.from_lane_id, pair.to_lane_id) for pair in plan_b.lane_correspondences
+    ] == [(1, 2), (2, 3)]
+
+    constraints = endpoint_constraints_by_road(plans)
+    assert set(constraints[trunk.id]) == {"start"}
+    assert set(constraints[branch_a.id]) == {"end"}
+    assert set(constraints[branch_b.id]) == {"end"}
+    assert constraints[trunk.id]["start"].reference_xyz[:2] == pytest.approx(
+        (20.0, 0.0)
+    )
+    assert constraints[branch_b.id]["end"].reference_xyz[:2] == pytest.approx(
+        (20.0, 3.0)
+    )
+
+
+def test_divergence_plans_skip_forks_reusing_a_branch_lane() -> None:
+    branch_a, branch_b, trunk, stubs, lanelet_by_id = _divergence_partition_fixture()
+
+    # Reuse branch A's only lane for a second stub: the interface is a true
+    # fork, so no partition contract may be planned for either target.
+    fork_stub = _make_zero_length_connecting_road(
+        road_id=14,
+        junction_id=900,
+        incoming_road_id=branch_a.id,
+        outgoing_road_id=trunk.id,
+        incoming_contact=ContactPoint.END,
+        outgoing_contact=ContactPoint.START,
+        start_xyz=(20.0, 0.0, 0.0),
+        end_xyz=(20.0, 0.0, 0.0),
+        min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
+        traffic_rule=TrafficRule.LHT,
+        from_lane=1,
+        to_lane=1,
+    )
+
+    plans = build_divergence_physical_connection_plans(
+        [branch_a, branch_b, trunk, *stubs, fork_stub],
+        lanelet_by_id,
+    )
+
+    assert plans == []
+
+
+def _emitted_lane_polygons_for_test(road, num_samples: int = 80):
+    """Sample emitted lane surfaces as closed rings from planView + widths."""
+    stations = np.linspace(0.0, road.length, num_samples)
+    section = road.lanes.lane_sections[0]
+    lanes = [section.left_lanes[k] for k in sorted(section.left_lanes)]
+
+    def width_at(lane, station):
+        active = lane.widths[0]
+        for record in lane.widths:
+            if record.s_offset <= station + 1e-9:
+                active = record
+        ds = station - active.s_offset
+        return active.a + active.b * ds + active.c * ds**2 + active.d * ds**3
+
+    rows = []
+    for station in stations:
+        pose = road.emission_context.evaluate(float(station))
+        x, y, heading = pose.x, pose.y, pose.heading
+        normal = np.array([-math.sin(heading), math.cos(heading)])
+        offsets = [0.0]
+        for lane in lanes:
+            offsets.append(offsets[-1] + width_at(lane, float(station)))
+        rows.append((np.array([x, y]), normal, offsets))
+
+    polygons = []
+    for index in range(len(lanes)):
+        inner = [pt + offs[index] * n for pt, n, offs in rows]
+        outer = [pt + offs[index + 1] * n for pt, n, offs in rows]
+        polygons.append(np.asarray(inner + outer[::-1]))
+    return polygons
+
+
+def _point_in_ring(point, ring) -> bool:
+    x, y = point
+    inside = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def test_true_fork_emission_covers_continuous_source_surface() -> None:
+    """A true fork with continuous source must not lose drivable surface.
+
+    Minimal fixture mirroring the Odaiba fork pattern: a two-lane trunk whose
+    inner lane feeds both a straight two-lane branch and an angled exit
+    branch. The exit shares the trunk cap edge, so the source union is
+    continuous; near the apex the branches overlap by construction. The fork
+    is intentionally NOT planned (a lane feeds two roads), and the emitted
+    surfaces must still cover every interior source point.
+    """
+
+    def line(points):
+        return lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [
+                lanelet2.core.Point3d(lanelet2.core.getId(), *map(float, p))
+                for p in points
+            ],
+        )
+
+    lanelet_map = lanelet2.core.LaneletMap()
+
+    def add_lanelet(left_line, right_line):
+        lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), left_line, right_line)
+        lanelet.attributes["subtype"] = "road"
+        lanelet.attributes["one_way"] = "yes"
+        lanelet_map.add(lanelet)
+        return lanelet
+
+    def straight(offset, x0, x1):
+        return [
+            [x0, offset, 0.0],
+            [(x0 + x1) / 2.0, offset, 0.0],
+            [x1, offset, 0.0],
+        ]
+
+    trunk_lines = {o: line(straight(o, 0.0, 20.0)) for o in (0.0, 3.0, 6.0)}
+    branch_a_lines = {o: line(straight(o, 20.0, 40.0)) for o in (0.0, 3.0, 6.0)}
+    # Angled exit branch: shares the trunk lane-1 cap points at x=20 and
+    # fans away at roughly 14 degrees.
+    exit_right = line([[20.0, 0.0, 0.0], [30.0, -2.5, 0.0], [40.0, -5.0, 0.0]])
+    exit_left = line([[20.0, 3.0, 0.0], [30.0, 0.5, 0.0], [40.0, -2.0, 0.0]])
+
+    trunk_lanelets = [
+        add_lanelet(trunk_lines[3.0], trunk_lines[0.0]),
+        add_lanelet(trunk_lines[6.0], trunk_lines[3.0]),
+    ]
+    branch_a_lanelets = [
+        add_lanelet(branch_a_lines[3.0], branch_a_lines[0.0]),
+        add_lanelet(branch_a_lines[6.0], branch_a_lines[3.0]),
+    ]
+    branch_b_lanelets = [add_lanelet(exit_left, exit_right)]
+
+    emitted = []
+    source_groups = [trunk_lanelets, branch_a_lanelets, branch_b_lanelets]
+    for road_id, group in enumerate(source_groups, start=1):
+        road = Road.construct_from_lanelet_groups(
+            lanelet_map,
+            group,
+            road_id=road_id,
+            traffic_rule="LHT",
+        )
+        context = RoadEmissionContext.from_lanelet_groups(
+            lanelet_map,
+            group,
+            traffic_rule="LHT",
+        )
+        emitted.append(
+            road.copy_with_emission_context(
+                lanelet_map=lanelet_map,
+                lanelet_group=group,
+                emission_context=context,
+                traffic_rule="LHT",
+                width_config=WidthEstimationConfig(adaptive_sampling=True),
+            )
+        )
+
+    rings = [ring for road in emitted for ring in _emitted_lane_polygons_for_test(road)]
+
+    def sample_interior(lanelet, u, v):
+        left = np.asarray([[p.x, p.y] for p in lanelet.leftBound])
+        right = np.asarray([[p.x, p.y] for p in lanelet.rightBound])
+
+        def along(points, fraction):
+            seg = np.linalg.norm(np.diff(points, axis=0), axis=1)
+            total = float(seg.sum())
+            target = fraction * total
+            acc = 0.0
+            for i, s in enumerate(seg):
+                if acc + s >= target:
+                    ratio = (target - acc) / s
+                    return points[i] + ratio * (points[i + 1] - points[i])
+                acc += s
+            return points[-1]
+
+        return (1.0 - v) * along(right, u) + v * along(left, u)
+
+    uncovered = []
+    for group in source_groups:
+        for lanelet in group:
+            for u in np.linspace(0.03, 0.97, 25):
+                for v in np.linspace(0.1, 0.9, 7):
+                    point = sample_interior(lanelet, float(u), float(v))
+                    if not any(_point_in_ring(point, ring) for ring in rings):
+                        uncovered.append(tuple(np.round(point, 3)))
+
+    assert uncovered == []
+
+
+def _heading_jump_at(context, station: float) -> float:
+    before = context.evaluate(max(0.0, station - 1e-4)).heading
+    after = context.evaluate(min(context.length, station + 1e-4)).heading
+    return math.degrees(
+        abs(math.atan2(math.sin(after - before), math.cos(after - before)))
+    )
+
+
+def test_smooth_curved_source_emits_c1_under_terminal_heading_overrides() -> None:
+    """A smooth curve split into segments must stay C1 with overrides.
+
+    The endpoint heading overrides model shared physical-connection tangents
+    that differ slightly from the terminal chords (the true curve tangent at
+    the endpoints). The blend must honor them without displacing interior
+    source points or injecting internal tangent kinks — the historic failure
+    mode moved the second-to-last point, bending the neighbouring segment by
+    the whole correction.
+    """
+    radius = 300.0
+    stations = np.arange(0.0, 30.1, 5.0)
+    angles = stations / radius
+    right_reference = np.column_stack(
+        [
+            radius * np.sin(angles),
+            radius * (1.0 - np.cos(angles)),
+            np.zeros_like(angles),
+        ]
+    )
+    left_outer = right_reference + np.array([0.0, 3.5, 0.0])
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+
+    start_tangent = 0.0
+    end_tangent = float(angles[-1])
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+        start_heading_override=start_tangent,
+        end_heading_override=end_tangent,
+    )
+
+    assert context.evaluate(0.0).heading == pytest.approx(start_tangent, abs=1e-8)
+    assert context.evaluate(context.length).heading == pytest.approx(
+        end_tangent, abs=1e-8
+    )
+
+    # Interior source points are never displaced.
+    chord = np.linalg.norm(np.diff(right_reference[:, :2], axis=0), axis=1)
+    chord_stations = np.concatenate(([0.0], np.cumsum(chord)))
+    for index in range(1, len(right_reference) - 1):
+        emitted_stations = context.emission_geometry.emission_stations
+        pose = context.evaluate(float(emitted_stations[index]))
+        assert pose.xy == pytest.approx(right_reference[index, :2], abs=1e-9)
+
+    # Every internal joint stays within the source vertex bend budget.
+    vertex_bend = math.degrees(chord[0] / radius)
+    for station in chord_stations[1:-1]:
+        assert _heading_jump_at(context, float(station)) <= vertex_bend + 0.1
+
+
+def test_true_source_kink_is_preserved_by_emission() -> None:
+    """A genuine sharp source corner must survive emission unchanged."""
+    kink = math.radians(15.0)
+    first = np.array([[0.0, 0.0], [7.5, 0.0], [15.0, 0.0]])
+    direction = np.array([math.cos(kink), math.sin(kink)])
+    second = np.array([first[-1] + 7.5 * direction, first[-1] + 15.0 * direction])
+    right_reference = np.column_stack([np.vstack([first, second]), np.zeros(5)])
+    left_outer = right_reference + np.array([0.0, 3.5, 0.0])
+    lanelet_map, lanelet = _make_lanelet_from_bounds(left_outer, right_reference)
+
+    context = RoadEmissionContext.from_lanelet_groups(
+        lanelet_map,
+        [lanelet],
+        traffic_rule="LHT",
+        start_heading_override=0.0,
+        end_heading_override=float(kink),
+    )
+
+    assert _heading_jump_at(context, 15.0) == pytest.approx(
+        15.0,
+        abs=0.1,
+    )

@@ -327,6 +327,33 @@ def _lateral_endpoint_cap_width(
     return None
 
 
+def _lateral_endpoint_cap_width_and_span(
+    anchor_point: np.ndarray,
+    other_point: np.ndarray,
+    heading: float,
+    side_direction: np.ndarray,
+) -> Optional[tuple[float, float]]:
+    cap_vector = other_point[:2] - anchor_point[:2]
+    lateral = float(np.dot(cap_vector, side_direction))
+    tangent = np.array([math.cos(heading), math.sin(heading)], dtype=float)
+    longitudinal = float(np.dot(cap_vector, tangent))
+    if lateral <= DEFAULT_CONFIG.geometry.epsilon:
+        return None
+    if lateral < abs(longitudinal):
+        return None
+    max_cap_span = (
+        DEFAULT_CONFIG.geometry.endpoint_cap_span_interval_multiplier
+        * DEFAULT_CONFIG.geometry.emission_width_refinement_min_interval
+    )
+    if (
+        abs(longitudinal) > max_cap_span
+        and abs(longitudinal)
+        > DEFAULT_CONFIG.geometry.endpoint_cap_span_lateral_ratio * lateral
+    ):
+        return None
+    return lateral, min(abs(longitudinal), lateral)
+
+
 def _piecewise_linear_width_segments(
     stations: np.ndarray,
     widths: np.ndarray,
@@ -451,6 +478,238 @@ def _with_endpoint_overrides(
     return overridden
 
 
+def _heading_delta(a: float, b: float) -> float:
+    return abs(float((a - b + math.pi) % (2.0 * math.pi) - math.pi))
+
+
+def _endpoint_segment_heading(
+    points: np.ndarray,
+    *,
+    at_start: bool,
+) -> tuple[float, float] | None:
+    if len(points) < 2:
+        return None
+    if at_start:
+        vector = points[1, :2] - points[0, :2]
+    else:
+        vector = points[-1, :2] - points[-2, :2]
+    length = float(np.linalg.norm(vector))
+    if length <= DEFAULT_CONFIG.geometry.epsilon:
+        return None
+    return length, _heading_from_vector(vector)
+
+
+def _endpoint_window_heading(
+    points: np.ndarray,
+    *,
+    at_start: bool,
+    window_length: float,
+) -> float | None:
+    if len(points) < 2:
+        return None
+
+    remaining = max(
+        float(window_length), DEFAULT_CONFIG.geometry.point_distance_threshold
+    )
+    vector = np.zeros(2, dtype=float)
+    if at_start:
+        indices = range(len(points) - 1)
+    else:
+        indices = range(len(points) - 2, -1, -1)
+
+    for idx in indices:
+        segment = points[idx + 1, :2] - points[idx, :2]
+        length = float(np.linalg.norm(segment))
+        if length <= DEFAULT_CONFIG.geometry.epsilon:
+            continue
+        take = min(remaining, length)
+        vector += segment * (take / length)
+        remaining -= take
+        if remaining <= DEFAULT_CONFIG.geometry.epsilon:
+            break
+
+    norm = float(np.linalg.norm(vector))
+    if norm <= DEFAULT_CONFIG.geometry.epsilon:
+        return None
+    return _heading_from_vector(vector)
+
+
+def _terminal_endpoint_supported_by_matching_kink(
+    terminal_heading: float,
+    support_points: list[np.ndarray],
+    *,
+    at_start: bool,
+) -> bool:
+    support_tolerance = (
+        DEFAULT_CONFIG.geometry.terminal_micro_kink_support_heading_tolerance
+    )
+    for points in support_points:
+        support_segment = _endpoint_segment_heading(points, at_start=at_start)
+        if support_segment is None:
+            continue
+        _support_length, support_heading = support_segment
+        if _heading_delta(terminal_heading, support_heading) <= support_tolerance:
+            return True
+    return False
+
+
+def _should_drop_terminal_micro_kink(
+    points: np.ndarray,
+    support_points: list[np.ndarray],
+    *,
+    at_start: bool,
+) -> bool:
+    if len(points) < 3:
+        return False
+
+    terminal_segment = _endpoint_segment_heading(points, at_start=at_start)
+    if terminal_segment is None:
+        return False
+    terminal_length, terminal_heading = terminal_segment
+    max_terminal_length = DEFAULT_CONFIG.geometry.emission_width_refinement_min_interval
+    if terminal_length > max_terminal_length:
+        return False
+
+    if _terminal_endpoint_supported_by_matching_kink(
+        terminal_heading,
+        support_points,
+        at_start=at_start,
+    ):
+        return False
+
+    local_points = points[1:] if at_start else points[:-1]
+    local_window = max(3.0 * max_terminal_length, 5.0 * terminal_length)
+    local_heading = _endpoint_window_heading(
+        local_points,
+        at_start=at_start,
+        window_length=local_window,
+    )
+    if local_heading is None:
+        return False
+
+    heading_delta = _heading_delta(terminal_heading, local_heading)
+    if heading_delta <= DEFAULT_CONFIG.geometry.terminal_micro_kink_min_heading_delta:
+        return False
+
+    support_headings = [
+        support_heading
+        for support in support_points
+        if (
+            support_heading := _endpoint_window_heading(
+                support,
+                at_start=at_start,
+                window_length=local_window,
+            )
+        )
+        is not None
+    ]
+    if not support_headings:
+        return False
+
+    support_delta = min(
+        _heading_delta(local_heading, heading) for heading in support_headings
+    )
+    terminal_support_delta = min(
+        _heading_delta(terminal_heading, heading) for heading in support_headings
+    )
+    support_tolerance = (
+        DEFAULT_CONFIG.geometry.terminal_micro_kink_support_heading_tolerance
+    )
+    return support_delta <= support_tolerance and terminal_support_delta > support_delta
+
+
+def _stabilize_terminal_micro_kinks(
+    points: np.ndarray,
+    support_points: list[np.ndarray],
+    *,
+    allow_start: bool,
+    allow_end: bool,
+) -> np.ndarray:
+    stabilized = points
+    if allow_start and _should_drop_terminal_micro_kink(
+        stabilized,
+        support_points,
+        at_start=True,
+    ):
+        stabilized = stabilized[1:].copy()
+    if allow_end and _should_drop_terminal_micro_kink(
+        stabilized,
+        support_points,
+        at_start=False,
+    ):
+        stabilized = stabilized[:-1].copy()
+    return stabilized
+
+
+def _align_terminal_segment_to_heading(
+    points: np.ndarray,
+    heading: float,
+    *,
+    at_start: bool,
+) -> np.ndarray:
+    aligned = points.copy()
+    endpoint_segment = _endpoint_segment_heading(aligned, at_start=at_start)
+    if endpoint_segment is None:
+        return aligned
+    segment_length, _terminal_heading = endpoint_segment
+    tangent = np.array([math.cos(heading), math.sin(heading)], dtype=float)
+    if at_start:
+        aligned[1, :2] = aligned[0, :2] + segment_length * tangent
+    else:
+        aligned[-2, :2] = aligned[-1, :2] - segment_length * tangent
+    return aligned
+
+
+def _terminal_heading_honored(
+    emission_geometry: "EmissionReferenceGeometry",
+    heading: float,
+    *,
+    at_start: bool,
+) -> bool:
+    """Check whether the emitted terminal tangent matches a heading override."""
+    station = 0.0 if at_start else emission_geometry.length
+    pose = emission_geometry.evaluate(station)
+    return _heading_delta(pose.heading, heading) <= 1e-8
+
+
+def _terminal_blend_curvature_ok(
+    emission_geometry: "EmissionReferenceGeometry",
+    *,
+    at_start: bool,
+    lateral_extent: float,
+) -> bool:
+    """Check that the terminal blend Beziers stay below the fold curvature.
+
+    An offset boundary at lateral distance ``t`` folds when ``t * curvature``
+    reaches 1, so the admissible blend curvature shrinks with the road's
+    lateral extent.
+    """
+    segment_count = len(emission_geometry._segments)
+    indices = (0, 1) if at_start else (segment_count - 2, segment_count - 1)
+    limit = DEFAULT_CONFIG.geometry.emission_terminal_blend_fold_safety / max(
+        lateral_extent, 1.0
+    )
+    for index in indices:
+        segment = emission_geometry._bezier_by_index.get(index)
+        if segment is None:
+            continue
+        for parameter in np.linspace(0.0, 1.0, 17):
+            _point, derivative, second = _evaluate_bezier_controls(
+                segment.control_points,
+                float(parameter),
+            )
+            speed_sq = float(derivative @ derivative)
+            if speed_sq <= DEFAULT_CONFIG.geometry.epsilon:
+                return False
+            curvature = (
+                abs(float(derivative[0] * second[1] - derivative[1] * second[0]))
+                / speed_sq**1.5
+            )
+            if curvature > limit:
+                return False
+    return True
+
+
 class TopologyReferenceGeometry:
     """Wrapper for the existing smooth spline used by topology code.
 
@@ -499,6 +758,42 @@ class TopologyReferenceGeometry:
         )
 
 
+@dataclass(frozen=True)
+class _EmissionBezierSegment:
+    control_points: np.ndarray
+    parameters: np.ndarray
+    arc_stations: np.ndarray
+    start_station: float
+
+    @property
+    def length(self) -> float:
+        return float(self.arc_stations[-1])
+
+
+def _evaluate_bezier_controls(
+    control_points: np.ndarray,
+    parameter: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    p0, p1, p2, p3 = control_points
+    t = float(np.clip(parameter, 0.0, 1.0))
+    one_minus_t = 1.0 - t
+    point = (
+        one_minus_t**3 * p0
+        + 3.0 * one_minus_t**2 * t * p1
+        + 3.0 * one_minus_t * t**2 * p2
+        + t**3 * p3
+    )
+    derivative = (
+        3.0 * one_minus_t**2 * (p1 - p0)
+        + 6.0 * one_minus_t * t * (p2 - p1)
+        + 3.0 * t**2 * (p3 - p2)
+    )
+    second_derivative = 6.0 * one_minus_t * (p2 - 2.0 * p1 + p0) + 6.0 * t * (
+        p3 - 2.0 * p2 + p1
+    )
+    return point, derivative, second_derivative
+
+
 class EmissionReferenceGeometry:
     """Piecewise-linear emission reference geometry from source Lanelet2 points.
 
@@ -508,27 +803,230 @@ class EmissionReferenceGeometry:
     leaking into topology code.
     """
 
-    def __init__(self, source_points: Iterable[Iterable[float]]):
+    def __init__(
+        self,
+        source_points: Iterable[Iterable[float]],
+        *,
+        start_heading: Optional[float] = None,
+        end_heading: Optional[float] = None,
+    ):
         points = _as_xy_array(source_points)
         if points.shape[1] == 2:
             points = np.column_stack((points, np.zeros(len(points), dtype=float)))
-        self._points_3d = _clean_polyline(points)
+        points = _clean_polyline(points)
+        collapsed_start_heading: Optional[float] = None
+        collapsed_end_heading: Optional[float] = None
+        min_curve_length = DEFAULT_CONFIG.parampoly3.min_segment_length
+        heading_tolerance = (
+            DEFAULT_CONFIG.geometry.terminal_micro_kink_support_heading_tolerance
+        )
+        if start_heading is not None and len(points) >= 3:
+            first_length = float(np.linalg.norm(points[1, :2] - points[0, :2]))
+            support_heading = _heading_from_vector(points[2, :2] - points[1, :2])
+            if (
+                first_length < min_curve_length
+                and _heading_delta(float(start_heading), support_heading)
+                <= heading_tolerance
+            ):
+                points = np.delete(points, 1, axis=0)
+                collapsed_start_heading = support_heading
+        if end_heading is not None and len(points) >= 3:
+            last_length = float(np.linalg.norm(points[-1, :2] - points[-2, :2]))
+            support_heading = _heading_from_vector(points[-2, :2] - points[-3, :2])
+            if (
+                last_length < min_curve_length
+                and _heading_delta(support_heading, float(end_heading))
+                <= heading_tolerance
+            ):
+                points = np.delete(points, -2, axis=0)
+                collapsed_end_heading = support_heading
+
+        self._points_3d = points
         self._points = self._points_3d[:, :2]
         self._segments = np.diff(self._points, axis=0)
-        self._segment_lengths = np.linalg.norm(self._segments, axis=1)
-        if np.any(self._segment_lengths <= DEFAULT_CONFIG.geometry.epsilon):
+        source_segment_lengths = np.linalg.norm(self._segments, axis=1)
+        if np.any(source_segment_lengths <= DEFAULT_CONFIG.geometry.epsilon):
             raise ValueError("source polyline contains zero-length segments")
-        self._stations = np.concatenate(([0.0], np.cumsum(self._segment_lengths)))
-        self._length = float(self._stations[-1])
+        self._source_stations = np.concatenate(
+            ([0.0], np.cumsum(source_segment_lengths))
+        )
+        self._bezier_segments: list[_EmissionBezierSegment] = []
+        self._bezier_by_index: dict[int, _EmissionBezierSegment] = {}
+        self._curved_segment_indices: set[int] = set()
+        use_bezier = len(self._points) == 2 and (
+            start_heading is not None or end_heading is not None
+        )
+        curve_headings: dict[int, tuple[float, float]] = {}
+
+        if use_bezier:
+            source_heading = _heading_from_vector(self._segments[0])
+            curve_headings[0] = (
+                source_heading if start_heading is None else float(start_heading),
+                source_heading if end_heading is None else float(end_heading),
+            )
+        elif len(self._points) >= 3:
+            segment_headings = [
+                _heading_from_vector(segment) for segment in self._segments
+            ]
+            if collapsed_start_heading is not None:
+                curve_headings[0] = (
+                    float(start_heading),
+                    collapsed_start_heading,
+                )
+            if collapsed_end_heading is not None:
+                curve_headings[len(self._segments) - 1] = (
+                    collapsed_end_heading,
+                    float(end_heading),
+                )
+            candidate_pairs: list[tuple[int, int, float, float]] = []
+            overlapping_endpoint_pairs = (
+                start_heading is not None
+                and end_heading is not None
+                and len(self._segments) < 4
+            )
+            if start_heading is not None and not overlapping_endpoint_pairs:
+                candidate_pairs.append(
+                    (0, 1, float(start_heading), segment_headings[1])
+                )
+            if end_heading is not None and not overlapping_endpoint_pairs:
+                candidate_pairs.append(
+                    (
+                        len(self._segments) - 2,
+                        len(self._segments) - 1,
+                        segment_headings[-2],
+                        float(end_heading),
+                    )
+                )
+
+            blend_tolerance = (
+                DEFAULT_CONFIG.geometry.emission_heading_override_blend_tolerance
+            )
+            occupied: set[int] = set(curve_headings)
+            for (
+                first_index,
+                second_index,
+                first_heading,
+                second_heading,
+            ) in candidate_pairs:
+                indices = {first_index, second_index}
+                if (
+                    indices & occupied
+                    or min(
+                        float(source_segment_lengths[first_index]),
+                        float(source_segment_lengths[second_index]),
+                    )
+                    < min_curve_length
+                    or _heading_delta(first_heading, second_heading) > blend_tolerance
+                ):
+                    continue
+                delta = math.atan2(
+                    math.sin(second_heading - first_heading),
+                    math.cos(second_heading - first_heading),
+                )
+                shared_heading = first_heading + 0.5 * delta
+                curve_headings[first_index] = (first_heading, shared_heading)
+                curve_headings[second_index] = (shared_heading, second_heading)
+                occupied.update(indices)
+
+        if curve_headings:
+            start_station = 0.0
+            emitted_stations = [start_station]
+            for index, source_length in enumerate(source_segment_lengths):
+                if index not in curve_headings:
+                    start_station += float(source_length)
+                    emitted_stations.append(start_station)
+                    continue
+                source_heading = _heading_from_vector(self._segments[index])
+                start_segment_heading, end_segment_heading = curve_headings.get(
+                    index,
+                    (source_heading, source_heading),
+                )
+                handle_length = min(
+                    float(source_length) / 3.0,
+                    DEFAULT_CONFIG.geometry.physical_connection_bezier_handle_length,
+                )
+                control_points = np.asarray(
+                    [
+                        self._points[index],
+                        self._points[index]
+                        + handle_length
+                        * np.array(
+                            [
+                                math.cos(start_segment_heading),
+                                math.sin(start_segment_heading),
+                            ],
+                            dtype=float,
+                        ),
+                        self._points[index + 1]
+                        - handle_length
+                        * np.array(
+                            [
+                                math.cos(end_segment_heading),
+                                math.sin(end_segment_heading),
+                            ],
+                            dtype=float,
+                        ),
+                        self._points[index + 1],
+                    ],
+                    dtype=float,
+                )
+                parameters = np.linspace(
+                    0.0,
+                    1.0,
+                    DEFAULT_CONFIG.geometry.emission_bezier_arc_length_samples,
+                )
+                samples = np.asarray(
+                    [
+                        _evaluate_bezier_controls(
+                            control_points,
+                            float(parameter),
+                        )[0]
+                        for parameter in parameters
+                    ]
+                )
+                arc_stations = np.concatenate(
+                    (
+                        [0.0],
+                        np.cumsum(np.linalg.norm(np.diff(samples, axis=0), axis=1)),
+                    )
+                )
+                bezier_segment = _EmissionBezierSegment(
+                    control_points=control_points,
+                    parameters=parameters,
+                    arc_stations=arc_stations,
+                    start_station=start_station,
+                )
+                self._bezier_segments.append(bezier_segment)
+                self._bezier_by_index[index] = bezier_segment
+                if index in curve_headings:
+                    self._curved_segment_indices.add(index)
+                start_station += bezier_segment.length
+                emitted_stations.append(start_station)
+
+            self._length = start_station
+            self._stations = np.asarray(emitted_stations, dtype=float)
+            self._segment_lengths = np.diff(self._stations)
+        else:
+            self._segment_lengths = source_segment_lengths
+            self._stations = self._source_stations.copy()
+            self._length = float(self._stations[-1])
         if self._length <= DEFAULT_CONFIG.geometry.epsilon:
             raise ValueError("source polyline has zero length")
 
     @classmethod
     def from_source_boundary(
-        cls, source_points: Iterable[Iterable[float]]
+        cls,
+        source_points: Iterable[Iterable[float]],
+        *,
+        start_heading: Optional[float] = None,
+        end_heading: Optional[float] = None,
     ) -> "EmissionReferenceGeometry":
         """Build emission geometry from the selected Lanelet2 reference boundary."""
-        return cls(source_points)
+        return cls(
+            source_points,
+            start_heading=start_heading,
+            end_heading=end_heading,
+        )
 
     @property
     def source_points(self) -> np.ndarray:
@@ -543,6 +1041,11 @@ class EmissionReferenceGeometry:
     @property
     def source_stations(self) -> np.ndarray:
         """Monotonic source arc-length station values."""
+        return self._source_stations.copy()
+
+    @property
+    def emission_stations(self) -> np.ndarray:
+        """Monotonic emitted-geometry station values at source breakpoints."""
         return self._stations.copy()
 
     @property
@@ -553,7 +1056,7 @@ class EmissionReferenceGeometry:
     @property
     def source_length(self) -> float:
         """Source boundary arc length."""
-        return self._length
+        return float(self._source_stations[-1])
 
     @property
     def min_segment_length(self) -> float:
@@ -565,11 +1068,125 @@ class EmissionReferenceGeometry:
         s_clamped = float(np.clip(s, 0.0, self._length))
         idx = int(np.searchsorted(self._stations, s_clamped, side="right") - 1)
         idx = max(0, min(idx, len(self._segment_lengths) - 1))
+        if idx in self._bezier_by_index:
+            segment = self._bezier_by_index[idx]
+            parameter = self._bezier_parameter_at_station(segment, s_clamped)
+            point, derivative, _second_derivative = _evaluate_bezier_controls(
+                segment.control_points,
+                parameter,
+            )
+            heading = _heading_from_vector(derivative)
+            return ReferencePose(float(point[0]), float(point[1]), heading)
         seg_len = float(self._segment_lengths[idx])
         ratio = (s_clamped - float(self._stations[idx])) / seg_len
         point = self._points[idx] + ratio * self._segments[idx]
         heading = _heading_from_vector(self._segments[idx])
         return ReferencePose(float(point[0]), float(point[1]), heading)
+
+    @staticmethod
+    def _bezier_parameter_at_station(
+        segment: _EmissionBezierSegment,
+        station: float,
+    ) -> float:
+        return float(
+            np.interp(
+                float(
+                    np.clip(
+                        station - segment.start_station,
+                        0.0,
+                        segment.length,
+                    )
+                ),
+                segment.arc_stations,
+                segment.parameters,
+            )
+        )
+
+    @staticmethod
+    def _bezier_station_at_parameter(
+        segment: _EmissionBezierSegment,
+        parameter: float,
+    ) -> float:
+        return segment.start_station + float(
+            np.interp(
+                float(np.clip(parameter, 0.0, 1.0)),
+                segment.parameters,
+                segment.arc_stations,
+            )
+        )
+
+    def _project_onto_bezier_segment(
+        self,
+        segment: _EmissionBezierSegment,
+        point: np.ndarray,
+    ) -> ProjectionResult:
+        parameters = np.linspace(
+            0.0,
+            1.0,
+            DEFAULT_CONFIG.geometry.emission_bezier_projection_seed_samples,
+        )
+        samples = np.asarray(
+            [
+                _evaluate_bezier_controls(
+                    segment.control_points,
+                    float(value),
+                )[0]
+                for value in parameters
+            ]
+        )
+        parameter = float(
+            parameters[int(np.argmin(np.linalg.norm(samples - point, axis=1)))]
+        )
+        for _ in range(
+            DEFAULT_CONFIG.geometry.emission_bezier_projection_newton_iterations
+        ):
+            curve, derivative, second_derivative = _evaluate_bezier_controls(
+                segment.control_points,
+                parameter,
+            )
+            residual = curve - point
+            gradient = float(np.dot(residual, derivative))
+            hessian = float(
+                np.dot(derivative, derivative) + np.dot(residual, second_derivative)
+            )
+            if abs(hessian) <= DEFAULT_CONFIG.geometry.epsilon:
+                break
+            updated = float(np.clip(parameter - gradient / hessian, 0.0, 1.0))
+            if abs(updated - parameter) <= DEFAULT_CONFIG.geometry.epsilon:
+                parameter = updated
+                break
+            parameter = updated
+
+        closest, derivative, _second_derivative = _evaluate_bezier_controls(
+            segment.control_points,
+            parameter,
+        )
+        heading = _heading_from_vector(derivative)
+        residual = point - closest
+        return ProjectionResult(
+            s=self._bezier_station_at_parameter(segment, parameter),
+            t=float(np.dot(residual, _left_normal(heading))),
+            heading=heading,
+            distance=float(np.linalg.norm(residual)),
+        )
+
+    def _projection_candidate_indices(
+        self,
+        preferred_s: Optional[float],
+        search_radius: Optional[float],
+    ) -> list[int]:
+        candidate_indices = list(range(len(self._segment_lengths)))
+        if preferred_s is None or search_radius is None:
+            return candidate_indices
+        low = float(preferred_s) - float(search_radius)
+        high = float(preferred_s) + float(search_radius)
+        local_indices = [
+            index
+            for index in candidate_indices
+            if float(self._stations[index + 1]) >= low
+            and float(self._stations[index]) <= high
+        ]
+        return local_indices or candidate_indices
 
     def point_at_lateral_offset(self, s: float, t: float) -> np.ndarray:
         """Evaluate a world XY point at station ``s`` and lateral offset ``t``."""
@@ -592,22 +1209,33 @@ class EmissionReferenceGeometry:
         point = np.asarray(list(point_xy), dtype=float)[:2]
         if point.shape != (2,) or not np.all(np.isfinite(point)):
             raise ValueError("point_xy must be a finite XY point")
-
-        candidate_indices = range(len(self._segment_lengths))
-        if preferred_s is not None and search_radius is not None:
-            low = float(preferred_s) - float(search_radius)
-            high = float(preferred_s) + float(search_radius)
-            local_indices = [
-                i
-                for i in candidate_indices
-                if float(self._stations[i + 1]) >= low
-                and float(self._stations[i]) <= high
-            ]
-            if local_indices:
-                candidate_indices = local_indices
+        candidate_indices = self._projection_candidate_indices(
+            preferred_s,
+            search_radius,
+        )
 
         best: tuple[float, float, float, float] | None = None
         for idx in candidate_indices:
+            if idx in self._bezier_by_index:
+                projection = self._project_onto_bezier_segment(
+                    self._bezier_by_index[idx],
+                    point,
+                )
+                station_penalty = (
+                    abs(projection.s - float(preferred_s))
+                    if preferred_s is not None
+                    else 0.0
+                )
+                key = (
+                    projection.distance,
+                    station_penalty,
+                    projection.s,
+                    projection.t,
+                )
+                if best is None or key < best:
+                    best = key
+                    best_projection = projection
+                continue
             start = self._points[idx]
             segment = self._segments[idx]
             seg_len = float(self._segment_lengths[idx])
@@ -654,23 +1282,34 @@ class EmissionReferenceGeometry:
         point = np.asarray(list(point_xy), dtype=float)[:2]
         if point.shape != (2,) or not np.all(np.isfinite(point)):
             raise ValueError("point_xy must be a finite XY point")
-
-        candidate_indices = range(len(self._segment_lengths))
-        if preferred_s is not None and search_radius is not None:
-            low = float(preferred_s) - float(search_radius)
-            high = float(preferred_s) + float(search_radius)
-            local_indices = [
-                i
-                for i in candidate_indices
-                if float(self._stations[i + 1]) >= low
-                and float(self._stations[i]) <= high
-            ]
-            if local_indices:
-                candidate_indices = local_indices
+        candidate_indices = self._projection_candidate_indices(
+            preferred_s,
+            search_radius,
+        )
 
         best: tuple[float, float, float, float] | None = None
         best_projection: ProjectionResult | None = None
         for idx in candidate_indices:
+            if idx in self._bezier_by_index:
+                projection = self._project_onto_bezier_segment(
+                    self._bezier_by_index[idx],
+                    point,
+                )
+                station_penalty = (
+                    abs(projection.s - float(preferred_s))
+                    if preferred_s is not None
+                    else 0.0
+                )
+                key = (
+                    projection.distance,
+                    station_penalty,
+                    0.0,
+                    projection.s,
+                )
+                if best is None or key < best:
+                    best = key
+                    best_projection = projection
+                continue
             start = self._points[idx]
             segment = self._segments[idx]
             seg_len = float(self._segment_lengths[idx])
@@ -708,6 +1347,24 @@ class EmissionReferenceGeometry:
             errors.append("non-monotonic stations")
         if self._length <= DEFAULT_CONFIG.geometry.epsilon:
             errors.append("zero length")
+        if self._bezier_segments:
+            derivatives = [
+                _evaluate_bezier_controls(
+                    segment.control_points,
+                    float(parameter),
+                )[1]
+                for segment in self._bezier_segments
+                for parameter in np.linspace(
+                    0.0,
+                    1.0,
+                    DEFAULT_CONFIG.geometry.emission_validation_samples,
+                )
+            ]
+            if any(
+                float(np.linalg.norm(derivative)) <= DEFAULT_CONFIG.geometry.epsilon
+                for derivative in derivatives
+            ):
+                errors.append("Bezier segment contains zero derivative")
         return ValidationResult(valid=not errors, errors=tuple(errors))
 
 
@@ -821,6 +1478,8 @@ class RoadEmissionContext:
         topology_spline: Optional[Splines] = None,
         start_xyz_override: Optional[tuple[float, float, float]] = None,
         end_xyz_override: Optional[tuple[float, float, float]] = None,
+        start_heading_override: Optional[float] = None,
+        end_heading_override: Optional[float] = None,
     ) -> "RoadEmissionContext":
         """Build emission geometry from the same boundary ReferenceLine selects."""
         if not lanelet_group:
@@ -843,11 +1502,24 @@ class RoadEmissionContext:
         if traffic_rule_normalized == "RHT":
             reference_lanelet = sorted_lanelets[0]
             boundary = reference_lanelet.leftBound
+            opposite_boundary = reference_lanelet.rightBound
+            outer_boundary = sorted_lanelets[-1].rightBound
         else:
             reference_lanelet = sorted_lanelets[-1]
             boundary = reference_lanelet.rightBound
+            opposite_boundary = reference_lanelet.leftBound
+            outer_boundary = sorted_lanelets[0].leftBound
 
         source_points_3d = extract_points_3d(boundary)
+        opposite_points_3d = extract_points_3d(opposite_boundary)
+        outer_points_3d = extract_points_3d(outer_boundary)
+        centerline_points_3d = np.array(
+            [
+                [point.x, point.y, getattr(point, "z", 0.0)]
+                for point in reference_lanelet.centerline
+            ],
+            dtype=float,
+        )
 
         if traffic_rule_normalized == "LHT":
             centerline_points = np.array(
@@ -870,14 +1542,99 @@ class RoadEmissionContext:
                 ):
                     source_points_3d = source_points_3d[::-1]
 
+        support_points = [
+            _orient_polyline_like(opposite_points_3d, source_points_3d),
+        ]
+        oriented_outer_points = _orient_polyline_like(
+            outer_points_3d,
+            source_points_3d,
+        )
+        if not np.array_equal(oriented_outer_points, support_points[0]):
+            support_points.append(oriented_outer_points)
+        if len(centerline_points_3d) >= 2:
+            support_points.append(
+                _orient_polyline_like(centerline_points_3d, source_points_3d)
+            )
+
         source_points_3d = _with_endpoint_overrides(
             source_points_3d,
             start_xyz_override,
             end_xyz_override,
         )
-        emission_geometry = EmissionReferenceGeometry.from_source_boundary(
-            source_points_3d
+        source_points_3d = _stabilize_terminal_micro_kinks(
+            source_points_3d,
+            support_points,
+            allow_start=(start_xyz_override is None and start_heading_override is None),
+            allow_end=(end_xyz_override is None and end_heading_override is None),
         )
+        # Honor heading overrides with source fidelity. Preferred: keep the
+        # raw source polyline and let the emitted terminal Bezier pair blend
+        # the override tangent, giving C1 at every internal joint without
+        # displacing any source point. That is only well conditioned while
+        # the terminal chord already points close to the override; a larger
+        # mismatch would force the short terminal Bezier into an S shape
+        # with extreme curvature that folds offset lane boundaries.
+        # Beyond the blend tolerance, fall back to the legacy terminal point
+        # move, which aligns the terminal chord with the override; the
+        # unconditional Bezier pair then smooths the moved joint instead of
+        # leaving a raw reference kink.
+        joint_bezier = len(source_points_3d) == 2
+        emission_geometry = EmissionReferenceGeometry.from_source_boundary(
+            source_points_3d,
+            start_heading=start_heading_override,
+            end_heading=end_heading_override,
+        )
+        if not joint_bezier:
+            blend_tolerance = (
+                DEFAULT_CONFIG.geometry.emission_heading_override_blend_tolerance
+            )
+            moved = False
+            for at_start, heading_override in (
+                (True, start_heading_override),
+                (False, end_heading_override),
+            ):
+                if heading_override is None:
+                    continue
+                terminal_chord = (
+                    source_points_3d[1, :2] - source_points_3d[0, :2]
+                    if at_start
+                    else source_points_3d[-1, :2] - source_points_3d[-2, :2]
+                )
+                if (
+                    _heading_delta(
+                        _heading_from_vector(terminal_chord),
+                        heading_override,
+                    )
+                    <= blend_tolerance
+                    and _terminal_heading_honored(
+                        emission_geometry,
+                        heading_override,
+                        at_start=at_start,
+                    )
+                    and _terminal_blend_curvature_ok(
+                        emission_geometry,
+                        at_start=at_start,
+                        lateral_extent=float(
+                            np.linalg.norm(
+                                oriented_outer_points[0 if at_start else -1, :2]
+                                - source_points_3d[0 if at_start else -1, :2]
+                            )
+                        ),
+                    )
+                ):
+                    continue
+                source_points_3d = _align_terminal_segment_to_heading(
+                    source_points_3d,
+                    heading_override,
+                    at_start=at_start,
+                )
+                moved = True
+            if moved:
+                emission_geometry = EmissionReferenceGeometry.from_source_boundary(
+                    source_points_3d,
+                    start_heading=start_heading_override,
+                    end_heading=end_heading_override,
+                )
 
         if topology_spline is None:
             topology_reference = ReferenceLine.construct_from_lanelet_groups(
@@ -900,7 +1657,7 @@ class RoadEmissionContext:
         station_mapping = StationMapping(
             topology_stations=topology_stations,
             source_stations=source_stations,
-            emission_stations=source_stations,
+            emission_stations=emission_geometry.emission_stations,
         )
         return cls(
             topology_geometry=topology_geometry,
@@ -940,10 +1697,62 @@ class RoadEmissionContext:
 
     def to_plan_view(self):
         """Create an OpenDRIVE planView that follows the emission polyline."""
-        from .geometry import Line, PlanView
+        from .geometry import Line, ParamPoly3, PlanView
 
         points = self.emission_geometry.source_points
-        stations = self.emission_geometry.source_stations
+        stations = self.emission_geometry.emission_stations
+        if self.emission_geometry._bezier_segments:
+            geometries = []
+            for index in range(len(points) - 1):
+                segment = self.emission_geometry._bezier_by_index.get(index)
+                if segment is None:
+                    vector = points[index + 1] - points[index]
+                    geometries.append(
+                        Line(
+                            s=float(stations[index]),
+                            x=float(points[index, 0]),
+                            y=float(points[index, 1]),
+                            hdg=_heading_from_vector(vector),
+                            length=float(stations[index + 1] - stations[index]),
+                        )
+                    )
+                    continue
+                control_points = segment.control_points
+                start = control_points[0]
+                start_tangent = control_points[1] - start
+                heading = _heading_from_vector(start_tangent)
+                cos_heading = math.cos(heading)
+                sin_heading = math.sin(heading)
+                rotation = np.array(
+                    [[cos_heading, sin_heading], [-sin_heading, cos_heading]],
+                    dtype=float,
+                )
+                local = (control_points - start) @ rotation.T
+                p0, p1, p2, p3 = local
+                a = p0
+                b = 3.0 * (p1 - p0)
+                c = 3.0 * (p2 - 2.0 * p1 + p0)
+                d = p3 - 3.0 * p2 + 3.0 * p1 - p0
+                length = segment.length
+                geometries.append(
+                    ParamPoly3(
+                        s=segment.start_station,
+                        x=float(start[0]),
+                        y=float(start[1]),
+                        hdg=heading,
+                        length=length,
+                        aU=float(a[0]),
+                        bU=float(b[0] / length),
+                        cU=float(c[0] / (length * length)),
+                        dU=float(d[0] / (length * length * length)),
+                        aV=float(a[1]),
+                        bV=float(b[1] / length),
+                        cV=float(c[1] / (length * length)),
+                        dV=float(d[1] / (length * length * length)),
+                        pRange="arcLength",
+                    )
+                )
+            return PlanView(geometries=geometries)
         geometries = []
         for idx in range(len(points) - 1):
             segment = points[idx + 1] - points[idx]
@@ -968,7 +1777,7 @@ class RoadEmissionContext:
         from .elevation import Elevation, ElevationProfile
 
         points = self.emission_geometry.source_points_3d
-        stations = self.emission_geometry.source_stations
+        stations = self.emission_geometry.emission_stations
         elevations = []
         for idx in range(len(points) - 1):
             length = float(stations[idx + 1] - stations[idx])
@@ -1081,7 +1890,7 @@ def estimate_lanelet_width_with_emission_geometry(
                 0.0,
                 emission_geometry.length,
                 *base_stations.tolist(),
-                *emission_geometry.source_stations.tolist(),
+                *emission_geometry.emission_stations.tolist(),
                 *projected_vertex_stations,
             ]
         ),
@@ -1090,6 +1899,67 @@ def estimate_lanelet_width_with_emission_geometry(
 
     widths = []
     polygon_points = np.vstack((anchor_points[:, :2], other_points[::-1, :2]))
+    start_pose = emission_geometry.evaluate(0.0)
+    end_pose = emission_geometry.evaluate(emission_geometry.length)
+    start_cap = _lateral_endpoint_cap_width_and_span(
+        anchor_points[0, :2],
+        other_points[0, :2],
+        start_pose.heading,
+        side_sign * _left_normal(start_pose.heading),
+    )
+    end_cap = _lateral_endpoint_cap_width_and_span(
+        anchor_points[-1, :2],
+        other_points[-1, :2],
+        end_pose.heading,
+        side_sign * _left_normal(end_pose.heading),
+    )
+    if start_cap is not None:
+        cap_domain = max(
+            start_cap[1],
+            emission_geometry.project(anchor_points[0, :2]).s,
+            emission_geometry.project(other_points[0, :2]).s,
+            0.0,
+        )
+        start_cap = (
+            start_cap[0],
+            min(
+                cap_domain
+                + DEFAULT_CONFIG.geometry.emission_width_refinement_min_interval,
+                DEFAULT_CONFIG.geometry.physical_connection_bezier_handle_length,
+            ),
+        )
+    if end_cap is not None:
+        cap_domain = max(
+            end_cap[1],
+            emission_geometry.length
+            - emission_geometry.project(anchor_points[-1, :2]).s,
+            emission_geometry.length
+            - emission_geometry.project(other_points[-1, :2]).s,
+            0.0,
+        )
+        end_cap = (
+            end_cap[0],
+            min(
+                cap_domain
+                + DEFAULT_CONFIG.geometry.emission_width_refinement_min_interval,
+                DEFAULT_CONFIG.geometry.physical_connection_bezier_handle_length,
+            ),
+        )
+    cap_boundary_stations = []
+    if start_cap is not None:
+        cap_boundary_stations.append(start_cap[1])
+    if end_cap is not None:
+        cap_boundary_stations.append(emission_geometry.length - end_cap[1])
+    if cap_boundary_stations:
+        width_stations = np.asarray(
+            _unique_sorted_values(
+                [
+                    *width_stations.tolist(),
+                    *cap_boundary_stations,
+                ]
+            ),
+            dtype=float,
+        )
 
     def measure_width(s_emission: float) -> float:
         pose = emission_geometry.evaluate(float(s_emission))
@@ -1104,8 +1974,8 @@ def estimate_lanelet_width_with_emission_geometry(
             abs(float(s_emission) - emission_geometry.length)
             <= DEFAULT_CONFIG.geometry.epsilon
         )
+        endpoint_width = None
         if width is not None and abs(width) <= DEFAULT_CONFIG.geometry.epsilon:
-            endpoint_width = None
             if is_start or is_end:
                 endpoint_width = _boundary_cross_section_width(
                     anchor_points[:, :2],
@@ -1123,11 +1993,18 @@ def estimate_lanelet_width_with_emission_geometry(
                         pose.heading,
                         side_direction,
                     )
-            if (
-                endpoint_width is not None
-                and endpoint_width > DEFAULT_CONFIG.geometry.epsilon
-            ):
-                width = endpoint_width
+        if (
+            endpoint_width is not None
+            and endpoint_width > DEFAULT_CONFIG.geometry.epsilon
+        ):
+            width = endpoint_width
+        if start_cap is not None and float(s_emission) <= start_cap[1]:
+            width = max(width if width is not None else 0.0, start_cap[0])
+        if (
+            end_cap is not None
+            and emission_geometry.length - float(s_emission) <= end_cap[1]
+        ):
+            width = max(width if width is not None else 0.0, end_cap[0])
         if width is None:
             width = _boundary_cross_section_width(
                 anchor_points[:, :2],

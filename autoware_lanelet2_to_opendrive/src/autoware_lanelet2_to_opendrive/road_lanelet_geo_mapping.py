@@ -175,6 +175,8 @@ class GeoRoadLaneletMapping:
     skipped_synthetic_roads: list[int] | None = None
     traffic_light_config: dict | None = None
     projection_metadata: ProjectionMetadata | None = None
+    lanelet_to_emitted_segments: dict[int, list[dict]] | None = None
+    junction_emission_plans: list[dict] | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
         init=False,
@@ -220,6 +222,12 @@ class GeoRoadLaneletMapping:
             result["traffic_light_config"] = self.traffic_light_config
         if self.projection_metadata is not None:
             result["projection_metadata"] = self.projection_metadata.to_dict()
+        if self.lanelet_to_emitted_segments is not None:
+            result["lanelet_to_emitted_segments"] = {
+                str(k): v for k, v in self.lanelet_to_emitted_segments.items()
+            }
+        if self.junction_emission_plans is not None:
+            result["junction_emission_plans"] = self.junction_emission_plans
         return result
 
     @classmethod
@@ -260,6 +268,12 @@ class GeoRoadLaneletMapping:
             skipped_synthetic_roads=data.get("skipped_synthetic_roads"),
             traffic_light_config=data.get("traffic_light_config"),
             projection_metadata=projection_metadata,
+            lanelet_to_emitted_segments=(
+                {int(k): v for k, v in data["lanelet_to_emitted_segments"].items()}
+                if data.get("lanelet_to_emitted_segments") is not None
+                else None
+            ),
+            junction_emission_plans=data.get("junction_emission_plans"),
         )
 
 
@@ -1742,6 +1756,8 @@ def validate_and_save_mapping(
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None,
     traffic_light_config: dict | None = None,
     projection_metadata: ProjectionMetadata | None = None,
+    lanelet_to_emitted_segments: dict[int, list[dict]] | None = None,
+    junction_emission_plans: list[dict] | None = None,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
@@ -1774,6 +1790,9 @@ def validate_and_save_mapping(
         projection_metadata: Optional resolved coordinate frame persisted for
             the ``analyze`` command to reproduce the converter-time local XY
             frame exactly.
+        lanelet_to_emitted_segments: Optional logical lanelet trace through one
+            or more emitted OpenDRIVE road/lane segments.
+        junction_emission_plans: Optional JSON-safe junction planning summaries.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
@@ -1800,6 +1819,8 @@ def validate_and_save_mapping(
         skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
         traffic_light_config=traffic_light_config,
         projection_metadata=projection_metadata,
+        lanelet_to_emitted_segments=lanelet_to_emitted_segments,
+        junction_emission_plans=junction_emission_plans,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
     logger.info("Mapping JSON saved to %s", json_path)

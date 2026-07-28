@@ -40,6 +40,46 @@ class GeometryConstants:
         emission_width_refinement_sample_multiplier: Limit refined width
             sample count to a small multiple of the initial/source-driven
             sample count.
+        terminal_micro_kink_min_heading_delta: Minimum heading discontinuity
+            (rad) before a very short endpoint segment can be treated as an
+            unstable terminal tangent rather than source geometry.
+        terminal_micro_kink_support_heading_tolerance: Maximum heading
+            disagreement (rad) between the preceding local tangent and
+            supporting geometry before the endpoint segment is preserved as a
+            possible physical kink.
+        physical_connection_bezier_handle_length: Maximum control-handle
+            length (m) used when a two-point source road needs independent
+            start/end tangents at shared physical connections.
+        emission_heading_override_blend_tolerance: Maximum tangent change
+            (rad) an endpoint heading override may demand from the terminal
+            source segments before the override is refused to protect source
+            fidelity. Slightly larger than the micro-kink support tolerance
+            so a deliberate physical-connection tangent (e.g. absorbing a
+            two-point neighbour road) can bend the terminal Bezier pair, but
+            small enough that the blended curve stays on the source corridor;
+            larger demands (oblique junction caps) keep the source tangent.
+        emission_terminal_blend_fold_safety: Fraction of the fold limit the
+            terminal blend Beziers may use. An offset boundary folds when
+            ``lateral_offset * curvature`` reaches 1, so the blend curvature
+            is capped at ``safety / road_lateral_extent``; beyond it emission
+            falls back to the legacy terminal point move.
+        emission_bezier_arc_length_samples: Number of parameter samples used
+            to build the arc-length lookup table of one emitted Bezier
+            segment.
+        emission_bezier_projection_seed_samples: Number of parameter samples
+            used to seed Newton projection onto one emitted Bezier segment.
+        emission_bezier_projection_newton_iterations: Upper bound on Newton
+            refinement steps when projecting a point onto an emitted Bezier
+            segment.
+        emission_validation_samples: Number of samples used when validating
+            emitted geometry and constrained lane-width records over their
+            domain.
+        endpoint_cap_span_interval_multiplier: Multiplier applied to
+            ``emission_width_refinement_min_interval`` to bound the
+            longitudinal span a staggered endpoint cap may cover.
+        endpoint_cap_span_lateral_ratio: Maximum longitudinal-to-lateral
+            ratio of an endpoint cap before it is treated as a real corner
+            instead of a lateral lane cap.
     """
 
     epsilon: float = 1e-10
@@ -52,6 +92,17 @@ class GeometryConstants:
     emission_width_refinement_min_interval: float = 0.02
     emission_width_refinement_max_iterations: int = 12
     emission_width_refinement_sample_multiplier: int = 4
+    terminal_micro_kink_min_heading_delta: float = 0.17453292519943295
+    terminal_micro_kink_support_heading_tolerance: float = 0.08726646259971647
+    physical_connection_bezier_handle_length: float = 3.0
+    emission_heading_override_blend_tolerance: float = 0.105
+    emission_terminal_blend_fold_safety: float = 0.8
+    emission_bezier_arc_length_samples: int = 257
+    emission_bezier_projection_seed_samples: int = 129
+    emission_bezier_projection_newton_iterations: int = 12
+    emission_validation_samples: int = 101
+    endpoint_cap_span_interval_multiplier: float = 3.0
+    endpoint_cap_span_lateral_ratio: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -197,6 +248,31 @@ class ArcSpiralConstants:
 
 
 @dataclass(frozen=True)
+class JunctionEmissionConstants:
+    """Internal search and validation constants for junction-wide emission.
+
+    The cut distances themselves are not fixed: the planner searches source
+    cross-sections in increasing total reserved extent and accepts only
+    candidates that preserve finite-width lane surfaces.
+    """
+
+    cutback_step: float = 0.1
+    max_cutback: float = 5.0
+    max_total_cutback: float = 6.0
+    control_scale_min: float = 0.1
+    control_scale_max: float = 1.0
+    control_scale_coarse_steps: int = 8
+    control_scale_refine_steps: int = 7
+    preferred_max_kappa_half_width: float = 0.8
+    curve_sample_interval: float = 0.05
+    minimum_curve_samples: int = 25
+    arc_length_quadrature_order: int = 32
+    minimum_tangent_extent: float = 0.001
+    heading_tolerance: float = 1e-8
+    lane_center_heading_tolerance: float = 0.008726646259971648
+
+
+@dataclass(frozen=True)
 class ConversionConstants:
     """Main container for all internal constants used in the conversion process.
 
@@ -237,6 +313,7 @@ class ConversionConstants:
         opendrive: OpenDRIVE format constants
         parampoly3: ParamPoly3 geometry generation constants
         arcspiral: Arc/spiral classifier internal tunables
+        junction_emission: Junction-wide topology/geometry planning constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -246,6 +323,7 @@ class ConversionConstants:
     opendrive: OpenDriveConstants = OpenDriveConstants()
     parampoly3: ParamPoly3Constants = ParamPoly3Constants()
     arcspiral: ArcSpiralConstants = ArcSpiralConstants()
+    junction_emission: JunctionEmissionConstants = JunctionEmissionConstants()
 
 
 @dataclass
