@@ -46,6 +46,9 @@ class PreflightConfig:
     max_connection_gap: float = 0.25
     msp_inconsistency_len_factor: float = 0.10
     min_length_for_missing_connection_check: float = 1.0
+    # Below this, a geometry's progression / integrated length / derivative
+    # norm counts as "no advance at all" (degenerate geometry).
+    degenerate_geometry_tolerance: float = 1e-6
     # OpenDRIVE semantics: left lanes travel against the reference (True).
     # Maps that link every road end to a successor start regardless of lane
     # side (this converter's LHT output) travel along +s on all lanes.
@@ -100,7 +103,9 @@ class _PlanGeometry:
     p_range: str = "arcLength"
 
 
-def _eval_geometry(geometry: _PlanGeometry, ds: float) -> Tuple[float, float, float, float]:
+def _eval_geometry(
+    geometry: _PlanGeometry, ds: float
+) -> Tuple[float, float, float, float]:
     """World (x, y, heading, curvature) at distance ``ds`` into the element."""
     ds = min(max(ds, 0.0), geometry.length)
     if geometry.kind == "line":
@@ -154,9 +159,7 @@ def _eval_geometry(geometry: _PlanGeometry, ds: float) -> Tuple[float, float, fl
         ddu = 2 * c_u + 6 * d_u * p
         ddv = 2 * c_v + 6 * d_v * p
         speed_sq = du * du + dv * dv
-        curvature = (
-            (du * ddv - dv * ddu) / speed_sq**1.5 if speed_sq > 1e-18 else 0.0
-        )
+        curvature = (du * ddv - dv * ddu) / speed_sq**1.5 if speed_sq > 1e-18 else 0.0
         ch, sh = math.cos(geometry.hdg), math.sin(geometry.hdg)
         return (
             geometry.x + u * ch - v * sh,
@@ -167,7 +170,89 @@ def _eval_geometry(geometry: _PlanGeometry, ds: float) -> Tuple[float, float, fl
     raise ValueError(f"unsupported planView geometry kind: {geometry.kind}")
 
 
-def _poly_at(records: Sequence[Tuple[float, Tuple[float, float, float, float]]], s: float) -> float:
+def check_degenerate_parampoly3(
+    roads: Dict[str, RoadModel],
+    config: Optional["PreflightConfig"] = None,
+) -> List[Finding]:
+    """Report ParamPoly3 elements that do not advance along their length.
+
+    A ``<paramPoly3>`` whose declared length is positive but whose curve
+    never moves is degenerate geometry: consumers integrating the curve get
+    a zero-length reference for a non-zero station span and reject the map.
+    Short stubs are NOT exempt — a valid 1 cm stub is ``u(p)=p, v(p)=0``
+    under ``pRange="arcLength"``, which advances exactly 1 cm.
+
+    Flags any of: all coefficients zero; start-to-end progression
+    effectively zero; integrated arc length effectively zero against a
+    positive declared length; derivative norm effectively zero across the
+    whole interval.
+    """
+    config = config or PreflightConfig()
+    tolerance = config.degenerate_geometry_tolerance
+    findings: List[Finding] = []
+    for road in roads.values():
+        for index, geometry in enumerate(road.geometries):
+            if geometry.kind != "paramPoly3" or geometry.poly is None:
+                continue
+            if geometry.length <= tolerance:
+                continue
+            all_zero = all(abs(value) <= tolerance for value in geometry.poly)
+            samples = max(8, int(math.ceil(geometry.length / 0.05)))
+            points = [
+                _eval_geometry(geometry, geometry.length * step / samples)
+                for step in range(samples + 1)
+            ]
+            integrated = sum(
+                math.hypot(
+                    points[step + 1][0] - points[step][0],
+                    points[step + 1][1] - points[step][1],
+                )
+                for step in range(samples)
+            )
+            progression = math.hypot(
+                points[-1][0] - points[0][0],
+                points[-1][1] - points[0][1],
+            )
+            derivative_dead = all(
+                math.hypot(
+                    points[step + 1][0] - points[step][0],
+                    points[step + 1][1] - points[step][1],
+                )
+                <= tolerance
+                for step in range(samples)
+            )
+            reasons = []
+            if all_zero:
+                reasons.append("all coefficients zero")
+            if progression <= tolerance:
+                reasons.append(f"start-to-end progression {progression:.2e} m")
+            if integrated <= tolerance:
+                reasons.append(f"integrated arc length {integrated:.2e} m")
+            if derivative_dead:
+                reasons.append("derivative norm zero across the interval")
+            if not reasons:
+                continue
+            findings.append(
+                Finding(
+                    anomaly="DEGENERATE_PARAMPOLY3",
+                    subject=f"road {road.road_id} geometry {index}",
+                    road_ids=(road.road_id,),
+                    value=max(progression, integrated),
+                    threshold=tolerance,
+                    station=geometry.s,
+                    detail=(
+                        f"declared length {geometry.length:.4f} m but "
+                        + "; ".join(reasons)
+                    ),
+                    classification=CLASS_CONVERTER,
+                )
+            )
+    return findings
+
+
+def _poly_at(
+    records: Sequence[Tuple[float, Tuple[float, float, float, float]]], s: float
+) -> float:
     value = 0.0
     for offset, (a, b, c, d) in records:
         if offset <= s + 1e-9:
@@ -328,6 +413,7 @@ def parse_roads(root: ET.Element) -> Dict[str, RoadModel]:
                     else "arcLength"
                 )
             geometries.append(geometry)
+
         def _quad(element: ET.Element) -> Tuple[float, float, float, float]:
             return (
                 float(element.get("a", "0")),
@@ -341,8 +427,7 @@ def parse_roads(root: ET.Element) -> Dict[str, RoadModel]:
             for e in road.findall("elevationProfile/elevation")
         ]
         lane_offsets = [
-            (float(e.get("s", "0")), _quad(e))
-            for e in road.findall("lanes/laneOffset")
+            (float(e.get("s", "0")), _quad(e)) for e in road.findall("lanes/laneOffset")
         ]
         length = float(road.get("length", "0"))
         raw_sections = road.findall("lanes/laneSection")
@@ -458,9 +543,7 @@ def _lane_travel_endpoints(
 ) -> Tuple[float, float]:
     """(travel_start_s, travel_end_s) for the lane's driving direction."""
     _road, _section, lane_id = ref.key
-    against = (
-        config.left_lanes_travel_against_s if config is not None else True
-    )
+    against = config.left_lanes_travel_against_s if config is not None else True
     if lane_id > 0 and against:
         return ref.section_end, ref.section_start
     return ref.section_start, ref.section_end
@@ -652,10 +735,7 @@ def check_lane_connections_geometry(
     for connection in connections:
         from_ref = registry[connection.from_key]
         to_ref = registry[connection.to_key]
-        if (
-            from_ref.lane_type != DRIVING_TYPE
-            or to_ref.lane_type != DRIVING_TYPE
-        ):
+        if from_ref.lane_type != DRIVING_TYPE or to_ref.lane_type != DRIVING_TYPE:
             continue
         from_road = roads[connection.from_key[0]]
         to_road = roads[connection.to_key[0]]
@@ -752,10 +832,7 @@ def check_border_connection_jitter(
     for connection in connections:
         from_ref = registry[connection.from_key]
         to_ref = registry[connection.to_key]
-        if (
-            from_ref.lane_type != DRIVING_TYPE
-            or to_ref.lane_type != DRIVING_TYPE
-        ):
+        if from_ref.lane_type != DRIVING_TYPE or to_ref.lane_type != DRIVING_TYPE:
             continue
         from_road = roads[connection.from_key[0]]
         to_road = roads[connection.to_key[0]]
@@ -893,7 +970,9 @@ def opposite_penetration(
     at ``t >= right border`` (no crossing); penetration is how far the left
     inner border dips below the right one.
     """
-    return float(np.max(np.asarray(right_inner_border_t) - np.asarray(left_inner_border_t)))
+    return float(
+        np.max(np.asarray(right_inner_border_t) - np.asarray(left_inner_border_t))
+    )
 
 
 def check_opposite_roads_overlap(
@@ -915,9 +994,7 @@ def check_opposite_roads_overlap(
                 continue
             innermost_left = left_driving[0]
             innermost_right = right_driving[0]
-            stations = np.arange(
-                section.s, section.end_s + 1e-9, config.sample_step
-            )
+            stations = np.arange(section.s, section.end_s + 1e-9, config.sample_step)
             if len(stations) < 2:
                 stations = np.array([section.s, section.end_s])
             left_t = np.array(
@@ -1028,9 +1105,7 @@ def check_missing_logical_connections(
         road = roads[ref.key[0]]
         _travel_start, travel_end = _lane_travel_endpoints(ref, config)
         point = road.lane_point(travel_end, ref.key[1], ref.key[2], "center")
-        neighbour_s = travel_end + (
-            -0.5 if travel_end > ref.section_start else 0.5
-        )
+        neighbour_s = travel_end + (-0.5 if travel_end > ref.section_start else 0.5)
         neighbour_s = min(max(neighbour_s, ref.section_start), ref.section_end)
         support = road.lane_point(neighbour_s, ref.key[1], ref.key[2], "center")
         heading = math.atan2(point[1] - support[1], point[0] - support[0])
@@ -1040,15 +1115,11 @@ def check_missing_logical_connections(
         road = roads[ref.key[0]]
         travel_start, _travel_end = _lane_travel_endpoints(ref, config)
         point = road.lane_point(travel_start, ref.key[1], ref.key[2], "center")
-        neighbour_s = travel_start + (
-            0.5 if travel_start < ref.section_end else -0.5
-        )
+        neighbour_s = travel_start + (0.5 if travel_start < ref.section_end else -0.5)
         neighbour_s = min(max(neighbour_s, ref.section_start), ref.section_end)
         support = road.lane_point(neighbour_s, ref.key[1], ref.key[2], "center")
         heading = math.atan2(support[1] - point[1], support[0] - point[0])
-        inner, outer = road.lane_borders_at(
-            travel_start, ref.key[1], ref.key[2]
-        )
+        inner, outer = road.lane_borders_at(travel_start, ref.key[1], ref.key[2])
         starts.append((ref, np.asarray(point[:2]), heading, abs(outer - inner)))
 
     heading_threshold = config.logical_connection_heading_threshold
@@ -1287,9 +1358,7 @@ def developer_log_proxies(
             threshold=finding.threshold,
             detail=finding.detail,
         )
-        for finding in check_driving_non_driving_connections(
-            registry, connections
-        )
+        for finding in check_driving_non_driving_connections(registry, connections)
     ]
     # Possible map discrepancy: geometric continuation across linked roads
     # without a laneLink.
@@ -1338,8 +1407,7 @@ def developer_log_proxies(
                             value=gap,
                             threshold=config.max_connection_gap,
                             detail=(
-                                "lane continues geometrically but has no"
-                                " laneLink"
+                                "lane continues geometrically but has no" " laneLink"
                             ),
                         )
                     )
@@ -1453,13 +1521,12 @@ def run_preflight(
     )
     report.findings.extend(check_neighbor_lanes(roads, config))
     report.findings.extend(check_opposite_roads_overlap(roads, config))
-    report.findings.extend(
-        check_driving_non_driving_connections(registry, connections)
-    )
+    report.findings.extend(check_driving_non_driving_connections(registry, connections))
     report.findings.extend(
         check_missing_logical_connections(roads, registry, connections, config)
     )
     report.findings.extend(check_msp_length_proxy(roads, registry, config))
+    report.findings.extend(check_degenerate_parampoly3(roads, config))
     for proxy_findings in developer_log_proxies(
         roads, registry, connections, config
     ).values():

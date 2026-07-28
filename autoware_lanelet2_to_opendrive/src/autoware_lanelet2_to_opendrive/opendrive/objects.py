@@ -41,18 +41,26 @@ class CornerLocal:
     - u: distance along the object's heading direction
     - v: distance perpendicular to the heading direction
     - z: vertical offset
+    - height: object height at this corner (0 for a flat painted outline)
     """
 
     u: float
     v: float
     z: float = 0.0
+    height: float = 0.0
 
     def to_xml(self) -> ET.Element:
-        """Convert to XML element."""
+        """Convert to XML element.
+
+        ``height`` is always written: it is optional in the OpenDRIVE 1.4
+        schema but required from 1.6 on, and consumers following the newer
+        contract read a missing attribute as NaN and drop the whole outline.
+        """
         elem = ET.Element("cornerLocal")
         elem.set("u", str(self.u))
         elem.set("v", str(self.v))
         elem.set("z", str(self.z))
+        elem.set("height", str(self.height))
         return elem
 
 

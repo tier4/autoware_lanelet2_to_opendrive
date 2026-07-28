@@ -1066,7 +1066,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             heading = math.atan2(dy, dx)
             ref_start = start
             ref_end = end
-            b_u = 1.0
         else:
             length = DEFAULT_CONFIG.geometry.divergence_min_segment_length
             endpoint = _evaluate_planview_endpoint_with_heading(
@@ -1090,8 +1089,12 @@ class _Lanelet2ToOpenDRIVEConverter:
             else:
                 ref_start = start
                 ref_end = (start[0], start[1], end[2])
-            b_u = 0.0
 
+        # With pRange="arcLength" the parameter is the station itself, so
+        # bU=1 gives u(p)=p, v(p)=0: a straight stub advancing exactly its
+        # declared length along `heading`. bU=0 would emit a curve that
+        # never advances (zero derivative over the whole declared length),
+        # which OpenDRIVE consumers reject as degenerate geometry.
         road.plan_view = PlanView(
             geometries=[
                 ParamPoly3(
@@ -1101,7 +1104,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                     hdg=heading,
                     length=length,
                     aU=0.0,
-                    bU=b_u,
+                    bU=1.0,
                     cU=0.0,
                     dU=0.0,
                     aV=0.0,

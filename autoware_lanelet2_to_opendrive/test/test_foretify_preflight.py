@@ -11,6 +11,7 @@ from autoware_lanelet2_to_opendrive.foretify_preflight import (
     CLASS_PROXY_LIMITATION,
     PreflightConfig,
     check_border_connection_jitter,
+    check_degenerate_parampoly3,
     check_driving_non_driving_connections,
     check_lane_connections_geometry,
     check_lane_ref_line_jitter,
@@ -79,7 +80,7 @@ def _road(
         f"<planView>{geometries}</planView>"
         f'<elevationProfile><elevation s="0" a="{z}" b="0" c="0" d="0"/>'
         "</elevationProfile>"
-        "<lanes><laneSection s=\"0\">"
+        '<lanes><laneSection s="0">'
         + (f"<left>{left}</left>" if left else "")
         + '<center><lane id="0" type="none" level="false"/></center>'
         f"<right>{right}</right>"
@@ -91,7 +92,9 @@ def _doc(*roads: str, junctions: str = "") -> ET.Element:
     return ET.fromstring(f"<OpenDRIVE>{''.join(roads)}{junctions}</OpenDRIVE>")
 
 
-def _pair_doc(gap_x: float = 0.0, gap_y: float = 0.0, gap_z: float = 0.0, bend: float = 0.0):
+def _pair_doc(
+    gap_x: float = 0.0, gap_y: float = 0.0, gap_z: float = 0.0, bend: float = 0.0
+):
     """Road 1 [0..20] linked to road 2 starting at (20+gap_x, gap_y)."""
     first = _road(
         "1",
@@ -311,9 +314,7 @@ def test_opposite_penetration_thresholds(penetration, expected) -> None:
 
 
 def test_bidirectional_road_has_no_opposite_overlap() -> None:
-    root = _doc(
-        _road("1", lane_types=("driving",), left_lane_types=("driving",))
-    )
+    root = _doc(_road("1", lane_types=("driving",), left_lane_types=("driving",)))
     findings = check_opposite_roads_overlap(parse_roads(root), CONFIG)
     assert findings == []
 
@@ -325,7 +326,14 @@ def test_bidirectional_road_has_no_opposite_overlap() -> None:
 
 @pytest.mark.parametrize(
     "second_type,expected",
-    [("driving", 0), ("sidewalk", 1), ("biking", 1), ("shoulder", 1), ("border", 1), ("restricted", 1)],
+    [
+        ("driving", 0),
+        ("sidewalk", 1),
+        ("biking", 1),
+        ("shoulder", 1),
+        ("border", 1),
+        ("restricted", 1),
+    ],
 )
 def test_driving_non_driving_connection(second_type, expected) -> None:
     first = _road(
@@ -359,9 +367,7 @@ def test_missing_logical_connection_detected_without_links() -> None:
     roads = parse_roads(root)
     registry = lane_registry(roads)
     connections = lane_connections(root, roads)
-    found = check_missing_logical_connections(
-        roads, registry, connections, CONFIG
-    )
+    found = check_missing_logical_connections(roads, registry, connections, CONFIG)
     assert [f.anomaly for f in found] == ["LANES_NOT_CONNECTED_LOGICALLY"]
 
 
@@ -370,10 +376,7 @@ def test_logical_connection_direct_link_suppresses_finding() -> None:
     roads = parse_roads(root)
     registry = lane_registry(roads)
     connections = lane_connections(root, roads)
-    assert (
-        check_missing_logical_connections(roads, registry, connections, CONFIG)
-        == []
-    )
+    assert check_missing_logical_connections(roads, registry, connections, CONFIG) == []
 
 
 def test_logical_connection_through_short_intermediate_connector() -> None:
@@ -407,10 +410,7 @@ def test_logical_connection_through_short_intermediate_connector() -> None:
     registry = lane_registry(roads)
     connections = lane_connections(root, roads)
     assert any(c.via == "junction" for c in connections)
-    assert (
-        check_missing_logical_connections(roads, registry, connections, CONFIG)
-        == []
-    )
+    assert check_missing_logical_connections(roads, registry, connections, CONFIG) == []
 
 
 def test_logical_connection_heading_mismatch_not_reported() -> None:
@@ -422,10 +422,7 @@ def test_logical_connection_heading_mismatch_not_reported() -> None:
     roads = parse_roads(root)
     registry = lane_registry(roads)
     connections = lane_connections(root, roads)
-    assert (
-        check_missing_logical_connections(roads, registry, connections, CONFIG)
-        == []
-    )
+    assert check_missing_logical_connections(roads, registry, connections, CONFIG) == []
 
 
 def test_logical_connection_left_lane_orientation_flag() -> None:
@@ -435,10 +432,14 @@ def test_logical_connection_left_lane_orientation_flag() -> None:
         lane_types=(),
         left_lane_types=("driving",),
         succ='<successor elementType="road" elementId="2" contactPoint="start"/>',
-    ).replace('<lane id="1" type="driving" level="false">', (
-        '<lane id="1" type="driving" level="false">'
-        '<link><successor id="1"/></link>'
-    ), 1)
+    ).replace(
+        '<lane id="1" type="driving" level="false">',
+        (
+            '<lane id="1" type="driving" level="false">'
+            '<link><successor id="1"/></link>'
+        ),
+        1,
+    )
     second = _road(
         "2",
         x=20.0,
@@ -451,10 +452,7 @@ def test_logical_connection_left_lane_orientation_flag() -> None:
     registry = lane_registry(roads)
     connections = lane_connections(root, roads)
     config = PreflightConfig(left_lanes_travel_against_s=False)
-    assert (
-        check_missing_logical_connections(roads, registry, connections, config)
-        == []
-    )
+    assert check_missing_logical_connections(roads, registry, connections, config) == []
 
 
 def test_logical_connection_short_lanes_skipped() -> None:
@@ -464,10 +462,7 @@ def test_logical_connection_short_lanes_skipped() -> None:
     roads = parse_roads(root)
     registry = lane_registry(roads)
     connections = lane_connections(root, roads)
-    assert (
-        check_missing_logical_connections(roads, registry, connections, CONFIG)
-        == []
-    )
+    assert check_missing_logical_connections(roads, registry, connections, CONFIG) == []
 
 
 # ---------------------------------------------------------------------------
@@ -513,9 +508,7 @@ def test_msp_proxy_offset_on_curvature(radius, expected) -> None:
 def test_msp_proxy_declared_length_lie_is_converter_class() -> None:
     # A road whose declared length disagrees with its actual geometry span
     # produces an unexplained inconsistency.
-    geometries = (
-        '<geometry s="0" x="0" y="0" hdg="0" length="24"><line/></geometry>'
-    )
+    geometries = '<geometry s="0" x="0" y="0" hdg="0" length="24"><line/></geometry>'
     road = _road("1", length=20.0, geometries=geometries).replace(
         'length="20.0" junction', 'length="24" junction', 1
     )
@@ -608,3 +601,70 @@ def test_run_preflight_reports_notes() -> None:
     assert any("DOCUMENTATION_INSUFFICIENT" in note for note in report.notes)
     assert any("NOT REPRODUCIBLE WITHOUT" in note for note in report.notes)
     assert any("NOT EXECUTED" in note for note in report.notes)
+
+
+# ---------------------------------------------------------------------------
+# DEGENERATE_PARAMPOLY3
+# ---------------------------------------------------------------------------
+
+
+def _parampoly3_doc(coefficients: str, length: float = 0.01) -> ET.Element:
+    geometries = (
+        f'<geometry s="0" x="0" y="0" hdg="0.5" length="{length}">'
+        f'<paramPoly3 {coefficients} pRange="arcLength"/></geometry>'
+    )
+    return _doc(_road("1", length=length, geometries=geometries))
+
+
+ALL_ZERO = 'aU="0" bU="0" cU="0" dU="0" aV="0" bV="0" cV="0" dV="0"'
+UNIT_U = 'aU="0" bU="1" cU="0" dU="0" aV="0" bV="0" cV="0" dV="0"'
+
+
+def test_degenerate_parampoly3_all_zero_coefficients_fails() -> None:
+    """B: all-zero coefficients with a positive declared length is a FAIL."""
+    roads = parse_roads(_parampoly3_doc(ALL_ZERO))
+    findings = check_degenerate_parampoly3(roads, CONFIG)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.anomaly == "DEGENERATE_PARAMPOLY3"
+    assert finding.classification == CLASS_CONVERTER
+    for reason in (
+        "all coefficients zero",
+        "start-to-end progression",
+        "integrated arc length",
+        "derivative norm zero",
+    ):
+        assert reason in finding.detail
+
+
+@pytest.mark.parametrize("length", [0.01, 0.1, 1.0, 25.0])
+def test_degenerate_parampoly3_not_excused_by_short_length(length) -> None:
+    """B: a short stub is never exempt from the degeneracy check."""
+    roads = parse_roads(_parampoly3_doc(ALL_ZERO, length=length))
+    assert len(check_degenerate_parampoly3(roads, CONFIG)) == 1
+
+
+@pytest.mark.parametrize("length", [0.01, 0.1, 1.0, 25.0])
+def test_valid_short_parampoly3_passes(length) -> None:
+    """C: u(p)=p, v(p)=0 advances its declared length and is a PASS."""
+    roads = parse_roads(_parampoly3_doc(UNIT_U, length=length))
+    assert check_degenerate_parampoly3(roads, CONFIG) == []
+
+
+def test_degenerate_parampoly3_zero_length_geometry_is_not_reported() -> None:
+    # Nothing to advance over: not a degeneracy claim this check makes.
+    roads = parse_roads(_parampoly3_doc(ALL_ZERO, length=0.0))
+    assert check_degenerate_parampoly3(roads, CONFIG) == []
+
+
+def test_degenerate_parampoly3_curved_but_advancing_passes() -> None:
+    coefficients = 'aU="0" bU="1" cU="0.01" dU="0" aV="0" bV="0" cV="0.02" dV="0"'
+    roads = parse_roads(_parampoly3_doc(coefficients, length=5.0))
+    assert check_degenerate_parampoly3(roads, CONFIG) == []
+
+
+def test_run_preflight_reports_degenerate_parampoly3() -> None:
+    report = run_preflight(_parampoly3_doc(ALL_ZERO))
+    assert [
+        f.anomaly for f in report.findings if f.anomaly == "DEGENERATE_PARAMPOLY3"
+    ] == ["DEGENERATE_PARAMPOLY3"]

@@ -2297,7 +2297,9 @@ def test_source_less_short_backward_connector_uses_linked_physical_heading(
     assert geometry.x == pytest.approx(-0.1)
     assert geometry.y == pytest.approx(0.0)
     assert geometry.hdg == pytest.approx(0.0)
-    assert geometry.bU == pytest.approx(0.0)
+    # The collapsed stub keeps its midpoint anchor and linked heading, and
+    # advances its declared length from there (u(p)=p under arcLength).
+    assert geometry.bU == pytest.approx(1.0)
 
 
 def test_source_less_short_backward_connector_normalizes_contact_point_heading() -> (
@@ -2331,7 +2333,7 @@ def test_source_less_short_backward_connector_normalizes_contact_point_heading()
     geometry = connector.plan_view.geometries[0]
     assert isinstance(geometry, ParamPoly3)
     assert geometry.hdg == pytest.approx(0.0)
-    assert geometry.bU == pytest.approx(0.0)
+    assert geometry.bU == pytest.approx(1.0)
 
 
 def test_source_less_short_forward_connector_keeps_endpoint_line() -> None:
@@ -3513,3 +3515,111 @@ def test_junction_geometry_e_isolated_true_corner_not_filleted() -> None:
         traffic_rule="RHT",
     )
     assert _heading_jump_at(context, 12.0) == pytest.approx(15.0, abs=0.1)
+
+
+# --- Consumer-compatibility regressions (zero-chord stub geometry) ---
+
+
+def _zero_chord_stub_connector() -> tuple[Road, "_Lanelet2ToOpenDRIVEConverter"]:
+    """A junction stub whose linked lane edges coincide (zero chord)."""
+    lanelet_map = lanelet2.core.LaneletMap()
+    pred_map, pred_lanelet = _make_lanelet_from_reference(
+        np.array([[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=float),
+        width=4.0,
+        lanelet_id=1301,
+    )
+    succ_map, succ_lanelet = _make_lanelet_from_reference(
+        np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]], dtype=float),
+        width=4.0,
+        lanelet_id=1302,
+    )
+    lanelet_map.add(pred_lanelet)
+    lanelet_map.add(succ_lanelet)
+    predecessor = Road.construct_from_lanelet_groups(
+        pred_map, [pred_lanelet], road_id=10, traffic_rule="RHT"
+    )
+    successor = Road.construct_from_lanelet_groups(
+        succ_map, [succ_lanelet], road_id=11, traffic_rule="RHT"
+    )
+    connector = _make_zero_length_connecting_road(
+        road_id=12,
+        junction_id=1000,
+        incoming_road_id=predecessor.id,
+        outgoing_road_id=successor.id,
+        incoming_contact=ContactPoint.END,
+        outgoing_contact=ContactPoint.START,
+        start_xyz=(0.0, 0.0, 0.0),
+        end_xyz=(0.0, 0.0, 0.0),
+        min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
+        traffic_rule=TrafficRule.RHT,
+        from_lane=-1,
+        to_lane=-1,
+        fallback_heading=0.0,
+        lane_width=3.5,
+    )
+    converter = _Lanelet2ToOpenDRIVEConverter(
+        lanelet_map,
+        ConversionConfig(
+            traffic_rule="RHT",
+            emission_geometry=EmissionGeometryConfig(enabled=True),
+        ),
+    )
+    roads_by_id = {road.id: road for road in (predecessor, successor, connector)}
+    assert converter._align_unmapped_connecting_road(connector, roads_by_id)
+    return connector, converter
+
+
+def test_zero_chord_stub_emits_advancing_parampoly3() -> None:
+    """A: the zero-chord stub is a valid straight ParamPoly3, not a point."""
+    connector, _converter = _zero_chord_stub_connector()
+    assert connector.plan_view is not None
+    geometries = connector.plan_view.geometries
+    assert len(geometries) == 1
+    geometry = geometries[0]
+    assert isinstance(geometry, ParamPoly3)
+    assert geometry.pRange == "arcLength"
+    # u(p) = p, v(p) = 0
+    assert geometry.bU == pytest.approx(1.0)
+    assert (geometry.aU, geometry.cU, geometry.dU) == pytest.approx((0.0, 0.0, 0.0))
+    assert (geometry.aV, geometry.bV, geometry.cV, geometry.dV) == pytest.approx(
+        (0.0, 0.0, 0.0, 0.0)
+    )
+    expected_length = DEFAULT_CONFIG.geometry.divergence_min_segment_length
+    assert geometry.length == pytest.approx(expected_length)
+    assert connector.length == pytest.approx(expected_length)
+
+    coefficients = (
+        geometry.aU,
+        geometry.bU,
+        geometry.cU,
+        geometry.dU,
+        geometry.aV,
+        geometry.bV,
+        geometry.cV,
+        geometry.dV,
+    )
+    samples = np.array(
+        [
+            evaluate_plan_view_world(
+                geometry.x,
+                geometry.y,
+                geometry.hdg,
+                geometry.length * step / 32.0,
+                coefficients,
+                None,
+            )
+            for step in range(33)
+        ]
+    )
+    steps = np.linalg.norm(np.diff(samples, axis=0), axis=1)
+    # Integrated arc length matches the declared length, and no sample step
+    # has a vanishing derivative.
+    assert float(np.sum(steps)) == pytest.approx(expected_length, rel=1e-6)
+    assert float(np.min(steps)) > 0.0
+    # The endpoint advances exactly `length` along the geometry heading.
+    direction = np.array([math.cos(geometry.hdg), math.sin(geometry.hdg)])
+    displacement = samples[-1] - samples[0]
+    assert float(np.dot(displacement, direction)) == pytest.approx(
+        expected_length, rel=1e-9
+    )
+    assert abs(float(np.cross(direction, displacement))) <= 1e-12

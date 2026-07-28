@@ -1066,3 +1066,83 @@ def test_project_point_onto_road_clamps_to_endpoints():
     end_s, end_t, _ = end_result
     assert end_s == pytest.approx(10.0, abs=1e-10)
     assert end_t == pytest.approx(-3.0, abs=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# cornerLocal height (consumer compatibility)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "corner",
+    [
+        CornerLocal(u=-1.0, v=-0.05),
+        CornerLocal(u=1.5, v=0.25, z=0.3),
+        CornerLocal(u=0.0, v=0.0, z=0.0, height=0.0),
+    ],
+)
+def test_corner_local_always_emits_height(corner: CornerLocal) -> None:
+    """D: height is always written; u/v/z keep their values."""
+    elem = corner.to_xml()
+    assert elem.tag == "cornerLocal"
+    assert "height" in elem.attrib
+    assert float(elem.get("height")) == pytest.approx(corner.height)
+    assert float(elem.get("u")) == pytest.approx(corner.u)
+    assert float(elem.get("v")) == pytest.approx(corner.v)
+    assert float(elem.get("z")) == pytest.approx(corner.z)
+
+
+def test_corner_local_default_height_is_flat() -> None:
+    assert CornerLocal(u=0.0, v=0.0).height == pytest.approx(0.0)
+    assert float(CornerLocal(u=0.0, v=0.0).to_xml().get("height")) == pytest.approx(0.0)
+
+
+def test_stop_line_outline_corners_all_carry_height() -> None:
+    """E: every cornerLocal of a stopLine outline is consumer-readable."""
+    obj = StopLineObject(
+        id=44,
+        name="stop_line_44",
+        s=0.0,
+        t=0.0,
+        z_offset=0.0,
+        hdg=0.0,
+        width=0.1,
+        length=2.0,
+        corners=[
+            CornerLocal(u=-1.0, v=-0.05),
+            CornerLocal(u=1.0, v=-0.05),
+            CornerLocal(u=1.0, v=0.05),
+            CornerLocal(u=-1.0, v=0.05),
+            CornerLocal(u=-1.0, v=-0.05),
+        ],
+    )
+    corners = obj.to_xml().find("outline").findall("cornerLocal")
+    assert len(corners) >= 3
+    assert all("height" in corner.attrib for corner in corners)
+    assert all(float(corner.get("height")) == pytest.approx(0.0) for corner in corners)
+
+
+def test_crosswalk_outline_corners_all_carry_height() -> None:
+    """E: crosswalk outlines keep >= 3 corners, each with a height."""
+    from autoware_lanelet2_to_opendrive.opendrive.objects import CrosswalkObject
+
+    obj = CrosswalkObject(
+        id=45,
+        name="crosswalk_45",
+        s=1.0,
+        t=0.0,
+        z_offset=0.0,
+        hdg=0.0,
+        width=4.0,
+        length=6.0,
+        corners=[
+            CornerLocal(u=-3.0, v=-2.0),
+            CornerLocal(u=3.0, v=-2.0),
+            CornerLocal(u=3.0, v=2.0),
+            CornerLocal(u=-3.0, v=2.0),
+            CornerLocal(u=-3.0, v=-2.0),
+        ],
+    )
+    corners = obj.to_xml().find("outline").findall("cornerLocal")
+    assert len(corners) >= 3
+    assert all("height" in corner.attrib for corner in corners)
