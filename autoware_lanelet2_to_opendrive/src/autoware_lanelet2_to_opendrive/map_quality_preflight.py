@@ -1,17 +1,17 @@
-"""Static preflight for Foretify Map Verification documented requirements.
+"""Static map-quality preflight for emitted OpenDRIVE documents.
 
-This module re-implements, as a standalone XODR static analysis, the anomaly
-checks documented in the Foretify Map Verification material. It never
-modifies converter geometry or topology; it only parses a serialized
-OpenDRIVE document, rebuilds lane-level geometry (center line, left/right
-borders, lane polygons and lane links) and reports findings.
+This module implements, as a standalone static analysis, the map-quality
+checks that downstream map-verification tooling documents as its acceptance
+criteria. It never modifies converter geometry or topology; it only parses a
+serialized OpenDRIVE document, rebuilds lane-level geometry (center line,
+left/right borders, lane polygons and lane links) and reports findings.
 
-Foretify itself is not executed: results are a documented-requirements
-preflight, not a Foretify verdict. ``MSP_LANE_LENGTH_CONSISTENCY`` cannot be
-reproduced exactly without the Foretify MSP, so only a proxy is provided.
-The documented ``min_connection_width`` default has no documented decision
-logic and is reported as ``DOCUMENTATION_INSUFFICIENT`` instead of being
-guessed.
+No external verification tool is executed: the result is a static preflight
+against documented requirements, not a verdict from such a tool. Checks whose
+exact reference implementation needs a tool-internal representation (see
+``MSP_LANE_LENGTH_CONSISTENCY_PROXY``) are provided as proxies only, and the
+documented ``min_connection_width`` default has no documented decision logic,
+so it is reported as ``DOCUMENTATION_INSUFFICIENT`` instead of being guessed.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ CLASS_UNCLASSIFIED = "unclassified"
 
 @dataclass(frozen=True)
 class PreflightConfig:
-    """Documented Foretify defaults (all configurable)."""
+    """Documented acceptance defaults (all configurable)."""
 
     sample_step: float = 3.0
     len_consistency_sample_step: float = 0.2
@@ -1533,12 +1533,13 @@ def run_preflight(
         report.findings.extend(proxy_findings)
     report.geometry_statistics = geometry_statistics(roads)
     report.notes.append(
-        "min_connection_width: DOCUMENTATION_INSUFFICIENT — the material"
-        " documents the default value but no decision logic; not guessed."
+        "min_connection_width: DOCUMENTATION_INSUFFICIENT — the reference"
+        " material documents the default value but no decision logic;"
+        " not guessed."
     )
     report.notes.append(
-        "MSP_LANE_LENGTH_CONSISTENCY exact: NOT REPRODUCIBLE WITHOUT"
-        " FORETIFY MSP (proxy results only)."
+        "MSP_LANE_LENGTH_CONSISTENCY exact: NOT REPRODUCIBLE without the"
+        " reference tool's internal representation (proxy results only)."
     )
-    report.notes.append("Foretify runtime verification: NOT EXECUTED.")
+    report.notes.append("External map-verification tool runtime check: NOT EXECUTED.")
     return report

@@ -1,4 +1,4 @@
-"""Threshold unit tests for the Foretify documented-requirements preflight."""
+"""Threshold unit tests for the static map-quality preflight."""
 
 import math
 import xml.etree.ElementTree as ET
@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
-from autoware_lanelet2_to_opendrive.foretify_preflight import (
+from autoware_lanelet2_to_opendrive.map_quality_preflight import (
     CLASS_CONVERTER,
     CLASS_PROXY_LIMITATION,
     PreflightConfig,
@@ -599,7 +599,7 @@ def test_geometry_statistics_fields() -> None:
 def test_run_preflight_reports_notes() -> None:
     report = run_preflight(_pair_doc())
     assert any("DOCUMENTATION_INSUFFICIENT" in note for note in report.notes)
-    assert any("NOT REPRODUCIBLE WITHOUT" in note for note in report.notes)
+    assert any("NOT REPRODUCIBLE" in note for note in report.notes)
     assert any("NOT EXECUTED" in note for note in report.notes)
 
 
