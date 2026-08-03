@@ -32,43 +32,49 @@ uv run python <script.py>
 uv venv
 ```
 
-## Local Test Verification (Container-Based)
+## Local Test Verification
 
-**IMPORTANT**: Run local test verification inside the Docker container, not directly on the host.
+**IMPORTANT**: Run the tests on the host with `uv`. There is no container.
 
 ### Why
 
-The runtime dependency `lanelet2-python-api-for-autoware` is built from source against system Boost. Many host environments (e.g., Ubuntu 24.04 with Boost 1.83) cannot compile it — `uv sync` and `uv run pytest` fail with `RuntimeError: Command failed: make -j24` during the wheel build. The Docker image pins Ubuntu 22.04 with Boost 1.74, matching CI exactly, and avoids this failure.
+Every dependency, including the Lanelet2 Python API, installs from a prebuilt
+wheel. `lanelet2` and `autoware_lanelet2_extension_python` come from
+[`simple-lanelet2`](https://github.com/hakuturu583/simple_lanelet2), which
+replaced `lanelet2-python-api-for-autoware` — that one was built from source
+against the system Boost, which is why the repository used to need a pinned
+Ubuntu 22.04 image, an apt step in CI, and a Python 3.10 cap.
 
 ### How
 
-The repository ships a multi-stage `Dockerfile` and `docker-compose.yml` with profiles that mirror each CI job. See [`docs/docker.md`](docs/docker.md) for the full reference. The most common commands:
-
 ```bash
 # Run the full pytest suite (matches CI's `test` job)
-docker compose --profile test run --rm pytest
+uv run pytest -n auto
+
+# Run a single test file
+uv run pytest autoware_lanelet2_to_opendrive/test/test_main.py
 
 # Run pre-commit on all files (matches CI's `lint-and-format` job)
-docker compose --profile lint run --rm lint
-
-# Open an interactive shell with the workspace bind-mounted
-docker compose --profile dev run --rm dev
+uv run pre-commit run --all-files
 ```
 
 ### Instructions for Claude Code
 
-When the user asks to "run the tests", "verify locally", or otherwise validate a change end-to-end:
+When the user asks to "run the tests", "verify locally", or otherwise validate a
+change end-to-end:
 
-1. **Do NOT run `uv run pytest` on the host.** It will likely fail on the Boost build step, producing noise unrelated to the change.
-2. **Use `docker compose --profile test run --rm pytest`** for the full suite, or the appropriate profile (`lint`, `qc`, `carla`) for a narrower check.
-3. If the container is unavailable in the current environment (e.g., Docker not installed), say so explicitly rather than running broken host commands. Defer test verification to CI in that case.
-4. Static checks that do **not** import the package (e.g., `ruff`, `ruff-format`, `mypy --ignore-missing-imports` on individual files) **can** still be run on the host and should be used for fast iteration.
+1. Run `uv sync --dev` once, then `uv run pytest -n auto`. No apt packages, no
+   Docker, no compiler.
+2. Prefer a targeted `uv run pytest <file>` while iterating — the end-to-end
+   tests that shell out to `convert` on the nishishinjuku fixture take minutes.
+3. Static checks (`ruff`, `ruff-format`, `mypy --ignore-missing-imports`) are
+   still the fastest signal and should be used first.
 
 ### Rationale
 
-- **Reproducibility**: Container matches CI exactly; host doesn't.
-- **Avoids false negatives**: Host build failures are an environment quirk, not a code defect.
-- **Fast iteration**: Static checks on the host stay fast; dynamic test verification gets pushed to a known-good environment.
+- **Reproducibility**: CI runs the same commands on `ubuntu-latest`.
+- **Fewer moving parts**: no image to rebuild when a dependency changes.
+- **Fast iteration**: the whole environment is one `uv sync` away.
 
 ## Pre-commit Hooks and Lint Checking
 
@@ -212,8 +218,11 @@ If pre-commit hooks fail:
 
 ## Dependencies
 
-- **lanelet2** (>=1.2.2) - Core library for working with Lanelet2 map format
-- Python 3.10 or higher is required
+- **simple-lanelet2** (>=1.0.3) - Provides `lanelet2` and
+  `autoware_lanelet2_extension_python` as a single prebuilt wheel
+- Python 3.10 or higher is required. The workspace lock is resolved for 3.10
+  because the CARLA 0.10.0 client is a cp310-only wheel; the converter package
+  itself declares `requires-python = ">=3.10"` and CI exercises it on 3.11-3.13
 
 ## Architecture Notes
 

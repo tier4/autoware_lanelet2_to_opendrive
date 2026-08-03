@@ -7,11 +7,6 @@ members = [
     "autoware_carla_scenario",
 ]
 
-[tool.uv.sources]
-lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", rev = "21cafbf9a855afbc4b89d4dfc3d299a411b64dde" }
-# Use tier4 fork with relaxed numpy upper bound (upstream PR: asam-ev/qc-opendrive#138)
-asam-qc-opendrive = { git = "https://github.com/tier4/qc-opendrive.git", rev = "f8b186ba7408f56d26ef6552643cc09d43c0d253" }
-
 [dependency-groups]
 dev = [
     "black>=25.11.0",
@@ -34,6 +29,20 @@ dev = [
 [tool.mypy]
 ignore_missing_imports = true
 exclude = ["conftest\\.py$"]
+# Needed for the `lanelet2` override below: without it, mypy follows stub files
+# regardless of any per-module `follow_imports` setting.
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+# simple-lanelet2 1.0.3 ships generated stubs that do not parse: `lanelet2.core`
+# and `lanelet2.routing` carry Argument Clinic's `$type` marker, and
+# `lanelet2.traffic_rules` a parameter literally named `from`. mypy treats an
+# unparseable stub as fatal, so a single bad line aborts the run for the whole
+# workspace. Nothing is lost by not following them -- every signature in those
+# stubs is annotated `Any`. Fixed upstream in hakuturu583/simple_lanelet2; drop
+# this override once the release carrying that fix is the minimum here.
+module = ["lanelet2", "lanelet2.*"]
+follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 # Pre-existing type errors in the l2o package are out of scope for this PR.

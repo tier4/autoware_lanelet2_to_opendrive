@@ -39,7 +39,7 @@ This package provides tools to convert Lanelet2 maps, commonly used in Autoware 
 - **Repository**: [tier4/autoware_lanelet2_to_opendrive](https://github.com/tier4/autoware_lanelet2_to_opendrive)
 - **Release Notes**: [View all releases on GitHub](https://github.com/tier4/autoware_lanelet2_to_opendrive/releases)
 - **License**: Check the repository for license information
-- **Python Version**: exactly 3.10 (pinned to `>=3.10,<3.11` because `lanelet2-python-api-for-autoware` ships a CPython-3.10 ABI-tagged wheel)
+- **Python Version**: 3.10 or newer (`requires-python = ">=3.10"`; the workspace lock is resolved for 3.10 because the CARLA client used by `autoware_carla_scenario` is a cp310-only wheel)
 
 ## Getting Help
 

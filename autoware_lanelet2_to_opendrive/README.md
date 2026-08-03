@@ -17,18 +17,32 @@ This package is a workspace member of the [`autoware_lanelet2_to_opendrive` repo
 - Right-of-way regulatory elements emitted as `<junction><priority>` records.
 - Built-in ASAM QC validation and Lanelet2-to-road geometric cross-validation (`analyze`, `qc-validate`).
 - CARLA import smoke test (`carla-import-test`).
-- Pure Python 3.10 with full type hints (`py.typed`); managed by `uv`.
+- Pure Python (3.10+) with full type hints (`py.typed`); managed by `uv`.
 
 ## Installation
 
-Python 3.10 is required (`>=3.10,<3.11`, locked by CARLA's bindings). Install via the workspace root:
+Python 3.10 or newer. Every dependency resolves to a wheel, so there is no apt
+package, no C++ toolchain and no container involved:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install ./autoware_lanelet2_to_opendrive
+```
+
+The Lanelet2 Python API comes from
+[`simple-lanelet2`](https://github.com/hakuturu583/simple_lanelet2), which ships
+`lanelet2` and `autoware_lanelet2_extension_python` under their usual import
+paths as a single prebuilt wheel.
+
+To work on the sources, install the whole workspace instead:
 
 ```bash
 # From the repository root
 uv sync --dev
 ```
 
-This pulls `lanelet2-python-api-for-autoware`, which builds from source against the system `libboost-python`. Hosts running Ubuntu 22.04 with Boost 1.74 (matching CI) are known to work; newer hosts may fail to compile, in which case use the [Docker route](#docker) instead.
+Note that the workspace as a whole is pinned to Python 3.10 by the CARLA client
+in `autoware_carla_scenario`; this package on its own is not.
 
 ## Quick usage
 
@@ -73,23 +87,6 @@ uv run qc-validate /path/to/map.xodr
 # Run QC plus geometric cross-validation against the source Lanelet2 map
 uv run analyze /path/to/map.osm /path/to/map.xodr
 ```
-
-## Docker
-
-The repository's multi-stage Docker image exposes a slim conversion image and a CI-equivalent test profile:
-
-```bash
-# One-shot conversion via the slim image (mount the directory holding your map)
-docker run --rm -v "$PWD:/io" l2o-convert:local \
-  map=nishishinjuku target=carla \
-  input_map_path=/io/your-map.osm \
-  output_map_path=/io/your-map.xodr
-
-# Run the full pytest suite in the CI-matching environment
-docker compose --profile test run --rm pytest
-```
-
-See the root [`docs/docker.md`](../docs/docker.md) for prerequisites, image targets, and troubleshooting.
 
 ## Documentation
 

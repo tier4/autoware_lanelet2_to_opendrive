@@ -6,15 +6,15 @@ readme = "README.md"
 authors = [
     { name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }
 ]
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.10"
 dependencies = [
-    # The lanelet2 Python package is provided by lanelet2-python-api-for-autoware,
-    # which builds it from source against the system libboost-python. Pulling
-    # lanelet2 from PyPI in addition introduces an auditwheel-bundled Boost 1.81
-    # that conflicts ABI-wise with the system Boost 1.74 used by the autoware
-    # extension wheels, and the install-order race that decides which lanelet2
-    # wins is what surfaces as a SystemError on import (refs #449).
-    "lanelet2-python-api-for-autoware",
+    # `lanelet2` and `autoware_lanelet2_extension_python` both come from
+    # simple-lanelet2, a pure-wheel reimplementation of the Lanelet2 Python API.
+    # It replaces lanelet2-python-api-for-autoware, which was built from source
+    # against the system libboost-python and so needed apt packages, a C++
+    # toolchain and a Boost version matched to the one the autoware extension
+    # wheels were built against (refs #449).
+    "simple-lanelet2>=1.0.3",
     "scipy>=1.9.0",
     "lxml>=5.2.2",
     "mgrs>=1.5.0",
