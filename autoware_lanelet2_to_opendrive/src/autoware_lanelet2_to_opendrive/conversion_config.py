@@ -41,11 +41,30 @@ class OriginSpec:
       when an MGRS grid is specified together with an offset: the lat/lon
       hold the offset-adjusted position while ``mgrs_code`` retains the
       grid zone for reference. The geoReference uses ``lat``/``lon``.
+    * ``lat`` + ``lon`` + ``scale_factor`` + ``geo_reference`` – a
+      TransverseMercator origin. ``geo_reference`` carries the
+      already-resolved PROJ string through from
+      :class:`~.projection_resolver.ResolvedProjection` so it does not need
+      to be re-derived here.
+
+    Attributes:
+        mgrs_code: MGRS grid square (e.g. ``"54SUE"``), when the origin was
+            specified via an MGRS grid.
+        lat: Origin latitude in decimal degrees.
+        lon: Origin longitude in decimal degrees.
+        scale_factor: Central-meridian scale factor (k) for a
+            TransverseMercator origin. ``None`` for MGRS/lat-lon origins.
+        geo_reference: Pre-resolved OpenDRIVE geoReference PROJ string, when
+            set by the projector-resolution layer. When ``None``, the
+            geoReference is derived from ``mgrs_code``/``lat``/``lon`` via
+            :func:`~.projection_resolver.geo_reference_for_origin`.
     """
 
     mgrs_code: Optional[str] = None
     lat: Optional[float] = None
     lon: Optional[float] = None
+    scale_factor: Optional[float] = None
+    geo_reference: Optional[str] = None
 
 
 @dataclass

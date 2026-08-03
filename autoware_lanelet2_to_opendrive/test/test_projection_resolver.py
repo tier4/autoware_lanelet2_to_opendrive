@@ -230,11 +230,18 @@ def test_map_projector_info_wins_over_explicit_keys(tmp_path):
 
 
 def test_resolve_projection_non_mgrs_type_falls_back(tmp_path):
-    """A not-yet-supported projector type falls back to explicit keys."""
+    """A not-yet-supported projector type falls back to explicit keys.
+
+    ``LocalCartesian`` is one of Autoware's three standard projector types
+    (MGRS / TransverseMercator / LocalCartesian, see #537) but is not yet
+    wired into this converter, making it a good stand-in for "unsupported
+    type -> silent fallback" now that TransverseMercator is supported
+    (issue #541).
+    """
     osm = _write_map(
         tmp_path,
         projector_info=(
-            "projector_type: TransverseMercator\n"
+            "projector_type: LocalCartesian\n"
             "map_origin:\n  latitude: 35.0\n  longitude: 139.0\n"
         ),
     )

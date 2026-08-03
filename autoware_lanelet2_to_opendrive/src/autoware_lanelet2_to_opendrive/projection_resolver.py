@@ -10,6 +10,7 @@ emitted ``.xodr`` is byte-identical.
 """
 
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,13 +19,17 @@ from typing import Optional, Tuple
 import lanelet2
 import mgrs as mgrs_lib
 import yaml
-from autoware_lanelet2_extension_python.projection import MGRSProjector
+from autoware_lanelet2_extension_python.projection import (
+    MGRSProjector,
+    TransverseMercatorProjector,
+)
 from omegaconf import DictConfig
 
 from .conversion_config import OriginSpec
 from .projection import (
     latlon_to_lanelet2_origin,
     latlon_to_proj_string,
+    latlon_to_tmerc_proj_string,
     mgrs_grid_with_offset_to_lanelet2_origin,
     mgrs_grid_with_offset_to_latlon,
     mgrs_to_lanelet2_origin,
@@ -59,6 +64,11 @@ class ResolvedProjection:
 
     ``mgrs_code`` and ``origin_lat``/``origin_lon`` may be ``None`` depending on
     how the origin was specified; the offset defaults to zero.
+
+    ``projector_type`` selects the projector :meth:`make_projector` builds and
+    how :attr:`geo_reference` is derived; it defaults to ``"MGRS"`` so
+    existing call sites keep their prior behavior. ``scale_factor`` only
+    applies when ``projector_type == "TransverseMercator"``.
     """
 
     origin: lanelet2.io.Origin
@@ -68,8 +78,12 @@ class ResolvedProjection:
     offset_x: float = 0.0
     offset_y: float = 0.0
     offset_z: float = 0.0
+    scale_factor: Optional[float] = None
+    projector_type: str = "MGRS"
 
-    def make_projector(self) -> MGRSProjector:
+    def make_projector(self):
+        if self.projector_type == "TransverseMercator":
+            return TransverseMercatorProjector(self.origin, self.scale_factor)
         return MGRSProjector(self.origin)
 
     @property
@@ -89,6 +103,10 @@ class ResolvedProjection:
 
     @property
     def geo_reference(self) -> str:
+        if self.projector_type == "TransverseMercator":
+            return latlon_to_tmerc_proj_string(
+                self.origin_lat, self.origin_lon, self.scale_factor
+            )
         return geo_reference_for_origin(self.to_origin_spec())
 
 
@@ -228,23 +246,80 @@ def resolve_projection_from_hydra(cfg: DictConfig) -> ResolvedProjection:
 MAP_PROJECTOR_INFO_FILENAME = "map_projector_info.yaml"
 
 
+def _resolve_transverse_mercator(info_path: Path, data: dict) -> ResolvedProjection:
+    """Build a :class:`ResolvedProjection` for ``projector_type: TransverseMercator``.
+
+    Any positive ``scale_factor`` is accepted: the Autoware Python binding
+    for ``TransverseMercatorProjector`` accepts an explicit ``scale_factor``
+    argument (defaulting to ``0.9996``), so it is threaded straight through
+    to the projector.
+
+    Args:
+        info_path: Path to the ``map_projector_info.yaml`` file (for error
+            messages).
+        data: Parsed YAML content of the file.
+
+    Returns:
+        A :class:`ResolvedProjection` with ``projector_type="TransverseMercator"``.
+
+    Raises:
+        ValueError: If ``map_origin.latitude``/``.longitude`` or
+            ``scale_factor`` are missing, or if ``scale_factor`` is not a
+            positive, finite number.
+    """
+    map_origin = data.get("map_origin") or {}
+    if "latitude" not in map_origin or "longitude" not in map_origin:
+        raise ValueError(
+            f"{info_path}: projector_type 'TransverseMercator' requires "
+            "'map_origin.latitude' and 'map_origin.longitude' fields"
+        )
+    origin_lat = float(map_origin["latitude"])
+    origin_lon = float(map_origin["longitude"])
+
+    if "scale_factor" not in data:
+        raise ValueError(
+            f"{info_path}: projector_type 'TransverseMercator' requires a "
+            "'scale_factor' field"
+        )
+    scale_factor = float(data["scale_factor"])
+    if not (math.isfinite(scale_factor) and scale_factor > 0):
+        raise ValueError(
+            f"{info_path}: TransverseMercator scale_factor={scale_factor!r} must be "
+            "a positive, finite number"
+        )
+
+    origin = lanelet2.io.Origin(origin_lat, origin_lon)
+    return ResolvedProjection(
+        origin=origin,
+        mgrs_code=None,
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
+        scale_factor=scale_factor,
+        projector_type="TransverseMercator",
+    )
+
+
 def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjection]:
     """Build a :class:`ResolvedProjection` from a ``map_projector_info.yaml``.
 
-    Only ``projector_type: MGRS`` is supported here; it reproduces the exact
-    projector/geoReference of the equivalent explicit ``mgrs_grid`` config,
-    so existing MGRS outputs stay byte-identical. Other projector types
-    return ``None`` so the caller falls back to the explicit origin keys.
+    ``projector_type: MGRS`` and ``projector_type: TransverseMercator`` are
+    wired. For an MGRS grid this reproduces the exact projector/geoReference
+    of the equivalent explicit ``mgrs_grid`` config, so existing MGRS
+    outputs stay byte-identical. Other projector types return ``None`` so
+    the caller falls back to the explicit origin keys.
 
     Args:
         info_path: Path to the ``map_projector_info.yaml`` file.
 
     Returns:
-        A :class:`ResolvedProjection` for MGRS, or ``None`` for unsupported
-        projector types.
+        A :class:`ResolvedProjection` for MGRS or TransverseMercator, or
+        ``None`` for unsupported projector types.
 
     Raises:
-        ValueError: If ``projector_type`` is MGRS but ``mgrs_grid`` is missing.
+        ValueError: If ``projector_type`` is MGRS but ``mgrs_grid`` is
+            missing, or if ``projector_type`` is TransverseMercator but
+            ``map_origin``/``scale_factor`` are missing (see
+            :func:`_resolve_transverse_mercator`).
     """
     data = yaml.safe_load(info_path.read_text(encoding="utf-8")) or {}
     projector_type = str(data.get("projector_type", "")).strip()
@@ -263,6 +338,9 @@ def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjec
             origin_lat=origin_lat,
             origin_lon=origin_lon,
         )
+
+    if projector_type == "TransverseMercator":
+        return _resolve_transverse_mercator(info_path, data)
 
     logger.warning(
         "map_projector_info.yaml projector_type=%r is not yet supported; "
