@@ -25,6 +25,7 @@ from lanelet2.routing import RoutingGraph
 
 from autoware_lanelet2_to_opendrive.projection_resolver import (
     geo_reference_for_origin,
+    resolve_projection,
     resolve_projection_from_hydra,
 )
 from autoware_lanelet2_to_opendrive.util import (
@@ -1368,8 +1369,10 @@ def preprocess_and_convert_with_hydra(
     input_map_path = lanelet2_file
 
     # Resolve the coordinate frame (origin, projector, geoReference, offset)
-    # through the single projector-resolution layer.
-    resolved = resolve_projection_from_hydra(cfg)
+    # through the single projector-resolution layer. Prefers a
+    # map_projector_info.yaml sitting next to the input map, falling back to
+    # the explicit cfg.map origin keys.
+    resolved = resolve_projection(cfg, lanelet2_file)
     mgrs_code = resolved.mgrs_code
     origin_lat = resolved.origin_lat
     origin_lon = resolved.origin_lon

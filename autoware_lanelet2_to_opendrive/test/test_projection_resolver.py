@@ -18,6 +18,7 @@ from autoware_lanelet2_to_opendrive.projection import (
 from autoware_lanelet2_to_opendrive.projection_resolver import (
     ResolvedProjection,
     geo_reference_for_origin,
+    resolve_projection,
     resolve_projection_from_hydra,
 )
 
@@ -168,3 +169,80 @@ def test_resolved_projection_helpers():
     # make_projector returns a usable MGRSProjector for the resolved origin.
     projector = resolved.make_projector()
     assert projector is not None
+
+
+# ---------------------------------------------------------------------------
+# resolve_projection – map_projector_info.yaml
+# ---------------------------------------------------------------------------
+
+
+def _write_map(tmp_path, *, projector_info: str | None = None):
+    """Create a dummy .osm and optional map_projector_info.yaml; return osm path.
+
+    ``resolve_projection`` only reads the projector-info file (not the .osm),
+    so the .osm content is irrelevant here.
+    """
+    osm = tmp_path / "lanelet2_map.osm"
+    osm.write_text("", encoding="utf-8")
+    if projector_info is not None:
+        (tmp_path / "map_projector_info.yaml").write_text(
+            projector_info, encoding="utf-8"
+        )
+    return osm
+
+
+def test_resolve_projection_uses_map_projector_info_mgrs(tmp_path):
+    """An MGRS map_projector_info.yaml reproduces the explicit mgrs_grid frame."""
+    osm = _write_map(
+        tmp_path,
+        projector_info="projector_type: MGRS\nvertical_datum: WGS84\nmgrs_grid: 54SUE\n",
+    )
+
+    # cfg carries no origin keys – the projector-info file supplies the origin.
+    resolved = resolve_projection(_cfg({}), osm)
+    explicit = resolve_projection_from_hydra(_cfg({"mgrs_grid": "54SUE"}))
+
+    assert resolved.mgrs_code == explicit.mgrs_code == "54SUE"
+    assert resolved.origin_lat == explicit.origin_lat
+    assert resolved.origin_lon == explicit.origin_lon
+    assert resolved.offset == explicit.offset == (0.0, 0.0, 0.0)
+    # Equal geoReference => byte-identical .xodr for this origin.
+    assert resolved.geo_reference == explicit.geo_reference
+
+
+def test_resolve_projection_falls_back_without_info(tmp_path):
+    """With no projector-info file, explicit cfg keys drive the frame."""
+    osm = _write_map(tmp_path)  # no map_projector_info.yaml
+    resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
+    assert resolved.mgrs_code == "54SUE"
+
+
+def test_map_projector_info_wins_over_explicit_keys(tmp_path):
+    """When both are present, the projector-info file is the champion."""
+    osm = _write_map(
+        tmp_path, projector_info="projector_type: MGRS\nmgrs_grid: 54SUE\n"
+    )
+    # Explicit keys point somewhere else entirely; they must be ignored.
+    resolved = resolve_projection(
+        _cfg({"lat_lon": {"latitude": 10.0, "longitude": 20.0}}), osm
+    )
+    assert resolved.mgrs_code == "54SUE"
+
+
+def test_resolve_projection_non_mgrs_type_falls_back(tmp_path):
+    """A not-yet-supported projector type falls back to explicit keys."""
+    osm = _write_map(
+        tmp_path,
+        projector_info=(
+            "projector_type: TransverseMercator\n"
+            "map_origin:\n  latitude: 35.0\n  longitude: 139.0\n"
+        ),
+    )
+    resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
+    assert resolved.mgrs_code == "54SUE"
+
+
+def test_map_projector_info_mgrs_without_grid_raises(tmp_path):
+    osm = _write_map(tmp_path, projector_info="projector_type: MGRS\n")
+    with pytest.raises(ValueError, match="requires a 'mgrs_grid'"):
+        resolve_projection(_cfg({}), osm)
