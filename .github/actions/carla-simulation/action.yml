@@ -1,0 +1,265 @@
+name: CARLA CPU-only Traffic Simulation
+description: >
+  Run a CPU-only CARLA traffic simulation for a single scenario. Boots a
+  headless CARLA server container (Null RHI, no GPU), installs the matching
+  CARLA Python client into a throwaway virtualenv, loads an OpenDRIVE map, spawns
+  Traffic-Manager-controlled vehicles, and asserts the traffic moved. All
+  scenario knobs are inputs so callers pick the scenario at call time.
+
+inputs:
+  map:
+    description: >
+      Built-in CARLA town map to load (e.g. Town03). Ships with the CARLA
+      image, so no OpenDRIVE conversion is needed. Provide either `map` or
+      `xodr-path`.
+    required: false
+    default: ""
+  xodr-path:
+    description: >
+      Path to an OpenDRIVE (.xodr) map file to simulate. Used when `map` is
+      empty. Provide either `map` or `xodr-path`.
+    required: false
+    default: ""
+  scenario-name:
+    description: Human-readable scenario label (used for logs and artifact names).
+    required: false
+    default: default
+  carla-image:
+    description: CARLA server Docker image (must match carla-client-version).
+    required: false
+    default: carlasim/carla:0.9.15
+  carla-client-version:
+    description: CARLA Python client version to pip install (must match the server).
+    required: false
+    default: "0.9.15"
+  python-version:
+    description: Python version for the CARLA client virtualenv.
+    required: false
+    default: "3.10"
+  compose-file:
+    description: Path to the CARLA server docker-compose file.
+    required: false
+    default: autoware_carla_scenario/ci/docker-compose.carla.yml
+  script-path:
+    description: Path to the traffic-simulation Python script.
+    required: false
+    default: autoware_carla_scenario/ci/carla_traffic_simulation.py
+  host:
+    description: CARLA RPC host.
+    required: false
+    default: localhost
+  rpc-port:
+    description: CARLA RPC port.
+    required: false
+    default: "2000"
+  tm-port:
+    description: CARLA Traffic Manager port.
+    required: false
+    default: "8000"
+  num-vehicles:
+    description: Number of vehicles to spawn (kept small for stock runners).
+    required: false
+    default: "8"
+  ticks:
+    description: Number of synchronous ticks to simulate after warm-up.
+    required: false
+    default: "120"
+  warmup-ticks:
+    description: Ticks to run before recording start positions.
+    required: false
+    default: "20"
+  fixed-delta:
+    description: Fixed simulation step in seconds (0.05 = 20 Hz).
+    required: false
+    default: "0.05"
+  min-total-distance:
+    description: Minimum total distance (m) the fleet must cover to pass.
+    required: false
+    default: "5.0"
+  min-moved-vehicles:
+    description: Minimum number of vehicles that must move for the run to pass.
+    required: false
+    default: "1"
+  seed:
+    description: Traffic Manager random seed.
+    required: false
+    default: "0"
+  connect-timeout:
+    description: Seconds to wait for the CARLA server to become ready.
+    required: false
+    default: "900"
+  extra-args:
+    description: Extra arguments appended verbatim to the simulation script.
+    required: false
+    default: ""
+  container-name:
+    description: Name of the CARLA server container (see the compose file).
+    required: false
+    default: carla-server
+  record-replay:
+    description: >
+      Record a native CARLA replay log (.log) and upload it as an artifact.
+    required: false
+    default: "true"
+  upload-artifacts:
+    description: Whether to upload the result JSON and server logs as artifacts.
+    required: false
+    default: "true"
+
+outputs:
+  result-json:
+    description: Path to the JSON result report produced by the simulation.
+    value: ${{ steps.simulate.outputs.result-json }}
+  passed:
+    description: "'true' when the traffic simulation passed, 'false' otherwise."
+    value: ${{ steps.simulate.outputs.passed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Start Xvfb virtual display
+      shell: bash
+      run: |
+        # CARLA's OpenGL RHI needs an X display even when running headless.
+        # A virtual framebuffer on the host, shared into the container via
+        # /tmp/.X11-unix, provides one without a GPU.
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends xvfb
+        Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset \
+          > /tmp/xvfb.log 2>&1 &
+        # Wait for the X socket to appear so the container can connect to it.
+        for _ in $(seq 1 30); do
+          [ -S /tmp/.X11-unix/X99 ] && break
+          sleep 1
+        done
+        ls -l /tmp/.X11-unix/ || true
+
+    - name: Start CARLA server (CPU-only, headless)
+      shell: bash
+      env:
+        CARLA_IMAGE: ${{ inputs.carla-image }}
+      run: |
+        echo "Starting CARLA server: $CARLA_IMAGE"
+        docker compose -f "${{ inputs.compose-file }}" up -d
+        docker compose -f "${{ inputs.compose-file }}" ps
+        # Give the engine a moment to boot, then surface its early output and
+        # container state so a crash/hang is visible directly in the job log.
+        sleep 30
+        echo "----- container state -----"
+        docker compose -f "${{ inputs.compose-file }}" ps -a
+        echo "----- initial CARLA server logs -----"
+        docker compose -f "${{ inputs.compose-file }}" logs --no-color --tail 150 \
+          || true
+
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install CARLA Python client
+      shell: bash
+      run: |
+        python -m venv "${RUNNER_TEMP}/carla-client-venv"
+        # shellcheck disable=SC1091
+        source "${RUNNER_TEMP}/carla-client-venv/bin/activate"
+        python -m pip install --upgrade pip
+        python -m pip install "carla==${{ inputs.carla-client-version }}"
+        echo "CARLA_CLIENT_VENV=${RUNNER_TEMP}/carla-client-venv" >> "$GITHUB_ENV"
+
+    - name: Run traffic simulation
+      id: simulate
+      shell: bash
+      run: |
+        set -o pipefail
+        # shellcheck disable=SC1091
+        source "${CARLA_CLIENT_VENV}/bin/activate"
+        result_json="carla_traffic_sim_${{ inputs.scenario-name }}.json"
+        echo "result-json=${result_json}" >> "$GITHUB_OUTPUT"
+        # Server-side path for the native CARLA replay log (created by the
+        # compose command). Passed through to the client and shared with the
+        # extraction step below.
+        recorder_arg=()
+        if [ "${{ inputs.record-replay }}" = "true" ]; then
+          recorder_container_path="/home/carla/recordings/${{ inputs.scenario-name }}.log"
+          recorder_arg=(--recorder-path "${recorder_container_path}")
+          echo "recorder-container-path=${recorder_container_path}" >> "$GITHUB_OUTPUT"
+        fi
+        # Source the world from a built-in town (`map`) or an OpenDRIVE file.
+        map_arg=()
+        if [ -n "${{ inputs.map }}" ]; then
+          map_arg=(--map "${{ inputs.map }}")
+        fi
+        if [ -n "${{ inputs.xodr-path }}" ]; then
+          map_arg+=(--xodr "${{ inputs.xodr-path }}")
+        fi
+        if [ "${#map_arg[@]}" -eq 0 ]; then
+          echo "::error::Either 'map' or 'xodr-path' must be provided."
+          exit 1
+        fi
+        status=0
+        python "${{ inputs.script-path }}" \
+          "${map_arg[@]}" \
+          --host "${{ inputs.host }}" \
+          --port "${{ inputs.rpc-port }}" \
+          --tm-port "${{ inputs.tm-port }}" \
+          --num-vehicles "${{ inputs.num-vehicles }}" \
+          --ticks "${{ inputs.ticks }}" \
+          --warmup-ticks "${{ inputs.warmup-ticks }}" \
+          --fixed-delta "${{ inputs.fixed-delta }}" \
+          --min-total-distance "${{ inputs.min-total-distance }}" \
+          --min-moved-vehicles "${{ inputs.min-moved-vehicles }}" \
+          --seed "${{ inputs.seed }}" \
+          --connect-timeout "${{ inputs.connect-timeout }}" \
+          --output "${result_json}" \
+          "${recorder_arg[@]}" \
+          ${{ inputs.extra-args }} \
+          2>&1 | tee "carla_traffic_sim_${{ inputs.scenario-name }}.log" || status=$?
+        if [ "${status}" -eq 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        fi
+        exit "${status}"
+
+    - name: Capture CARLA server logs
+      if: always()
+      shell: bash
+      run: |
+        # tee to stdout as well so the server output is always visible in the
+        # job log (artifact download is not always convenient).
+        docker compose -f "${{ inputs.compose-file }}" logs --no-color 2>&1 \
+          | tee "carla_server_${{ inputs.scenario-name }}.log" || true
+
+    - name: Extract CARLA replay log
+      if: always() && inputs.record-replay == 'true'
+      shell: bash
+      run: |
+        # The recorder writes the .log inside the server container; copy it out
+        # to the workspace so it can be uploaded as an artifact. Best-effort:
+        # a failed/short run may not have produced a file.
+        src="/home/carla/recordings/${{ inputs.scenario-name }}.log"
+        dst="carla_replay_${{ inputs.scenario-name }}.log"
+        if docker cp "${{ inputs.container-name }}:${src}" "${dst}" 2>/dev/null; then
+          echo "Extracted replay log to ${dst} ($(du -h "${dst}" | cut -f1))"
+        else
+          echo "No CARLA replay log found at ${src} (skipping)."
+        fi
+
+    - name: Stop CARLA server
+      if: always()
+      shell: bash
+      run: |
+        docker compose -f "${{ inputs.compose-file }}" down -v || true
+
+    - name: Upload simulation artifacts
+      if: always() && inputs.upload-artifacts == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: carla-simulation-${{ inputs.scenario-name }}
+        path: |
+          carla_traffic_sim_${{ inputs.scenario-name }}.json
+          carla_traffic_sim_${{ inputs.scenario-name }}.log
+          carla_server_${{ inputs.scenario-name }}.log
+          carla_replay_${{ inputs.scenario-name }}.log
+        retention-days: 7
+        if-no-files-found: warn
