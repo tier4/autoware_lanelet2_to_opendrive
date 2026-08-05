@@ -1,5 +1,6 @@
 """Tests for OpenDRIVE validation functionality."""
 
+from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint, ElementType
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
@@ -11,9 +12,9 @@ from autoware_lanelet2_to_opendrive.opendrive.road_links import (
     RoadLink,
     Successor,
 )
-from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint, ElementType
 from autoware_lanelet2_to_opendrive.opendrive.validation import (
     validate_lane_road_link_consistency,
+    validate_no_duplicate_road_ids,
 )
 
 
@@ -238,3 +239,108 @@ class TestLaneRoadLinkConsistency:
 
         assert result.is_valid
         assert result.error_count == 0
+
+
+class TestNoDuplicateRoadIds:
+    """Test suite for duplicate road ID validation.
+
+    ``validate_no_duplicate_road_ids`` only requires ``road.id``, so these tests
+    use bare ``Road(id=...)`` instances rather than the fully-populated
+    ``create_test_road`` helper above.
+    """
+
+    def test_all_unique_ids_valid(self):
+        """Test that roads with all-unique IDs pass validation."""
+        roads = [Road(id=1), Road(id=2), Road(id=3)]
+
+        result = validate_no_duplicate_road_ids(roads)
+
+        assert result.is_valid
+        assert result.errors == []
+
+    def test_single_duplicate_id_invalid(self):
+        """Test that a duplicated ID is reported along with its occurrence count."""
+        roads = [Road(id=1), Road(id=2), Road(id=1)]
+
+        result = validate_no_duplicate_road_ids(roads)
+
+        assert not result.is_valid
+        assert result.error_count == 1
+        assert result.errors[0].road_id == 1
+        assert result.errors[0].connection_type == "duplicate"
+        assert "Road ID 1 appears 2 times" in result.errors[0].message
+
+    def test_multiple_duplicate_ids_reported_independently(self):
+        """Test that distinct duplicated IDs are each reported with their own counts."""
+        roads = [
+            Road(id=1),
+            Road(id=2),
+            Road(id=1),
+            Road(id=3),
+            Road(id=2),
+        ]
+
+        result = validate_no_duplicate_road_ids(roads)
+
+        assert not result.is_valid
+        assert result.error_count == 2
+
+        errors_by_id = {error.road_id: error for error in result.errors}
+        assert set(errors_by_id) == {1, 2}
+        assert "appears 2 times" in errors_by_id[1].message
+        assert "appears 2 times" in errors_by_id[2].message
+
+    def test_id_repeated_three_times_counts_correctly(self):
+        """Test that the occurrence count distinguishes a 3x duplicate from a 2x one."""
+        roads = [
+            Road(id=1),
+            Road(id=1),
+            Road(id=1),
+            Road(id=2),
+            Road(id=2),
+        ]
+
+        result = validate_no_duplicate_road_ids(roads)
+
+        assert not result.is_valid
+        assert result.error_count == 2
+
+        errors_by_id = {error.road_id: error for error in result.errors}
+        assert "Road ID 1 appears 3 times" in errors_by_id[1].message
+        assert "Road ID 2 appears 2 times" in errors_by_id[2].message
+
+    def test_empty_roads_list(self):
+        """Test validation with an empty roads list."""
+        result = validate_no_duplicate_road_ids([])
+
+        assert result.is_valid
+        assert result.errors == []
+
+    def test_validation_result_error_summary(self):
+        """Test that ValidationResult provides a useful error summary for duplicates."""
+        roads = [Road(id=5), Road(id=5)]
+
+        result = validate_no_duplicate_road_ids(roads)
+
+        summary = result.get_error_summary()
+
+        assert "Found 1 validation errors" in summary
+        assert "Road 5 Lane 0 (duplicate)" in summary
+        assert "Road ID 5 appears 2 times in the road list" in summary
+
+    def test_duplicates_are_reported_not_raised(self):
+        """Test that duplicate IDs are surfaced via ValidationResult, never raised.
+
+        The current caller (main.py) only prints a WARNING built from
+        ``get_error_summary()`` when ``is_valid`` is False; it does not treat a
+        failed result as fatal and does not abort the build. This test pins that
+        report-only contract so that a future switch to fail-fast behavior shows
+        up as an intentional change to this test, not a silent regression.
+        """
+        roads = [Road(id=1), Road(id=1), Road(id=1)]
+
+        # Should complete normally and return a result, never raise.
+        result = validate_no_duplicate_road_ids(roads)
+
+        assert not result.is_valid
+        assert result.error_count == 1
