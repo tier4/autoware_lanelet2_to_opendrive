@@ -8,6 +8,7 @@ here, since this tool only needs to exercise XML shapes, not real geometry.
 from __future__ import annotations
 
 import json
+import math
 import sys
 
 import pytest
@@ -96,6 +97,51 @@ _JUNCTION_1 = """
   </connection>
 </junction>
 """
+
+
+def _road_with_hdgs(road_id: int, hdgs_rad: list[float]) -> str:
+    """Build a minimal road with one `<planView><geometry>` per hdg value.
+
+    Only `planView` (and a bare `laneSection` to keep the fixture a valid
+    road) is populated - links/signals/objects are irrelevant to the
+    heading-delta metrics under test.
+    """
+    geometries = "".join(
+        f'<geometry s="{i * 10.0}" x="0.0" y="0.0" hdg="{hdg!r}" length="10.0">'
+        '<paramPoly3 aU="0" bU="1" cU="0" dU="0" aV="0" bV="0" cV="0" dV="0" '
+        'pRange="arcLength"/>'
+        "</geometry>"
+        for i, hdg in enumerate(hdgs_rad)
+    )
+    return f"""
+<road name="r{road_id}" length="{10.0 * len(hdgs_rad)!r}" id="{road_id}" junction="-1">
+  <planView>
+    {geometries}
+  </planView>
+  <lanes>
+    <laneSection s="0.0">
+      <center>
+        <lane id="0" type="none" level="false"/>
+      </center>
+    </laneSection>
+  </lanes>
+</road>
+"""
+
+
+def _hdgs_from_deg_deltas(deltas_deg: list[float]) -> list[float]:
+    """Cumulative headings (radians) that produce the given degree deltas.
+
+    Returns `len(deltas_deg) + 1` headings, starting at 0.0, so that the
+    consecutive-geometry deltas computed by `_hdg_deltas_deg` reproduce
+    `deltas_deg` (up to floating-point rounding).
+    """
+    hdg = 0.0
+    hdgs = [hdg]
+    for delta_deg in deltas_deg:
+        hdg += math.radians(delta_deg)
+        hdgs.append(hdg)
+    return hdgs
 
 
 def test_normal_case_counts(tmp_path):
@@ -277,6 +323,120 @@ def test_cumulative_length_buckets_are_exclusive_at_their_own_threshold(tmp_path
     assert digest["length"]["lt_1_0_count"] == 2
 
 
+def test_hdg_delta_straight_road_is_all_zero(tmp_path):
+    """A road whose geometries all share the same `hdg` is a straight line."""
+    road = _road_with_hdgs(1, _hdgs_from_deg_deltas([0.0, 0.0, 0.0]))
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    entry = digest["roads"][0]
+    assert entry["max_abs_hdg_delta_deg"] == 0.0
+    assert entry["total_hdg_change_deg"] == 0.0
+    assert entry["hdg_sign_changes"] == 0
+
+
+def test_hdg_delta_smooth_curve_has_large_total_but_small_max(tmp_path):
+    """A gentle, steady curve accumulates a large total but a small per-step max.
+
+    Four consecutive +3 deg steps: `total` (12 deg) is far larger than any
+    single `max_abs` (3 deg), and since every step turns the same way there
+    are no sign reversals.
+    """
+    road = _road_with_hdgs(1, _hdgs_from_deg_deltas([3.0, 3.0, 3.0, 3.0]))
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    entry = digest["roads"][0]
+    assert entry["max_abs_hdg_delta_deg"] == pytest.approx(3.0, abs=1e-6)
+    assert entry["total_hdg_change_deg"] == pytest.approx(12.0, abs=1e-6)
+    assert entry["hdg_sign_changes"] == 0
+
+
+def test_hdg_delta_meandering_road_counts_sign_changes(tmp_path):
+    """Deltas alternating +/-/+/- must count 3 direction reversals."""
+    road = _road_with_hdgs(1, _hdgs_from_deg_deltas([20.0, -10.0, 15.0, -5.0]))
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    entry = digest["roads"][0]
+    assert entry["hdg_sign_changes"] == 3
+    assert entry["max_abs_hdg_delta_deg"] == pytest.approx(20.0, abs=1e-6)
+    assert entry["total_hdg_change_deg"] == pytest.approx(20.0, abs=1e-6)
+
+
+def test_hdg_delta_wraps_across_pi_boundary(tmp_path):
+    """`hdg` wrapping past +-pi must not be reported as a near-360 deg jump.
+
+    170 deg followed by -170 deg is a 20 deg turn in reality (both headings
+    point almost the same way, just represented on opposite sides of the
+    +-180 wraparound), not the ~340 deg a naive subtraction would produce.
+    This is the case the resent report called out as most important to get
+    right.
+    """
+    hdgs_rad = [math.radians(170.0), math.radians(-170.0)]
+    road = _road_with_hdgs(1, hdgs_rad)
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    entry = digest["roads"][0]
+    assert entry["max_abs_hdg_delta_deg"] == pytest.approx(20.0, abs=1e-6)
+    assert entry["total_hdg_change_deg"] == pytest.approx(20.0, abs=1e-6)
+    # The un-normalized jump would have been ~340 deg; make sure that
+    # spurious value never leaks out.
+    assert abs(entry["total_hdg_change_deg"]) < 180.0
+
+
+def test_hdg_delta_zero_or_one_geometry_does_not_crash(tmp_path):
+    """0 or 1 geometries leave a delta undefined; must report 0, not crash."""
+    no_geometry = _road_with_hdgs(1, [])
+    one_geometry = _road_with_hdgs(2, [1.234])
+    path = _write(tmp_path, no_geometry + one_geometry)
+    digest = build_digest(path)
+
+    for entry in digest["roads"]:
+        assert entry["max_abs_hdg_delta_deg"] == 0.0
+        assert entry["total_hdg_change_deg"] == 0.0
+        assert entry["hdg_sign_changes"] == 0
+
+
+def test_hdg_delta_map_level_percentiles_use_linear_interpolation(tmp_path):
+    """`hdg_delta_p50/p90/p99_deg` must use linear interpolation between
+    closest ranks (numpy's default `'linear'`, Excel's `PERCENTILE.INC`),
+    pinned here so a future refactor cannot silently shift these numbers
+    (see `_percentile`'s docstring for why that would be a problem).
+
+    Ten roads with `max_abs_hdg_delta_deg` = 1, 2, ..., 10 (each road has a
+    single delta of exactly that many degrees). For values 1..10 (n=10),
+    linear interpolation gives:
+      p50 -> rank = 0.50 * 9 = 4.5  -> halfway between values[4]=5, values[5]=6 -> 5.5
+      p90 -> rank = 0.90 * 9 = 8.1  -> values[8]=9 + 0.1 * (values[9] - values[8]) -> 9.1
+      p99 -> rank = 0.99 * 9 = 8.91 -> values[8]=9 + 0.91 * (values[9] - values[8]) -> 9.91
+    """
+    roads = "".join(
+        _road_with_hdgs(i, _hdgs_from_deg_deltas([float(i)])) for i in range(1, 11)
+    )
+    path = _write(tmp_path, roads)
+    digest = build_digest(path)
+
+    assert digest["max_abs_hdg_delta_deg"] == pytest.approx(10.0, abs=1e-6)
+    assert digest["hdg_delta_p50_deg"] == pytest.approx(5.5, abs=1e-6)
+    assert digest["hdg_delta_p90_deg"] == pytest.approx(9.1, abs=1e-6)
+    assert digest["hdg_delta_p99_deg"] == pytest.approx(9.91, abs=1e-6)
+
+
+def test_hdg_delta_map_level_percentiles_single_road_returns_its_own_value(tmp_path):
+    """A single road's percentiles must equal its own value, not divide by
+    zero (the multi-element interpolation formula divides by `n - 1`)."""
+    road = _road_with_hdgs(1, _hdgs_from_deg_deltas([7.0]))
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    assert digest["max_abs_hdg_delta_deg"] == pytest.approx(7.0, abs=1e-6)
+    assert digest["hdg_delta_p50_deg"] == pytest.approx(7.0, abs=1e-6)
+    assert digest["hdg_delta_p90_deg"] == pytest.approx(7.0, abs=1e-6)
+    assert digest["hdg_delta_p99_deg"] == pytest.approx(7.0, abs=1e-6)
+
+
 def test_empty_xodr_zero_roads_does_not_crash(tmp_path):
     """A `.xodr` with zero roads/junctions must not raise and reports zeros."""
     path = _write(tmp_path, "")
@@ -297,6 +457,10 @@ def test_empty_xodr_zero_roads_does_not_crash(tmp_path):
         "lt_0_1_count": 0,
         "lt_1_0_count": 0,
     }
+    assert digest["max_abs_hdg_delta_deg"] == 0.0
+    assert digest["hdg_delta_p50_deg"] == 0.0
+    assert digest["hdg_delta_p90_deg"] == 0.0
+    assert digest["hdg_delta_p99_deg"] == 0.0
 
     # format_digest must also handle the empty-arrays case without error.
     rendered = format_digest(digest)
