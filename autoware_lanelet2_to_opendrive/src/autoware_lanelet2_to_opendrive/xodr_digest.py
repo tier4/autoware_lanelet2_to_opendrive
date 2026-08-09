@@ -10,8 +10,33 @@ output".
 This tool produces a normalized JSON digest instead: coordinates are rounded
 to millimeter precision, ``date`` and the generator-version comment are
 dropped, and roads/junctions are explicitly sorted by ``id``. Diffing two
-digests then shows exactly which roads/junctions/counts changed, and nothing
-else changed.
+digests shows which of the fields the digest extracts changed - it does
+**not** show that nothing else changed. A digest diff is a claim about the
+fields listed below, and only about those fields; anything the digest never
+reads is invisible to it regardless of whether it changed in the ``.xodr``
+file itself.
+
+That distinction used to be stated the other way around, and the gap it
+papered over was not hypothetical: an earlier revision of this tool
+extracted no lane-width metrics at all. On the real 693-road dataset, one
+preprocessing change moved road 65 lane 2's sampled width from ~3.0m to
+~31.5m (and lane 3's similarly, up to 28.9m) between two conversion runs,
+while every field this tool did extract - length, geometry types, heading
+deltas, lane counts - stayed byte-identical. The digest reported those roads
+as unchanged; they were not. ``width_min_m``/``width_max_m``/``width_mean_m``/
+``width_segment_count`` (see ``_lane_width_samples``/``_width_stats`` below)
+were added to close that specific gap - not every gap; see those two
+functions' docstrings for what the width metric still cannot catch.
+
+Extracted, per road: ``length``; ``<planView>`` geometry-primitive types and
+the heading deltas between consecutive ones (module comment above
+``_hdg_summary``); lane counts by side/type; and, per non-center lane, a
+sampled width summary. Extracted, map-wide: header bounds; signal/object/
+link/connection counts (object and link further split by type); and
+length/segment-count/heading-delta distributions across all roads. Nothing
+else is read - e.g. lane markings, elevation/superelevation profiles, and
+signal/object attributes other than ``type`` are all outside what this tool
+looks at, and an unchanged digest says nothing about whether they changed.
 
 The file is streamed with ``xml.etree.ElementTree.iterparse`` and each
 ``<road>``/``<junction>`` subtree is ``clear()``-ed once processed, so the
@@ -197,12 +222,119 @@ def _new_digest_state() -> dict[str, Any]:
     }
 
 
+def _lane_width_samples(
+    lane_elem: ET.Element, section_span: float
+) -> tuple[int, list[float]]:
+    """Evaluate a lane's ``<width>`` cubic polynomials at representative points.
+
+    Direct coefficient/``sOffset`` comparison across runs is unsound once
+    boundary positions themselves shift - e.g. road 65's `laneSection`
+    length moved from 76.54m to 78.91m between a known-good run and one with
+    `move_point`/`delete_point` disabled, so segment count and breakpoint
+    positions are not stable identifiers to line up between two digests.
+
+    Instead every ``<width>`` segment is sampled at 3 points *local to
+    itself* (its own start, midpoint, and end): this guarantees every
+    segment contributes at least one sample regardless of how many segments
+    a lane has (measured range on the reference dataset: 1-7 segments per
+    lane), so a change confined to a single narrow segment cannot be
+    skipped the way a fixed, small, global sample count could. Sampling at
+    a segment's own start (``ds=0``) also means its raw ``a`` coefficient is
+    always one of the samples, which is where the largest measured width
+    changes land (e.g. road 67 lane 2's ``a`` jumping from ~2.9m to
+    ~22.2m at ``sOffset=0.0``).
+
+    `section_span` is the `laneSection`'s own local length (next
+    `laneSection`'s ``s`` minus this one's, or the road's length for the
+    last `laneSection`) and bounds the final segment's local end.
+
+    Returns ``(segment_count, samples)``; `segment_count` is the exact
+    number of ``<width>`` elements (a non-sampled structural signal: it
+    changes on its own if a `<width>` breakpoint is added or removed, even
+    if every sampled value happened to land on an unchanged part of the
+    curve).
+    """
+    widths = sorted(
+        (
+            {
+                "sOffset": float(w.get("sOffset") or 0.0),
+                "a": float(w.get("a") or 0.0),
+                "b": float(w.get("b") or 0.0),
+                "c": float(w.get("c") or 0.0),
+                "d": float(w.get("d") or 0.0),
+            }
+            for w in lane_elem.findall("width")
+        ),
+        key=lambda w: w["sOffset"],
+    )
+    samples: list[float] = []
+    for index, segment in enumerate(widths):
+        segment_start = segment["sOffset"]
+        segment_end = (
+            widths[index + 1]["sOffset"] if index + 1 < len(widths) else section_span
+        )
+        span = segment_end - segment_start
+        for fraction in (0.0, 0.5, 1.0):
+            ds = span * fraction
+            samples.append(
+                segment["a"]
+                + segment["b"] * ds
+                + segment["c"] * ds**2
+                + segment["d"] * ds**3
+            )
+    return len(widths), samples
+
+
+def _width_stats(samples: list[float]) -> dict[str, float] | None:
+    """Summarize sampled effective widths, or ``None`` for a lane with none.
+
+    Widths are spatial measurements in metres, so they are rounded to
+    `COORDINATE_DECIMALS` (millimetre precision) rather than a separate
+    constant - the same precision the header's coordinate fields already
+    use.
+
+    Detects: any width change that moves the sampled min, max, or mean
+    (per-segment sampling in `_lane_width_samples` guarantees every
+    ``<width>`` segment contributes at least one sample). ``width_segment_count``
+    (see caller) is a separate, non-sampled signal that catches segment-count
+    changes on its own.
+
+    Measured on the real dataset (the 11 lanes affected by the
+    point-operation preprocessing entries, cross-checked against an
+    independently generated per-lane ground truth): `width_min_m` or
+    `width_max_m` moved in every one of the 11, `width_mean_m` never moved on
+    its own. Do not read this as `width_mean_m` being redundant with the two
+    extremes in general - a shape change entirely inside a segment's
+    interior, away from both its sampled endpoints, could in principle move
+    the mean without moving either extreme - only as a report that no such
+    case has been observed here. `width_mean_m` is kept for reading the
+    *size* of a detected change (e.g. distinguishing a cm-scale wobble from
+    the ~19m/~29m jumps above), not as an independent detector in its own
+    right.
+
+    Does NOT detect (known limitation, not closed by this design):
+    a shape change confined between two sample points that leaves min, max,
+    *and* mean all unchanged - e.g. a bulge in the middle of one segment that
+    is offset by an equal dip elsewhere in the same segment. Recording only
+    three summary statistics from a 3-point-per-segment sample cannot rule
+    this out; it narrows the blind spot, it does not close it.
+    """
+    if not samples:
+        return None
+    return {
+        "width_min_m": round(min(samples), COORDINATE_DECIMALS),
+        "width_max_m": round(max(samples), COORDINATE_DECIMALS),
+        "width_mean_m": round(statistics.mean(samples), COORDINATE_DECIMALS),
+    }
+
+
 def _process_road(road_elem: ET.Element, state: dict[str, Any]) -> dict[str, Any]:
     """Extract one road's digest entry and fold its counters into `state`.
 
-    Returns the ``{"id", "length", "lane_count", "geometry_types"}`` entry
-    for the ``roads`` array; every other statistic is accumulated in-place
-    into `state` so it can be summarized once all roads have been seen.
+    Returns the ``{"id", "length", "lane_count", "geometry_types", "lanes",
+    ...}`` entry for the ``roads`` array; every other statistic is
+    accumulated in-place into `state` so it can be summarized once all
+    roads have been seen.
     """
     road_id = int(road_elem.get("id", "-1"))
     # `raw_length` is the unrounded value straight from the XML attribute.
@@ -249,8 +381,26 @@ def _process_road(road_elem: ET.Element, state: dict[str, Any]) -> dict[str, Any
     state["road_max_abs_hdg_deltas_raw"].append(raw_max_abs_hdg_delta_deg)
 
     lane_count = 0
-    for lane_section in road_elem.iter("laneSection"):
+    lane_entries: list[dict[str, Any]] = []
+    # A road's <laneSection> elements are assumed to already be in ascending
+    # `s` order - the only order the converter emits, and the only order
+    # observed across all 693 roads in the reference dataset (confirmed by a
+    # full-map, both-file count: every road has exactly 1 laneSection, see
+    # WIDTH-COMPARISON.md #6). That assumption lets each section's local
+    # span be computed from its immediate successor's `s` (or, for the last
+    # section, from the road's own length) without a second sort pass -
+    # still handled generically here for a road that one day has more than
+    # one.
+    lane_sections = list(road_elem.iter("laneSection"))
+    for index, lane_section in enumerate(lane_sections):
         state["lane_section_total"] += 1
+        section_s = float(lane_section.get("s") or 0.0)
+        section_end = (
+            float(lane_sections[index + 1].get("s") or 0.0)
+            if index + 1 < len(lane_sections)
+            else raw_length
+        )
+        section_span = section_end - section_s
         for side in _LANE_SIDES:
             side_elem = lane_section.find(side)
             if side_elem is None:
@@ -262,6 +412,35 @@ def _process_road(road_elem: ET.Element, state: dict[str, Any]) -> dict[str, Any
                 state["lane_by_type"][lane_type] = (
                     state["lane_by_type"].get(lane_type, 0) + 1
                 )
+                # Center lanes (id 0) are never assigned a <width> element
+                # anywhere in the generator (see LaneWidth in
+                # lane_elements.py, corroborated by the _ROAD_1 test
+                # fixture and by every center lane in the real dataset) -
+                # skip them rather than emit a spurious width_segment_count
+                # of 0 for every one of the ~693 center lanes on the real
+                # map.
+                if side == "center":
+                    continue
+                segment_count, samples = _lane_width_samples(lane, section_span)
+                stats = _width_stats(samples)
+                if stats is None:
+                    continue
+                lane_entries.append(
+                    {
+                        "side": side,
+                        "id": int(lane.get("id", "0")),
+                        "lane_section_s": round(section_s, LENGTH_DECIMALS),
+                        "width_segment_count": segment_count,
+                        **stats,
+                    }
+                )
+    # Sorted for the same reason the top-level `roads`/`junctions` arrays
+    # are: nothing guarantees this order in the XML, and an accidental
+    # future reorder must not show up as a digest diff. `side` sorts
+    # "left" before "right" alphabetically, which matches `_LANE_SIDES`.
+    lane_entries.sort(
+        key=lambda entry: (entry["lane_section_s"], entry["side"], entry["id"])
+    )
     state["lane_total"] += lane_count
     state["lane_count_per_road"][lane_count] = (
         state["lane_count_per_road"].get(lane_count, 0) + 1
@@ -303,6 +482,10 @@ def _process_road(road_elem: ET.Element, state: dict[str, Any]) -> dict[str, Any
         "max_abs_hdg_delta_deg": round(raw_max_abs_hdg_delta_deg, HDG_DECIMALS),
         "total_hdg_change_deg": round(raw_total_hdg_change_deg, HDG_DECIMALS),
         "hdg_sign_changes": hdg_sign_changes,
+        # One entry per non-center lane per laneSection - see
+        # `_lane_width_samples` for how width_min_m/max_m/mean_m are
+        # sampled and why direct coefficient comparison is unsound.
+        "lanes": lane_entries,
     }
 
 

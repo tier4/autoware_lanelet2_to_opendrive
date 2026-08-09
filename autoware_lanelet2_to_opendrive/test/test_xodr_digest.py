@@ -323,6 +323,142 @@ def test_cumulative_length_buckets_are_exclusive_at_their_own_threshold(tmp_path
     assert digest["length"]["lt_1_0_count"] == 2
 
 
+def test_width_metrics_single_segment_constant_width(tmp_path):
+    """A lane with one constant `<width>` segment reports that constant value.
+
+    _ROAD_1's left lane (id=1) has a single `<width sOffset="0.0" a="3.5"
+    b="0" c="0" d="0"/>`; its center lane (id=0) has none. `lanes` must
+    contain exactly the left lane's entry - the center lane is skipped
+    entirely rather than emitted with a zero-segment placeholder (see the
+    exclusion comment in `_process_road`: center lanes never carry a
+    `<width>` in the generator's output).
+    """
+    path = _write(tmp_path, _ROAD_1)
+    digest = build_digest(path)
+
+    assert digest["roads"][0]["lanes"] == [
+        {
+            "side": "left",
+            "id": 1,
+            "lane_section_s": 0.0,
+            "width_segment_count": 1,
+            "width_min_m": 3.5,
+            "width_max_m": 3.5,
+            "width_mean_m": 3.5,
+        }
+    ]
+
+
+def test_width_metrics_multi_segment_lane_takes_min_max_across_segments(tmp_path):
+    """Two piecewise-constant `<width>` segments: min/max span both of them.
+
+    Neither segment alone contains the other's value, so a metric that
+    skipped a segment entirely under a fixed, small global sample count
+    (rather than sampling every segment) would under-report the true
+    min/max - this is the road-65/67 multi-segment-lane scenario in
+    miniature (those lanes have 4-7 `<width>` segments each).
+    """
+    road = """
+<road name="r1" length="10.0" id="1" junction="-1">
+  <lanes>
+    <laneSection s="0.0">
+      <left>
+        <lane id="1" type="driving" level="false">
+          <width sOffset="0.0" a="2.0" b="0" c="0" d="0"/>
+          <width sOffset="5.0" a="4.0" b="0" c="0" d="0"/>
+        </lane>
+      </left>
+      <center>
+        <lane id="0" type="none" level="false"/>
+      </center>
+    </laneSection>
+  </lanes>
+</road>
+"""
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    assert digest["roads"][0]["lanes"] == [
+        {
+            "side": "left",
+            "id": 1,
+            "lane_section_s": 0.0,
+            "width_segment_count": 2,
+            "width_min_m": 2.0,
+            "width_max_m": 4.0,
+            "width_mean_m": 3.0,
+        }
+    ]
+
+
+def test_width_metrics_cubic_polynomial_evaluated_correctly(tmp_path):
+    """`width_min/max/mean_m` must use the full cubic, not just the `a` term.
+
+    a=1.0, b=0.1, c=0.01, d=0.001 over a 10m span, sampled at this segment's
+    own start/mid/end (ds=0/5/10 per `_lane_width_samples`):
+      ds=0  -> 1.0
+      ds=5  -> 1.0 + 0.1*5 + 0.01*25 + 0.001*125  = 1.875
+      ds=10 -> 1.0 + 0.1*10 + 0.01*100 + 0.001*1000 = 4.0
+    """
+    road = """
+<road name="r1" length="10.0" id="1" junction="-1">
+  <lanes>
+    <laneSection s="0.0">
+      <left>
+        <lane id="1" type="driving" level="false">
+          <width sOffset="0.0" a="1.0" b="0.1" c="0.01" d="0.001"/>
+        </lane>
+      </left>
+      <center>
+        <lane id="0" type="none" level="false"/>
+      </center>
+    </laneSection>
+  </lanes>
+</road>
+"""
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    lane = digest["roads"][0]["lanes"][0]
+    assert lane["width_min_m"] == pytest.approx(1.0, abs=1e-6)
+    assert lane["width_max_m"] == pytest.approx(4.0, abs=1e-6)
+    assert lane["width_mean_m"] == pytest.approx(2.292, abs=1e-3)
+
+
+def test_width_metrics_sorted_by_side_then_id(tmp_path):
+    """`lanes` entries must be sorted `(lane_section_s, side, id)`, not file order."""
+    road = """
+<road name="r1" length="10.0" id="1" junction="-1">
+  <lanes>
+    <laneSection s="0.0">
+      <left>
+        <lane id="2" type="driving" level="false">
+          <width sOffset="0.0" a="3.0" b="0" c="0" d="0"/>
+        </lane>
+        <lane id="1" type="driving" level="false">
+          <width sOffset="0.0" a="3.0" b="0" c="0" d="0"/>
+        </lane>
+      </left>
+      <right>
+        <lane id="1" type="driving" level="false">
+          <width sOffset="0.0" a="3.0" b="0" c="0" d="0"/>
+        </lane>
+      </right>
+    </laneSection>
+  </lanes>
+</road>
+"""
+    path = _write(tmp_path, road)
+    digest = build_digest(path)
+
+    entries = digest["roads"][0]["lanes"]
+    assert [(e["side"], e["id"]) for e in entries] == [
+        ("left", 1),
+        ("left", 2),
+        ("right", 1),
+    ]
+
+
 def test_hdg_delta_straight_road_is_all_zero(tmp_path):
     """A road whose geometries all share the same `hdg` is a straight line."""
     road = _road_with_hdgs(1, _hdgs_from_deg_deltas([0.0, 0.0, 0.0]))
