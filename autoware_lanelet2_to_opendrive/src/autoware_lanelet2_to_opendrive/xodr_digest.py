@@ -28,6 +28,32 @@ as unchanged; they were not. ``width_min_m``/``width_max_m``/``width_mean_m``/
 were added to close that specific gap - not every gap; see those two
 functions' docstrings for what the width metric still cannot catch.
 
+Road identity has an analogous, unclosed gap. `road["id"]` is not a
+property of a physical road; it comes from `enumerate(adjacent_groups)`
+over the lanelet grouping computed for that run (`road.py:1325-1326`), and
+nothing in the ``.xodr`` file itself records which lanelet(s) a road was
+built from. When the grouping is unchanged between two runs - e.g. the
+point-only preprocessing above - the same id does mean the same road:
+measured on the real dataset, 0 of 693 shared ids moved by more than 1m.
+When the grouping itself changes - e.g. enabling `merge_operations` - ids
+are reassigned wholesale, not carried over: 623 of those same 693 shared
+ids moved by more than 1m (median 265.9m among the moved, max 889.4m).
+Concretely, id 57 was a 19.29m road starting at (16.32, 220.01) in one run
+and a 51.78m road starting at (175.09, -76.96) in the other - two
+unrelated roads that happen to share a number, not one road that changed.
+
+A digest diff keyed by road ``id`` (this tool sorts `roads` by `id`, and an
+external `diff` between two digest files relies on that same ordering to
+line entries up) is therefore only a meaningful comparison for changes
+that preserve road composition. This tool does not close that gap for
+changes that don't: it has no alternative key today, so an id-based diff
+across a structural change like `merge_operations` cannot be trusted
+either way - a changed field is not evidence the road changed, and an
+unchanged one is not evidence it didn't. A correspondence that survives
+regrouping would have to come from data this tool does not read, e.g.
+matching each road's anchor lanelet(s) via the companion `mapping.json`'s
+`lanelet_to_road_and_lane` field.
+
 Extracted, per road: ``length``; ``<planView>`` geometry-primitive types and
 the heading deltas between consecutive ones (module comment above
 ``_hdg_summary``); lane counts by side/type; and, per non-center lane, a
