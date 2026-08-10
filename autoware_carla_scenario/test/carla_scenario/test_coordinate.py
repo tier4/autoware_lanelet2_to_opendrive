@@ -28,6 +28,11 @@ from autoware_carla_scenario.coordinate.transform import (
     _opendrive_to_carla,
 )
 
+# Generous bound on the nishishinjuku map's half-extent, in metres. Used to
+# assert that a coordinate is XODR-relative rather than MGRS-absolute (MGRS
+# easting/northing around Tokyo are ~81 km / ~33 km).
+_MAP_EXTENT_M = 5_000.0
+
 DATA_DIR = Path(__file__).parent / "data"
 _CONVERTER_TEST_DATA = (
     Path(__file__).resolve().parents[3]
@@ -163,11 +168,18 @@ class TestLanelet2ToCarla:
         assert math.isfinite(result.z)
         assert math.isfinite(result.yaw)
 
-    def test_carla_x_is_positive(self, map_manager):
-        """MGRS easting for Tokyo is positive (zone 54S)."""
+    def test_carla_coords_are_xodr_relative(self, map_manager):
+        """The MGRS offset must be subtracted, leaving XODR-relative metres.
+
+        MGRS easting/northing for Tokyo are ~81 km / ~33 km; the map itself is
+        about a kilometre across. Anything near the MGRS magnitude means the
+        offset was not applied, and a value far outside the map extent means it
+        was applied twice or with the wrong sign.
+        """
         lanelet_id = next(iter(map_manager.lanelet_map.laneletLayer)).id
         result = _lanelet2_to_carla(Lanelet2Pose(lanelet_id=lanelet_id, s=0.0))
-        assert result.x > 0
+        assert abs(result.x) < _MAP_EXTENT_M
+        assert abs(result.y) < _MAP_EXTENT_M
 
     def test_lateral_offset_displaces_by_correct_distance(self, map_manager):
         """t=1 m should shift position by exactly 1 m."""
@@ -196,11 +208,16 @@ class TestOpenDriveToCarla:
         assert math.isfinite(result.y)
         assert math.isfinite(result.z)
 
-    def test_carla_x_is_positive(self, map_manager):
-        """After adding MGRS offset, x should be in the Tokyo MGRS range (> 0)."""
+    def test_carla_coords_are_xodr_relative(self, map_manager):
+        """OpenDRIVE coordinates are already XODR-relative; no offset is added.
+
+        Roads sit on either side of the geoReference origin, so the sign of x
+        carries no information — the invariant is the magnitude.
+        """
         road_id = next(iter(map_manager.road_network.road_ids_to_object))
         result = _opendrive_to_carla(OpenDrivePose(road_id=road_id, lane_id=-1, s=0.0))
-        assert result.x > 0
+        assert abs(result.x) < _MAP_EXTENT_M
+        assert abs(result.y) < _MAP_EXTENT_M
 
     def test_lateral_offset_displaces_by_correct_distance(self, map_manager):
         """t=1 m should shift position by exactly 1 m."""

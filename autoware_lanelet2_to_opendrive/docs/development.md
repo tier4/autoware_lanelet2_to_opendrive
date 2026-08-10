@@ -8,11 +8,9 @@ codified in the repo-root [`CLAUDE.md`](https://github.com/tier4/autoware_lanele
 
 ### Prerequisites
 
-- **Python 3.10** (exactly 3.10 — see [Installation](installation.md) for
-  the rationale)
+- **Python 3.10 or newer** (the workspace lock is resolved for 3.10 — see
+  [Installation](installation.md) for the rationale)
 - **uv** 0.9.7 or newer
-- **Docker** with Compose (only required for end-to-end test verification;
-  see "Local test verification" below)
 - **Git**
 
 ### Cloning the repository
@@ -67,8 +65,6 @@ re-stage with `git add -u` and commit again.
 autoware_lanelet2_to_opendrive/                 # repo root (uv workspace)
 ├── pyproject.toml                              # workspace + tool config
 ├── uv.lock                                     # locked dependencies
-├── Dockerfile                                  # multi-stage CI / convert image
-├── docker-compose.yml                          # dev / test / lint / qc / carla / convert profiles
 ├── .pre-commit-config.yaml
 ├── autoware_lanelet2_to_opendrive/             # this package
 │   ├── pyproject.toml                          # package metadata & console scripts
@@ -144,38 +140,30 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 
 ## Local Test Verification (Container-Based)
 
-!!! warning "Run dynamic checks inside the container"
-    The runtime dependency `lanelet2-python-api-for-autoware` is built
-    from source against the system Boost. Hosts whose Boost ABI does not
-    match (e.g. Ubuntu 24.04 with Boost 1.83) will fail the wheel build
-    with `RuntimeError: Command failed: make -jN`. The Docker image
-    pins Ubuntu 22.04 with Boost 1.74, matching CI exactly.
-
-The repository ships a multi-stage `Dockerfile` and `docker-compose.yml`
-with profiles that mirror each CI job:
+Everything installs from wheels, so the whole suite runs on the host with
+no container and no system packages:
 
 ```bash
 # Full pytest suite (matches CI's `test` job)
-docker compose --profile test run --rm pytest
+uv run pytest -n auto
+
+# A single test file
+uv run pytest autoware_lanelet2_to_opendrive/test/test_main.py
 
 # Pre-commit on all files (matches CI's `lint-and-format` job)
-docker compose --profile lint run --rm lint
+uv run pre-commit run --all-files
 
 # QC: convert nishishinjuku and run qc-validate on the result
-docker compose --profile qc run --rm qc-validate
+uv run convert map=nishishinjuku target=carla \
+    input_map_path=autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm \
+    output_map_path=/tmp/nishishinjuku_carla.xodr
+uv run qc-validate /tmp/nishishinjuku_carla.xodr
 
-# CARLA: convert + carla-import-test + analyze
-docker compose --profile carla run --rm carla-import-test
-
-# Interactive workspace shell with the repo bind-mounted
-docker compose --profile dev run --rm dev
-
-# Slim convert image (uses the `convert` console script as its entrypoint)
-docker compose --profile convert run --rm convert input_map_path=/io/map.osm
+# CARLA import smoke test (needs a running CARLA server)
+uv run carla-import-test /tmp/nishishinjuku_carla.xodr --map-name nishishinjuku
 ```
 
-The static checks listed below do **not** import the package and can be
-run directly on the host without Docker:
+The static checks are the same ones pre-commit runs:
 
 ```bash
 uv run ruff check .
@@ -184,17 +172,6 @@ uv run mypy --ignore-missing-imports \
     autoware_lanelet2_to_opendrive/src \
     autoware_lanelet2_to_opendrive/test
 ```
-
-If you need to run unit tests without Docker (e.g. for a single test
-file) and your host happens to have a compatible Boost, you can fall
-back to:
-
-```bash
-uv run pytest autoware_lanelet2_to_opendrive/test/<file>.py
-```
-
-— but if the build fails with the `make -jN` error, defer to the
-container or to CI.
 
 ## Contributing
 
@@ -311,8 +288,8 @@ through the standard GitHub release workflow associated with each tag.
   — source format library
 - [Autoware](https://github.com/autowarefoundation/autoware) — target
   platform
-- [tier4/lanelet2_python_api_for_autoware](https://github.com/tier4/lanelet2_python_api_for_autoware)
-  — Lanelet2 Python wrapper used at runtime
+- [hakuturu583/simple_lanelet2](https://github.com/hakuturu583/simple_lanelet2)
+  — the Lanelet2 Python API used at runtime
 - [CARLA](https://carla.org/) — primary OpenDRIVE consumer
 
 ### Standards and specifications

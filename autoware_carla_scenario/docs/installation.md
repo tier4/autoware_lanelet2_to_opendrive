@@ -6,7 +6,8 @@ This guide will help you install the `autoware-carla-scenario` package.
 
 ### Operating System
 
-- **Linux** (Ubuntu 22.04 is the reference; CI uses 22.04 with Boost 1.74)
+- **Linux** (Ubuntu 22.04 is the reference; CI runs on `ubuntu-latest`).
+  Nothing is compiled at install time — every dependency resolves to a wheel.
 
 ### Python Version
 
@@ -72,30 +73,10 @@ This package is part of a workspace that also contains
     ```
 
 !!! note
-    The runtime dependency `lanelet2-python-api-for-autoware` is built
-    from source against system Boost. Hosts whose Boost version differs
-    from the CI image (Ubuntu 22.04 / Boost 1.74) may fail during
-    `uv sync`. In that case, use the Docker workflow described below.
-
-## Container-Based Installation
-
-The repository ships a multi-stage `Dockerfile` and `docker-compose.yml`
-at its root. The Docker image pins Ubuntu 22.04 and matches CI exactly,
-which avoids the Boost ABI issues mentioned above.
-
-```bash
-# Open an interactive development shell (workspace bind-mounted).
-docker compose --profile dev run --rm dev
-
-# Run the carla-scenario test suite.
-docker compose --profile test run --rm pytest
-
-# Run pre-commit hooks (matches CI's `lint-and-format` job).
-docker compose --profile lint run --rm lint
-```
-
-See [`docs/docker.md`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
-in the repository root for the full reference.
+    The Lanelet2 binding comes from
+    [`simple-lanelet2`](https://github.com/hakuturu583/simple_lanelet2)
+    as a prebuilt wheel, so `uv sync` needs no apt packages and no C++
+    toolchain on any host.
 
 ## Environment Configuration
 
@@ -132,8 +113,8 @@ The package's runtime dependencies (declared in `pyproject.toml`):
 - `numpy>=1.21`
 - `pytest>=9.0.1`
 - `python-dotenv>=1.2.2`
-- `lanelet2-python-api-for-autoware` — the Lanelet2 binding (provided
-  via the workspace; see the note in
+- `simple-lanelet2>=1.1.2` — the Lanelet2 binding, plus the Autoware
+  regulatory-element extensions, as a single wheel (see the note in
   `autoware_lanelet2_to_opendrive/pyproject.toml`)
 - `tqdm>=4.67.1`
 - `hydra-core>=1.3.2`, `omegaconf>=2.3.0`
@@ -153,8 +134,9 @@ Ensure that:
 1. You're using Python 3.10 (`>=3.10,<3.11`).
 2. The package was installed in your active environment (`uv sync` from
    the workspace root, or a fresh `uv venv` followed by `uv sync`).
-3. If you see `ImportError: ... lanelet2 ...`, your Boost version may
-   not match the wheel's expectation — switch to the Docker workflow.
+3. If you see `ImportError: ... lanelet2 ...`, a `lanelet2` distribution
+   from PyPI may be shadowing the one `simple-lanelet2` provides. Reset
+   the environment with `rm -rf .venv && uv sync --dev`.
 
 ### CARLA Connection Issues
 
