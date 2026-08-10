@@ -14,7 +14,7 @@ Command-line tool and Python library for converting HD map formats, specifically
 
 ### Key Dependencies/Libraries
 
-* **simple-lanelet2** (>\=1.0.3): Lanelet2 Python API and the Autoware regulatory-element extensions, shipped together as one prebuilt wheel
+* **simple-lanelet2** (>\=1.1.2): Lanelet2 Python API and the Autoware regulatory-element extensions, shipped together as one prebuilt wheel
 * **scipy** (>\=1.9.0): Scientific computing library for mathematical operations and interpolation
 * **splines** (>\=0.3.3): Spline interpolation for smooth road geometry generation
 * **scenariogeneration** (>\=0.16.3): OpenDRIVE generation and manipulation library

@@ -14,7 +14,7 @@ dependencies = [
     # against the system libboost-python and so needed apt packages, a C++
     # toolchain and a Boost version matched to the one the autoware extension
     # wheels were built against (refs #449).
-    "simple-lanelet2>=1.0.3",
+    "simple-lanelet2>=1.1.2",
     "scipy>=1.9.0",
     "lxml>=5.2.2",
     "mgrs>=1.5.0",

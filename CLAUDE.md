@@ -218,7 +218,7 @@ If pre-commit hooks fail:
 
 ## Dependencies
 
-- **simple-lanelet2** (>=1.0.3) - Provides `lanelet2` and
+- **simple-lanelet2** (>=1.1.2) - Provides `lanelet2` and
   `autoware_lanelet2_extension_python` as a single prebuilt wheel
 - Python 3.10 or higher is required. The workspace lock is resolved for 3.10
   because the CARLA 0.10.0 client is a cp310-only wheel; the converter package

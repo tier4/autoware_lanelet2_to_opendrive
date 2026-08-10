@@ -113,7 +113,7 @@ The package's runtime dependencies (declared in `pyproject.toml`):
 - `numpy>=1.21`
 - `pytest>=9.0.1`
 - `python-dotenv>=1.2.2`
-- `simple-lanelet2>=1.0.3` — the Lanelet2 binding, plus the Autoware
+- `simple-lanelet2>=1.1.2` — the Lanelet2 binding, plus the Autoware
   regulatory-element extensions, as a single wheel (see the note in
   `autoware_lanelet2_to_opendrive/pyproject.toml`)
 - `tqdm>=4.67.1`

@@ -101,7 +101,7 @@ The runtime dependencies declared in
 [`autoware_lanelet2_to_opendrive/pyproject.toml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/pyproject.toml)
 are:
 
-- `simple-lanelet2` (>=1.0.3) — Lanelet2 Python API plus the Autoware regulatory-element extensions, as a single wheel
+- `simple-lanelet2` (>=1.1.2) — Lanelet2 Python API plus the Autoware regulatory-element extensions, as a single wheel
 - `scipy` (>=1.9.0) — spline fitting and numerical primitives
 - `lxml` (>=5.2.2) — OpenDRIVE XML serialization
 - `mgrs` (>=1.5.0) — MGRS ↔ lat/lon conversion
