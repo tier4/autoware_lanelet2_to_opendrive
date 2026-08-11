@@ -1333,12 +1333,36 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Step 6.9: Validate no duplicate road IDs (safety check for ID assignment bugs)
         from autoware_lanelet2_to_opendrive.opendrive.validation import (
+            check_lane_width_plausibility,
             validate_no_duplicate_road_ids,
         )
 
         dup_result = validate_no_duplicate_road_ids(all_roads)
         if not dup_result.is_valid:
             print(f"\nWARNING: {dup_result.get_error_summary()}")
+
+        # Step 6.9a: Warn about implausibly wide lanes (e.g. a corrupted
+        # source coordinate inflating a lane to 20+ metres - see
+        # `check_lane_width_plausibility`'s docstring). This is a heuristic
+        # threshold calibrated on one map, not a spec violation, so it is a
+        # warning here, not a build failure - `qc_validate.py` is the CI gate
+        # that turns the same check into a hard failure. Run on `all_roads`
+        # before the parking-lot roads below are appended: parking-lot widths
+        # are config-driven (`construct_parking_roads`), not derived from
+        # lanelet boundary geometry, so they are not exposed to the source-map
+        # coordinate corruption this check targets. Run before Step 7 so the
+        # warnings print before `_write_opendrive_output` writes the file.
+        width_violations = check_lane_width_plausibility(all_roads)
+        if width_violations:
+            print(
+                f"\nWARNING: {len(width_violations)} lane(s) exceed the "
+                f"{DEFAULT_CONFIG.lane_width_validation.implausible_width_threshold_m:.1f}m "
+                "lane-width plausibility threshold (heuristic, calibrated on one "
+                "reference map - a legitimately wide lane on a different map can "
+                "also trigger this; conversion is not aborted):"
+            )
+            for violation in width_violations:
+                print(f"  {violation}")
 
         # Step 6.9: Build parking lots (P2-1)
         # Runs AFTER crosswalk/stop-line extraction so the nearest-road
