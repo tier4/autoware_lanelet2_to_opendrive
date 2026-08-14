@@ -3,17 +3,26 @@
 These tests exercise ``Lane.construct_from_lanelet`` directly with minimal
 in-memory lanelets (no ``.osm`` round-trip, no MGRS projection) to lock in
 the subtype -> ``LaneType`` mapping. They close the coverage gap left by
-PR #427 (and PR #424 lineage), which extended the subtype filter in
-``opendrive/road.py`` to include ``highway`` and ``road_shoulder`` in
-addition to ``road`` and ``walkway``.
+PR #427 (and PR #424 lineage), which extended the road-construction subtype
+filter in ``opendrive/road.py`` beyond the original ``road``/``walkway`` set.
 
 If a future refactor drops or changes a branch in the subtype mapping, these
 tests will fail and force an explicit decision.
 """
 
+import contextlib
+import io
+
 import lanelet2
 import pytest
 
+from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
+from autoware_lanelet2_to_opendrive.conversion_config import (
+    ConversionConfig,
+    OriginSpec,
+    ParamPoly3Config,
+)
+from autoware_lanelet2_to_opendrive.main import convert_lanelet2_to_opendrive
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneType
 
@@ -51,6 +60,7 @@ def _make_straight_lanelet(
         ("road", LaneType.DRIVING),
         ("highway", LaneType.DRIVING),
         ("walkway", LaneType.SIDEWALK),
+        ("pedestrian_lane", LaneType.SIDEWALK),
         ("road_shoulder", LaneType.SHOULDER),
         ("bicycle_lane", LaneType.BIKING),
     ],
@@ -125,3 +135,82 @@ def test_missing_subtype_falls_back_to_driving() -> None:
     lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1)
 
     assert lane.lane_type is LaneType.DRIVING
+
+
+def _make_adjacent_subtype_map(
+    adjacent_subtype: str,
+) -> lanelet2.core.LaneletMap:
+    """Build a minimal road lanelet with one adjacent subtype lanelet."""
+    lanelet_map = lanelet2.core.LaneletMap()
+
+    def make_points(y: float) -> list[lanelet2.core.Point3d]:
+        return [
+            lanelet2.core.Point3d(lanelet2.core.getId(), 0.0, y, 0.0),
+            lanelet2.core.Point3d(lanelet2.core.getId(), 10.0, y, 0.0),
+        ]
+
+    road_left = lanelet2.core.LineString3d(lanelet2.core.getId(), make_points(0.0))
+    shared = lanelet2.core.LineString3d(lanelet2.core.getId(), make_points(-3.5))
+    adjacent_outer = lanelet2.core.LineString3d(
+        lanelet2.core.getId(), make_points(-5.5)
+    )
+
+    road = lanelet2.core.Lanelet(lanelet2.core.getId(), road_left, shared)
+    road.attributes["subtype"] = "road"
+    adjacent = lanelet2.core.Lanelet(lanelet2.core.getId(), shared, adjacent_outer)
+    adjacent.attributes["subtype"] = adjacent_subtype
+
+    lanelet_map.add(road)
+    lanelet_map.add(adjacent)
+    return lanelet_map
+
+
+def _convert_adjacent_subtype_map(adjacent_subtype: str):
+    """Run the normal converter path for a minimal adjacent subtype map."""
+    lanelet_map = _make_adjacent_subtype_map(adjacent_subtype)
+    config = ConversionConfig(
+        origin=OriginSpec(mgrs_code="54SUE"),
+        parampoly3=ParamPoly3Config(enabled=False),
+    )
+
+    COORDINATE_OFFSET.reset()
+    try:
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            opendrive, *_ = convert_lanelet2_to_opendrive(lanelet_map, config)
+        return opendrive.to_xml()
+    finally:
+        COORDINATE_OFFSET.reset()
+
+
+def _lane_width_values(lane) -> list[float]:
+    """Return constant width coefficients emitted for a lane."""
+    return [float(width.get("a")) for width in lane.findall("width")]
+
+
+def test_pedestrian_lane_reaches_e2e_conversion_as_sidewalk() -> None:
+    """An adjacent pedestrian_lane must be emitted as an OpenDRIVE sidewalk."""
+    root = _convert_adjacent_subtype_map("pedestrian_lane")
+
+    driving_lanes = root.findall(".//lane[@type='driving']")
+    sidewalk_lanes = root.findall(".//lane[@type='sidewalk']")
+
+    assert len(driving_lanes) == 1, "road lanelet should remain a driving lane"
+    assert sidewalk_lanes, "pedestrian_lane should produce lane[type='sidewalk']"
+
+
+def test_bicycle_lane_reaches_e2e_conversion_as_biking_with_width() -> None:
+    """An adjacent bicycle_lane must be emitted as biking with meaningful width."""
+    root = _convert_adjacent_subtype_map("bicycle_lane")
+
+    driving_lanes = root.findall(".//lane[@type='driving']")
+    biking_lanes = root.findall(".//lane[@type='biking']")
+
+    assert len(driving_lanes) == 1, "road lanelet should remain a driving lane"
+    assert biking_lanes, "bicycle_lane should produce lane[type='biking']"
+
+    widths = [width for lane in biking_lanes for width in _lane_width_values(lane)]
+    assert widths, "biking lanes should emit OpenDRIVE lane width entries"
+    assert all(1.5 <= width <= 2.5 for width in widths)
