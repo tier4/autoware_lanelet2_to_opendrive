@@ -457,7 +457,7 @@ class ScenarioRunner:
         tm.set_synchronous_mode(True)
         tm.set_random_device_seed(scenario.random_seed)
 
-        ego = scenario.ego_type()
+        ego = scenario.create_ego()
         recording_started = False
         tick_count = 0
         result: Optional[ScenarioResult] = None
@@ -514,6 +514,11 @@ class ScenarioRunner:
             # Apply initial speeds after warm-up stabilisation
             scenario.set_initial_speed(ego_actor)
 
+            # Let the ego entity bring up whatever it needs now that the actor
+            # exists and physics have settled (e.g. sensors and an external
+            # driver session).
+            ego.on_scenario_start(world)
+
             _vehicle_entity_module._warmup_done = True
 
             # Start native CARLA recorder
@@ -545,6 +550,10 @@ class ScenarioRunner:
                     cb(world)
 
                 world.tick()
+
+                # Give the ego entity a chance to drive itself before the
+                # scenario's own post-tick hooks observe the new state.
+                ego.on_tick(world, elapsed)
 
                 # Post-tick actions (receive elapsed)
                 for action in scenario._post_tick_actions:
@@ -617,6 +626,27 @@ class ScenarioRunner:
                 if result is not None:
                     break
 
+                # An ego entity can ask to stop early (e.g. the driver policy
+                # signalled termination).  Conditions are checked first so a
+                # pass or fail firing on the same tick still decides the outcome;
+                # on its own, an early stop is not a pass.
+                if ego.termination_requested:
+                    logger.info(
+                        "[%s] Ego entity requested termination at t=%.2fs (tick %d)",
+                        scenario_name,
+                        elapsed,
+                        tick_count,
+                    )
+                    result = ScenarioResult(
+                        passed=False,
+                        message="Ego entity requested session termination",
+                        elapsed_seconds=elapsed,
+                        condition_statuses=_collect_condition_statuses(
+                            scenario, world, elapsed, scenario_name
+                        ),
+                    )
+                    break
+
             # If the loop exited via is_done() with no result, treat as passed
             if result is None:
                 elapsed = time.monotonic() - start_time
@@ -629,6 +659,17 @@ class ScenarioRunner:
         finally:
             logger.info("[%s] === Cleanup start ===", scenario_name)
             _vehicle_entity_module._warmup_done = False
+
+            # Let the ego entity tear down its own resources (driver session,
+            # sensors) while the world is still alive.
+            try:
+                ego.on_scenario_end(world)
+            except Exception:
+                logger.warning(
+                    "[%s] Ego entity teardown failed",
+                    scenario_name,
+                    exc_info=True,
+                )
 
             # Explicitly destroy the ego vehicle so it does not persist
             # if reload_world() fails later.

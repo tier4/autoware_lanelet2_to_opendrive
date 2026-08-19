@@ -44,6 +44,7 @@ from omegaconf import DictConfig, OmegaConf
 from autoware_carla_scenario import (
     BaseScenario,
     EgoConfig,
+    EgoVehicle,
     GroundProjectionConfig,
     Lanelet2Pose,
     ScenarioQueue,
@@ -135,6 +136,51 @@ def build_ego_and_spawn(
         s=cfg.ego.spawn_s,
     )
     return ego, spawn_pose, ground_projection
+
+
+def build_ego_entity(cfg: DictConfig) -> EgoVehicle | None:
+    """Build the ego entity selected by ``cfg.ego.entity``.
+
+    Returns ``None`` for ``"autopilot"``, letting the scenario fall back to its default
+    :class:`~autoware_carla_scenario.entity.ego.EgoVehicle`.
+
+    Raises:
+        ValueError: If ``cfg.ego.entity`` names an unknown entity.
+    """
+    entity = str(cfg.ego.get("entity", "autopilot"))
+
+    if entity == "autopilot":
+        return None
+
+    if entity == "autoware":
+        from autoware_carla_scenario import AutowareEntity  # noqa: PLC0415
+
+        return AutowareEntity()
+
+    if entity == "carla_driver":
+        from autoware_carla_scenario import CarlaDriverEntity  # noqa: PLC0415
+        from autoware_carla_scenario.driver import (  # noqa: PLC0415
+            ControlConfig,
+            DriverClientConfig,
+        )
+
+        driver_cfg = cfg.get("driver")
+        if driver_cfg is None:
+            msg = (
+                "ego.entity=carla_driver requires the 'driver' config group. "
+                "Add 'driver: default' to the defaults list."
+            )
+            raise ValueError(msg)
+
+        driver_dict = _to_dict(driver_cfg)
+        control = ControlConfig.from_mapping(driver_dict.get("control", {}))
+        return CarlaDriverEntity(DriverClientConfig.from_mapping(driver_dict), control)
+
+    msg = (
+        f"Unknown ego.entity: {entity!r}. "
+        "Expected one of: 'autopilot', 'autoware', 'carla_driver'."
+    )
+    raise ValueError(msg)
 
 
 def run_scenario_with_queue(
@@ -461,7 +507,9 @@ def build_scenario(
         and its return value is forwarded to the caller.
     """
     if build_scenario_fn is not None:
-        return build_scenario_fn(cfg)
+        ego, scenario = build_scenario_fn(cfg)
+        scenario.ego_entity = build_ego_entity(cfg)
+        return ego, scenario
 
     # Validate the name before doing any expensive work.
     scenario_name: str = cfg.scenario.name
@@ -476,7 +524,9 @@ def build_scenario(
 
     ego, spawn_pose, ground_projection = build_ego_and_spawn(cfg)
     scenario_dict = _to_dict(cfg.scenario)
-    return ego, builder(ego, scenario_dict, spawn_pose, ground_projection)
+    scenario = builder(ego, scenario_dict, spawn_pose, ground_projection)
+    scenario.ego_entity = build_ego_entity(cfg)
+    return ego, scenario
 
 
 def run_scenario(

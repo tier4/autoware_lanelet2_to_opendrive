@@ -89,6 +89,20 @@ tree internally:
 | `CameraSensorBase`, `CameraSensorConfig` | Provider-agnostic camera sensor interface. |
 | `CarlaCameraSensor`, `CarlaCameraSensorConfig` | CARLA RGB camera implementation, used by the video recorder and `AttachCarlaCameraSensorAction`. |
 
+## External driver (`autoware_carla_scenario.driver`)
+
+Connects the ego to a driving policy served over alpasim's
+`egodriver.EgodriverService`. See [External Driver Interface](driver_interface.md).
+
+| Symbol | Description |
+|--------|-------------|
+| `BaseEgoDriverClient` | Transport-agnostic client interface: session lifecycle, observation submission, `drive`. |
+| `EgoDriverGrpcClient` | gRPC implementation against the vendored alpasim protos. |
+| `DriverClientConfig`, `DriverCameraConfig` | Connection settings, policy cadence, and the camera rig streamed to the policy. |
+| `ControlConfig`, `TrajectoryFollower`, `VehicleCommand` | Pure-pursuit + PID tracking that turns a plan into `carla.VehicleControl`. |
+| `Pose`, `Trajectory` | Rigid-transform primitives with protobuf conversions (right-handed frame). |
+| `EgoObservation`, `DriveOutcome` | The state sent to the policy and the plan it returns. |
+
 ## Coordinate transforms (`autoware_carla_scenario.coordinate`)
 
 | Symbol | Description |
@@ -107,8 +121,9 @@ tree internally:
 | Symbol | Description |
 |--------|-------------|
 | `VehicleEntity`, `VehicleEntityConfig` | Generic vehicle actor with retry-aware spawn. |
-| `EgoVehicle` | Subclass with the fixed `EGO_ROLE_NAME`. |
-| `AutowareEntity` | Marker base class for Autoware-managed entities. |
+| `EgoVehicle` | Subclass with the fixed `EGO_ROLE_NAME`, plus the `on_scenario_start` / `on_tick` / `on_scenario_end` lifecycle hooks `ScenarioRunner` calls. |
+| `AutowareEntity` | Opts out of TrafficManager autopilot and leaves the actor for an external stack. |
+| `CarlaDriverEntity` | Drives the ego from an external policy's plan over the `egodriver` gRPC contract. See [External Driver Interface](driver_interface.md). |
 | `SpawnLocation` (Protocol) | Tag interface implemented by spawn-point providers. |
 | `SpawnTransform` | Spawn at an explicit `carla.Transform`. |
 | `SpawnPointIndex` | Spawn at the N-th map spawn point. |

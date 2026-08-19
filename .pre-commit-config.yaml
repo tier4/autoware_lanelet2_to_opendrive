@@ -2,8 +2,14 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
+      # The vendored alpasim protos are copied verbatim from upstream (see
+      # autoware_carla_scenario/proto/README.md) and the modules under _proto/ are
+      # protoc output checked byte-for-byte by test_proto_generated.py. Reformatting
+      # either would break that guarantee.
       - id: trailing-whitespace
+        exclude: '^autoware_carla_scenario/(proto/|src/autoware_carla_scenario/driver/_proto/)'
       - id: end-of-file-fixer
+        exclude: '^autoware_carla_scenario/(proto/|src/autoware_carla_scenario/driver/_proto/)'
       - id: check-yaml
         exclude: 'mkdocs\.yml$'
       - id: check-added-large-files

@@ -1,0 +1,42 @@
+# @package _global_
+#
+# Settings for an external driver policy, used when `ego.entity: carla_driver`.
+# The policy is expected to serve `egodriver.EgodriverService`, e.g.
+#   carla-driver-interface serve --policy route_follower --port 50051
+driver:
+  address: localhost:50051
+  timeout_s: 60.0
+  # Must be a positive integer multiple of the 0.05 s simulation step.
+  policy_timestep_s: 0.1
+  image_quality: 90
+  route_horizon_m: 80.0
+  route_resolution_m: 2.0
+  # null derives the rig origin offset from the vehicle's wheel physics.
+  rear_axle_offset_m: null
+  send_ground_truth: false
+  random_seed: 0
+  cameras:
+    - logical_id: camera_front_wide_120fov
+      image_width: 960
+      image_height: 604
+      fov: 120.0
+      fps: 20.0
+      position_x: 1.5
+      position_y: 0.0
+      position_z: 1.6
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+  control:
+    lookahead_gain_s: 0.9
+    min_lookahead_m: 4.0
+    max_lookahead_m: 20.0
+    wheelbase_m: 2.8
+    max_steer_angle_deg: 70.0
+    max_steer_rate: 4.0
+    speed_kp: 0.6
+    speed_ki: 0.15
+    speed_kd: 0.05
+    integral_limit: 1.0
+    stop_speed_mps: 0.2
+    stop_brake: 0.6

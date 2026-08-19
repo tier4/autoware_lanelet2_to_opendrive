@@ -195,3 +195,53 @@ class _ElapsedRecordingCondition(BaseCondition):
     def check(self, world: object, elapsed: float) -> Optional[ScenarioResult]:
         self.last_elapsed = elapsed
         return None
+
+
+# ---------------------------------------------------------------------------
+# Ego entity selection
+# ---------------------------------------------------------------------------
+
+
+class TestCreateEgo:
+    """`ScenarioRunner` calls `create_ego()` to obtain the entity it spawns."""
+
+    def test_defaults_to_a_traffic_manager_ego(self) -> None:
+        from autoware_carla_scenario.entity.ego import EgoVehicle
+
+        ego = _SimpleScenario(_make_ego_config()).create_ego()
+        assert isinstance(ego, EgoVehicle)
+        assert ego.use_autopilot is True
+
+    def test_ego_type_is_instantiated_when_given(self) -> None:
+        from autoware_carla_scenario.entity.autoware_entity import AutowareEntity
+
+        scenario = _SimpleScenario(_make_ego_config())
+        scenario.ego_type = AutowareEntity
+        ego = scenario.create_ego()
+        assert isinstance(ego, AutowareEntity)
+        assert ego.use_autopilot is False
+
+    def test_a_prebuilt_entity_takes_precedence(self) -> None:
+        """Entities needing constructor arguments are supplied as instances."""
+        from autoware_carla_scenario.entity.autoware_entity import AutowareEntity
+        from autoware_carla_scenario.entity.ego import EgoVehicle
+
+        scenario = _SimpleScenario(_make_ego_config())
+        scenario.ego_type = EgoVehicle
+        prebuilt = AutowareEntity()
+        scenario.ego_entity = prebuilt
+
+        assert scenario.create_ego() is prebuilt
+
+    def test_create_ego_returns_the_same_instance_each_call(self) -> None:
+        from autoware_carla_scenario.entity.autoware_entity import AutowareEntity
+
+        scenario = _SimpleScenario(_make_ego_config())
+        scenario.ego_entity = AutowareEntity()
+        assert scenario.create_ego() is scenario.create_ego()
+
+    def test_default_ego_never_requests_termination(self) -> None:
+        assert (
+            _SimpleScenario(_make_ego_config()).create_ego().termination_requested
+            is False
+        )

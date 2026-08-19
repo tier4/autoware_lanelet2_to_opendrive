@@ -710,8 +710,22 @@ classDiagram
     }
 
     class EgoVehicle {
+        +use_autopilot = true
+        +actor: carla.Actor | None
         +spawn(world, config) carla.Actor
+        +on_scenario_start(world)
+        +on_tick(world, elapsed)
+        +on_scenario_end(world)
         +destroy()
+    }
+
+    class AutowareEntity {
+        +use_autopilot = false
+    }
+
+    class CarlaDriverEntity {
+        +use_autopilot = false
+        +termination_requested: bool
     }
 
     VehicleEntityConfig <|-- EgoConfig
@@ -719,7 +733,20 @@ classDiagram
     SpawnLocation <|.. SpawnPointIndex
     VehicleEntityConfig --> SpawnLocation
     VehicleEntity --> VehicleEntityConfig
+    EgoVehicle <|-- AutowareEntity
+    EgoVehicle <|-- CarlaDriverEntity
 ```
+
+**Ego lifecycle hooks**: `ScenarioRunner` calls `on_scenario_start()` after the warm-up
+ticks, `on_tick()` on every simulation tick, and `on_scenario_end()` during teardown.
+They are no-ops on `EgoVehicle`, so a TrafficManager-driven ego costs nothing. An ego
+that drives itself overrides them — see
+[External Driver Interface](driver_interface.md).
+
+**Who drives the ego**: `use_autopilot` decides whether `ScenarioRunner` calls
+`set_autopilot(True)` on the ego actor. `EgoVehicle` opts in (TrafficManager drives);
+`AutowareEntity` opts out and nothing drives the actor; `CarlaDriverEntity` opts out and
+drives it itself from an external policy's plan.
 
 **Spawn retry logic**: When a vehicle fails to spawn (e.g., collision with existing geometry), the spawn system retries with lateral (`t_step`) and vertical (`z_step`) offsets, up to `spawn_retry_max_count` attempts.
 
