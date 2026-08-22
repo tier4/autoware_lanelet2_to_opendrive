@@ -37,6 +37,7 @@ __all__ = [
     "rear_axle_offset",
     "route_waypoints_in_rig",
     "to_local_pose",
+    "to_local_vector",
 ]
 
 #: Rear-axle offsets outside this magnitude (metres) are considered implausible and are
@@ -48,7 +49,7 @@ _MAX_PLAUSIBLE_AXLE_OFFSET_M: float = 5.0
 _MIN_ROUTE_POINTS: int = 2
 
 
-def _to_local_vector(x: float, y: float, z: float) -> NDArray[np.float64]:
+def to_local_vector(x: float, y: float, z: float) -> NDArray[np.float64]:
     """Return a CARLA world *polar* vector in the right-handed local frame."""
     return np.array([x, -y, z], dtype=np.float64)
 
@@ -57,7 +58,7 @@ def _to_local_axial(x: float, y: float, z: float) -> NDArray[np.float64]:
     """Return a CARLA world *axial* vector (e.g. angular velocity) in the local frame.
 
     The handedness flip is a reflection, so pseudovectors pick up an extra sign change
-    relative to :func:`_to_local_vector`.
+    relative to :func:`to_local_vector`.
     """
     return np.array([-x, y, -z], dtype=np.float64)
 
@@ -117,7 +118,7 @@ def rear_axle_offset(actor: "carla.Actor", override: Optional[float] = None) -> 
             to_local_pose(transform)
             .inverse()
             .transform_points(
-                np.stack([_to_local_vector(*(point / 100.0)) for point in world_cm])
+                np.stack([to_local_vector(*(point / 100.0)) for point in world_cm])
             )
         )
         offset = float(np.mean(local[:, 0]))
@@ -156,8 +157,8 @@ def ego_observation(
     acceleration = actor.get_acceleration()
     angular = actor.get_angular_velocity()
 
-    linear_local = _to_local_vector(velocity.x, velocity.y, velocity.z)
-    accel_local = _to_local_vector(acceleration.x, acceleration.y, acceleration.z)
+    linear_local = to_local_vector(velocity.x, velocity.y, velocity.z)
+    accel_local = to_local_vector(acceleration.x, acceleration.y, acceleration.z)
     angular_local = np.radians(_to_local_axial(angular.x, angular.y, angular.z))
 
     return EgoObservation(
@@ -230,7 +231,7 @@ def route_waypoints_in_rig(
     travelled = 0.0
     while travelled < horizon_m:
         location = current.transform.location
-        points.append(_to_local_vector(location.x, location.y, location.z))
+        points.append(to_local_vector(location.x, location.y, location.z))
         following = current.next(step)
         if not following:
             break

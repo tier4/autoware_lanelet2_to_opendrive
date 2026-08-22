@@ -102,6 +102,7 @@ Connects the ego to a driving policy served over alpasim's
 | `ControlConfig`, `TrajectoryFollower`, `VehicleCommand` | Pure-pursuit + PID tracking that turns a plan into `carla.VehicleControl`. |
 | `Pose`, `Trajectory` | Rigid-transform primitives with protobuf conversions (right-handed frame). |
 | `EgoObservation`, `DriveOutcome` | The state sent to the policy and the plan it returns. |
+| `RendererDataBuilder` | Collects CARLA ground truth (governing traffic light, other vehicles, speed limit) into the `renderer_data` extension payload. |
 
 ## Coordinate transforms (`autoware_carla_scenario.coordinate`)
 

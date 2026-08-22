@@ -23,6 +23,7 @@ from ..driver.base import BaseEgoDriverClient, DriverClientConfig, EgoObservatio
 from ..driver.control import ControlConfig, TrajectoryFollower
 from ..driver.egodriver_client import EgoDriverGrpcClient
 from ..driver.geometry import Trajectory
+from ..driver.renderer import RendererDataBuilder
 from ..driver.observation import (
     ego_observation,
     encode_frame_jpeg,
@@ -45,6 +46,9 @@ _FIXED_DELTA_S: float = 0.05
 
 #: Microseconds per second, for the contract's ``fixed64`` timestamps.
 _US_PER_S: int = 1_000_000
+
+#: Log the policy's own diagnostics every N policy steps (~1 s at 10 Hz).
+_DEBUG_LOG_INTERVAL: int = 10
 
 
 class CarlaDriverEntity(EgoVehicle):
@@ -85,6 +89,7 @@ class CarlaDriverEntity(EgoVehicle):
         self._session_open: bool = False
         self._drive_count: int = 0
         self._map: Optional["carla.Map"] = None
+        self._renderer: Optional[RendererDataBuilder] = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -139,6 +144,9 @@ class CarlaDriverEntity(EgoVehicle):
         # once here and reused for the rolling route walk.
         self._map = world.get_map()
 
+        if self._config.send_renderer_data:
+            self._renderer = RendererDataBuilder(world, actor, self._config)
+
         session_uuid = str(uuid.uuid4())
         self._client.start_session(session_uuid, str(self._map.name))
         self._session_open = True
@@ -186,6 +194,7 @@ class CarlaDriverEntity(EgoVehicle):
                 logger.warning("Failed to destroy camera %s", logical_id, exc_info=True)
         self._cameras = []
         self._map = None
+        self._renderer = None
 
         logger.info(
             "Driver session finished after %d policy step(s)%s",
@@ -247,14 +256,41 @@ class CarlaDriverEntity(EgoVehicle):
         query_us = self._sim_time_us + int(
             round(self._config.policy_timestep_s * _US_PER_S)
         )
-        outcome = self._client.drive(self._sim_time_us, query_us)
+        outcome = self._client.drive(
+            self._sim_time_us,
+            query_us,
+            self._renderer_data(observation),
+        )
         self._plan = outcome.trajectory
         self._drive_count += 1
         self._last_policy_time_us = self._sim_time_us
 
+        if outcome.debug_scalars and self._drive_count % _DEBUG_LOG_INTERVAL == 0:
+            logger.info(
+                "[%s] step %d: %s",
+                outcome.policy_name or "driver",
+                self._drive_count,
+                " ".join(
+                    f"{key}={value:.3f}"
+                    for key, value in sorted(outcome.debug_scalars.items())
+                ),
+            )
+
         if outcome.terminate_session and not self._termination_requested:
             logger.info("Driver policy requested session termination")
             self._termination_requested = True
+
+    def _renderer_data(self, observation: EgoObservation) -> bytes:
+        """Return the CARLA ground-truth payload for this policy step.
+
+        Empty when ``send_renderer_data`` is off.  Note that a policy cannot tell
+        that apart from "nothing to report": both read as no traffic light and no
+        other vehicles, so turning this off quietly weakens any policy that
+        reasons about them.
+        """
+        if self._renderer is None:
+            return b""
+        return self._renderer.build(self._sim_time_us, observation.pose)
 
     def _submit_camera_frames(self) -> None:
         """Encode and send the latest frame from each camera."""

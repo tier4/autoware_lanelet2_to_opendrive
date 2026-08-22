@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// CARLA-specific extensions to the alpasim egodriver contract.
+//
+// Nothing here changes the alpasim wire format.  The upstream service
+// `egodriver.EgodriverService` is used verbatim (see `alpasim_grpc`); the
+// messages below are only ever carried inside the two `bytes` extension points
+// upstream already provides:
+//
+//   * `egodriver.DriveRequest.renderer_data`
+//         -> serialized `carla_driver.v0.CarlaRendererData`
+//   * `egodriver.DriveResponse.DebugInfo.unstructured_debug_info`
+//         -> serialized `carla_driver.v0.CarlaDriveDebugInfo`
+//
+// A driver that ignores those bytes stays fully compatible; a driver that wants
+// CARLA ground truth can parse them.  Upstream messages are imported and
+// composed (never redefined) so field numbers can never drift.
+
+syntax = "proto3";
+
+package carla_driver.v0;
+
+import "alpasim_grpc/v0/common.proto";
+import "alpasim_grpc/v0/egodriver.proto";
+import "alpasim_grpc/v0/sensorsim.proto";
+
+////////////////////////////////////////////////////////////////////////////////
+// Renderer -> driver payload (carried in DriveRequest.renderer_data)
+////////////////////////////////////////////////////////////////////////////////
+
+// State of the traffic light that currently governs the ego lane.
+enum TrafficLightState {
+  TRAFFIC_LIGHT_STATE_UNKNOWN = 0;
+  TRAFFIC_LIGHT_STATE_NONE = 1; // no light applies to the ego right now
+  TRAFFIC_LIGHT_STATE_RED = 2;
+  TRAFFIC_LIGHT_STATE_YELLOW = 3;
+  TRAFFIC_LIGHT_STATE_GREEN = 4;
+  TRAFFIC_LIGHT_STATE_OFF = 5;
+}
+
+message CarlaWeather {
+  float cloudiness = 1;
+  float precipitation = 2;
+  float precipitation_deposits = 3;
+  float wind_intensity = 4;
+  float sun_azimuth_angle = 5;
+  float sun_altitude_angle = 6;
+  float fog_density = 7;
+  float wetness = 8;
+}
+
+// An actor other than the ego, in the alpasim `local` frame (right handed,
+// already converted out of CARLA's left handed world).
+message CarlaActorState {
+  string track_id = 1;
+  string type_id = 2; // CARLA blueprint id, e.g. "vehicle.tesla.model3"
+  common.Pose pose_local_to_aabb = 3;
+  common.AABB aabb = 4;
+  common.DynamicState dynamic_state = 5;
+}
+
+// Packed into `egodriver.DriveRequest.renderer_data`.
+message CarlaRendererData {
+  fixed64 snapshot_timestamp_us = 1;
+  // CARLA world snapshot frame counter; useful for correlating with recordings.
+  uint64 frame_id = 2;
+  string map_name = 3;
+  CarlaWeather weather = 4;
+  TrafficLightState ego_traffic_light = 5;
+  // Distance to the governing traffic light's stop line, in metres, measured
+  // along the ego's heading.
+  //
+  // Negative when no stop line applies to the ego: either `ego_traffic_light`
+  // is NONE/UNKNOWN, or the ego has already crossed the line. The two cases
+  // are deliberately not distinguished -- in both there is nothing ahead to
+  // stop for. A straight-line distance would be ambiguous, since it starts
+  // growing again once the ego crosses, and a policy that stopped inside the
+  // light's trigger volume would never be told it had got through.
+  float ego_traffic_light_distance_m = 6;
+  // Posted speed limit for the ego lane, in m/s. 0 when unknown.
+  float speed_limit_mps = 7;
+  repeated CarlaActorState actors = 8;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Driver -> runtime payload (carried in DriveResponse.DebugInfo)
+////////////////////////////////////////////////////////////////////////////////
+
+// Packed into `egodriver.DriveResponse.DebugInfo.unstructured_debug_info`.
+message CarlaDriveDebugInfo {
+  string policy_name = 1;
+  float inference_seconds = 2;
+  // Free-form scalars the policy wants surfaced in the rollout metrics.
+  map<string, double> scalars = 3;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Session description
+////////////////////////////////////////////////////////////////////////////////
+
+// CARLA-side view of a rollout session.  Wraps (rather than replaces) the
+// upstream request that is actually sent over the wire, so the two can never
+// disagree about session_uuid, seed or camera set.
+message CarlaDriveSessionInfo {
+  egodriver.DriveSessionRequest base = 1;
+  string map_name = 2;
+  string scenario_name = 3;
+  // Simulator tick period; `policy_timestep_us` is a multiple of it.
+  fixed64 fixed_delta_us = 4;
+  fixed64 policy_timestep_us = 5;
+  // Longitudinal offset from the CARLA actor origin to the alpasim rig origin
+  // (rear axle centre projected to the ground), in metres.
+  float rear_axle_offset_m = 6;
+  repeated nre.grpc.protos.sensorsim.AvailableCamerasReturn.AvailableCamera cameras = 7;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Compatibility report
+////////////////////////////////////////////////////////////////////////////////
+
+// How closely this project follows one aspect of the alpasim contract.
+enum CompatLevel {
+  COMPAT_LEVEL_UNSPECIFIED = 0;
+  // Byte-for-byte the upstream behaviour.
+  COMPAT_LEVEL_EXACT = 1;
+  // Same messages, narrower behaviour (e.g. pinhole cameras only).
+  COMPAT_LEVEL_PARTIAL = 2;
+  // Same driver-facing contract, different implementation behind it
+  // (e.g. CARLA physics instead of the PhysicsService RPC).
+  COMPAT_LEVEL_STRUCTURAL = 3;
+  // Present upstream, absent here.
+  COMPAT_LEVEL_UNIMPLEMENTED = 4;
+  // Beyond upstream; carried in an upstream-sanctioned extension point.
+  COMPAT_LEVEL_EXTENSION = 5;
+}
+
+message CompatEntry {
+  string area = 1;
+  string alpasim_behaviour = 2;
+  string carla_behaviour = 3;
+  CompatLevel level = 4;
+  // Proto symbols this entry is about, e.g. "egodriver.DriveRequest".
+  repeated string symbols = 5;
+}
+
+message CarlaCompatReport {
+  // Version of this package.
+  string carla_driver_interface_version = 1;
+  // alpasim commit the `alpasim-grpc` dependency is pinned to.
+  string alpasim_grpc_rev = 2;
+  // `alpasim_grpc.API_VERSION_MESSAGE`, forwarded unchanged.
+  common.VersionId.APIVersion alpasim_grpc_api_version = 3;
+  repeated CompatEntry entries = 4;
+}

@@ -229,6 +229,23 @@ class DriverConfig:
     #: Whether to also submit the recorded ground-truth trajectory.
     send_ground_truth: bool = False
 
+    #: Whether to send CARLA ground truth (traffic light, other vehicles, speed
+    #: limit) in ``DriveRequest.renderer_data``.  A policy that reasons about
+    #: any of those reads them from there; without it, it sees an empty world
+    #: and says nothing about the omission.
+    send_renderer_data: bool = True
+
+    #: Whether that payload includes the other vehicles.
+    send_actor_ground_truth: bool = True
+
+    #: How far down its own lane the ego looks for the light governing it.
+    #: 0 falls back to CARLA's ``is_at_traffic_light()``, which only reports a
+    #: light once the ego is already at the line.
+    traffic_light_sight_distance_m: float = 60.0
+
+    #: Radius within which other vehicles are reported to the policy.
+    actor_horizon_m: float = 150.0
+
     #: Seed handed to the policy in ``start_session``.
     random_seed: int = 0
 

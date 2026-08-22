@@ -14,8 +14,8 @@ abstracts the simulator behind the camera.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, fields
-from typing import Any, List, Mapping, Optional, Tuple
+from dataclasses import dataclass, field, fields
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -151,6 +151,30 @@ class DriverClientConfig:
     send_ground_truth: bool = False
     """Whether to also submit the recorded ground-truth trajectory."""
 
+    send_renderer_data: bool = True
+    """Whether to send CARLA ground truth in ``DriveRequest.renderer_data``.
+
+    The alpasim contract carries no traffic lights and no other vehicles, so a
+    policy that reasons about either reads them from this extension payload.
+    Policies that ignore it are unaffected; policies that read it treat an absent
+    payload as "no light applies, no traffic present" **without erroring**, which
+    silently disables every rule that depends on the world outside the ego.
+    """
+
+    send_actor_ground_truth: bool = True
+    """Whether the payload includes the other vehicles' poses and velocities."""
+
+    traffic_light_sight_distance_m: float = 60.0
+    """How far down its own lane the ego looks for the light governing it.
+
+    0 falls back to CARLA's ``is_at_traffic_light()``, whose trigger volumes are
+    about a metre thick -- a policy learns of a red light on arrival, too late to
+    stop from any ordinary speed.
+    """
+
+    actor_horizon_m: float = 150.0
+    """Radius within which other vehicles are reported to the policy."""
+
     random_seed: int = 0
     """Seed handed to the policy in ``start_session``."""
 
@@ -202,15 +226,20 @@ class DriveOutcome:
     Attributes:
         trajectory: Planned trajectory in the **local** frame, as returned on the wire.
         terminate_session: When ``True`` the policy asked to end the rollout early.
-        debug_info: Opaque ``unstructured_debug_info`` bytes from the response.  The
-            alpasim contract deliberately leaves this unstructured -- a policy built on
-            ``carla_driver_interface`` packs a ``CarlaDriveDebugInfo`` message in here,
-            which this package does not decode.
+        debug_info: Raw ``unstructured_debug_info`` bytes from the response.  The
+            alpasim contract deliberately leaves this unstructured.
+        policy_name: Policy name, when the response carried a decodable
+            ``CarlaDriveDebugInfo``.
+        inference_seconds: How long the policy took, from the same message.
+        debug_scalars: Free-form diagnostics the policy chose to surface.
     """
 
     trajectory: Trajectory
     terminate_session: bool = False
     debug_info: bytes = b""
+    policy_name: str = ""
+    inference_seconds: float = 0.0
+    debug_scalars: Dict[str, float] = field(default_factory=dict)
 
 
 class BaseEgoDriverClient(ABC):
@@ -282,12 +311,20 @@ class BaseEgoDriverClient(ABC):
         ...
 
     @abstractmethod
-    def drive(self, time_now_us: int, time_query_us: int) -> DriveOutcome:
+    def drive(
+        self,
+        time_now_us: int,
+        time_query_us: int,
+        renderer_data: bytes = b"",
+    ) -> DriveOutcome:
         """Ask the policy for a plan.
 
         Args:
             time_now_us: Planning time; the plan is anchored to the pose at this instant.
             time_query_us: The instant the runtime will next advance to.
+            renderer_data: Serialized ``carla_driver.v0.CarlaRendererData`` giving
+                the policy CARLA ground truth (traffic light, other vehicles,
+                speed limit).  Empty means "no ground truth available".
 
         Returns:
             The policy's plan and termination flag.

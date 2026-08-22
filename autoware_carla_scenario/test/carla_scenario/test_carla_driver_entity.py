@@ -22,6 +22,7 @@ from autoware_carla_scenario.driver.base import (
     DriverClientConfig,
     EgoObservation,
 )
+from autoware_carla_scenario.driver._proto import carla_driver_pb2
 from autoware_carla_scenario.driver.geometry import Pose, Trajectory
 from autoware_carla_scenario.entity.carla_driver_entity import CarlaDriverEntity
 
@@ -41,6 +42,7 @@ class _FakeDriverClient(BaseEgoDriverClient):
         self.images: List[Tuple[str, bytes]] = []
         self.observations: List[EgoObservation] = []
         self.drives: List[Tuple[int, int]] = []
+        self.renderer_payloads: List[bytes] = []
         self.closed = 0
         self._terminate_after = terminate_after
 
@@ -62,8 +64,14 @@ class _FakeDriverClient(BaseEgoDriverClient):
     def submit_egomotion_observation(self, observation: EgoObservation) -> None:
         self.observations.append(observation)
 
-    def drive(self, time_now_us: int, time_query_us: int) -> DriveOutcome:
+    def drive(
+        self,
+        time_now_us: int,
+        time_query_us: int,
+        renderer_data: bytes = b"",
+    ) -> DriveOutcome:
         self.drives.append((time_now_us, time_query_us))
+        self.renderer_payloads.append(renderer_data)
         plan = Trajectory.empty()
         for index in range(1, 5):
             plan.append(
@@ -78,6 +86,13 @@ class _FakeDriverClient(BaseEgoDriverClient):
 
     def close_session(self) -> None:
         self.closed += 1
+
+
+class _EmptyActors(list):
+    """Stands in for CARLA's ActorList when the world holds only the ego."""
+
+    def filter(self, pattern: str) -> List[MagicMock]:
+        return []
 
 
 def _actor(x: float = 0.0, y: float = 0.0, yaw_deg: float = 0.0) -> MagicMock:
@@ -116,6 +131,7 @@ def _entity(
     **config_overrides,
 ) -> Tuple[CarlaDriverEntity, _FakeDriverClient]:
     """Return an entity wired to a fake client, with the ego actor already 'spawned'."""
+    config_overrides.setdefault("send_renderer_data", False)
     config = DriverClientConfig(
         cameras=cameras, rear_axle_offset_m=-1.4, **config_overrides
     )
@@ -181,6 +197,34 @@ def test_start_opens_a_session_and_sends_a_route() -> None:
     # Waypoints are in the rig frame, so they start just ahead of the rear-axle origin.
     assert route[0][0] == pytest.approx(1.4, abs=1e-6)
     assert np.allclose(route[:, 1], 0.0, atol=1e-6)
+
+
+def test_ground_truth_reaches_the_policy() -> None:
+    """The payload carries traffic lights and other vehicles; the contract does not."""
+    entity, client = _entity(send_renderer_data=True, policy_timestep_s=0.05)
+    world = _world_with_route()
+    world.get_actors.return_value = _EmptyActors()
+    world.get_snapshot.return_value.frame = 1
+    world.get_weather.return_value = SimpleNamespace(cloudiness=0.0)
+
+    entity.on_scenario_start(world)
+    entity.on_tick(world, 0.0)
+
+    assert client.renderer_payloads
+    payload = carla_driver_pb2.CarlaRendererData()
+    payload.ParseFromString(client.renderer_payloads[0])
+    assert payload.snapshot_timestamp_us == 50_000
+    assert payload.map_name == "Town10HD_Opt"
+
+
+def test_ground_truth_can_be_switched_off() -> None:
+    """Off is indistinguishable from 'nothing to report' on the policy side."""
+    entity, client = _entity(send_renderer_data=False, policy_timestep_s=0.05)
+    world = _world_with_route()
+    entity.on_scenario_start(world)
+    entity.on_tick(world, 0.0)
+
+    assert client.renderer_payloads == [b""]
 
 
 def test_start_before_spawn_raises() -> None:

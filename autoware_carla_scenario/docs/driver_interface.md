@@ -74,6 +74,10 @@ driver:
   route_resolution_m: 2.0
   rear_axle_offset_m: null   # null derives it from the wheel physics
   send_ground_truth: false
+  send_renderer_data: true       # CARLA ground truth: lights, traffic, speed limit
+  send_actor_ground_truth: true
+  traffic_light_sight_distance_m: 60.0
+  actor_horizon_m: 150.0
   random_seed: 0
   cameras:
     - logical_id: camera_front_wide_120fov
@@ -123,6 +127,57 @@ To test against a fake policy, pass a `BaseEgoDriverClient` implementation:
 CarlaDriverEntity(config, client=MyFakeDriverClient(config))
 ```
 
+## CARLA ground truth
+
+The alpasim contract has no field for a traffic light and none for other vehicles.
+Both ride inside `DriveRequest.renderer_data`, an upstream-sanctioned `bytes` extension
+point, as a serialized `carla_driver.v0.CarlaRendererData`:
+
+| Field | Contents |
+| --- | --- |
+| `ego_traffic_light` | State of the light governing the ego lane |
+| `ego_traffic_light_distance_m` | Distance to its stop line **along the ego's heading**; negative once crossed or when no line applies |
+| `speed_limit_mps` | Posted limit for the ego lane, 0 when unknown |
+| `actors[]` | Other vehicles: pose, bounding box, and velocity, all in the local frame |
+| `weather`, `map_name`, `frame_id` | Scene context |
+
+!!! warning "Turning this off is not a no-op"
+    A policy reads the payload defensively — a missing one means "no light applies" and
+    "no other vehicles" rather than an error. So `send_renderer_data: false` does not
+    fail loudly. It silently disables every rule that depends on the world outside the
+    ego. For a specification-driven policy such as
+    [stl_driver](https://github.com/hakuturu583/stl_driver), that is `stop_on_red`,
+    `collision_free` and `safe_headway` — the car keeps driving and the rules simply
+    stop applying.
+
+### Finding the light that governs us
+
+CARLA's `is_at_traffic_light()` answers a different question: whether the ego is inside
+the light's *trigger volume*, which is about a metre thick along the road. A policy
+asking CARLA therefore learns of a red light at the moment it arrives at it, when
+stopping from any ordinary speed is already impossible.
+
+So the lane graph is walked forward instead — up to `traffic_light_sight_distance_m` —
+and any light whose stop line lies on one of those lanes governs us. Inside a junction
+nothing governs us: having crossed the line, the thing to do is clear the box.
+
+The point reported is not the stop waypoint itself but the **mouth of the junction it
+governs**, reached by walking forward from the waypoint. Upstream measured stop
+waypoints a median of 5.5 m short of their junction on `Town10HD_Opt`; a policy told to
+stop there hesitates most of a car-and-a-half before the line a driver aims at.
+
+This logic is ported from `carla_driver_interface`'s reference runtime
+(`runtime/carla_world.py` at `af1dcd3`) so that a policy tuned against that runtime sees
+the same numbers here.
+
+### Diagnostics coming back
+
+`DriveResponse.debug_info.unstructured_debug_info` is decoded as
+`carla_driver.v0.CarlaDriveDebugInfo` when it parses as one, surfacing the policy's name,
+its inference time, and whatever scalars it chose to publish. They are logged every ten
+policy steps. Anything that does not parse is left as raw bytes — the field is
+deliberately unstructured, and a policy is free to use its own encoding.
+
 ## Coordinate frames
 
 Two conversions sit between CARLA and the contract, both handled in
@@ -159,9 +214,13 @@ pass condition.
 The protobuf definitions are **vendored**, not installed. `carla-driver-interface` and
 its `alpasim-grpc` dependency require Python ≥ 3.11, while this package is pinned to
 3.10 by the CPython-3.10-only CARLA 0.10.0 wheel, so the two cannot share an
-environment. Instead the `.proto` files are copied verbatim from
-`NVlabs/alpasim@68709245a5dc0f2eda4f8cb2c3aa8cbdfa913043` (Apache-2.0) and compiled
-locally. Field numbers, package names, and import paths are preserved exactly, which is
+environment. Instead the `.proto` files are copied verbatim from two upstreams
+(both Apache-2.0) and compiled locally:
+
+| Proto | Source | Carries |
+| --- | --- | --- |
+| `alpasim_grpc/v0/*` | `NVlabs/alpasim@6870924` | The `egodriver` service and its messages |
+| `carla_driver/v0/*` | `hakuturu583/carla_driver_interface@af1dcd3` | The CARLA extension payloads | Field numbers, package names, and import paths are preserved exactly, which is
 what keeps the messages wire compatible.
 
 Regenerate the committed modules after updating the vendored protos:
@@ -175,14 +234,15 @@ See `autoware_carla_scenario/proto/README.md` for the full provenance.
 
 ## Limitations
 
-* Only RGB cameras are streamed. Lidar and the ground-truth channel
-  (`submit_recording_ground_truth`) are not wired up yet; `send_ground_truth` is
-  accepted but not acted on.
+* Only RGB cameras are streamed. Lidar is not wired up.
+* `submit_recording_ground_truth` is not called; `send_ground_truth` is accepted but not
+  acted on. This is the *recorded* trajectory channel, unrelated to the CARLA ground
+  truth in `renderer_data`, which is sent.
 * The route is a lane-following walk of CARLA's road graph, taking the first
   continuation at each fork. It is a rolling window, re-sent on every policy step so the
   horizon stays ahead of the vehicle, but it is not a global plan: the ego will not turn
   toward a goal. Scenarios needing a specific route should submit their own waypoints
   through the client.
-* `DriveResponse.debug_info` is surfaced as opaque bytes. `carla_driver_interface`
-  packs its own `CarlaDriveDebugInfo` message in there, which this package does not
-  decode.
+* Actor reporting covers vehicles only — pedestrians are not included.
+* Actor `dynamic_state` carries linear velocity; angular velocity and acceleration are
+  left zero, matching the reference runtime.

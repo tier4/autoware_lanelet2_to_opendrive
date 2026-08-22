@@ -16,9 +16,16 @@ from typing import Optional
 
 import grpc
 import numpy as np
+from google.protobuf.message import DecodeError
 from numpy.typing import NDArray
 
-from ._proto import common_pb2, egodriver_pb2, egodriver_pb2_grpc, sensorsim_pb2
+from ._proto import (
+    carla_driver_pb2,
+    common_pb2,
+    egodriver_pb2,
+    egodriver_pb2_grpc,
+    sensorsim_pb2,
+)
 from .base import BaseEgoDriverClient, DriveOutcome, DriverClientConfig, EgoObservation
 from .geometry import Trajectory, waypoints_to_proto
 
@@ -201,11 +208,17 @@ class EgoDriverGrpcClient(BaseEgoDriverClient):
             timeout=self._config.timeout_s,
         )
 
-    def drive(self, time_now_us: int, time_query_us: int) -> DriveOutcome:
+    def drive(
+        self,
+        time_now_us: int,
+        time_query_us: int,
+        renderer_data: bytes = b"",
+    ) -> DriveOutcome:
         """Ask the policy for a plan.
 
         Returns:
-            The plan in the **local** frame, plus the policy's termination flag.
+            The plan in the **local** frame, plus the policy's termination flag
+            and whatever diagnostics it chose to surface.
         """
         stub = self._require_session()
         response = stub.drive(
@@ -213,14 +226,18 @@ class EgoDriverGrpcClient(BaseEgoDriverClient):
                 session_uuid=self._session_uuid,
                 time_now_us=time_now_us,
                 time_query_us=time_query_us,
+                renderer_data=renderer_data,
             ),
             timeout=self._config.timeout_s,
         )
-        return DriveOutcome(
+        raw_debug = bytes(response.debug_info.unstructured_debug_info)
+        outcome = DriveOutcome(
             trajectory=Trajectory.from_proto(response.trajectory),
             terminate_session=bool(response.terminate_session),
-            debug_info=bytes(response.debug_info.unstructured_debug_info),
+            debug_info=raw_debug,
         )
+        _decode_debug_info(raw_debug, outcome)
+        return outcome
 
     def close_session(self) -> None:
         """Close the session and the channel.  Safe to call more than once."""
@@ -253,6 +270,26 @@ class EgoDriverGrpcClient(BaseEgoDriverClient):
         if self._stub is None or self._session_uuid is None:
             raise RuntimeError("No driver session is open. Call start_session() first.")
         return self._stub
+
+
+def _decode_debug_info(raw: bytes, outcome: DriveOutcome) -> None:
+    """Fill *outcome*'s diagnostics from a ``CarlaDriveDebugInfo`` payload.
+
+    The field is deliberately unstructured in the alpasim contract, so anything
+    that fails to parse is left alone rather than treated as an error -- a policy
+    is free to put its own encoding there.
+    """
+    if not raw:
+        return
+    message = carla_driver_pb2.CarlaDriveDebugInfo()
+    try:
+        message.ParseFromString(raw)
+    except DecodeError:
+        logger.debug("Driver debug info is not a CarlaDriveDebugInfo", exc_info=True)
+        return
+    outcome.policy_name = str(message.policy_name)
+    outcome.inference_seconds = float(message.inference_seconds)
+    outcome.debug_scalars = dict(message.scalars)
 
 
 def _vec3(values: NDArray[np.float64]) -> common_pb2.Vec3:

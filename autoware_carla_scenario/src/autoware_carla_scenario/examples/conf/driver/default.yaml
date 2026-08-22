@@ -14,6 +14,14 @@ driver:
   # null derives the rig origin offset from the vehicle's wheel physics.
   rear_axle_offset_m: null
   send_ground_truth: false
+  # CARLA ground truth for the policy (traffic light, other vehicles, speed limit).
+  # Turning this off does not error on the policy side -- it just makes the world
+  # look empty, so any rule about lights or traffic quietly stops applying.
+  send_renderer_data: true
+  send_actor_ground_truth: true
+  # 0 falls back to CARLA's trigger volumes, which only report a light on arrival.
+  traffic_light_sight_distance_m: 60.0
+  actor_horizon_m: 150.0
   random_seed: 0
   cameras:
     - logical_id: camera_front_wide_120fov
