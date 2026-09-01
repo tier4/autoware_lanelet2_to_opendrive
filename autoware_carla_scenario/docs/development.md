@@ -81,19 +81,15 @@ The repository defines a single custom pytest marker in the workspace
   hook `pytest-carla` and the CI `test` job both run with
   `-m "not integration"`.
 
-For local verification that mirrors CI exactly, use the Docker
-profiles defined in the workspace `docker-compose.yml`:
+Local verification is the same command CI runs — no container involved:
 
 ```bash
 # Full pytest suite (matches CI's `test` job)
-docker compose --profile test run --rm pytest
+uv run pytest -n auto
 
 # Pre-commit (matches CI's `lint-and-format` job)
-docker compose --profile lint run --rm lint
+uv run pre-commit run --all-files
 ```
-
-See [`docs/docker.md`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
-in the repository root for the full reference.
 
 ## Code Style and Quality
 

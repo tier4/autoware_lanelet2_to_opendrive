@@ -5,6 +5,9 @@ description = "CARLA scenario testing framework for Autoware"
 authors = [
     { name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }
 ]
+# Capped at 3.10 by the CARLA client alone: 0.10.0 is not published to PyPI and
+# the wheel vendored in carla_wheels/ is cp310-only. Nothing else in this package
+# — and nothing in autoware-lanelet2-to-opendrive — is limited to 3.10 any more.
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "pyxodr>=0.1.0",
@@ -12,10 +15,9 @@ dependencies = [
     "numpy>=1.21",
     "pytest>=9.0.1",
     "python-dotenv>=1.2.2",
-    # See note in autoware_lanelet2_to_opendrive/pyproject.toml: the lanelet2
-    # Python package is provided by lanelet2-python-api-for-autoware. Adding
-    # the PyPI lanelet2 wheel here causes a Boost ABI conflict (refs #449).
-    "lanelet2-python-api-for-autoware",
+    # See the note in autoware_lanelet2_to_opendrive/pyproject.toml: `lanelet2`
+    # and `autoware_lanelet2_extension_python` are provided by simple-lanelet2.
+    "simple-lanelet2>=1.1.2",
     "tqdm>=4.67.1",
     "hydra-core>=1.3.2",
     "omegaconf>=2.3.0",

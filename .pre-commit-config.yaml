@@ -49,9 +49,10 @@ repos:
 
   - repo: local
     hooks:
-      # Run each package's tests in a separate process to avoid a crash in
-      # the lanelet2 C++ bindings that occurs when both suites run together
-      # and the interpreter shuts down with multiple LaneletMap instances alive.
+      # Each package's tests run in their own process. This originally worked
+      # around a crash in the lanelet2 C++ bindings at interpreter shutdown;
+      # simple-lanelet2 no longer has that failure mode, but keeping the two
+      # suites separate still gives a clearer signal about which one broke.
       - id: pytest-lanelet2
         name: pytest (autoware_lanelet2_to_opendrive)
         entry: uv run pytest --no-testmon autoware_lanelet2_to_opendrive/test

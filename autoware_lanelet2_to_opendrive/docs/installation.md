@@ -1,65 +1,53 @@
 # Installation
 
-This guide explains how to install the `autoware-lanelet2-to-opendrive` package
-either directly on a host or inside the project's pinned Docker image.
+This guide explains how to install the `autoware-lanelet2-to-opendrive` package.
 
 ## System Requirements
 
 ### Operating System
 
-The package targets **Ubuntu 22.04** (the Docker image's base) for binary
-compatibility with the prebuilt `lanelet2-python-api-for-autoware` wheel.
-Other Linux distributions may work if their system Boost matches, but only
-22.04 is exercised in CI.
+Any Linux distribution with a recent `pip`. Nothing is compiled at install
+time: every dependency, including the Lanelet2 bindings, resolves to a
+prebuilt wheel. macOS and Windows are untested but not excluded by anything in
+the dependency set.
 
 ### Python Version
 
-- **Python 3.10** (exactly 3.10, not 3.11+) — pinned by `requires-python = ">=3.10,<3.11"`
-  in `pyproject.toml`. The pin exists because `lanelet2-python-api-for-autoware`
-  ships a CPython-3.10 ABI-tagged wheel.
+- **Python 3.10 or newer** — `requires-python = ">=3.10"` in `pyproject.toml`.
+
+The repository's `uv.lock` is resolved for 3.10 because the sibling
+`autoware_carla_scenario` package is capped there by the CARLA 0.10.0 client
+wheel, which is published for CPython 3.10 only. That cap does not apply when
+this package is installed on its own, and CI exercises it on 3.11 and 3.12.
+
+Python 3.13 works, but is not wheels-only yet: `asam-qc-opendrive` caps `numpy`
+below 2.0 and `numpy` 1.26 publishes no cp313 wheel, so a 3.13 install compiles
+numpy from source.
 
 ### Package Manager
 
-- **uv** 0.9.7 or newer.
-
-## Installing uv
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-For other installation methods, see the
-[uv documentation](https://docs.astral.sh/uv/).
+- **pip**, or **uv** 0.9.7 or newer for workspace development.
 
 ## Installing the Package
 
-### Recommended: Use Docker (matches CI exactly)
-
-The runtime dependency `lanelet2-python-api-for-autoware` is built from source
-against the system `libboost-python`. On hosts whose Boost ABI does not match
-(e.g. Ubuntu 24.04 with Boost 1.83), `uv sync` fails during the wheel build
-with a `RuntimeError: Command failed: make -j…`. The repository ships a
-multi-stage `Dockerfile` and `docker-compose.yml` that pin Ubuntu 22.04 with
-Boost 1.74 — the same environment used in CI.
+### Standalone (pip)
 
 ```bash
-# Open an interactive shell with the workspace bind-mounted.
-docker compose --profile dev run --rm dev
-
-# Run the slim convert image directly (uses the `convert` console script).
-docker compose --profile convert run --rm convert input_map_path=/io/map.osm
+python -m venv .venv
+.venv/bin/pip install ./autoware_lanelet2_to_opendrive
 ```
 
-See the [docker docs in the repo root](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
-for the full reference of profiles (`dev`, `test`, `lint`, `qc`, `carla`,
-`convert`).
+The Lanelet2 Python API comes from
+[`simple-lanelet2`](https://github.com/hakuturu583/simple_lanelet2), a Rust
+reimplementation of the Lanelet2 Python API that ships `lanelet2` and
+`autoware_lanelet2_extension_python` under their usual import paths in one
+wheel. There is no Boost, no GeographicLib and no C++ toolchain in the loop.
 
-### From Source (host install, Boost-compatible distros only)
-
-If your host has a compatible Boost (Ubuntu 22.04 or earlier), you can install
-from source:
+### From source (uv workspace)
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # if uv is not installed
+
 git clone https://github.com/tier4/autoware_lanelet2_to_opendrive.git
 cd autoware_lanelet2_to_opendrive
 
@@ -84,12 +72,12 @@ uv run carla-import-test output.xodr --map-name my_map
 ### CARLA extra (optional)
 
 The `carla` Python wheel is required only by the `autoware_carla_scenario`
-workspace member (used by `carla-import-test` and the `carla` docker-compose
-profile). The optional extra is declared on that workspace, not on this
-package; the bundled wheels live under `carla_wheels/`:
+workspace member (used by `carla-import-test`). The optional extra is declared
+on that workspace member, not on this package; the bundled wheels live under
+`carla_wheels/`:
 
 ```bash
-# CARLA 0.10.0 (default expected by the carla docker profile)
+# CARLA 0.10.0 (not published to PyPI; the cp310 wheel is vendored in-tree)
 uv sync --dev --extra carla
 
 # Or pin to CARLA 0.9.16 (mutually exclusive with `carla`)
@@ -113,7 +101,7 @@ The runtime dependencies declared in
 [`autoware_lanelet2_to_opendrive/pyproject.toml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/pyproject.toml)
 are:
 
-- `lanelet2-python-api-for-autoware` — Lanelet2 with Autoware regulatory-element extensions
+- `simple-lanelet2` (>=1.1.2) — Lanelet2 Python API plus the Autoware regulatory-element extensions, as a single wheel
 - `scipy` (>=1.9.0) — spline fitting and numerical primitives
 - `lxml` (>=5.2.2) — OpenDRIVE XML serialization
 - `mgrs` (>=1.5.0) — MGRS ↔ lat/lon conversion
@@ -135,20 +123,21 @@ Console scripts registered in `[project.scripts]`:
 
 ## Troubleshooting
 
-### `RuntimeError: Command failed: make -jN` while building lanelet2
+### `ModuleNotFoundError: No module named 'lanelet2'`
 
-Your host Boost is incompatible with the wheel's expectations. Use the
-Docker workflow described above.
-
-### `SystemError` on `import lanelet2`
-
-Usually caused by a stale `lanelet2` from PyPI co-installed with
-`lanelet2-python-api-for-autoware`. Reset the venv:
+`lanelet2` is provided by `simple-lanelet2`, not by a package of that name.
+Reinstall the environment so the wheel is present:
 
 ```bash
 rm -rf .venv
 uv sync --dev
 ```
+
+### A stale `lanelet2` from PyPI shadows the bindings
+
+Installing the PyPI `lanelet2` distribution alongside `simple-lanelet2` puts two
+different implementations at the same import path, and which one wins depends on
+install order. Do not add it; if it is already there, reset the venv as above.
 
 ## Next Steps
 

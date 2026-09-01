@@ -76,16 +76,6 @@ For diagnosing lanelets that do not project onto a CARLA ground mesh:
 uv run detect-no-3d-model --map /path/to/map.xodr
 ```
 
-## Docker
-
-The repository's multi-stage Docker image exposes a CARLA-import test profile that mirrors CI:
-
-```bash
-docker compose --profile carla run --rm carla-import-test
-```
-
-See the root [`docs/docker.md`](../docs/docker.md) for prerequisites, profiles, and troubleshooting.
-
 ## Documentation
 
 Full guides live under [`docs/`](docs/) and are served by MkDocs:
