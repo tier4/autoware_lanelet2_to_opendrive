@@ -11,7 +11,7 @@ import math
 from pathlib import Path
 
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from autoware_carla_scenario.driver.base import DriverCameraConfig, DriverClientConfig
 from autoware_carla_scenario.driver.control import ControlConfig

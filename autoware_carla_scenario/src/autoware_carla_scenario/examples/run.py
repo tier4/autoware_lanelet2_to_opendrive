@@ -142,12 +142,15 @@ def build_ego_entity(cfg: DictConfig) -> EgoVehicle | None:
     """Build the ego entity selected by ``cfg.ego.entity``.
 
     Returns ``None`` for ``"autopilot"``, letting the scenario fall back to its default
-    :class:`~autoware_carla_scenario.entity.ego.EgoVehicle`.
+    :class:`~autoware_carla_scenario.entity.ego.EgoVehicle`. A config with no ``ego``
+    group at all selects ``"autopilot"`` too: an injected ``build_scenario_fn`` supplies
+    its own :class:`EgoConfig`, so it has no reason to carry the group Hydra would.
 
     Raises:
         ValueError: If ``cfg.ego.entity`` names an unknown entity.
     """
-    entity = str(cfg.ego.get("entity", "autopilot"))
+    ego_cfg = cfg.get("ego") or {}
+    entity = str(ego_cfg.get("entity", "autopilot"))
 
     if entity == "autopilot":
         return None

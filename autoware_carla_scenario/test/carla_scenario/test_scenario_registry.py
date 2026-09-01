@@ -212,6 +212,42 @@ class TestBuildScenarioInjectable:
 
 
 # ---------------------------------------------------------------------------
+# Tests for build_ego_entity
+# ---------------------------------------------------------------------------
+
+
+class TestBuildEgoEntity:
+    """Tests for the ego entity selected by build_ego_entity()."""
+
+    def test_missing_ego_group_selects_autopilot(self) -> None:
+        """A config with no 'ego' group at all should select autopilot, not raise.
+
+        build_scenario() calls build_ego_entity() even when an injected
+        build_scenario_fn supplied the EgoConfig, and such a config has no reason
+        to carry the group Hydra would compose.
+        """
+        from autoware_carla_scenario.examples.run import build_ego_entity
+
+        cfg = OmegaConf.create({"scenario": {"name": "whatever"}})
+        assert build_ego_entity(cfg) is None
+
+    def test_empty_ego_group_selects_autopilot(self) -> None:
+        """An 'ego' group without an 'entity' key should select autopilot."""
+        from autoware_carla_scenario.examples.run import build_ego_entity
+
+        cfg = OmegaConf.create({"ego": {"vehicle_type": "vehicle.tesla.model3"}})
+        assert build_ego_entity(cfg) is None
+
+    def test_unknown_entity_raises(self) -> None:
+        """An unrecognised ego.entity should raise rather than silently autopilot."""
+        from autoware_carla_scenario.examples.run import build_ego_entity
+
+        cfg = OmegaConf.create({"ego": {"entity": "__nope__"}})
+        with pytest.raises(ValueError, match="Unknown ego.entity"):
+            build_ego_entity(cfg)
+
+
+# ---------------------------------------------------------------------------
 # Tests for build_ego_and_spawn helper
 # ---------------------------------------------------------------------------
 
