@@ -281,7 +281,8 @@ qc-validate <xodr_file> [--output FILE] [--no-default-ignores] [...]
 ## `carla-import-test`
 
 Connects to a running CARLA server and verifies that the generated `.xodr`
-imports cleanly. Only used inside the `carla` docker-compose profile and CI.
+imports cleanly. Only used by CI's `carla-import-test` job and locally against
+a running server.
 
 ```
 carla-import-test <xodr_file> --map-name <name> [--host HOST] [--port PORT]

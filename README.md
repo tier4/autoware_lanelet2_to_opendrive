@@ -14,34 +14,39 @@ The repository is a [`uv`](https://docs.astral.sh/uv/) workspace with two packag
 ├── autoware_lanelet2_to_opendrive/   # Lanelet2 → OpenDRIVE converter (workspace member)
 ├── autoware_carla_scenario/          # CARLA scenario testing framework (workspace member)
 ├── examples/                         # Standalone usage examples
-├── docs/                             # Repository-level documentation (Docker, etc.)
 ├── carla_wheels/                     # Local CARLA Python wheels resolved by uv
-├── Dockerfile                        # Multi-stage image: dev / convert
-├── docker-compose.yml                # CI-equivalent profiles: test / lint / qc / carla / dev / convert
 ├── pyproject.toml                    # uv workspace root
 └── uv.lock
 ```
 
-## Quick start (Docker)
+## Quick start
 
-The Docker route mirrors CI exactly and avoids host build issues with the `lanelet2-python-api-for-autoware` C++ wrapper. The dependency is cloned from a public repository, so no GitHub token is needed.
+Every dependency installs from a wheel — no apt packages, no C++ toolchain, no
+container. The Lanelet2 Python API comes from
+[`simple-lanelet2`](https://github.com/hakuturu583/simple_lanelet2), a Rust
+reimplementation that ships `lanelet2` and `autoware_lanelet2_extension_python`
+under their usual import paths.
 
 ```bash
-# Build the slim conversion image (only needed once, or after dependency changes)
-docker compose --profile convert build convert
+# Just the converter, into a plain virtualenv
+python -m venv .venv && .venv/bin/pip install ./autoware_lanelet2_to_opendrive
 
-# Convert a Lanelet2 map to OpenDRIVE. Mount the directory holding your map at /io.
-docker run --rm -v "$PWD:/io" l2o-convert:local \
+# Convert a Lanelet2 map to OpenDRIVE
+.venv/bin/convert \
   map=nishishinjuku target=carla \
-  input_map_path=/io/your-map.osm \
-  output_map_path=/io/your-map.xodr
+  input_map_path=/path/to/your-map.osm \
+  output_map_path=/path/to/your-map.xodr
 ```
 
-Arguments are passed verbatim to the `convert` CLI ([Hydra](https://hydra.cc/) syntax). See [`docs/docker.md`](docs/docker.md) for the full Docker reference, image targets, named volumes, and troubleshooting.
+Arguments are passed verbatim to the `convert` CLI ([Hydra](https://hydra.cc/) syntax).
+
+The converter runs on Python 3.10 and newer. `autoware_carla_scenario` is capped
+at 3.10 because the CARLA 0.10.0 client is only published as a cp310 wheel, so
+the workspace lock is resolved for 3.10.
 
 ## Local development (uv)
 
-For source edits and fast iteration, use `uv` directly. Note that the runtime dependency `lanelet2-python-api-for-autoware` builds from source against system Boost, so host installation is sensitive to the OS — Ubuntu 22.04 with Boost 1.74 (matching CI) is known to work; newer hosts may fail to compile.
+For source edits and fast iteration, use `uv` on the whole workspace.
 
 ```bash
 # Install workspace dependencies into a local .venv
@@ -64,17 +69,18 @@ For full CLI options, configuration layout, and preprocessing operations, see th
 
 ## Development & CI
 
-Each GitHub Actions job has a matching Docker Compose profile so the same checks run identically on a developer machine:
+Every GitHub Actions job is the same command you would run locally — CI installs
+Python, installs uv, runs `uv sync`, and nothing else:
 
 ```bash
-docker compose --profile test  run --rm pytest          # full pytest suite
-docker compose --profile lint  run --rm lint            # pre-commit on all files
-docker compose --profile qc    run --rm qc-validate     # ASAM QC against fixture
-docker compose --profile carla run --rm carla-import-test
-docker compose --profile dev   run --rm dev             # interactive shell
+uv run pytest -n auto                # full pytest suite
+uv run pre-commit run --all-files    # lint & format
+uv run convert map=nishishinjuku target=carla \
+  input_map_path=autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm \
+  output_map_path=nishishinjuku_carla.xodr
+uv run qc-validate nishishinjuku_carla.xodr          # ASAM QC against the fixture
+uv run carla-import-test nishishinjuku_carla.xodr --map-name nishishinjuku
 ```
-
-Static checks that do not import the workspace (`ruff`, `ruff-format`, `mypy --ignore-missing-imports` on individual files) can also be run on the host for fast feedback.
 
 [`pre-commit`](https://pre-commit.com/) hooks (`ruff`, `ruff-format`, `mypy`, plus standard hygiene checks) are mandatory for every commit; install once with `uv run pre-commit install`. Run `uv run pre-commit run --all-files` before pushing to avoid CI formatting failures.
 
@@ -84,7 +90,6 @@ Static checks that do not import the workspace (`ruff`, `ruff-format`, `mypy --i
   - [Autoware Lanelet2 to OpenDRIVE](https://tier4.github.io/autoware_lanelet2_to_opendrive/) — installation, usage, configuration reference, signals, signs, junctions, geometry classification.
   - [Autoware CARLA Scenario](https://tier4.github.io/autoware_lanelet2_to_opendrive/carla-scenario/) — installation, usage, architecture, API reference, development guide.
 - Repository-level references:
-  - [`docs/docker.md`](docs/docker.md) — Docker build & test environment.
   - [`examples/README_cartesian_to_frenet.md`](examples/README_cartesian_to_frenet.md) — Cartesian ↔ Frenet conversion example.
 - [`CLAUDE.md`](CLAUDE.md) — project conventions and guidelines for working with this repository.
 

@@ -8,18 +8,14 @@ on:
 
 jobs:
   test:
-    name: test (${{ matrix.python-version }}, ${{ matrix.carla-extra }})
-    runs-on: ${{ matrix.runner }}
+    # The workspace is capped at Python 3.10 by the CARLA client wheel, not by
+    # anything of ours -- see 'converter-on-modern-python' below.
+    name: test (3.10, ${{ matrix.carla-extra }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python-version: "3.10"
-            carla-extra: "carla"
-            runner: ubicloud-standard-8-ubuntu-2204
-          - python-version: "3.10"
-            carla-extra: "carla-0-9-16"
-            runner: ubicloud-standard-8-ubuntu-2204
+        carla-extra: ["carla", "carla-0-9-16"]
 
     steps:
     - uses: actions/checkout@v4
@@ -27,12 +23,10 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        python-version: ${{ matrix.python-version }}
-        install-system-deps: "true"
+        python-version: "3.10"
         install-dev-deps: "true"
         run-precommit: "false"
         carla-extra: ${{ matrix.carla-extra }}
-        cache-suffix: ${{ matrix.runner }}
 
     - name: Run tests
       run: uv run pytest -v --tb=short -n auto -o addopts=
@@ -42,24 +36,69 @@ jobs:
         uv build --package autoware-lanelet2-to-opendrive
         uv build --package autoware-carla-scenario
 
+  converter-on-modern-python:
+    # autoware-lanelet2-to-opendrive declares 'requires-python >= 3.10' and now
+    # installs entirely from wheels; only autoware-carla-scenario is still held
+    # at 3.10, by the cp310-only CARLA client. This job converts a fixture map
+    # with nothing but 'pip install .' on newer interpreters, so that claim
+    # cannot quietly stop being true.
+    #
+    # 3.13 is left out on purpose: asam-qc-opendrive caps numpy below 2.0, and
+    # numpy 1.26 has no cp313 wheel, so a 3.13 install compiles numpy from
+    # source. It works, but it is no longer the wheels-only install this job
+    # exists to prove. Add 3.13 here once that cap is lifted upstream.
+    name: converter on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install the converter from source with pip
+      run: |
+        python -m venv .venv-modern
+        .venv-modern/bin/pip install --upgrade pip
+        .venv-modern/bin/pip install ./autoware_lanelet2_to_opendrive
+
+    - name: Convert a fixture map
+      run: |
+        .venv-modern/bin/convert \
+          map=example_mgrs_offset \
+          target=carla \
+          input_map_path=autoware_lanelet2_to_opendrive/test/data/walkway_mini.osm \
+          output_map_path=walkway_mini.xodr
+        .venv-modern/bin/python -c "
+        import lxml.etree as ET
+        root = ET.parse('walkway_mini.xodr').getroot()
+        roads = root.findall('.//road')
+        assert roads, 'converter produced no <road> elements'
+        print(f'{len(roads)} road(s) emitted')
+        "
+
   lint-and-format:
-    runs-on: ubicloud-standard-8-ubuntu-2204
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "true"
         precommit-continue-on-error: "false"
         carla-extra: "carla"
-        cache-suffix: ubicloud-standard-8-ubuntu-2204
 
   auto-format:
     name: Auto-fix formatting
-    runs-on: ubicloud-standard-8-ubuntu-2204
+    runs-on: ubuntu-latest
     needs: lint-and-format
     if: |
       failure() &&
@@ -77,11 +116,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
-          install-system-deps: "true"
           install-dev-deps: "true"
           run-precommit: "false"
           carla-extra: "carla"
-          cache-suffix: ubicloud-standard-8-ubuntu-2204
 
       - name: Run pre-commit auto-fix
         run: uv run pre-commit run --all-files || true
@@ -99,7 +136,7 @@ jobs:
           git push
 
   docs:
-    runs-on: ubicloud-standard-8-ubuntu-2204
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
       with:
@@ -108,11 +145,9 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
         carla-extra: "carla"
-        cache-suffix: ubicloud-standard-8-ubuntu-2204
 
     - name: Build lanelet2-to-opendrive documentation
       uses: ./.github/actions/build-docs
@@ -145,7 +180,7 @@ jobs:
         retention-days: 7
 
   check-src-changes:
-    runs-on: ubicloud-standard-8-ubuntu-2204
+    runs-on: ubuntu-latest
     outputs:
       src-changed: ${{ steps.filter.outputs.src }}
     steps:
@@ -160,18 +195,16 @@ jobs:
   carla-import-test:
     needs: check-src-changes
     if: needs.check-src-changes.outputs.src-changed == 'true'
-    runs-on: ubicloud-standard-8-ubuntu-2204
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
         carla-extra: "carla"
-        cache-suffix: ubicloud-standard-8-ubuntu-2204
 
     - name: Convert Lanelet2 map to OpenDRIVE (CARLA target)
       run: |
@@ -209,17 +242,15 @@ jobs:
         retention-days: 7
 
   qc-validate:
-    runs-on: ubicloud-standard-8-ubuntu-2204
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        install-system-deps: "true"
         install-dev-deps: "true"
         run-precommit: "false"
         carla-extra: "carla"
-        cache-suffix: ubicloud-standard-8-ubuntu-2204
     - name: Convert fixture map
       run: |
         uv run convert \
