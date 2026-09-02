@@ -1,0 +1,89 @@
+// gRPC wire contract between the scenario framework and
+// autoware_carla_interface. The contract is intentionally tiny: the scenario
+// framework hands Autoware the mission (initial pose + goal) and then polls a
+// single readiness flag. The Autoware side owns the entire startup sequence.
+//
+// Delegation (all on the Autoware side, not the framework):
+//   - localization init  : autoware_automatic_pose_initializer (GNSS) or a
+//                          published /initialpose via initial_pose_adaptor.
+//   - routing            : routing_adaptor, from the goal pose.
+//   - engage + readiness : small Autoware-side helpers (an auto-engage node and
+//                          a readiness aggregator that ANDs localization /
+//                          routing / operation-mode state) - see the follow-up
+//                          issues.
+//
+// This is DELIBERATELY SEPARATE from the alpasim egodriver contract
+// (proto/alpasim_grpc/v0/egodriver.proto), which is a driving-policy interface.
+// Autoware drives the ego itself through the ROS 2 interface node.
+//
+// Topology (splatsim-style): autoware_carla_interface launches the scenario
+// library in Docker and hosts this AutowareBridge gRPC server, which internally
+// performs the ROS 2 / Autoware AD API I/O. The scenario framework is the gRPC
+// client (GrpcAutowareBridge), keeping it free of any ROS 2 dependency.
+//
+// High-bandwidth data (sensors, control, /clock, tf) never flows here; it stays
+// on ROS 2 topics and direct CARLA control inside the interface node. Ego
+// pose/velocity for scenario conditions is read directly from the CARLA world.
+//
+// This file is the design-time contract only. Stub generation (via
+// scripts/compile_protos.py) and the GrpcAutowareBridge implementation are
+// follow-up work.
+
+syntax = "proto3";
+
+package autoware_carla_scenario.autoware_bridge.v0;
+
+// Shared physics primitives. These deliberately mirror the splatsim proto
+// (tier4/splatsim proto/splatsim/v1/rendering_service.proto) by name and shape
+// so the two stacks can converge on a common set of physics types later.
+message Vector3 {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+message Quaternion {
+  // wxyz convention (matching the splatsim / gsplat and alpasim common.Quat
+  // convention). The interface node converts to/from ROS geometry_msgs
+  // (xyzw) internally.
+  double w = 1;
+  double x = 2;
+  double y = 3;
+  double z = 4;
+}
+
+// A full 6-DoF map-frame pose (metres), structurally geometry_msgs/Pose - the
+// representation Autoware and autoware_carla_interface hold natively, so no
+// lossy conversion is needed at the boundary. position.z disambiguates
+// multi-level roads (overpasses); the quaternion (not a bare yaw) represents
+// pitch/roll on ramps and banked segments exactly.
+message Pose {
+  Vector3 position = 1;
+  Quaternion rotation = 2;
+}
+
+// -- Request / response messages --------------------------------------------
+
+message ConfigureRequest {
+  Pose initial_pose = 1;  // where Autoware initializes localization
+  Pose goal = 2;          // where Autoware plans the route to
+}
+message ConfigureResponse {}
+
+message GetReadinessRequest {}
+message GetReadinessResponse {
+  // True once Autoware is initialized, routed, engaged, and driving.
+  bool ready = 1;
+}
+
+// -- Service ----------------------------------------------------------------
+
+service AutowareBridge {
+  // Hand Autoware the mission; the Autoware side auto-initializes, routes, and
+  // engages. Called once at scenario start.
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+
+  // Poll the single readiness flag (non-blocking; the client latches it and
+  // stops polling once ready).
+  rpc GetReadiness(GetReadinessRequest) returns (GetReadinessResponse);
+}

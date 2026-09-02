@@ -3,6 +3,7 @@
 Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
+        AutowareEgoEntity,
         AutowareEntity,
         CarlaDriverEntity,
         DriverClientConfig,
@@ -138,7 +139,14 @@ if TYPE_CHECKING:
         DriverClientConfig as DriverClientConfig,
         EgoDriverGrpcClient as EgoDriverGrpcClient,
     )
+    from .autoware_bridge import (
+        AutowareBridge as AutowareBridge,
+        AutowareBridgeConfig as AutowareBridgeConfig,
+        BridgePose as BridgePose,
+        FakeAutowareBridge as FakeAutowareBridge,
+    )
     from .entity import (
+        AutowareEgoEntity as AutowareEgoEntity,
         AutowareEntity as AutowareEntity,
         CarlaDriverEntity as CarlaDriverEntity,
         EgoVehicle as EgoVehicle,
@@ -245,7 +253,13 @@ __all__ = [
     "StandstillCondition",
     "StickyCondition",
     "TemporaryStopCondition",
+    "AutowareEgoEntity",
     "AutowareEntity",
+    # autoware bridge
+    "AutowareBridge",
+    "AutowareBridgeConfig",
+    "BridgePose",
+    "FakeAutowareBridge",
     "BaseEgoDriverClient",
     "CarlaDriverEntity",
     "ControlConfig",
@@ -388,6 +402,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "to_lanelet2": (".coordinate", "to_lanelet2"),
     "to_opendrive": (".coordinate", "to_opendrive"),
     # entity
+    "AutowareEgoEntity": (".entity", "AutowareEgoEntity"),
     "AutowareEntity": (".entity", "AutowareEntity"),
     "CarlaDriverEntity": (".entity", "CarlaDriverEntity"),
     "EgoVehicle": (".entity", "EgoVehicle"),
@@ -431,6 +446,11 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "DriverConfig": (".scenario_config", "DriverConfig"),
     "DriverCameraSpec": (".scenario_config", "DriverCameraSpec"),
     "DriverControlSpec": (".scenario_config", "DriverControlSpec"),
+    # autoware bridge
+    "AutowareBridge": (".autoware_bridge", "AutowareBridge"),
+    "AutowareBridgeConfig": (".autoware_bridge", "AutowareBridgeConfig"),
+    "BridgePose": (".autoware_bridge", "BridgePose"),
+    "FakeAutowareBridge": (".autoware_bridge", "FakeAutowareBridge"),
     # driver
     "BaseEgoDriverClient": (".driver", "BaseEgoDriverClient"),
     "ControlConfig": (".driver", "ControlConfig"),
