@@ -2,9 +2,20 @@
 
 A scenario package created with `scenario-new` is a normal Python
 distribution, so it can be shipped as a container image that carries the
-framework, the scenario, its configs, and a **fixed** CARLA client. The image
-is built by the `pack-scenario-image` composite action; the same Dockerfile
-works by hand.
+framework, the scenario, its configs, and a **fixed** CARLA client.
+
+The image is built by the `pack-scenario-image` composite action. Everything it
+needs lives in the action's own directory, so it is meant to be referenced from
+other repositories:
+
+```yaml
+- uses: tier4/autoware_lanelet2_to_opendrive/.github/actions/pack-scenario-image@v2.62.0
+```
+
+The ref you pin is both the action version and the framework version that ends
+up in the image — the runner checks the whole repository out alongside the
+action, and the framework packages are built from that copy. Your own
+repository does not have to contain this framework, or even be checked out.
 
 ## What the image contains
 
@@ -13,21 +24,21 @@ Only installed code:
 | Present | Absent |
 | --- | --- |
 | `/opt/venv` — the framework, `autoware-lanelet2-to-opendrive`, the scenario package, their dependencies, and one pinned CARLA client | Source trees, `pyproject.toml`, tests, docs, git history |
-| `libgl1` / `libglib2.0-0` for OpenCV, `ffmpeg` when asked for | `uv`, wheels, build caches, a compiler |
+| `ffmpeg`, when asked for | `uv`, wheels, build caches, a compiler, any apt package at all |
 
 The entry point is the `scenario` CLI and the working directory is `/work`,
 where Hydra writes its run directory.
 
 ## Stage layout
 
-`docker/scenario/Dockerfile` runs three stages, each handing the next strictly
-less than it was given:
+`.github/actions/pack-scenario-image/Dockerfile` runs three stages, each
+handing the next strictly less than it was given:
 
 ```mermaid
 flowchart LR
     A["wheelhouse<br/>(Alpine + uv)<br/>framework/ + scenario/ → wheels"]
-    B["venv<br/>(Debian slim)<br/>wheels + carla==X → /opt/venv"]
-    C["runtime<br/>(Debian slim)<br/>/opt/venv + libGL"]
+    B["venv<br/>(Debian slim)<br/>wheels + carla==X → /opt/venv,<br/>then slimmed"]
+    C["runtime<br/>(Debian slim)<br/>/opt/venv, no apt layer"]
     A -- "*.whl only" --> B
     B -- "/opt/venv only" --> C
 ```
@@ -37,11 +48,41 @@ build` emits `py3-none-any` wheels for all three packages — so the stage needs
 neither glibc nor a compiler, and nothing but the wheels survives it.
 
 The runtime is **not** Alpine, and cannot be. The CARLA client (the vendored
-0.10.0 wheel and the PyPI 0.9.16 one alike), `opencv-python` and
+0.10.0 wheel and the PyPI 0.9.16 one alike), `opencv-python-headless` and
 `simple-lanelet2` publish manylinux wheels only. There is no musllinux wheel to
 fall back to, so a musl runtime cannot install them at all; the CARLA extension
 module additionally links glibc 2.34+ symbols directly, so even a forced
 install would not import. Debian slim is the smallest base that runs the code.
+
+## Keeping the image small
+
+Three things do the work, measured on a scaffolded package with CARLA 0.10.0:
+
+| | virtualenv |
+| --- | --- |
+| Naive install | 565 MB |
+| `opencv-python-headless` instead of `opencv-python` | 514 MB |
+| …plus the `slim` pass | **415 MB** |
+
+- **Headless OpenCV.** The framework's only OpenCV calls are `imencode` and
+  `pointPolygonTest`; there is no `imshow` or `namedWindow` anywhere, so the GUI
+  build's GTK/GStreamer payload is dead weight. Dropping it also removes the
+  *last* external shared-library dependency: every `.so` in the venv now needs
+  nothing beyond glibc, `libgcc_s`, `libstdc++` and `libz`, all of which the
+  base image already has. The runtime therefore installs no apt packages and
+  carries no apt layer unless `with-ffmpeg` is on.
+- **The `slim` pass** (on by default, `slim: "false"` to disable) drops
+  byte-code caches, vendored test suites, C headers, Cython sources and type
+  stubs, then runs `strip --strip-unneeded` over every bundled shared object —
+  the manylinux wheels for scipy, numpy and OpenCV ship unstripped. Stripping
+  leaves the dynamic symbol table intact, and the build fails right there if an
+  extension module stops importing.
+- **Stage separation.** Wheels are built in a throwaway Alpine stage and the
+  virtualenv in a throwaway Debian stage, so no source tree, wheel, build cache
+  or copy of `uv` reaches the final image.
+
+What is left is dominated by dependencies with no smaller variant: OpenCV,
+scipy, numpy, and the matplotlib stack that `pyxodr` requires.
 
 ## Pinning the CARLA client
 
@@ -99,7 +140,9 @@ anywhere on the runner and point `scenario-package-path` at it.
 | `framework-path` | this repository | uv workspace root supplying the framework packages. |
 | `carla-wheel-dir` | `carla_wheels` | Local wheels for CARLA releases that are not on PyPI, relative to `framework-path`. |
 | `python-version` | `3.10` | Interpreter in the image. The CARLA client caps this at 3.10. |
-| `with-ffmpeg` | `false` | Install ffmpeg so `CameraRecorder` can encode MP4s. |
+| `with-ffmpeg` | `false` | Install ffmpeg so `CameraRecorder` can encode MP4s. The only thing that adds an apt layer. |
+| `slim` | `true` | Strip the virtualenv (see above). |
+| `labels` | — | Extra newline-separated `KEY=VALUE` OCI labels. |
 | `platforms` | `linux/amd64` | buildx platforms. More than one requires `load: "false"` and `smoke-test: "false"`. |
 | `build-args` | — | Extra newline-separated `KEY=VALUE` build arguments. |
 | `push` / `load` | `false` / `true` | Push to the registry / load into the local daemon. |
@@ -110,8 +153,8 @@ Outputs: `image-ref`, `tags`, `digest` (pushed images only), `image-id`.
 
 ### The smoke test
 
-With `smoke-test: "true"` the action runs `docker/scenario/smoke-test.py`
-inside the freshly built image and checks that
+With `smoke-test: "true"` the action runs its `smoke-test.py` inside the
+freshly built image and checks that
 
 1. the installed CARLA client is exactly `carla-version`,
 2. the scenario package's `autoware_carla_scenario.scenarios` entry point loads
@@ -127,21 +170,23 @@ editable install resolves via `src/`, so losing it from the wheel breaks every
 ## Building by hand
 
 ```bash
+ACTION=.github/actions/pack-scenario-image
+
 # 1. Assemble a minimal build context (framework + scenario, nothing else).
-docker/scenario/assemble-context.sh \
+"$ACTION/assemble-context.sh" \
   --scenario ../my_scenario_package \
   --out /tmp/scenario-ctx
 
 # 2. Build.
 docker build \
-  --file docker/scenario/Dockerfile \
+  --file "$ACTION/Dockerfile" \
   --build-arg CARLA_VERSION=0.10.0 \
   --tag my-scenario:carla0.10.0 \
   /tmp/scenario-ctx
 
 # 3. Verify.
 docker run --rm --entrypoint python \
-  -v "$PWD/docker/scenario/smoke-test.py:/tmp/smoke-test.py:ro" \
+  -v "$PWD/$ACTION/smoke-test.py:/tmp/smoke-test.py:ro" \
   my-scenario:carla0.10.0 /tmp/smoke-test.py 0.10.0
 ```
 

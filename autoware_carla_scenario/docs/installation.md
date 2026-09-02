@@ -109,7 +109,7 @@ requires a live CARLA server and a valid `CARLA_EXECUTABLE`.
 The package's runtime dependencies (declared in `pyproject.toml`):
 
 - `pyxodr>=0.1.0` — OpenDRIVE parser used by `MapManager` / `to_opendrive`
-- `opencv-python>=4.8` — frame processing for the camera recorder
+- `opencv-python-headless>=4.8` — frame processing for the camera recorder (headless: the package makes no GUI calls)
 - `numpy>=1.21`
 - `pytest>=9.0.1`
 - `python-dotenv>=1.2.2`

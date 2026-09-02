@@ -3,13 +3,13 @@
 An editable install puts ``src/`` on ``sys.path`` wholesale, so a package that
 the build backend never copies still imports fine during development and only
 goes missing inside a wheel -- and therefore inside the container image built
-by ``docker/scenario/Dockerfile``.  The ``hydra_plugins`` namespace package is
+by ``.github/actions/pack-scenario-image/Dockerfile``.  The ``hydra_plugins`` namespace package is
 exactly that kind of blind spot: without it Hydra never picks up a scenario
 package's ``conf/`` directory and every ``scenario=<name>/...`` override fails
 with "Could not find".
 
 These tests read the build configuration rather than building a wheel, so they
-stay fast; ``docker/scenario/smoke-test.py`` checks the built artifact itself.
+stay fast; the action's ``smoke-test.py`` checks the built artifact itself.
 """
 
 from __future__ import annotations

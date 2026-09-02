@@ -15,7 +15,7 @@ The repository is a [`uv`](https://docs.astral.sh/uv/) workspace with two packag
 ├── autoware_carla_scenario/          # CARLA scenario testing framework (workspace member)
 ├── examples/                         # Standalone usage examples
 ├── carla_wheels/                     # Local CARLA Python wheels resolved by uv
-├── docker/scenario/                  # Container image for a generated scenario package
+├── .github/actions/                  # Reusable composite actions (incl. scenario image packing)
 ├── pyproject.toml                    # uv workspace root
 └── uv.lock
 ```

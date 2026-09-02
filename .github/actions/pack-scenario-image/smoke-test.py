@@ -3,12 +3,12 @@
 Run with the image's own interpreter::
 
     docker run --rm --entrypoint python \
-        -v "$PWD/docker/scenario/smoke-test.py:/tmp/smoke-test.py:ro" \
+        -v "$PWD/.github/actions/pack-scenario-image/smoke-test.py:/tmp/smoke-test.py:ro" \
         my-scenario:carla0.10.0 /tmp/smoke-test.py 0.10.0
 
-It asserts the two properties the image exists to guarantee: the CARLA client
-is exactly the version pinned at build time, and the scenario package's entry
-point registers its scenario and config directory.
+It asserts the properties the image exists to guarantee: the CARLA client is
+exactly the version pinned at build time, the scenario package's entry point
+registers its scenario, and Hydra can reach that package's config directory.
 """
 
 from __future__ import annotations

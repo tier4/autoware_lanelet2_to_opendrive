@@ -2,8 +2,8 @@
 #
 # Container image for a scenario package generated with `scenario-new`.
 #
-# The build context is the trimmed tree produced by
-# docker/scenario/assemble-context.sh:
+# The build context is the trimmed tree produced by the assemble-context.sh
+# script next to this file:
 #
 #     framework/   the uv workspace (autoware_carla_scenario,
 #                  autoware_lanelet2_to_opendrive, carla_wheels/)
@@ -18,14 +18,20 @@
 #                        wheels leave this stage -- no sources, no uv, no
 #                        pyproject.toml, no build cache.
 #   venv (Debian slim)   installs those wheels plus the pinned CARLA client
-#                        into a self-contained /opt/venv.
-#   runtime (Debian slim) copies /opt/venv and the handful of shared libraries
-#                        OpenCV needs. Nothing else: no uv, no wheels, no
-#                        sources, no toolchain.
+#                        into a self-contained /opt/venv, then slims it: no
+#                        byte-code caches, no vendored test suites, no C
+#                        headers or type stubs, and every bundled shared
+#                        object stripped of its symbol table.
+#   runtime (Debian slim) copies /opt/venv and nothing else. After the switch
+#                        to opencv-python-headless the only shared libraries
+#                        the venv needs from outside are glibc, libgcc_s,
+#                        libstdc++ and libz, all already in the base image, so
+#                        the runtime installs no packages at all unless ffmpeg
+#                        is asked for -- there is not even an apt layer.
 #
 # Why the runtime is not Alpine: the CARLA client (both the vendored 0.10.0
-# wheel and the PyPI 0.9.16 one), opencv-python and simple-lanelet2 publish
-# manylinux wheels only. The CARLA extension module links glibc 2.34+
+# wheel and the PyPI 0.9.16 one), opencv-python-headless and simple-lanelet2
+# publish manylinux wheels only. The CARLA extension module links glibc 2.34+
 # symbols directly, and there is no musllinux wheel to fall back to, so a musl
 # runtime cannot even install -- let alone import -- the client. Alpine is
 # therefore used where it is actually free, in the wheel-building stage.
@@ -66,13 +72,16 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: venv -- resolve and install into a relocatable /opt/venv
+# Stage 2: venv -- resolve, install, and slim /opt/venv
 # ---------------------------------------------------------------------------
 FROM ${RUNTIME_BASE} AS venv
 
 # The CARLA client version is fixed here, at build time, and never resolved
 # again: the runtime image contains exactly this client and no way to change it.
 ARG CARLA_VERSION=0.10.0
+# Set to anything but "true" to keep debug symbols and vendored test suites --
+# useful when debugging a native crash inside the image with gdb.
+ARG SLIM=true
 
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=wheelhouse /wheels /wheels
@@ -81,37 +90,59 @@ COPY --from=wheelhouse /carla-wheels /carla-wheels
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
-# Byte-code caches are dropped rather than kept: the runtime runs as a non-root
-# user that cannot write to /opt/venv, so they would never be refreshed. The
-# final check fails the build if the client is not the version asked for.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv --python /usr/local/bin/python3 /opt/venv \
     && uv pip install --python /opt/venv/bin/python \
         --find-links /wheels \
         --find-links /carla-wheels \
         "carla==${CARLA_VERSION}" \
-        /wheels/*.whl \
-    && find /opt/venv -depth -type d -name __pycache__ -exec rm -rf {} + \
-    && /opt/venv/bin/python -c "import importlib.metadata as m; got = m.version('carla'); print('CARLA client pinned at ' + got); assert got == '${CARLA_VERSION}', 'expected CARLA ${CARLA_VERSION}, installed ' + got"
+        /wheels/*.whl
+
+# Everything removed here is dead weight at run time. Byte-code caches are
+# never refreshed (the runtime user cannot write to /opt/venv); vendored test
+# suites, C headers, Cython sources and type stubs are only read by test
+# runners, compilers and type checkers. `strip --strip-unneeded` leaves the
+# dynamic symbol table intact, so the extension modules keep working -- the
+# manylinux wheels for scipy, numpy and OpenCV simply ship unstripped.
+# Together this is worth roughly 100 MB.
+RUN set -eu; \
+    if [ "${SLIM}" = "true" ]; then \
+        site="$(/opt/venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+        find "${site}" -depth -type d \
+            \( -name __pycache__ -o -name tests -o -name include \) \
+            -exec rm -rf {} +; \
+        find "${site}" \
+            \( -name '*.pyi' -o -name '*.pyx' -o -name '*.pxd' -o -name '*.a' \) \
+            -delete; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends binutils; \
+        find "${site}" \( -name '*.so' -o -name '*.so.*' \) -print0 \
+            | xargs -0 -r strip --strip-unneeded; \
+    fi
+
+# Fail the build here rather than at run time if the client is not the version
+# that was asked for, or if slimming broke an extension module.
+RUN /opt/venv/bin/python -c "import importlib.metadata as m; got = m.version('carla'); print('CARLA client pinned at ' + got); assert got == '${CARLA_VERSION}', 'expected CARLA ${CARLA_VERSION}, installed ' + got" \
+    && /opt/venv/bin/python -c "import carla, cv2, lanelet2, numpy, scipy.interpolate, shapely; print('native extension modules import cleanly')"
 
 
 # ---------------------------------------------------------------------------
-# Stage 3: runtime -- the venv, its shared libraries, and nothing else
+# Stage 3: runtime -- the venv and nothing else
 # ---------------------------------------------------------------------------
 FROM ${RUNTIME_BASE} AS runtime
 
 ARG CARLA_VERSION=0.10.0
-# opencv-python links libGL/libglib even when only decoding frames in memory;
-# opencv-python-headless would drop these, but the framework depends on the
-# full build. ffmpeg is only needed by CameraRecorder, so it stays opt-in.
+# ffmpeg is only invoked by CameraRecorder, and it is the largest thing that
+# can be added to this image, so it stays opt-in. With it off the runtime
+# installs no packages and carries no apt layer.
 ARG WITH_FFMPEG=false
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
-    && if [ "${WITH_FFMPEG}" = "true" ]; then \
+RUN set -eu; \
+    if [ "${WITH_FFMPEG}" = "true" ]; then \
+        apt-get update; \
         apt-get install -y --no-install-recommends ffmpeg; \
-    fi \
-    && rm -rf /var/lib/apt/lists/*
+        rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # --user-group makes the matching group explicit rather than relying on
 # Debian's USERGROUPS_ENAB default, which `install -o/-g` below depends on.

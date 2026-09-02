@@ -276,8 +276,15 @@ jobs:
 
     - name: Report the image size
       run: |
-        docker image ls --format '{{ .Repository }}:{{ .Tag }}  {{ .Size }}' \
-          "${{ steps.pack.outputs.image-ref }}" | tee -a "${GITHUB_STEP_SUMMARY}"
+        {
+          echo "### Scenario image (CARLA ${{ matrix.carla-version }})"
+          echo
+          echo '```'
+          docker image ls --format '{{ .Repository }}:{{ .Tag }}  {{ .Size }}' \
+            "${{ steps.pack.outputs.image-ref }}"
+          docker run --rm --entrypoint du "${{ steps.pack.outputs.image-ref }}" -sh /opt/venv
+          echo '```'
+        } | tee -a "${GITHUB_STEP_SUMMARY}"
 
   qc-validate:
     runs-on: ubuntu-latest

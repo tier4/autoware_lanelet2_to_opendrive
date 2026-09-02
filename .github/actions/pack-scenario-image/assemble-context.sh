@@ -2,9 +2,9 @@
 #
 # Assemble the minimal Docker build context for a generated scenario package.
 #
-# The context deliberately contains only what the wheel-building stage of
-# docker/scenario/Dockerfile needs -- no VCS history, no tests, no docs, no
-# virtualenv -- so that the image build stays fast and nothing that is not
+# The context deliberately contains only what the wheel-building stage of the
+# Dockerfile next to this script needs -- no VCS history, no tests, no docs,
+# no virtualenv -- so that the image build stays fast and nothing that is not
 # code ends up in a layer:
 #
 #     <out>/framework/pyproject.toml        # uv workspace root
@@ -15,12 +15,13 @@
 #                                           # that are not published to PyPI
 #     <out>/scenario/                       # the generated scenario package
 #
-# Used by .github/actions/pack-scenario-image and by anyone building the image
-# by hand (see autoware_carla_scenario/docs/docker.md).
+# Used by action.yml next to it, and by anyone building the image by hand
+# (see autoware_carla_scenario/docs/docker.md).
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# .github/actions/pack-scenario-image -> repository root.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 scenario_dir=""
 out_dir=""
