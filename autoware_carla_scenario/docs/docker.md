@@ -9,13 +9,14 @@ needs lives in the action's own directory, so it is meant to be referenced from
 other repositories:
 
 ```yaml
-- uses: tier4/autoware_lanelet2_to_opendrive/.github/actions/pack-scenario-image@v2.62.0
+- uses: tier4/autoware_lanelet2_to_opendrive/.github/actions/pack-scenario-image@main
 ```
 
-The ref you pin is both the action version and the framework version that ends
-up in the image — the runner checks the whole repository out alongside the
-action, and the framework packages are built from that copy. Your own
-repository does not have to contain this framework, or even be checked out.
+The ref is both the action version and the framework version that ends up in
+the image — the runner checks the whole repository out alongside the action,
+and the framework packages are built from that copy. Pin a release tag instead
+of `main` for reproducible framework versions. Your own repository does not
+have to contain this framework, or even be checked out.
 
 ## What the image contains
 
@@ -62,7 +63,7 @@ Three things do the work, measured on a scaffolded package with CARLA 0.10.0:
 | --- | --- |
 | Naive install | 565 MB |
 | `opencv-python-headless` instead of `opencv-python` | 514 MB |
-| …plus the `slim` pass | **415 MB** |
+| …plus the `slim` pass | **413 MB** |
 
 - **Headless OpenCV.** The framework's only OpenCV calls are `imencode` and
   `pointPolygonTest`; there is no `imshow` or `namedWindow` anywhere, so the GUI
@@ -84,7 +85,7 @@ Three things do the work, measured on a scaffolded package with CARLA 0.10.0:
 What is left is dominated by dependencies with no smaller variant: OpenCV,
 scipy, numpy, and the matplotlib stack that `pyxodr` requires.
 
-## Pinning the CARLA client
+## Pinning the CARLA client — and everything else
 
 `carla-version` is resolved once, during the build, and asserted before the
 image is finished. `0.10.0` is not on PyPI and comes from the local
@@ -97,6 +98,13 @@ the version is recorded twice — in the default tag (`:carla0.10.0`) and in the
 docker image inspect --format '{{ index .Config.Labels "io.autoware.carla-scenario.carla-version" }}' \
   ghcr.io/tier4/my-scenario:carla0.10.0
 ```
+
+The rest of the dependency tree is pinned too, so the same ref rebuilt months
+apart gives the same image: the build context carries `uv.lock`, the wheelhouse
+stage turns it into a constraints file with `uv export --frozen`, and the
+install is constrained by it. Constraints only bound what is resolved, so a
+scenario package that brings dependencies of its own still installs — they are
+the one part that floats.
 
 ## In a workflow
 
@@ -131,23 +139,17 @@ anywhere on the runner and point `scenario-package-path` at it.
 
 ### Inputs
 
-| Input | Default | Meaning |
-| --- | --- | --- |
-| `scenario-package-path` | — | The generated package (the directory with its `pyproject.toml`). Required. |
-| `image` | — | Image name without a tag. Required. |
-| `carla-version` | `0.10.0` | Client version baked into the image. |
-| `tags` | `<image>:carla<version>` and `…-<sha>` | Newline-separated full references. |
-| `framework-path` | this repository | uv workspace root supplying the framework packages. |
-| `carla-wheel-dir` | `carla_wheels` | Local wheels for CARLA releases that are not on PyPI, relative to `framework-path`. |
-| `python-version` | `3.10` | Interpreter in the image. The CARLA client caps this at 3.10. |
-| `with-ffmpeg` | `false` | Install ffmpeg so `CameraRecorder` can encode MP4s. The only thing that adds an apt layer. |
-| `slim` | `true` | Strip the virtualenv (see above). |
-| `labels` | — | Extra newline-separated `KEY=VALUE` OCI labels. |
-| `platforms` | `linux/amd64` | buildx platforms. More than one requires `load: "false"` and `smoke-test: "false"`. |
-| `build-args` | — | Extra newline-separated `KEY=VALUE` build arguments. |
-| `push` / `load` | `false` / `true` | Push to the registry / load into the local daemon. |
-| `smoke-test` | `true` | Run the built image to verify the pin and the registration. |
-| `cache` | `true` | Use the GitHub Actions build cache. |
+`action.yml` carries the full list with defaults; these are the ones worth
+explaining further:
+
+| Input | Meaning |
+| --- | --- |
+| `scenario-package-path` | The generated package — the directory with its `pyproject.toml`. Required, and may sit outside this repository. |
+| `carla-version` | The client baked into the image. `0.10.0` resolves from `carla-wheel-dir`, published versions (e.g. `0.9.16`) from the index. |
+| `framework-path` | uv workspace root supplying the framework. Defaults to the action's own checkout, which is what makes the pinned ref the framework version. |
+| `with-ffmpeg` | Installs ffmpeg for `CameraRecorder`. The only input that adds an apt layer. |
+| `slim` | Strips the virtualenv (see above). On by default. |
+| `cache-scope` | Cache key namespace. Defaults to one scope per image and CARLA version, so images built in the same workflow do not evict each other. |
 
 Outputs: `image-ref`, `tags`, `digest` (pushed images only), `image-id`.
 
@@ -185,9 +187,8 @@ docker build \
   /tmp/scenario-ctx
 
 # 3. Verify.
-docker run --rm --entrypoint python \
-  -v "$PWD/$ACTION/smoke-test.py:/tmp/smoke-test.py:ro" \
-  my-scenario:carla0.10.0 /tmp/smoke-test.py 0.10.0
+docker run --rm -i --entrypoint python \
+  my-scenario:carla0.10.0 - 0.10.0 < "$ACTION/smoke-test.py"
 ```
 
 ## Running a scenario

@@ -1,45 +1,21 @@
 # syntax=docker/dockerfile:1.7
 #
 # Container image for a scenario package generated with `scenario-new`.
+# Build context: the trimmed tree that assemble-context.sh next to this file
+# produces (`framework/` = the uv workspace, `scenario/` = the package).
 #
-# The build context is the trimmed tree produced by the assemble-context.sh
-# script next to this file:
+# Three stages, each handing the next strictly less than it was given: wheels
+# are built on Alpine (everything here is pure Python), installed into a
+# throwaway Debian stage, and only the finished virtualenv reaches the runtime.
+# The runtime cannot be Alpine -- the CARLA client, opencv-python-headless and
+# simple-lanelet2 publish manylinux wheels only, and the CARLA extension module
+# links glibc 2.34+ symbols directly.
 #
-#     framework/   the uv workspace (autoware_carla_scenario,
-#                  autoware_lanelet2_to_opendrive, carla_wheels/)
-#     scenario/    the generated scenario package
-#
-# Stages, ordered so that each one hands the next strictly less than it was
-# given -- that is what keeps the final image down to "the code that runs":
-#
-#   wheelhouse (Alpine)  turns both trees into wheels. Every package here is
-#                        pure Python (`uv build` emits py3-none-any), so musl
-#                        is enough: no compiler, no CARLA, no glibc. Only the
-#                        wheels leave this stage -- no sources, no uv, no
-#                        pyproject.toml, no build cache.
-#   venv (Debian slim)   installs those wheels plus the pinned CARLA client
-#                        into a self-contained /opt/venv, then slims it: no
-#                        byte-code caches, no vendored test suites, no C
-#                        headers or type stubs, and every bundled shared
-#                        object stripped of its symbol table.
-#   runtime (Debian slim) copies /opt/venv and nothing else. After the switch
-#                        to opencv-python-headless the only shared libraries
-#                        the venv needs from outside are glibc, libgcc_s,
-#                        libstdc++ and libz, all already in the base image, so
-#                        the runtime installs no packages at all unless ffmpeg
-#                        is asked for -- there is not even an apt layer.
-#
-# Why the runtime is not Alpine: the CARLA client (both the vendored 0.10.0
-# wheel and the PyPI 0.9.16 one), opencv-python-headless and simple-lanelet2
-# publish manylinux wheels only. The CARLA extension module links glibc 2.34+
-# symbols directly, and there is no musllinux wheel to fall back to, so a musl
-# runtime cannot even install -- let alone import -- the client. Alpine is
-# therefore used where it is actually free, in the wheel-building stage.
+# See autoware_carla_scenario/docs/docker.md for the reasoning and the sizes.
 
 ARG PYTHON_VERSION=3.10
-ARG DEBIAN_SUITE=bookworm
 ARG UV_VERSION=0.9.7
-ARG RUNTIME_BASE=python:${PYTHON_VERSION}-slim-${DEBIAN_SUITE}
+ARG RUNTIME_BASE=python:${PYTHON_VERSION}-slim-bookworm
 
 
 # ---------------------------------------------------------------------------
@@ -52,18 +28,19 @@ ENV UV_LINK_MODE=copy \
 
 WORKDIR /build
 
+# The framework is pinned by the action ref, so it changes far less often than
+# the scenario package; building it first keeps its layer cached across
+# scenario edits. `--all-packages` builds whatever workspace members the
+# assembler copied, so the member list lives in exactly one place.
 COPY framework/ framework/
-COPY scenario/ scenario/
-
-# Build the three wheels, then gather any vendored CARLA wheels alongside them.
-# The mkdir keeps the gather (and the next stage's COPY) valid whether or not
-# the context carried a wheel for a CARLA release that is not on PyPI.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv build --wheel --out-dir /wheels --package autoware-carla-scenario framework \
-    && uv build --wheel --out-dir /wheels --package autoware-lanelet2-to-opendrive framework \
-    && uv build --wheel --out-dir /wheels scenario \
-    && mkdir -p /carla-wheels framework/carla_wheels \
-    && find framework/carla_wheels -maxdepth 1 -name '*.whl' -exec cp {} /carla-wheels/ \;
+    uv build --wheel --all-packages --out-dir /wheels framework \
+    && uv export --directory framework --frozen --no-dev --no-emit-workspace \
+        --no-hashes -o /wheels/constraints.txt
+
+COPY scenario/ scenario/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv build --wheel --out-dir /wheels scenario
 
 
 # The uv binary is lifted out of its own distroless image rather than
@@ -83,16 +60,31 @@ ARG CARLA_VERSION=0.10.0
 # useful when debugging a native crash inside the image with gdb.
 ARG SLIM=true
 
+# `strip` comes from binutils. Installed before anything volatile is copied in
+# so the apt layer caches across every rebuild; the stage is discarded, so
+# installing it even when SLIM is off costs the image nothing.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends binutils \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=wheelhouse /wheels /wheels
-COPY --from=wheelhouse /carla-wheels /carla-wheels
+# The vendored CARLA wheels stay in their own --find-links directory: merged
+# into /wheels they would be installed by the glob below even when
+# CARLA_VERSION names a different release.
+COPY framework/carla_wheels /carla-wheels
 
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
+# The constraints file is the workspace lock, so every framework dependency is
+# pinned to the version this repository tests -- not just the CARLA client.
+# Constraints only bound what gets resolved, so a scenario package that pulls
+# in extra dependencies of its own still installs.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv --python /usr/local/bin/python3 /opt/venv \
     && uv pip install --python /opt/venv/bin/python \
+        --constraint /wheels/constraints.txt \
         --find-links /wheels \
         --find-links /carla-wheels \
         "carla==${CARLA_VERSION}" \
@@ -114,16 +106,13 @@ RUN set -eu; \
         find "${site}" \
             \( -name '*.pyi' -o -name '*.pyx' -o -name '*.pxd' -o -name '*.a' \) \
             -delete; \
-        apt-get update; \
-        apt-get install -y --no-install-recommends binutils; \
         find "${site}" \( -name '*.so' -o -name '*.so.*' \) -print0 \
             | xargs -0 -r strip --strip-unneeded; \
     fi
 
 # Fail the build here rather than at run time if the client is not the version
 # that was asked for, or if slimming broke an extension module.
-RUN /opt/venv/bin/python -c "import importlib.metadata as m; got = m.version('carla'); print('CARLA client pinned at ' + got); assert got == '${CARLA_VERSION}', 'expected CARLA ${CARLA_VERSION}, installed ' + got" \
-    && /opt/venv/bin/python -c "import carla, cv2, lanelet2, numpy, scipy.interpolate, shapely; print('native extension modules import cleanly')"
+RUN /opt/venv/bin/python -c "import carla, cv2, lanelet2, numpy, scipy.interpolate, shapely; from importlib.metadata import version; got = version('carla'); assert got == '${CARLA_VERSION}', 'expected CARLA ${CARLA_VERSION}, installed ' + got; print('CARLA ' + got + ' pinned; native extension modules import cleanly')"
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +123,9 @@ FROM ${RUNTIME_BASE} AS runtime
 ARG CARLA_VERSION=0.10.0
 # ffmpeg is only invoked by CameraRecorder, and it is the largest thing that
 # can be added to this image, so it stays opt-in. With it off the runtime
-# installs no packages and carries no apt layer.
+# installs no packages and carries no apt layer: after the move to
+# opencv-python-headless the venv needs nothing beyond the glibc, libgcc_s,
+# libstdc++ and libz the base image already has.
 ARG WITH_FFMPEG=false
 
 RUN set -eu; \

@@ -25,6 +25,13 @@ inputs:
     description: "uv extra for CARLA version selection (e.g. 'carla' for 0.10.0, 'carla-0-9-16' for 0.9.16)"
     required: false
     default: ""
+  sync-dev-group:
+    description: >
+      Include the dev dependency group in 'uv sync'. Set to "false" for a job
+      that only runs a console script -- the group carries mkdocs, weasyprint,
+      mypy and the rest of the tooling, none of which such a job touches.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -49,12 +56,19 @@ runs:
     - name: Install Python dependencies
       if: inputs.install-dev-deps == 'true'
       shell: bash
+      env:
+        CARLA_EXTRA: ${{ inputs.carla-extra }}
+        SYNC_DEV_GROUP: ${{ inputs.sync-dev-group }}
       run: |
-        if [ -n "${{ inputs.carla-extra }}" ]; then
-          uv sync --dev --extra "${{ inputs.carla-extra }}"
-        else
-          uv sync --dev
+        set -euo pipefail
+        args=()
+        if [ "${SYNC_DEV_GROUP}" = "true" ]; then
+          args+=(--dev)
         fi
+        if [ -n "${CARLA_EXTRA}" ]; then
+          args+=(--extra "${CARLA_EXTRA}")
+        fi
+        uv sync ${args[@]+"${args[@]}"}
 
     - name: Run pre-commit hooks
       if: inputs.run-precommit == 'true' && inputs.precommit-continue-on-error == 'false'

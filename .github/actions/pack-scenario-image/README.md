@@ -10,7 +10,7 @@ meant to be referenced from other repositories:
 ```yaml
 - uses: actions/checkout@v4
 
-- uses: tier4/autoware_lanelet2_to_opendrive/.github/actions/pack-scenario-image@v2.62.0
+- uses: tier4/autoware_lanelet2_to_opendrive/.github/actions/pack-scenario-image@main
   with:
     scenario-package-path: my_scenario_package
     image: ghcr.io/my-org/my-scenario
@@ -18,14 +18,9 @@ meant to be referenced from other repositories:
     push: "true"
 ```
 
-The ref you pin is both the action version **and** the framework version that
-ends up in the image: the runner checks the whole repository out next to the
-action, and `autoware-carla-scenario` / `autoware-lanelet2-to-opendrive` are
-built from that copy. Your repository needs to contain only your scenario
-package.
-
-Push to a registry with `docker/login-action` first; this action does not
-handle credentials.
+Your repository needs to contain only your scenario package: the framework
+comes from the ref you reference the action by. Push to a registry with
+`docker/login-action` first; this action does not handle credentials.
 
 Inputs, outputs, sizing, and how to build the same image by hand are documented
 in [`autoware_carla_scenario/docs/docker.md`](../../../autoware_carla_scenario/docs/docker.md).

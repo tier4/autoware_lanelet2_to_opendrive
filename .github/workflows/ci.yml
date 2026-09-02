@@ -260,6 +260,9 @@ jobs:
       with:
         python-version: "3.10"
         install-dev-deps: "true"
+        # The job only runs one console script; the dev group (mkdocs,
+        # weasyprint, mypy, ...) would be installed and never touched.
+        sync-dev-group: "false"
         run-precommit: "false"
 
     - name: Scaffold a scenario package
@@ -276,15 +279,9 @@ jobs:
 
     - name: Report the image size
       run: |
-        {
-          echo "### Scenario image (CARLA ${{ matrix.carla-version }})"
-          echo
-          echo '```'
-          docker image ls --format '{{ .Repository }}:{{ .Tag }}  {{ .Size }}' \
-            "${{ steps.pack.outputs.image-ref }}"
-          docker run --rm --entrypoint du "${{ steps.pack.outputs.image-ref }}" -sh /opt/venv
-          echo '```'
-        } | tee -a "${GITHUB_STEP_SUMMARY}"
+        docker image ls --format \
+          '### Scenario image `{{ .Repository }}:{{ .Tag }}` — {{ .Size }}' \
+          "${{ steps.pack.outputs.image-ref }}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
   qc-validate:
     runs-on: ubuntu-latest
