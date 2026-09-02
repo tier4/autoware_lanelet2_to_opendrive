@@ -57,12 +57,12 @@ install would not import. Debian slim is the smallest base that runs the code.
 
 ## Keeping the image small
 
-Three things do the work, measured on a scaffolded package with CARLA 0.10.0:
+Two things do the work, measured on a scaffolded package with CARLA 0.10.0:
 
 | | virtualenv |
 | --- | --- |
 | Naive install | 565 MB |
-| `opencv-python-headless` instead of `opencv-python` | 514 MB |
+| `opencv-python-headless` instead of `opencv-python` | 512 MB |
 | …plus the `slim` pass | **413 MB** |
 
 - **Headless OpenCV.** The framework's only OpenCV calls are `imencode` and
@@ -74,10 +74,18 @@ Three things do the work, measured on a scaffolded package with CARLA 0.10.0:
   carries no apt layer unless `with-ffmpeg` is on.
 - **The `slim` pass** (on by default, `slim: "false"` to disable) drops
   byte-code caches, vendored test suites, C headers, Cython sources and type
-  stubs, then runs `strip --strip-unneeded` over every bundled shared object —
-  the manylinux wheels for scipy, numpy and OpenCV ship unstripped. Stripping
-  leaves the dynamic symbol table intact, and the build fails right there if an
-  extension module stops importing.
+  stubs (29 MB), then runs `strip --strip-unneeded` over every bundled shared
+  object (64 MB) — the manylinux wheels for scipy, numpy and OpenCV ship
+  unstripped. Stripping leaves the dynamic symbol table intact.
+
+    GNU binutils up to 2.40 — the version in Debian bookworm — rewrites some
+    objects into a layout the kernel's ELF loader rejects with *"ELF load
+    command address/offset not page-aligned"*; scipy's bundled OpenBLAS is one.
+    So `slim-venv.py` re-reads every object it strips and restores the original
+    unless each `PT_LOAD` segment still satisfies the loader's congruence rule.
+    A newer binutils strips everything and restores nothing; on bookworm the
+    one restored file costs about 2 MB. The build then imports the native
+    extension modules and fails right there if anything did break.
 - **Stage separation.** Wheels are built in a throwaway Alpine stage and the
   virtualenv in a throwaway Debian stage, so no source tree, wheel, build cache
   or copy of `uv` reaches the final image.
@@ -102,7 +110,7 @@ docker image inspect --format '{{ index .Config.Labels "io.autoware.carla-scenar
 The rest of the dependency tree is pinned too, so the same ref rebuilt months
 apart gives the same image: the build context carries `uv.lock`, the wheelhouse
 stage turns it into a constraints file with `uv export --frozen`, and the
-install is constrained by it. Constraints only bound what is resolved, so a
+install is constrained by it. This buys reproducibility rather than size. Constraints only bound what is resolved, so a
 scenario package that brings dependencies of its own still installs — they are
 the one part that floats.
 

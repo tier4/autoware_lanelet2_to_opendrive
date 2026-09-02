@@ -90,24 +90,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         "carla==${CARLA_VERSION}" \
         /wheels/*.whl
 
-# Everything removed here is dead weight at run time. Byte-code caches are
-# never refreshed (the runtime user cannot write to /opt/venv); vendored test
-# suites, C headers, Cython sources and type stubs are only read by test
-# runners, compilers and type checkers. `strip --strip-unneeded` leaves the
-# dynamic symbol table intact, so the extension modules keep working -- the
-# manylinux wheels for scipy, numpy and OpenCV simply ship unstripped.
-# Together this is worth roughly 100 MB.
+# Drops what only a test runner, compiler or type checker reads, then strips
+# the bundled shared objects. The script verifies each stripped object and puts
+# the original back if binutils produced a layout the ELF loader would reject
+# -- see its docstring; scipy's bundled OpenBLAS is one such object under the
+# binutils in Debian bookworm.
+COPY slim-venv.py /tmp/slim-venv.py
 RUN set -eu; \
     if [ "${SLIM}" = "true" ]; then \
-        site="$(/opt/venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
-        find "${site}" -depth -type d \
-            \( -name __pycache__ -o -name tests -o -name include \) \
-            -exec rm -rf {} +; \
-        find "${site}" \
-            \( -name '*.pyi' -o -name '*.pyx' -o -name '*.pxd' -o -name '*.a' \) \
-            -delete; \
-        find "${site}" \( -name '*.so' -o -name '*.so.*' \) -print0 \
-            | xargs -0 -r strip --strip-unneeded; \
+        /opt/venv/bin/python /tmp/slim-venv.py /opt/venv; \
     fi
 
 # Fail the build here rather than at run time if the client is not the version

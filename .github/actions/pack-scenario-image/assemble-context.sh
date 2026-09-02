@@ -14,6 +14,7 @@
 #                                           # that are not published to PyPI
 #     <out>/scenario/                       # the generated scenario package,
 #                                           # minus VCS, caches and build output
+#     <out>/slim-venv.py                    # run by the venv stage
 #
 # Workspace members are discovered rather than listed, so the set stays in step
 # with `[tool.uv.workspace] members` without this script having to parse TOML.
@@ -142,6 +143,9 @@ if [ -d "${framework_dir}/${carla_wheel_dir}" ]; then
 fi
 
 copy_tree "${scenario_dir}" "${out_dir}/scenario"
+
+# The Dockerfile COPYs this, so it has to live in the context.
+cp "$(dirname "${BASH_SOURCE[0]}")/slim-venv.py" "${out_dir}/slim-venv.py"
 
 echo "Assembled build context at ${out_dir} (${members} workspace member(s))"
 du -sh "${out_dir}" 2>/dev/null || true
