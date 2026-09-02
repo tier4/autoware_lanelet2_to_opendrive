@@ -1,4 +1,4 @@
-"""autoware_bridge – initialization/monitoring contract with ``autoware_carla_interface``.
+"""autoware_bridge - initialization/monitoring contract with ``autoware_carla_interface``.
 
 Distinct from the alpasim ``egodriver`` driving-policy contract in
 :mod:`autoware_carla_scenario.driver`; see :class:`.base.AutowareBridge` for the

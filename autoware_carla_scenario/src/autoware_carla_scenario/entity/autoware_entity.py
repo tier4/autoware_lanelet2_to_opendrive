@@ -2,17 +2,17 @@
 
 Two entities live here:
 
-* :class:`AutowareEntity` — a bare placeholder that spawns the ego, opts out of
+* :class:`AutowareEntity` - a bare placeholder that spawns the ego, opts out of
   TrafficManager, and leaves the actor standing still for an external stack to
   control out of band.  Kept for backwards compatibility.
 
-* :class:`AutowareEgoEntity` — the closed-loop entity.  Autoware (via the
+* :class:`AutowareEgoEntity` - the closed-loop entity.  Autoware (via the
   ``autoware_carla_interface`` ROS 2 node) reads CARLA sensors and applies
   control to the ego **directly**, so unlike
   :class:`~autoware_carla_scenario.entity.carla_driver_entity.CarlaDriverEntity`
   the framework is *not* in the control loop.  Instead this entity **attaches**
   to the ego actor spawned by the interface node and drives Autoware's startup
-  handshake (pose init → routing → engage) over an
+  handshake (pose init -> routing -> engage) over an
   :class:`~autoware_carla_scenario.autoware_bridge.base.AutowareBridge`.  This is
   a separate, Autoware-specific contract from the alpasim ``egodriver`` one.
 
@@ -75,7 +75,7 @@ class AutowareEgoEntity(EgoVehicle):
 
     .. warning::
 
-       Not yet wired into :class:`ScenarioRunner` — this class is the foundation
+       Not yet wired into :class:`ScenarioRunner` - this class is the foundation
        only.  Two runner-side gaps must be closed before an Autoware scenario can
        run end to end (tracked separately):
 
@@ -97,14 +97,14 @@ class AutowareEgoEntity(EgoVehicle):
     Pose feedback to the scenario.  There are two paths, and the important one
     does **not** involve the bridge:
 
-    * *Ground truth* — pass/fail conditions read the ego's pose/velocity from the
+    * *Ground truth* - pass/fail conditions read the ego's pose/velocity from the
       CARLA actor directly.  Because :meth:`spawn` attaches this entity's
       :attr:`~EgoVehicle.actor` by ``role_name``, every existing condition
       (``EntityInAreaCondition``, ``EntityLanePositionCondition``,
-      ``WaypointCondition``, ``CollisionCondition`` …) works against the Autoware
+      ``WaypointCondition``, ``CollisionCondition`` ...) works against the Autoware
       ego exactly as it does for a TrafficManager or driver ego, via
       ``find_actor_by_role_name(world, EGO_ROLE_NAME).get_transform()``.
-    * *Autoware's estimate* — :attr:`estimated_pose` exposes Autoware's
+    * *Autoware's estimate* - :attr:`estimated_pose` exposes Autoware's
       localization belief relayed over the bridge's ``StreamState``, for checking
       localization accuracy against ground truth.  It is monitoring only.
 
@@ -283,7 +283,7 @@ class AutowareEgoEntity(EgoVehicle):
         seq.step()
         if seq.failed:
             logger.warning(
-                "Autoware initialization failed: %s — requesting termination",
+                "Autoware initialization failed: %s - requesting termination",
                 seq.failure_reason,
             )
             self._termination_requested = True

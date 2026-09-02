@@ -45,10 +45,10 @@ message Quaternion {
   double z = 4;
 }
 
-// A full 6-DoF map-frame pose (metres), structurally geometry_msgs/Pose — the
+// A full 6-DoF map-frame pose (metres), structurally geometry_msgs/Pose - the
 // representation Autoware and autoware_carla_interface hold natively, so no
 // lossy conversion is needed at the boundary. position.z disambiguates
-// multi-level roads (overpasses / 高架); the quaternion (not a bare yaw)
+// multi-level roads (overpasses); the quaternion (not a bare yaw)
 // represents pitch/roll on ramps and banked segments exactly.
 message Pose {
   Vector3 position = 1;
@@ -138,7 +138,7 @@ message StateUpdate {
   bool is_autonomous_available = 7;
   // Autoware's ESTIMATED map-frame pose (/localization/kinematic_state), for
   // monitoring localization accuracy. NOTE: scenario pass/fail conditions do
-  // NOT use this — they read the CARLA ego actor's ground-truth transform
+  // NOT use this - they read the CARLA ego actor's ground-truth transform
   // directly from the shared world. Unset until localization is initialized.
   Pose estimated_pose = 8;
 }
@@ -154,7 +154,7 @@ message SubscribeStateRequest {
 // (grpc.aio or a ThreadPoolExecutor). Inside the interface node, ROS 2
 // subscription callbacks update a shared, lock-guarded state; StreamState emits
 // snapshots of it while the unary command RPCs run in parallel. The bridge is a
-// thin CONTROL/MONITOR plane only — high-bandwidth data (sensors, control,
+// thin CONTROL/MONITOR plane only - high-bandwidth data (sensors, control,
 // /clock, tf) never flows here; it stays on ROS 2 topics and direct CARLA
 // actor control inside the interface node.
 service AutowareBridge {

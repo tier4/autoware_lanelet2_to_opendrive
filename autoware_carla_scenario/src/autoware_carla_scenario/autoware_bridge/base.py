@@ -1,9 +1,9 @@
 """Semantic contract for communicating with ``autoware_carla_interface``.
 
 The ``egodriver`` gRPC contract in :mod:`autoware_carla_scenario.driver` is an
-alpasim-compatible *driving policy* interface (sensor observations in → planned
+alpasim-compatible *driving policy* interface (sensor observations in -> planned
 trajectory out): the scenario framework stays in the control loop.  Autoware is
-different — the ``autoware_carla_interface`` ROS 2 node reads CARLA sensors and
+different - the ``autoware_carla_interface`` ROS 2 node reads CARLA sensors and
 applies control to the ego **directly**, so the framework is *not* in the
 control loop.  What the framework needs instead is an *initialization and
 monitoring* contract: drive Autoware's startup handshake (pose init, routing,
@@ -58,7 +58,7 @@ class Vector3:
     ``Vector3`` so the physics primitives can be unified in the future.
 
     Note: distinct from the frame-aware
-    :class:`autoware_carla_scenario.kinematics.Vector3` — this one is the plain
+    :class:`autoware_carla_scenario.kinematics.Vector3` - this one is the plain
     wire primitive that mirrors the proto; unifying the two is future work.
     """
 
@@ -92,7 +92,7 @@ class BridgePose:
     ``autoware_carla_interface`` hold poses, so there is no lossy conversion at
     the boundary.
 
-    The ``position.z`` disambiguates multi-level roads (overpasses/高架): a 2D
+    The ``position.z`` disambiguates multi-level roads (overpasses): a 2D
     ``(x, y)`` alone can match both an elevated road and the surface beneath it,
     which would let localization or the interface node's ground projection snap
     to the wrong level.  The quaternion (not a bare yaw) represents pitch/roll on
@@ -204,7 +204,7 @@ class AutowareBridge(ABC):
     thread, and the query methods simply read that mirror.  Commands and the
     state stream are handled concurrently by the server (grpc.aio or a thread
     pool).  High-bandwidth data (sensors, control, ``/clock``, tf) never flows
-    over this bridge — it stays on ROS 2 / direct CARLA control in the interface
+    over this bridge - it stays on ROS 2 / direct CARLA control in the interface
     node.
     """
 
