@@ -89,6 +89,26 @@ def test_pose_rejects_wrong_dimensions() -> None:
         Pose(np.zeros(3), np.zeros(3))
 
 
+def test_from_axis_angle_matches_the_principal_rotations() -> None:
+    angle = math.radians(30.0)
+    cos, sin = math.cos(angle), math.sin(angle)
+    expected = {
+        0: np.array([[1.0, 0.0, 0.0], [0.0, cos, -sin], [0.0, sin, cos]]),
+        1: np.array([[cos, 0.0, sin], [0.0, 1.0, 0.0], [-sin, 0.0, cos]]),
+        2: np.array([[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]]),
+    }
+    for axis, rotation in expected.items():
+        pose = Pose.from_axis_angle(axis, angle)
+        assert np.allclose(pose.rotation_matrix, rotation, atol=1e-12)
+        assert np.allclose(pose.position, np.zeros(3))
+
+
+def test_from_axis_angle_composes_into_a_yaw_pitch_roll_rotation() -> None:
+    """The z rotation must agree with ``from_xyz_yaw`` about the same axis."""
+    yaw = Pose.from_axis_angle(2, math.radians(45.0))
+    assert yaw.yaw == pytest.approx(math.radians(45.0), abs=1e-12)
+
+
 # ---------------------------------------------------------------------------
 # Trajectory
 # ---------------------------------------------------------------------------

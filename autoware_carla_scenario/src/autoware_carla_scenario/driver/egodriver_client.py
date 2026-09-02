@@ -28,6 +28,7 @@ from ._proto import (
 )
 from .base import BaseEgoDriverClient, DriveOutcome, DriverClientConfig, EgoObservation
 from .geometry import Trajectory, waypoints_to_proto
+from .observation import camera_extrinsics_to_rig
 
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,17 @@ class EgoDriverGrpcClient(BaseEgoDriverClient):
             cameras.append(
                 sensorsim_pb2.AvailableCamerasReturn.AvailableCamera(
                     intrinsics=spec,
+                    # Without this the policy sees the protobuf-default (identity,
+                    # origin) pose and reads every frame from the wrong viewpoint,
+                    # not even the configured (1.5, 0, 1.6) mount.
+                    rig_to_camera=camera_extrinsics_to_rig(
+                        camera.position_x,
+                        camera.position_y,
+                        camera.position_z,
+                        camera.roll,
+                        camera.pitch,
+                        camera.yaw,
+                    ).to_proto(),
                     logical_id=camera.logical_id,
                 )
             )

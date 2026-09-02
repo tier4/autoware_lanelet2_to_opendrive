@@ -130,7 +130,7 @@ class RendererDataBuilder:
         self, timestamp_us: int, ego_pose: Pose
     ) -> carla_driver_pb2.CarlaRendererData:
         """Assemble the payload."""
-        light = self._governing_traffic_light()
+        light = self._governing_traffic_light(ego_pose)
         return carla_driver_pb2.CarlaRendererData(
             snapshot_timestamp_us=timestamp_us,
             frame_id=self._frame_id(),
@@ -150,7 +150,7 @@ class RendererDataBuilder:
     # Traffic lights
     # ------------------------------------------------------------------
 
-    def _governing_traffic_light(self) -> Optional[Any]:
+    def _governing_traffic_light(self, ego_pose: Pose) -> Optional[Any]:
         """The light the ego must obey, found by looking down its own lane.
 
         CARLA's ``is_at_traffic_light()`` answers a different question -- whether
@@ -179,7 +179,8 @@ class RendererDataBuilder:
             if waypoint is not None and waypoint.is_junction:
                 return None
             lanes = self._lanes_ahead(self._config.traffic_light_sight_distance_m)
-            for light in self._lights_on_lanes(lanes):
+            light = self._nearest_light_ahead(lanes, ego_pose)
+            if light is not None:
                 return light
         try:
             if self._ego.is_at_traffic_light():
@@ -221,11 +222,37 @@ class RendererDataBuilder:
                 break
         return lanes
 
-    def _lights_on_lanes(self, lanes: List[Tuple[int, int]]) -> List[Any]:
-        """Lights whose stop lines lie on *lanes*, nearest lane first.
+    def _nearest_light_ahead(
+        self, lanes: List[Tuple[int, int]], ego_pose: Pose
+    ) -> Optional[Any]:
+        """The nearest light on *lanes* whose stop line is still ahead of the ego.
 
-        *lanes* is in the order the ego will drive them, so the first hit is the
-        first light it will meet.
+        :meth:`_lights_on_lanes` keys its index only by ``(road_id, lane_id)``, so
+        a light whose stop line sits behind the ego on the current lane -- or
+        beyond the sight distance -- lands in the same bucket as one genuinely
+        ahead, and a bucket holds its lights in CARLA's arbitrary actor order.
+        Ranking the candidates by longitudinal distance and dropping any already
+        passed or out of sight is what turns "a light on our lane" back into "the
+        light we are about to reach".
+        """
+        sight = self._config.traffic_light_sight_distance_m
+        nearest: Optional[Any] = None
+        nearest_distance = float("inf")
+        for light in self._lights_on_lanes(lanes):
+            distance = self._light_distance(light, ego_pose)
+            if distance < 0.0 or distance > sight:
+                continue
+            if distance < nearest_distance:
+                nearest, nearest_distance = light, distance
+        return nearest
+
+    def _lights_on_lanes(self, lanes: List[Tuple[int, int]]) -> List[Any]:
+        """Lights whose stop lines lie on *lanes*.
+
+        The index is keyed by ``(road_id, lane_id)`` alone, so a lane's bucket can
+        hold a light behind the ego or beyond the horizon, in CARLA's arbitrary
+        actor order.  :meth:`_nearest_light_ahead` is what filters and ranks these
+        candidates by their stop-line position relative to the ego.
         """
         if not lanes:
             return []

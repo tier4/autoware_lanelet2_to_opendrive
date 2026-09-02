@@ -235,15 +235,29 @@ class CarlaCameraSensor(CameraSensorBase):
         logger.info("CarlaCameraSensor destroyed")
 
     def get_image(self) -> Optional[NDArray[np.uint8]]:
-        """Return the latest frame as an HxWx3 BGR NumPy array.
+        """Return the *newest* captured frame as an HxWx3 BGR NumPy array.
 
-        The method blocks for up to :data:`_FRAME_TIMEOUT` seconds waiting
-        for a frame.  Returns ``None`` on timeout.
+        Frames arrive asynchronously into a bounded FIFO, and at the default
+        20 Hz capture against a 10 Hz policy two frames land per policy step.
+        Taking only the oldest each time would leave the queue permanently full:
+        the ``listen`` callback then blocks on ``put``, frames back up, and the
+        caller is fed steadily staler images.  So the queue is drained to its most
+        recent entry and the older frames are dropped rather than delivered late.
+
+        Blocks for up to :data:`_FRAME_TIMEOUT` seconds for the first frame, then
+        takes whatever else is already queued without waiting.  Returns ``None``
+        on timeout.
         """
         try:
             image: carla.Image = self._frame_queue.get(timeout=_FRAME_TIMEOUT)
         except queue.Empty:
             return None
+
+        while True:
+            try:
+                image = self._frame_queue.get_nowait()
+            except queue.Empty:
+                break
 
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
         array = array.reshape((image.height, image.width, 4))  # BGRA

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "camera_extrinsics_to_rig",
     "encode_frame_jpeg",
     "ego_observation",
     "rear_axle_offset",
@@ -81,6 +82,34 @@ def to_local_pose(
         return pose
     shift = Pose.from_xyz_yaw(rear_axle_offset_m, 0.0, 0.0, 0.0)
     return pose @ shift
+
+
+def camera_extrinsics_to_rig(
+    position_x: float,
+    position_y: float,
+    position_z: float,
+    roll_deg: float,
+    pitch_deg: float,
+    yaw_deg: float,
+) -> Pose:
+    """Return a camera's ``base_link -> camera`` extrinsics as a rig-frame pose.
+
+    Camera extrinsics are configured in CARLA's convention (x forward, y right, z
+    up, degrees), whereas the pose the contract advertises as ``rig_to_camera`` is
+    right-handed (x forward, y left, z up).  Crossing that boundary is the same
+    ``y`` reflection this module applies elsewhere: the translation's ``y`` flips,
+    and CARLA's ``yaw * pitch * roll`` rotation, rebuilt in the right-handed frame,
+    is the same rotation with the yaw and pitch angles negated and the roll kept.
+    The yaw-only case therefore reduces to the "negate the yaw" rule
+    :func:`to_local_pose` already uses.
+    """
+    rotation = (
+        Pose.from_axis_angle(2, -math.radians(yaw_deg))
+        @ Pose.from_axis_angle(1, -math.radians(pitch_deg))
+        @ Pose.from_axis_angle(0, math.radians(roll_deg))
+    )
+    position = np.array([position_x, -position_y, position_z], dtype=np.float64)
+    return Pose(position, rotation.quat_xyzw)
 
 
 def rear_axle_offset(actor: "carla.Actor", override: Optional[float] = None) -> float:

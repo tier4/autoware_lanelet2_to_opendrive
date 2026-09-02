@@ -127,6 +127,19 @@ class Pose:
             ),
         )
 
+    @classmethod
+    def from_axis_angle(cls, axis: int, angle_rad: float) -> "Pose":
+        """Return a rotation-only pose about a principal axis.
+
+        Args:
+            axis: ``0``, ``1`` or ``2`` for the x, y or z axis.
+            angle_rad: Rotation angle in radians (counter-clockwise).
+        """
+        half = 0.5 * angle_rad
+        quat = [0.0, 0.0, 0.0, math.cos(half)]
+        quat[axis] = math.sin(half)
+        return cls(np.zeros(3), np.array(quat, dtype=np.float64))
+
     # ------------------------------------------------------------------
     # Derived quantities
     # ------------------------------------------------------------------

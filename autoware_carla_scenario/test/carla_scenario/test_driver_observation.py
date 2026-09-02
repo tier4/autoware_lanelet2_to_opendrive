@@ -13,7 +13,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from autoware_carla_scenario.driver.geometry import Pose
 from autoware_carla_scenario.driver.observation import (
+    camera_extrinsics_to_rig,
     ego_observation,
     encode_frame_jpeg,
     rear_axle_offset,
@@ -214,3 +216,41 @@ def test_encode_frame_honours_quality() -> None:
     )
     assert low is not None and high is not None
     assert len(low) < len(high)
+
+
+# ---------------------------------------------------------------------------
+# Camera extrinsics
+# ---------------------------------------------------------------------------
+
+
+def test_camera_extrinsics_flip_the_translation_into_the_rig_frame() -> None:
+    """The default front mount at CARLA (1.5, 0, 1.6) keeps x and z, flips y."""
+    pose = camera_extrinsics_to_rig(1.5, 2.0, 1.6, 0.0, 0.0, 0.0)
+    assert np.allclose(pose.position, [1.5, -2.0, 1.6])
+    # No rotation configured -> identity orientation.
+    assert np.allclose(pose.rotation_matrix, np.eye(3), atol=1e-9)
+
+
+def test_camera_extrinsics_negate_the_yaw_like_the_rest_of_the_bridge() -> None:
+    """Yaw-only extrinsics must match the ``to_local_pose`` handedness rule."""
+    pose = camera_extrinsics_to_rig(0.0, 0.0, 0.0, 0.0, 0.0, 30.0)
+    reference = to_local_pose(_transform(yaw=30.0))
+    assert pose.yaw == pytest.approx(reference.yaw, abs=1e-9)
+    assert pose.yaw == pytest.approx(math.radians(-30.0), abs=1e-9)
+
+
+def test_camera_extrinsics_keep_a_downward_pitch_downward() -> None:
+    """A CARLA nose-up pitch survives the flip unchanged (pitch is about y)."""
+    pose = camera_extrinsics_to_rig(0.0, 0.0, 0.0, 0.0, 10.0, 0.0)
+    forward = pose.rotation_matrix @ np.array([1.0, 0.0, 0.0])
+    assert forward[2] == pytest.approx(math.sin(math.radians(10.0)), abs=1e-9)
+
+
+def test_camera_extrinsics_are_an_orthonormal_rotation() -> None:
+    """A combined roll/pitch/yaw must still yield a valid rotation matrix."""
+    pose = camera_extrinsics_to_rig(0.5, -0.3, 1.2, 5.0, -12.0, 40.0)
+    rotation = pose.rotation_matrix
+    assert np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-9)
+    assert float(np.linalg.det(rotation)) == pytest.approx(1.0, abs=1e-9)
+    # The reflection is applied to both the rotation and the translation.
+    assert isinstance(pose, Pose)

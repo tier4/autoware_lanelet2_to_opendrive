@@ -160,6 +160,42 @@ def test_start_session_sends_the_camera_rig(policy: _StubPolicy) -> None:
     assert intrinsics.opencv_pinhole_param.principal_point_x == pytest.approx(480.0)
 
 
+def test_start_session_advertises_the_camera_extrinsics(policy: _StubPolicy) -> None:
+    """The advertised ``rig_to_camera`` must carry the configured mount, not the
+    protobuf default (identity at the origin)."""
+    from autoware_carla_scenario.driver.observation import camera_extrinsics_to_rig
+
+    camera = DriverCameraConfig(
+        logical_id="camera_front",
+        position_x=1.5,
+        position_y=0.2,
+        position_z=1.6,
+        yaw=15.0,
+        pitch=-5.0,
+    )
+    config = DriverClientConfig(
+        address=f"localhost:{policy.port}",  # type: ignore[attr-defined]
+        timeout_s=10.0,
+        cameras=(camera,),
+    )
+    channel = grpc.insecure_channel(config.address, options=channel_options())
+    client = EgoDriverGrpcClient(config, channel=channel)
+    try:
+        client.start_session("session-1", "scene")
+    finally:
+        client.close_session()
+
+    advertised = policy.sessions[0].rollout_spec.vehicle.available_cameras[0]
+    expected = camera_extrinsics_to_rig(1.5, 0.2, 1.6, 0.0, -5.0, 15.0)
+    assert advertised.rig_to_camera.vec.x == pytest.approx(expected.position[0])
+    assert advertised.rig_to_camera.vec.y == pytest.approx(expected.position[1])
+    assert advertised.rig_to_camera.vec.z == pytest.approx(expected.position[2])
+    assert advertised.rig_to_camera.quat.w == pytest.approx(expected.quat_xyzw[3])
+    assert advertised.rig_to_camera.quat.z == pytest.approx(expected.quat_xyzw[2])
+    # A populated pose is not the protobuf default.
+    assert advertised.rig_to_camera.vec.x != pytest.approx(0.0)
+
+
 def test_close_session_is_idempotent(policy: _StubPolicy) -> None:
     client = _client(policy)
     client.start_session("session-1", "scene")
