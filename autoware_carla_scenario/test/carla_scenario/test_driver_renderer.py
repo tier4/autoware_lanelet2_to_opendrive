@@ -256,6 +256,37 @@ def test_zero_sight_distance_falls_back_to_trigger_volumes() -> None:
     assert message.ego_traffic_light == carla_driver_pb2.TRAFFIC_LIGHT_STATE_RED
 
 
+def test_a_light_behind_us_on_our_own_lane_does_not_govern_us() -> None:
+    """The stop-line index is keyed by lane only, so a light behind the ego on the
+    current lane shares its bucket -- it must be filtered out by distance."""
+    light = _light("Red", stop_x=5.0)  # stop line (and mouth) behind the ego
+    ego_pose = Pose.from_xyz_yaw(20.0, 0.0, 0.0, 0.0)
+    message = _build(
+        _world(actors=[light], ego_x=20.0, junction_at=60.0), _ego(), ego_pose
+    )
+    assert message.ego_traffic_light == carla_driver_pb2.TRAFFIC_LIGHT_STATE_NONE
+
+
+def test_the_nearest_light_ahead_wins_regardless_of_actor_order() -> None:
+    """A lane bucket holds its lights in arbitrary order; the nearer one governs."""
+    far = _light("Green", stop_x=50.0, light_id=1)
+    near = _light("Red", stop_x=20.0, light_id=2)
+    # ``far`` is listed first, so a first-hit selection would pick the wrong light.
+    message = _build(_world(actors=[far, near], junction_at=80.0), _ego())
+    assert message.ego_traffic_light == carla_driver_pb2.TRAFFIC_LIGHT_STATE_RED
+    assert message.ego_traffic_light_distance_m < 30.0
+
+
+def test_a_light_beyond_the_sight_distance_does_not_govern_us() -> None:
+    light = _light("Red", stop_x=80.0)
+    message = _build(
+        _world(actors=[light], junction_at=85.0),
+        _ego(),
+        traffic_light_sight_distance_m=40.0,
+    )
+    assert message.ego_traffic_light == carla_driver_pb2.TRAFFIC_LIGHT_STATE_NONE
+
+
 def test_light_on_another_lane_does_not_govern_us() -> None:
     light = _light("Red")
     light.get_stop_waypoints.return_value = [_waypoint(30.0, lane_id=+1)]

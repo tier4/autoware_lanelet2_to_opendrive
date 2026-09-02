@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "camera_extrinsics_to_rig",
     "encode_frame_jpeg",
     "ego_observation",
     "rear_axle_offset",
@@ -81,6 +82,54 @@ def to_local_pose(
         return pose
     shift = Pose.from_xyz_yaw(rear_axle_offset_m, 0.0, 0.0, 0.0)
     return pose @ shift
+
+
+def _carla_rotation_matrix(
+    roll_deg: float, pitch_deg: float, yaw_deg: float
+) -> NDArray[np.float64]:
+    """Return the rotation matrix CARLA builds from ``(roll, pitch, yaw)`` degrees.
+
+    This reproduces the rotation block of ``carla.Transform.get_matrix()`` -- a
+    yaw about z, then a pitch about y, then a roll about x, in CARLA's left-handed
+    world -- so that a pose expressed with CARLA Euler angles round-trips through
+    it exactly.
+    """
+    cy, sy = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
+    cp, sp = math.cos(math.radians(pitch_deg)), math.sin(math.radians(pitch_deg))
+    cr, sr = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
+    return np.array(
+        [
+            [cp * cy, cy * sp * sr - sy * cr, -cy * sp * cr - sy * sr],
+            [cp * sy, sy * sp * sr + cy * cr, -sy * sp * cr + cy * sr],
+            [sp, -cp * sr, cp * cr],
+        ],
+        dtype=np.float64,
+    )
+
+
+def camera_extrinsics_to_rig(
+    position_x: float,
+    position_y: float,
+    position_z: float,
+    roll_deg: float,
+    pitch_deg: float,
+    yaw_deg: float,
+) -> Pose:
+    """Return a camera's ``base_link -> camera`` extrinsics as a rig-frame pose.
+
+    Camera extrinsics are configured in CARLA's convention (x forward, y right, z
+    up, degrees), whereas the pose the contract advertises as ``rig_to_camera`` is
+    right-handed (x forward, y left, z up).  Crossing that boundary is the same
+    ``y`` reflection ``S = diag(1, -1, 1)`` the rest of this module applies: the
+    translation's ``y`` flips and the rotation ``R`` becomes ``S R S``.  That
+    negates roll and yaw and leaves pitch, so the yaw-only case reduces to the
+    "negate the yaw" rule :func:`to_local_pose` already uses.
+    """
+    reflection = np.diag([1.0, -1.0, 1.0])
+    rotation = _carla_rotation_matrix(roll_deg, pitch_deg, yaw_deg)
+    rig_rotation = reflection @ rotation @ reflection
+    position = np.array([position_x, -position_y, position_z], dtype=np.float64)
+    return Pose.from_rotation_matrix(position, rig_rotation)
 
 
 def rear_axle_offset(actor: "carla.Actor", override: Optional[float] = None) -> float:
