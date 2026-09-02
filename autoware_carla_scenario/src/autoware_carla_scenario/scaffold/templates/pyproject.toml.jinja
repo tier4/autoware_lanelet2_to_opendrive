@@ -19,5 +19,11 @@ dependencies = [
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
 
-[tool.uv-build]
-packages = ["src/{{ package_name }}"]
+[tool.uv.build-backend]
+# Note the table name: uv reads `tool.uv.build-backend` and silently ignores
+# any other spelling, so a misconfigured manifest looks fine until you unzip
+# the wheel. Name every top-level module you ship -- add an entry here if this
+# package grows a second one (a `hydra_plugins/` namespace package of its own,
+# say), or the backend will guess a single module from the distribution name
+# and drop the rest.
+module-name = ["{{ package_name }}"]

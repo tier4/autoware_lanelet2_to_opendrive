@@ -11,7 +11,11 @@ authors = [
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "pyxodr>=0.1.0",
-    "opencv-python>=4.8",
+    # Headless: the only OpenCV calls in this package are imencode and
+    # pointPolygonTest -- there is no imshow/namedWindow anywhere, so the GUI
+    # build would add ~125 MB of GTK/GStreamer libraries (and a libGL system
+    # dependency) that nothing calls.
+    "opencv-python-headless>=4.8",
     "numpy>=1.21",
     "pytest>=9.0.1",
     "python-dotenv>=1.2.2",
@@ -51,10 +55,16 @@ conflicts = [
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
 
-[tool.uv-build]
-packages = [
-    "src/autoware_carla_scenario",
-    "src/hydra_plugins",
+[tool.uv.build-backend]
+# `hydra_plugins` is a PEP 420 namespace package shared with Hydra itself, so
+# each plugin has to be named individually and `namespace` has to be set --
+# otherwise the backend looks for a single top-level module named after the
+# distribution and the plugins never reach the wheel.
+namespace = true
+module-name = [
+    "autoware_carla_scenario",
+    "hydra_plugins.autoware_scenario_searchpath",
+    "hydra_plugins.autoware_scenario_sweeper",
 ]
 
 [project.scripts]
