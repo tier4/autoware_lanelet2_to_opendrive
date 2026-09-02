@@ -26,7 +26,9 @@ from .base import (
     BridgePose,
     LocalizationState,
     OperationMode,
+    Quaternion,
     RoutingState,
+    Vector3,
     VehicleStatus,
 )
 from .fake import FakeAutowareBridge
@@ -41,6 +43,8 @@ __all__ = [
     "InitState",
     "LocalizationState",
     "OperationMode",
+    "Quaternion",
     "RoutingState",
+    "Vector3",
     "VehicleStatus",
 ]

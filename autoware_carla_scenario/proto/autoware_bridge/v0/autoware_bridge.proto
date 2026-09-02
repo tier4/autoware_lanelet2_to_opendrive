@@ -26,24 +26,33 @@ syntax = "proto3";
 
 package autoware_carla_scenario.autoware_bridge.v0;
 
-// Orientation quaternion (matches geometry_msgs/Quaternion).
-message Quaternion {
+// Shared physics primitives. These deliberately mirror the splatsim proto
+// (tier4/splatsim proto/splatsim/v1/rendering_service.proto) by name and shape
+// so the two stacks can converge on a common set of physics types later.
+message Vector3 {
   double x = 1;
   double y = 2;
   double z = 3;
-  double w = 4;
 }
 
-// A full 6-DoF map-frame pose (metres), mirroring geometry_msgs/Pose — the
+message Quaternion {
+  // wxyz convention (matching the splatsim / gsplat and alpasim common.Quat
+  // convention). The interface node converts to/from ROS geometry_msgs
+  // (xyzw) internally.
+  double w = 1;
+  double x = 2;
+  double y = 3;
+  double z = 4;
+}
+
+// A full 6-DoF map-frame pose (metres), structurally geometry_msgs/Pose — the
 // representation Autoware and autoware_carla_interface hold natively, so no
-// lossy conversion is needed at the boundary. z disambiguates multi-level roads
-// (overpasses / 高架); the quaternion (not a bare yaw) represents pitch/roll on
-// ramps and banked segments exactly.
+// lossy conversion is needed at the boundary. position.z disambiguates
+// multi-level roads (overpasses / 高架); the quaternion (not a bare yaw)
+// represents pitch/roll on ramps and banked segments exactly.
 message Pose {
-  double x = 1;
-  double y = 2;
-  double z = 3;
-  Quaternion orientation = 4;
+  Vector3 position = 1;
+  Quaternion rotation = 2;
 }
 
 // Mirrors autoware_adapi_v1_msgs/LocalizationInitializationState.

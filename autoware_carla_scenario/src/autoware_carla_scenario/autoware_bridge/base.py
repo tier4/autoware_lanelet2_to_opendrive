@@ -53,40 +53,61 @@ class AutowareBridgeConfig:
 
 
 @dataclass(frozen=True)
-class BridgePose:
-    """A full 6-DoF map-frame pose for pose initialization and goal setting.
+class Vector3:
+    """A 3D vector (metres).  Shares the shape/name of the splatsim proto
+    ``Vector3`` so the physics primitives can be unified in the future.
 
-    Mirrors ``geometry_msgs/Pose`` (position + quaternion), which is how Autoware
-    and ``autoware_carla_interface`` hold poses natively, so no lossy conversion
-    is needed at the boundary.
-
-    ``z`` disambiguates multi-level roads (overpasses/高架): a 2D ``(x, y)`` alone
-    can match both an elevated road and the surface beneath it, which would let
-    localization or the interface node's ground projection snap to the wrong
-    level.  Orientation is a quaternion rather than a bare yaw so pitch/roll on
-    ramps and banked segments are represented exactly.  The scenario already
-    knows both from its snapped CARLA transform, so they are carried through
-    rather than re-estimated.
-
-    Use :meth:`from_yaw` when only a planar heading is available.
-
-    Attributes:
-        x: Position X in the map frame (metres).
-        y: Position Y in the map frame (metres).
-        z: Position Z in the map frame (metres) — disambiguates road level.
-        qx: Orientation quaternion x component.
-        qy: Orientation quaternion y component.
-        qz: Orientation quaternion z component.
-        qw: Orientation quaternion w component.
+    Note: distinct from the frame-aware
+    :class:`autoware_carla_scenario.kinematics.Vector3` — this one is the plain
+    wire primitive that mirrors the proto; unifying the two is future work.
     """
 
     x: float
     y: float
     z: float
-    qx: float
-    qy: float
-    qz: float
-    qw: float
+
+
+@dataclass(frozen=True)
+class Quaternion:
+    """An orientation quaternion in ``wxyz`` order.
+
+    Matches the splatsim/gsplat proto convention (and the alpasim ``common.Quat``
+    already vendored here).  The interface node converts to/from ROS
+    ``geometry_msgs/Quaternion`` (``xyzw``) internally.
+    """
+
+    w: float
+    x: float
+    y: float
+    z: float
+
+
+@dataclass(frozen=True)
+class BridgePose:
+    """A full 6-DoF map-frame pose for pose initialization and goal setting.
+
+    Mirrors the splatsim proto ``Pose`` (a :class:`Vector3` ``position`` plus a
+    :class:`Quaternion` ``rotation``) so the type is shareable with that stack;
+    it is also structurally ``geometry_msgs/Pose``, how Autoware and
+    ``autoware_carla_interface`` hold poses, so there is no lossy conversion at
+    the boundary.
+
+    The ``position.z`` disambiguates multi-level roads (overpasses/高架): a 2D
+    ``(x, y)`` alone can match both an elevated road and the surface beneath it,
+    which would let localization or the interface node's ground projection snap
+    to the wrong level.  The quaternion (not a bare yaw) represents pitch/roll on
+    ramps and banked segments exactly.  The scenario already knows both from its
+    snapped CARLA transform, so they are carried through rather than re-estimated.
+
+    Use :meth:`from_yaw` when only a planar heading is available.
+
+    Attributes:
+        position: Map-frame position (metres).
+        rotation: Map-frame orientation (``wxyz`` quaternion).
+    """
+
+    position: Vector3
+    rotation: Quaternion
 
     @classmethod
     def from_yaw(cls, x: float, y: float, z: float, yaw: float) -> "BridgePose":
@@ -99,7 +120,10 @@ class BridgePose:
             yaw: Heading in the map frame (radians).
         """
         half = yaw * 0.5
-        return cls(x, y, z, 0.0, 0.0, math.sin(half), math.cos(half))
+        return cls(
+            Vector3(x, y, z),
+            Quaternion(w=math.cos(half), x=0.0, y=0.0, z=math.sin(half)),
+        )
 
 
 class LocalizationState(Enum):
