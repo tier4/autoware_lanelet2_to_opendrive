@@ -26,6 +26,9 @@ dev = [
     "pytest>=9.0.3",
     "pytest-testmon>=2.2.0",
     "pytest-xdist>=3.8.0",
+    # test_wheel_packaging.py reads pyproject.toml; tomllib is 3.11+ only and
+    # the workspace is pinned to 3.10 by the CARLA client.
+    "tomli>=2.0.0; python_version < '3.11'",
     "weasyprint>=68.0",
 ]
 

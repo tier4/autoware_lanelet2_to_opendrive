@@ -241,6 +241,44 @@ jobs:
           analyze_result.txt
         retention-days: 7
 
+  scenario-image:
+    # Proves the packing action end-to-end: scaffold a scenario package the way
+    # a user would, pack it, and let the action's smoke test confirm that the
+    # image really carries the pinned CARLA client and a registered scenario.
+    name: scenario image (CARLA ${{ matrix.carla-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        carla-version: ["0.10.0", "0.9.16"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup environment
+      uses: ./.github/actions/setup-env
+      with:
+        python-version: "3.10"
+        install-dev-deps: "true"
+        run-precommit: "false"
+
+    - name: Scaffold a scenario package
+      run: uv run scenario-new ci_probe_package --output-dir "${RUNNER_TEMP}/packages"
+
+    - name: Pack it into an image
+      uses: ./.github/actions/pack-scenario-image
+      id: pack
+      with:
+        scenario-package-path: ${{ runner.temp }}/packages/ci_probe_package
+        image: ci-probe-scenario
+        carla-version: ${{ matrix.carla-version }}
+        push: "false"
+
+    - name: Report the image size
+      run: |
+        docker image ls --format '{{ .Repository }}:{{ .Tag }}  {{ .Size }}' \
+          "${{ steps.pack.outputs.image-ref }}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
   qc-validate:
     runs-on: ubuntu-latest
     steps:

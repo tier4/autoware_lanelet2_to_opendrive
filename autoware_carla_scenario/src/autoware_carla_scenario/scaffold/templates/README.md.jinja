@@ -32,6 +32,22 @@ uv run scenario scenario='{{ scenario_name }}/*' map=nishishinjuku
 uv run scenario scenario={{ scenario_name }}/default scenario.timeout_seconds=20
 ```
 
+## Ship it as a container
+
+`pack-scenario-image` builds an image holding this package, the framework and a
+CARLA client pinned at build time:
+
+```yaml
+- uses: tier4/autoware_lanelet2_to_opendrive/.github/actions/pack-scenario-image@main
+  with:
+    scenario-package-path: {{ package_name }}
+    image: ghcr.io/<owner>/{{ distribution_name }}
+    carla-version: "0.10.0"
+```
+
+See the framework's *Container Image* documentation for the inputs and for
+building the same image by hand.
+
 ## How it plugs in
 
 `register()` in `__init__.py` calls `register_scenario(...)` and

@@ -15,6 +15,7 @@ The repository is a [`uv`](https://docs.astral.sh/uv/) workspace with two packag
 ├── autoware_carla_scenario/          # CARLA scenario testing framework (workspace member)
 ├── examples/                         # Standalone usage examples
 ├── carla_wheels/                     # Local CARLA Python wheels resolved by uv
+├── docker/scenario/                  # Container image for a generated scenario package
 ├── pyproject.toml                    # uv workspace root
 └── uv.lock
 ```
@@ -91,6 +92,7 @@ uv run carla-import-test nishishinjuku_carla.xodr --map-name nishishinjuku
   - [Autoware CARLA Scenario](https://tier4.github.io/autoware_lanelet2_to_opendrive/carla-scenario/) — installation, usage, architecture, API reference, development guide.
 - Repository-level references:
   - [`examples/README_cartesian_to_frenet.md`](examples/README_cartesian_to_frenet.md) — Cartesian ↔ Frenet conversion example.
+  - [`autoware_carla_scenario/docs/docker.md`](autoware_carla_scenario/docs/docker.md) — packing a generated scenario package into a container image with a pinned CARLA client.
 - [`CLAUDE.md`](CLAUDE.md) — project conventions and guidelines for working with this repository.
 
 ## Contributing

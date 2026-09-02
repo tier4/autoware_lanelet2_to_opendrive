@@ -1,0 +1,225 @@
+name: Pack scenario package
+description: >
+  Build (and optionally push) a container image for a scenario package
+  generated with 'scenario-new'. The CARLA client version is chosen here, at
+  build time, and baked into the image: the image never resolves a client
+  again. See autoware_carla_scenario/docs/docker.md.
+
+inputs:
+  scenario-package-path:
+    description: >
+      Directory of the generated scenario package (the one holding its
+      pyproject.toml). May live outside this repository.
+    required: true
+  image:
+    description: "Image name without a tag, e.g. ghcr.io/tier4/my-scenario"
+    required: true
+  carla-version:
+    description: >
+      CARLA client version to pin into the image. '0.10.0' resolves from
+      'carla-wheel-dir'; versions published to PyPI (e.g. '0.9.16') resolve
+      from the index.
+    required: false
+    default: "0.10.0"
+  tags:
+    description: >
+      Newline-separated full image references. Defaults to
+      '<image>:carla<carla-version>' plus '<image>:carla<carla-version>-<sha>'.
+    required: false
+    default: ""
+  framework-path:
+    description: >
+      uv workspace root providing the framework packages. Defaults to the
+      repository this action comes from.
+    required: false
+    default: ""
+  carla-wheel-dir:
+    description: "Local CARLA wheel directory, relative to 'framework-path'"
+    required: false
+    default: "carla_wheels"
+  python-version:
+    description: "Python version of the image (the CARLA client caps this at 3.10)"
+    required: false
+    default: "3.10"
+  with-ffmpeg:
+    description: >
+      Install ffmpeg so CameraRecorder can encode MP4s. Off by default: it is
+      the largest single optional addition to the image.
+    required: false
+    default: "false"
+  platforms:
+    description: "Target platforms for buildx"
+    required: false
+    default: "linux/amd64"
+  build-args:
+    description: "Newline-separated extra KEY=VALUE build arguments"
+    required: false
+    default: ""
+  push:
+    description: "Push the built image to its registry"
+    required: false
+    default: "false"
+  load:
+    description: >
+      Load the image into the local Docker daemon. Required by 'smoke-test',
+      and only possible for a single platform.
+    required: false
+    default: "true"
+  smoke-test:
+    description: >
+      After building, run the image to check that the CARLA client is the
+      pinned one and that the scenario package registered itself.
+    required: false
+    default: "true"
+  cache:
+    description: "Use the GitHub Actions build cache"
+    required: false
+    default: "true"
+
+outputs:
+  image-ref:
+    description: "The first tag that was built"
+    value: ${{ steps.plan.outputs.image-ref }}
+  tags:
+    description: "All tags that were built, newline-separated"
+    value: ${{ steps.plan.outputs.tags }}
+  digest:
+    description: "Image digest (empty unless the image was pushed)"
+    value: ${{ steps.build.outputs.digest }}
+  image-id:
+    description: "Local image ID"
+    value: ${{ steps.build.outputs.imageid }}
+
+runs:
+  using: composite
+  steps:
+    - name: Plan the build
+      id: plan
+      shell: bash
+      env:
+        SCENARIO_PACKAGE_PATH: ${{ inputs.scenario-package-path }}
+        IMAGE: ${{ inputs.image }}
+        CARLA_VERSION: ${{ inputs.carla-version }}
+        TAGS_IN: ${{ inputs.tags }}
+        PLATFORMS: ${{ inputs.platforms }}
+        LOAD: ${{ inputs.load }}
+        PUSH: ${{ inputs.push }}
+        SMOKE_TEST: ${{ inputs.smoke-test }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -f "${SCENARIO_PACKAGE_PATH}/pyproject.toml" ]; then
+          echo "::error::scenario-package-path '${SCENARIO_PACKAGE_PATH}' has no pyproject.toml." \
+               "Point it at the directory 'scenario-new' created."
+          exit 1
+        fi
+
+        # The version becomes part of an image tag, so it has to be tag-safe.
+        if ! printf '%s' "${CARLA_VERSION}" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+          echo "::error::carla-version '${CARLA_VERSION}' is not a valid version string."
+          exit 1
+        fi
+
+        # buildx can push a multi-platform build, but it cannot load one into
+        # the single-image local store the smoke test reads from.
+        case "${PLATFORMS}" in
+          *,*)
+            if [ "${LOAD}" = "true" ]; then
+              echo "::error::load=true cannot be combined with multiple platforms" \
+                   "('${PLATFORMS}'). Set load=false and smoke-test=false instead."
+              exit 1
+            fi
+            ;;
+        esac
+        if [ "${SMOKE_TEST}" = "true" ] && [ "${LOAD}" != "true" ]; then
+          echo "::error::smoke-test=true requires load=true -- the test runs the built image."
+          exit 1
+        fi
+
+        tags="${TAGS_IN}"
+        if [ -z "$(printf '%s' "${tags}" | tr -d '[:space:]')" ]; then
+          tags="$(printf '%s\n%s\n' \
+            "${IMAGE}:carla${CARLA_VERSION}" \
+            "${IMAGE}:carla${CARLA_VERSION}-${GITHUB_SHA:0:7}")"
+        fi
+        # Drop blank lines so the first tag is always a real reference.
+        tags="$(printf '%s\n' "${tags}" | sed '/^[[:space:]]*$/d')"
+
+        {
+          echo "tags<<__TAGS__"
+          printf '%s\n' "${tags}"
+          echo "__TAGS__"
+          echo "image-ref=$(printf '%s\n' "${tags}" | head -n 1)"
+          echo "context-dir=${RUNNER_TEMP}/scenario-image-context"
+          echo "docker-dir=$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)/docker/scenario"
+        } >> "${GITHUB_OUTPUT}"
+
+        echo "Building ${IMAGE} with CARLA ${CARLA_VERSION} (push=${PUSH})"
+
+    - name: Assemble the build context
+      shell: bash
+      env:
+        SCENARIO_PACKAGE_PATH: ${{ inputs.scenario-package-path }}
+        FRAMEWORK_PATH: ${{ inputs.framework-path }}
+        CARLA_WHEEL_DIR: ${{ inputs.carla-wheel-dir }}
+        CONTEXT_DIR: ${{ steps.plan.outputs.context-dir }}
+        DOCKER_DIR: ${{ steps.plan.outputs.docker-dir }}
+      run: |
+        set -euo pipefail
+        args=(
+          --scenario "${SCENARIO_PACKAGE_PATH}"
+          --carla-wheel-dir "${CARLA_WHEEL_DIR}"
+          --out "${CONTEXT_DIR}"
+        )
+        # Empty means "the repository this action came from", which is the
+        # script's own default -- and the right answer when the action is used
+        # from another repository.
+        if [ -n "${FRAMEWORK_PATH}" ]; then
+          args+=(--framework "${FRAMEWORK_PATH}")
+        fi
+        "${DOCKER_DIR}/assemble-context.sh" "${args[@]}"
+
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build image
+      id: build
+      uses: docker/build-push-action@v6
+      with:
+        context: ${{ steps.plan.outputs.context-dir }}
+        file: ${{ steps.plan.outputs.docker-dir }}/Dockerfile
+        tags: ${{ steps.plan.outputs.tags }}
+        platforms: ${{ inputs.platforms }}
+        push: ${{ inputs.push }}
+        load: ${{ inputs.load }}
+        provenance: false
+        build-args: |
+          CARLA_VERSION=${{ inputs.carla-version }}
+          PYTHON_VERSION=${{ inputs.python-version }}
+          WITH_FFMPEG=${{ inputs.with-ffmpeg }}
+          ${{ inputs.build-args }}
+        cache-from: ${{ inputs.cache == 'true' && 'type=gha' || '' }}
+        cache-to: ${{ inputs.cache == 'true' && 'type=gha,mode=max' || '' }}
+
+    - name: Smoke-test the image
+      if: inputs.smoke-test == 'true'
+      shell: bash
+      env:
+        IMAGE_REF: ${{ steps.plan.outputs.image-ref }}
+        CARLA_VERSION: ${{ inputs.carla-version }}
+        DOCKER_DIR: ${{ steps.plan.outputs.docker-dir }}
+      run: |
+        set -euo pipefail
+
+        # The entry point is the 'scenario' CLI, so reaching the interpreter
+        # takes --entrypoint; the script is mounted rather than baked in so the
+        # image keeps nothing that is not needed to run scenarios.
+        docker run --rm \
+          --entrypoint python \
+          --volume "${DOCKER_DIR}/smoke-test.py:/tmp/smoke-test.py:ro" \
+          "${IMAGE_REF}" /tmp/smoke-test.py "${CARLA_VERSION}"
+
+        # Hydra must be able to compose a config with no CARLA server around.
+        docker run --rm "${IMAGE_REF}" --help > /dev/null
+
+        echo "Smoke test passed for ${IMAGE_REF}"
