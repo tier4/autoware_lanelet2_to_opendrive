@@ -154,12 +154,12 @@ explaining further:
 | --- | --- |
 | `scenario-package-path` | The generated package — the directory with its `pyproject.toml`. Required, and may sit outside this repository. |
 | `carla-version` | The client baked into the image. `0.10.0` resolves from `carla-wheel-dir`, published versions (e.g. `0.9.16`) from the index. |
-| `framework-path` | uv workspace root supplying the framework. Defaults to the action's own checkout, which is what makes the pinned ref the framework version. |
+| `framework-path` | uv workspace root supplying the framework. Defaults to the action's own checkout, which is what makes the pinned ref the framework version. Its members are read from `[tool.uv.workspace] members`, globs included. |
 | `with-ffmpeg` | Installs ffmpeg for `CameraRecorder`. The only input that adds an apt layer. |
 | `slim` | Strips the virtualenv (see above). On by default. |
 | `cache-scope` | Cache key namespace. Defaults to one scope per image and CARLA version, so images built in the same workflow do not evict each other. |
 
-Outputs: `image-ref`, `tags`, `digest` (pushed images only), `image-id`.
+Outputs: `image-ref`, `tags`, `digest` (pushed images only).
 
 ### The smoke test
 
