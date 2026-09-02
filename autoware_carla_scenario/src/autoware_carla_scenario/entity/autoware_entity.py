@@ -10,11 +10,11 @@ Two entities live here:
   ``autoware_carla_interface`` ROS 2 node) reads CARLA sensors and applies
   control to the ego **directly**, so unlike
   :class:`~autoware_carla_scenario.entity.carla_driver_entity.CarlaDriverEntity`
-  the framework is *not* in the control loop.  Instead this entity **attaches**
-  to the ego actor spawned by the interface node and drives Autoware's startup
-  handshake (pose init -> routing -> engage) over an
-  :class:`~autoware_carla_scenario.autoware_bridge.base.AutowareBridge`.  This is
-  a separate, Autoware-specific contract from the alpasim ``egodriver`` one.
+  the framework is *not* in the control loop.  This entity **attaches** to the
+  ego actor spawned by the interface node, hands Autoware the scenario's initial
+  pose and goal, and waits for Autoware to become ready.  The whole startup
+  sequence (localization init, routing, engage) is owned by the Autoware side;
+  see :mod:`autoware_carla_scenario.autoware_bridge`.
 
 Tick ownership: the scenario framework remains the tick master; the interface
 node runs as a non-ticking, asynchronous I/O bridge (``sync_mode:=false``).
@@ -35,11 +35,9 @@ if TYPE_CHECKING:
     import carla
 
     from ..autoware_bridge.base import AutowareBridge, BridgePose
-    from ..autoware_bridge.init_sequence import InitState
     from ..scenario_base import EgoConfig
 
 from ..autoware_bridge.base import AutowareBridgeConfig
-from ..autoware_bridge.init_sequence import AutowareInitSequence
 from ..conditions.base import find_actor_by_role_name
 from ..constants import EGO_ROLE_NAME
 from .ego import EgoVehicle
@@ -59,7 +57,7 @@ class AutowareEntity(EgoVehicle):
 
     The lifecycle hooks inherited from :class:`EgoVehicle` stay no-ops, so the
     vehicle stands still unless something outside the scenario drives it.  For a
-    closed loop that drives Autoware's startup handshake, use
+    closed loop that waits for Autoware to become ready, use
     :class:`AutowareEgoEntity`.
     """
 
@@ -86,42 +84,35 @@ class AutowareEgoEntity(EgoVehicle):
          after cleanup.
        * The runner evaluates pass/fail conditions from the first tick without
          waiting for :attr:`is_initialized`, so a condition already true near the
-         initial pose could record a result before routing/engage completes.  The
-         runner must gate scenario timing and condition evaluation on
+         initial pose could record a result before Autoware is ready.  The runner
+         must gate scenario timing and condition evaluation on
          :attr:`is_initialized`.
 
        This entity already exposes the hooks (:attr:`is_initialized`,
        :attr:`termination_requested`) the runner needs; the wiring itself is a
        follow-up.
 
-    Pose feedback to the scenario.  There are two paths, and the important one
-    does **not** involve the bridge:
+    Pose feedback to the scenario is read directly from the CARLA actor, not the
+    bridge: because :meth:`spawn` attaches this entity's
+    :attr:`~EgoVehicle.actor` by ``role_name``, every existing condition
+    (``EntityInAreaCondition``, ``EntityLanePositionCondition``,
+    ``WaypointCondition``, ``CollisionCondition`` ...) works against the Autoware
+    ego exactly as for a TrafficManager or driver ego, via
+    ``find_actor_by_role_name(world, EGO_ROLE_NAME).get_transform()``.
 
-    * *Ground truth* - pass/fail conditions read the ego's pose/velocity from the
-      CARLA actor directly.  Because :meth:`spawn` attaches this entity's
-      :attr:`~EgoVehicle.actor` by ``role_name``, every existing condition
-      (``EntityInAreaCondition``, ``EntityLanePositionCondition``,
-      ``WaypointCondition``, ``CollisionCondition`` ...) works against the Autoware
-      ego exactly as it does for a TrafficManager or driver ego, via
-      ``find_actor_by_role_name(world, EGO_ROLE_NAME).get_transform()``.
-    * *Autoware's estimate* - :attr:`estimated_pose` exposes Autoware's
-      localization belief relayed over the bridge's ``StreamState``, for checking
-      localization accuracy against ground truth.  It is monitoring only.
-
-    The ``bridge`` is a required keyword argument: the live
-    ``GrpcAutowareBridge`` is a follow-up (see
-    ``proto/autoware_bridge/v0/autoware_bridge.proto``), so callers pass a bridge
-    explicitly today (e.g. ``FakeAutowareBridge`` in tests).
+    The ``bridge`` is a required keyword argument: the live ``GrpcAutowareBridge``
+    is a follow-up (see ``proto/autoware_bridge/v0/autoware_bridge.proto``), so
+    callers pass a bridge explicitly today (e.g. ``FakeAutowareBridge`` in tests).
 
     Args:
         config: Bridge connection settings.  ``None`` uses
             :class:`~autoware_carla_scenario.autoware_bridge.base.AutowareBridgeConfig`
             defaults.
         bridge: The bridge to the interface node.
-        initial_pose: Map-frame pose used to initialize localization.  Required
+        initial_pose: Map-frame pose Autoware initializes localization at.
+            Required before :meth:`on_scenario_start`.
+        goal_pose: Map-frame goal pose Autoware plans the route to.  Required
             before :meth:`on_scenario_start`.
-        goal_pose: Map-frame goal pose used to plan the route.  Required before
-            :meth:`on_scenario_start`.
     """
 
     #: Autoware drives; TrafficManager must keep its hands off this actor.
@@ -140,7 +131,9 @@ class AutowareEgoEntity(EgoVehicle):
         self._bridge = bridge
         self._initial_pose = initial_pose
         self._goal_pose = goal_pose
-        self._init_sequence: Optional["AutowareInitSequence"] = None
+        self._configured: bool = False
+        self._ready: bool = False
+        self._ready_ticks: int = 0
         self._termination_requested: bool = False
 
     # ------------------------------------------------------------------
@@ -159,28 +152,13 @@ class AutowareEgoEntity(EgoVehicle):
 
     @property
     def termination_requested(self) -> bool:
-        """Whether the initialization handshake failed and the run should end."""
+        """Whether Autoware failed to become ready in time and the run should end."""
         return self._termination_requested
 
     @property
     def is_initialized(self) -> bool:
-        """``True`` once Autoware is engaged and the scenario may proceed."""
-        return self._init_sequence is not None and self._init_sequence.is_ready
-
-    @property
-    def init_state(self) -> Optional["InitState"]:
-        """Current handshake state, or ``None`` before :meth:`on_scenario_start`."""
-        return self._init_sequence.state if self._init_sequence is not None else None
-
-    @property
-    def estimated_pose(self) -> Optional["BridgePose"]:
-        """Autoware's latest estimated map-frame pose, or ``None``.
-
-        Monitoring only (localization accuracy vs. ground truth).  Scenario
-        conditions read ground-truth pose from :attr:`~EgoVehicle.actor`, not
-        from here.
-        """
-        return self._bridge.get_estimated_pose()
+        """``True`` once Autoware is ready (initialized, routed, engaged, driving)."""
+        return self._ready
 
     # ------------------------------------------------------------------
     # Actor lifecycle (attach, not spawn)
@@ -240,10 +218,7 @@ class AutowareEgoEntity(EgoVehicle):
     # ------------------------------------------------------------------
 
     def on_scenario_start(self, world: "carla.World") -> None:
-        """Create the initialization handshake state machine.
-
-        The handshake itself is advanced across ticks by :meth:`on_tick`, since
-        Autoware only initializes while simulation time advances.
+        """Hand Autoware the initial pose and goal; readiness is awaited in ticks.
 
         Raises:
             RuntimeError: If the ego actor has not been attached yet.
@@ -257,34 +232,31 @@ class AutowareEgoEntity(EgoVehicle):
         if self._initial_pose is None or self._goal_pose is None:
             raise ValueError(
                 "AutowareEgoEntity requires both initial_pose and goal_pose "
-                "before the initialization handshake can start."
+                "before Autoware can be configured."
             )
-        # Open the transport and start mirroring Autoware state (a background
-        # server-streaming subscription in the gRPC impl) so that the per-tick
-        # query methods stay non-blocking.
-        self._bridge.start()
-        self._init_sequence = AutowareInitSequence(
-            self._bridge,
-            self._initial_pose,
-            self._goal_pose,
-            step_timeout=self._config.step_timeout,
-        )
+        self._bridge.configure(self._initial_pose, self._goal_pose)
+        self._configured = True
 
     def on_tick(self, world: "carla.World", elapsed: float) -> None:
-        """Advance the initialization handshake by one step until it completes.
+        """Poll Autoware's readiness each tick until it is ready (or times out).
 
-        Once Autoware is engaged the handshake is terminal and this becomes a
-        no-op.  If the handshake fails, the entity requests early termination.
+        Autoware only makes progress while simulation time advances, so readiness
+        is awaited here rather than blocking in :meth:`on_scenario_start`.  Once
+        ready this is a no-op.  If Autoware is not ready within
+        ``ready_timeout_ticks``, the entity requests early termination.
         """
         del world, elapsed
-        seq = self._init_sequence
-        if seq is None or seq.is_done:
+        if self._ready or self._termination_requested or not self._configured:
             return
-        seq.step()
-        if seq.failed:
+        if self._bridge.is_ready():
+            self._ready = True
+            logger.info("Autoware is ready; scenario may proceed")
+            return
+        self._ready_ticks += 1
+        if self._ready_ticks >= self._config.ready_timeout_ticks:
             logger.warning(
-                "Autoware initialization failed: %s - requesting termination",
-                seq.failure_reason,
+                "Autoware not ready after %d ticks - requesting termination",
+                self._ready_ticks,
             )
             self._termination_requested = True
 

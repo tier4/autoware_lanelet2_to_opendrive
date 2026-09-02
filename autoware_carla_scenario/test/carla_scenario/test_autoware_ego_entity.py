@@ -2,7 +2,7 @@
 
 The CARLA world/actor are faked with lightweight stand-ins so no live CARLA
 server is required.  These tests verify the attach-instead-of-spawn behaviour,
-the no-destroy lifecycle, and the initialization handshake driven through the
+the no-destroy lifecycle, and the readiness wait driven through the
 :class:`~autoware_carla_scenario.entity.ego.EgoVehicle` lifecycle hooks
 (``on_scenario_start`` / ``on_tick`` / ``on_scenario_end``).
 """
@@ -17,7 +17,6 @@ from autoware_carla_scenario.autoware_bridge import (
     AutowareBridgeConfig,
     BridgePose,
     FakeAutowareBridge,
-    InitState,
 )
 from autoware_carla_scenario.constants import EGO_ROLE_NAME
 from autoware_carla_scenario.entity import AutowareEgoEntity, AutowareEntity
@@ -134,41 +133,26 @@ def test_destroy_does_not_destroy_actor() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Initialization handshake via lifecycle hooks
+# Readiness wait via lifecycle hooks
 # ---------------------------------------------------------------------------
 
 
-def test_lifecycle_drives_handshake_to_engaged() -> None:
-    bridge = FakeAutowareBridge()
+def test_lifecycle_configures_and_reaches_ready() -> None:
+    bridge = FakeAutowareBridge(ready_after=2)
     ego_actor = _FakeActor(42, str(EGO_ROLE_NAME))
     world = _FakeWorld([ego_actor])
     entity = _make_entity(bridge=bridge)
     entity.spawn(world, config=None)  # type: ignore[arg-type]
 
-    assert entity.init_state is None
+    assert not entity.is_initialized
     _drive_to_ready(entity, world)
 
     assert entity.is_initialized
-    assert entity.init_state is InitState.RUNNING
     assert not entity.termination_requested
-    assert bridge.started is True  # transport/state stream opened before handshake
-    assert bridge.initialized_pose == _INITIAL
-    assert bridge.route_goal == _GOAL
-
-
-def test_estimated_pose_exposed_after_localization() -> None:
-    bridge = FakeAutowareBridge()
-    ego_actor = _FakeActor(42, str(EGO_ROLE_NAME))
-    world = _FakeWorld([ego_actor])
-    entity = _make_entity(bridge=bridge)
-    entity.spawn(world, config=None)  # type: ignore[arg-type]
-
-    assert entity.estimated_pose is None  # before the handshake localizes
-    _drive_to_ready(entity, world)
-
-    # Autoware's estimate is exposed for monitoring; ground-truth pose for
-    # conditions still comes from entity.actor / CARLA, not from here.
-    assert entity.estimated_pose == _INITIAL
+    # Autoware was handed the mission once, then readiness was polled.
+    assert bridge.configured_initial_pose == _INITIAL
+    assert bridge.configured_goal == _GOAL
+    assert bridge.calls.count("configure") == 1
 
 
 def test_on_scenario_start_before_spawn_raises() -> None:
@@ -192,17 +176,17 @@ def test_on_scenario_start_requires_poses() -> None:
 def test_on_tick_before_start_is_noop() -> None:
     entity = _make_entity()
     world = _FakeWorld([])
-    # No init sequence yet -> must not raise.
+    # Not configured yet -> must not raise or poll.
     entity.on_tick(world, 0.0)
-    assert entity.init_state is None
+    assert not entity.is_initialized
 
 
-def test_failed_handshake_requests_termination() -> None:
-    # Autoware never reports ready within the step budget.
+def test_not_ready_in_time_requests_termination() -> None:
+    # Autoware never reports ready within the tick budget.
     bridge = FakeAutowareBridge(ready_after=10_000)
     ego_actor = _FakeActor(42, str(EGO_ROLE_NAME))
     world = _FakeWorld([ego_actor])
-    entity = _make_entity(bridge=bridge, step_timeout=3)
+    entity = _make_entity(bridge=bridge, ready_timeout_ticks=3)
     entity.spawn(world, config=None)  # type: ignore[arg-type]
 
     entity.on_scenario_start(world)
@@ -213,20 +197,6 @@ def test_failed_handshake_requests_termination() -> None:
 
     assert entity.termination_requested
     assert not entity.is_initialized
-    assert entity.init_state is InitState.FAILED
-
-
-def test_on_scenario_start_opens_bridge_stream() -> None:
-    bridge = FakeAutowareBridge()
-    world = _FakeWorld([_FakeActor(42, str(EGO_ROLE_NAME))])
-    entity = _make_entity(bridge=bridge)
-    entity.spawn(world, config=None)  # type: ignore[arg-type]
-
-    entity.on_scenario_start(world)
-
-    # The transport/state stream is opened before the handshake begins so the
-    # per-tick query methods stay non-blocking.
-    assert bridge.started is True
 
 
 def test_on_scenario_end_closes_bridge() -> None:

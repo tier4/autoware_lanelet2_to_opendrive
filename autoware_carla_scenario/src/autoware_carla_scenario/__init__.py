@@ -142,14 +142,8 @@ if TYPE_CHECKING:
     from .autoware_bridge import (
         AutowareBridge as AutowareBridge,
         AutowareBridgeConfig as AutowareBridgeConfig,
-        AutowareInitSequence as AutowareInitSequence,
         BridgePose as BridgePose,
         FakeAutowareBridge as FakeAutowareBridge,
-        InitState as InitState,
-        LocalizationState as LocalizationState,
-        OperationMode as OperationMode,
-        RoutingState as RoutingState,
-        VehicleStatus as VehicleStatus,
     )
     from .entity import (
         AutowareEgoEntity as AutowareEgoEntity,
@@ -264,14 +258,8 @@ __all__ = [
     # autoware bridge
     "AutowareBridge",
     "AutowareBridgeConfig",
-    "AutowareInitSequence",
     "BridgePose",
     "FakeAutowareBridge",
-    "InitState",
-    "LocalizationState",
-    "OperationMode",
-    "RoutingState",
-    "VehicleStatus",
     "BaseEgoDriverClient",
     "CarlaDriverEntity",
     "ControlConfig",
@@ -461,14 +449,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     # autoware bridge
     "AutowareBridge": (".autoware_bridge", "AutowareBridge"),
     "AutowareBridgeConfig": (".autoware_bridge", "AutowareBridgeConfig"),
-    "AutowareInitSequence": (".autoware_bridge", "AutowareInitSequence"),
     "BridgePose": (".autoware_bridge", "BridgePose"),
     "FakeAutowareBridge": (".autoware_bridge", "FakeAutowareBridge"),
-    "InitState": (".autoware_bridge", "InitState"),
-    "LocalizationState": (".autoware_bridge", "LocalizationState"),
-    "OperationMode": (".autoware_bridge", "OperationMode"),
-    "RoutingState": (".autoware_bridge", "RoutingState"),
-    "VehicleStatus": (".autoware_bridge", "VehicleStatus"),
     # driver
     "BaseEgoDriverClient": (".driver", "BaseEgoDriverClient"),
     "ControlConfig": (".driver", "ControlConfig"),

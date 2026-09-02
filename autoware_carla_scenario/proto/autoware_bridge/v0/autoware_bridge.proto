@@ -1,26 +1,33 @@
 // gRPC wire contract between the scenario framework and
-// autoware_carla_interface, for driving Autoware's initialization handshake and
-// observing its state.
+// autoware_carla_interface. The contract is intentionally tiny: the scenario
+// framework hands Autoware the mission (initial pose + goal) and then polls a
+// single readiness flag. The Autoware side owns the entire startup sequence.
 //
-// This is DELIBERATELY SEPARATE from the alpasim-compatible egodriver contract
-// (proto/alpasim_grpc/v0/egodriver.proto). egodriver is a *driving-policy*
-// interface (sensor observations in -> planned trajectory out) and does not
-// cover Autoware's startup concerns (pose initialization, routing, engage,
-// operation-mode / readiness). Autoware drives the ego itself through the ROS 2
-// interface node; the framework only needs this init/monitor contract.
+// Delegation (all on the Autoware side, not the framework):
+//   - localization init  : autoware_automatic_pose_initializer (GNSS) or a
+//                          published /initialpose via initial_pose_adaptor.
+//   - routing            : routing_adaptor, from the goal pose.
+//   - engage + readiness : small Autoware-side helpers (an auto-engage node and
+//                          a readiness aggregator that ANDs localization /
+//                          routing / operation-mode state) - see the follow-up
+//                          issues.
+//
+// This is DELIBERATELY SEPARATE from the alpasim egodriver contract
+// (proto/alpasim_grpc/v0/egodriver.proto), which is a driving-policy interface.
+// Autoware drives the ego itself through the ROS 2 interface node.
 //
 // Topology (splatsim-style): autoware_carla_interface launches the scenario
-// library in Docker and hosts this AutowareBridge gRPC *server*, which
-// internally performs the ROS 2 / Autoware AD API I/O. The scenario framework
-// is the gRPC *client* (GrpcAutowareBridge), keeping it free of any ROS 2
-// dependency.
+// library in Docker and hosts this AutowareBridge gRPC server, which internally
+// performs the ROS 2 / Autoware AD API I/O. The scenario framework is the gRPC
+// client (GrpcAutowareBridge), keeping it free of any ROS 2 dependency.
+//
+// High-bandwidth data (sensors, control, /clock, tf) never flows here; it stays
+// on ROS 2 topics and direct CARLA control inside the interface node. Ego
+// pose/velocity for scenario conditions is read directly from the CARLA world.
 //
 // This file is the design-time contract only. Stub generation (via
 // scripts/compile_protos.py) and the GrpcAutowareBridge implementation are
-// follow-up work to be done in an environment with a live Autoware stack.
-//
-// Each RPC maps 1:1 onto a method of
-// autoware_carla_scenario.autoware_bridge.base.AutowareBridge.
+// follow-up work.
 
 syntax = "proto3";
 
@@ -48,141 +55,35 @@ message Quaternion {
 // A full 6-DoF map-frame pose (metres), structurally geometry_msgs/Pose - the
 // representation Autoware and autoware_carla_interface hold natively, so no
 // lossy conversion is needed at the boundary. position.z disambiguates
-// multi-level roads (overpasses); the quaternion (not a bare yaw)
-// represents pitch/roll on ramps and banked segments exactly.
+// multi-level roads (overpasses); the quaternion (not a bare yaw) represents
+// pitch/roll on ramps and banked segments exactly.
 message Pose {
   Vector3 position = 1;
   Quaternion rotation = 2;
 }
 
-// Mirrors autoware_adapi_v1_msgs/LocalizationInitializationState.
-enum LocalizationState {
-  LOCALIZATION_UNKNOWN = 0;
-  LOCALIZATION_UNINITIALIZED = 1;
-  LOCALIZATION_INITIALIZING = 2;
-  LOCALIZATION_INITIALIZED = 3;
-}
-
-// Mirrors autoware_adapi_v1_msgs/RouteState.
-enum RoutingState {
-  ROUTING_UNKNOWN = 0;
-  ROUTING_UNSET = 1;
-  ROUTING_SET = 2;
-  ROUTING_ARRIVED = 3;
-  ROUTING_CHANGING = 4;
-}
-
-// Mirrors autoware_adapi_v1_msgs/OperationModeState.
-enum OperationMode {
-  OPERATION_MODE_UNKNOWN = 0;
-  OPERATION_MODE_STOP = 1;
-  OPERATION_MODE_AUTONOMOUS = 2;
-  OPERATION_MODE_LOCAL = 3;
-  OPERATION_MODE_REMOTE = 4;
-}
-
 // -- Request / response messages --------------------------------------------
+
+message ConfigureRequest {
+  Pose initial_pose = 1;  // where Autoware initializes localization
+  Pose goal = 2;          // where Autoware plans the route to
+}
+message ConfigureResponse {}
 
 message GetReadinessRequest {}
 message GetReadinessResponse {
-  // True once Autoware's stack is up and accepting commands.
+  // True once Autoware is initialized, routed, engaged, and driving.
   bool ready = 1;
 }
 
-message InitializePoseRequest {
-  Pose pose = 1;
-}
-message InitializePoseResponse {}
-
-message GetLocalizationStateRequest {}
-message GetLocalizationStateResponse {
-  LocalizationState state = 1;
-}
-
-message SetRouteRequest {
-  Pose goal = 1;
-}
-message SetRouteResponse {}
-
-message GetRoutingStateRequest {}
-message GetRoutingStateResponse {
-  RoutingState state = 1;
-}
-
-message ChangeToAutonomousRequest {}
-message ChangeToAutonomousResponse {}
-
-message GetOperationModeRequest {}
-message GetOperationModeResponse {
-  OperationMode mode = 1;
-}
-
-message GetVehicleStatusRequest {}
-message GetVehicleStatusResponse {
-  double longitudinal_velocity = 1;  // m/s
-  double steering_tire_angle = 2;    // rad
-  OperationMode operation_mode = 3;
-  bool is_autonomous_available = 4;
-}
-
-// A single consolidated state snapshot, pushed over StreamState. Carries every
-// field the monitor plane needs so the client can maintain an in-memory mirror
-// and never has to poll per tick.
-message StateUpdate {
-  fixed64 stamp_us = 1;
-  LocalizationState localization_state = 2;
-  RoutingState routing_state = 3;
-  OperationMode operation_mode = 4;
-  double longitudinal_velocity = 5;  // m/s
-  double steering_tire_angle = 6;    // rad
-  bool is_autonomous_available = 7;
-  // Autoware's ESTIMATED map-frame pose (/localization/kinematic_state), for
-  // monitoring localization accuracy. NOTE: scenario pass/fail conditions do
-  // NOT use this - they read the CARLA ego actor's ground-truth transform
-  // directly from the shared world. Unset until localization is initialized.
-  Pose estimated_pose = 8;
-}
-
-message SubscribeStateRequest {
-  // Lower bound on the interval between pushed updates (server may coalesce).
-  double min_period_s = 1;
-}
-
 // -- Service ----------------------------------------------------------------
-//
-// Concurrency: the server is expected to handle these RPCs concurrently
-// (grpc.aio or a ThreadPoolExecutor). Inside the interface node, ROS 2
-// subscription callbacks update a shared, lock-guarded state; StreamState emits
-// snapshots of it while the unary command RPCs run in parallel. The bridge is a
-// thin CONTROL/MONITOR plane only - high-bandwidth data (sensors, control,
-// /clock, tf) never flows here; it stays on ROS 2 topics and direct CARLA
-// actor control inside the interface node.
+
 service AutowareBridge {
-  // Readiness gate for the initialization handshake.
+  // Hand Autoware the mission; the Autoware side auto-initializes, routes, and
+  // engages. Called once at scenario start.
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+
+  // Poll the single readiness flag (non-blocking; the client latches it and
+  // stops polling once ready).
   rpc GetReadiness(GetReadinessRequest) returns (GetReadinessResponse);
-
-  // Pose initialization (publishes initialpose; repositions the CARLA ego).
-  rpc InitializePose(InitializePoseRequest) returns (InitializePoseResponse);
-  rpc GetLocalizationState(GetLocalizationStateRequest)
-      returns (GetLocalizationStateResponse);
-
-  // Routing.
-  rpc SetRoute(SetRouteRequest) returns (SetRouteResponse);
-  rpc GetRoutingState(GetRoutingStateRequest) returns (GetRoutingStateResponse);
-
-  // Engage.
-  rpc ChangeToAutonomous(ChangeToAutonomousRequest)
-      returns (ChangeToAutonomousResponse);
-  rpc GetOperationMode(GetOperationModeRequest)
-      returns (GetOperationModeResponse);
-
-  // Status: prefer the server-streaming StreamState (the client mirrors the
-  // latest snapshot and never blocks its tick loop polling). The unary getters
-  // above remain for one-shot queries and simple fallbacks.
-  rpc GetVehicleStatus(GetVehicleStatusRequest)
-      returns (GetVehicleStatusResponse);
-
-  // Continuous, asynchronous monitor plane: the server pushes consolidated
-  // state snapshots until the client cancels the stream.
-  rpc StreamState(SubscribeStateRequest) returns (stream StateUpdate);
 }
