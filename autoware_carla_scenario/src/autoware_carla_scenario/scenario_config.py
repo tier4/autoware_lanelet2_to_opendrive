@@ -37,6 +37,9 @@ __all__ = [
     "EntityConfig",
     "EgoVehicleConfig",
     "NpcVehicleConfig",
+    "DriverCameraSpec",
+    "DriverControlSpec",
+    "DriverConfig",
     "SweepConfig",
 ]
 
@@ -115,6 +118,14 @@ class EgoVehicleConfig:
     #: Longitudinal offset along the lanelet centerline.
     spawn_s: float = 25.0
 
+    #: Which ego entity drives the vehicle.
+    #:
+    #: * ``"autopilot"`` -- CARLA's TrafficManager (default).
+    #: * ``"autoware"`` -- no driver; the actor is left for an external stack.
+    #: * ``"carla_driver"`` -- an external policy over the ``egodriver`` gRPC
+    #:   contract, configured by the ``driver`` config group.
+    entity: str = "autopilot"
+
 
 @dataclass
 class NpcVehicleConfig:
@@ -131,6 +142,120 @@ class NpcVehicleConfig:
 
     #: Initial speed in km/h applied after warm-up.
     initial_speed_kmh: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# External driver config (for ego.entity == "carla_driver")
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DriverCameraSpec:
+    """One camera streamed to the driver policy.
+
+    ``logical_id`` is the name the policy looks the camera up by, so it must match what
+    the policy expects.  Extrinsics use CARLA's convention relative to ``base_link``
+    (x forward, y right, z up; angles in degrees).
+    """
+
+    logical_id: str = "camera_front_wide_120fov"
+    image_width: int = 960
+    image_height: int = 604
+    fov: float = 120.0
+    fps: float = 20.0
+    position_x: float = 1.5
+    position_y: float = 0.0
+    position_z: float = 1.6
+    roll: float = 0.0
+    pitch: float = 0.0
+    yaw: float = 0.0
+
+
+@dataclass
+class DriverControlSpec:
+    """Gains for the controller that tracks the policy's plan.
+
+    Mirrors :class:`~autoware_carla_scenario.driver.control.ControlConfig`; see that
+    class for the meaning of each field.  ``max_steer_angle_deg`` is expressed in
+    degrees here for readability and converted on the way in.
+    """
+
+    lookahead_gain_s: float = 0.9
+    min_lookahead_m: float = 4.0
+    max_lookahead_m: float = 20.0
+    wheelbase_m: float = 2.8
+    max_steer_angle_deg: float = 70.0
+    max_steer_rate: float = 4.0
+    speed_kp: float = 0.6
+    speed_ki: float = 0.15
+    speed_kd: float = 0.05
+    integral_limit: float = 1.0
+    stop_speed_mps: float = 0.2
+    stop_brake: float = 0.6
+
+
+@dataclass
+class DriverConfig:
+    """Connection settings for an external driver policy.
+
+    Only used when ``ego.entity`` is ``"carla_driver"``.  The policy is expected to
+    serve ``egodriver.EgodriverService`` at :attr:`address` -- for example
+    ``carla-driver-interface serve --policy route_follower --port 50051``.
+    """
+
+    #: ``host:port`` of the policy's gRPC server.
+    address: str = "localhost:50051"
+
+    #: Per-RPC deadline in seconds.
+    timeout_s: float = 60.0
+
+    #: Interval between ``drive`` calls.  Must be a positive integer multiple of the
+    #: 0.05 s simulation step.
+    policy_timestep_s: float = 0.1
+
+    #: JPEG quality (1-100) for streamed camera frames.
+    image_quality: int = 90
+
+    #: How far ahead the submitted route extends, in metres.
+    route_horizon_m: float = 80.0
+
+    #: Spacing between route waypoints, in metres.
+    route_resolution_m: float = 2.0
+
+    #: Offset from the CARLA actor origin back to the rig origin, in metres.
+    #: ``null`` derives it from the vehicle's wheel physics.
+    rear_axle_offset_m: float | None = None
+
+    #: Whether to also submit the recorded ground-truth trajectory.
+    send_ground_truth: bool = False
+
+    #: Whether to send CARLA ground truth (traffic light, other vehicles, speed
+    #: limit) in ``DriveRequest.renderer_data``.  A policy that reasons about
+    #: any of those reads them from there; without it, it sees an empty world
+    #: and says nothing about the omission.
+    send_renderer_data: bool = True
+
+    #: Whether that payload includes the other vehicles.
+    send_actor_ground_truth: bool = True
+
+    #: How far down its own lane the ego looks for the light governing it.
+    #: 0 falls back to CARLA's ``is_at_traffic_light()``, which only reports a
+    #: light once the ego is already at the line.
+    traffic_light_sight_distance_m: float = 60.0
+
+    #: Radius within which other vehicles are reported to the policy.
+    actor_horizon_m: float = 150.0
+
+    #: Seed handed to the policy in ``start_session``.
+    random_seed: int = 0
+
+    #: Cameras streamed to the policy.
+    cameras: list[DriverCameraSpec] = field(
+        default_factory=lambda: [DriverCameraSpec()]
+    )
+
+    #: Trajectory-following gains.
+    control: DriverControlSpec = field(default_factory=DriverControlSpec)
 
 
 # ---------------------------------------------------------------------------

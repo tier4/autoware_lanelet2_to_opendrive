@@ -27,6 +27,12 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "ffmpeg-python>=0.2.0",
+    # Speaks the alpasim `egodriver` gRPC contract to an external driver policy.
+    # The protobuf definitions are vendored (see proto/README.md) rather than pulled
+    # from `alpasim-grpc`, which requires Python >= 3.11 and so cannot coexist with the
+    # CPython-3.10-only CARLA 0.10.0 wheel.
+    "grpcio>=1.60",
+    "protobuf>=4.25.0,<5.0.0",
 ]
 
 [project.optional-dependencies]

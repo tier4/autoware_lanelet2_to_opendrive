@@ -4,6 +4,8 @@ Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
         AutowareEntity,
+        CarlaDriverEntity,
+        DriverClientConfig,
         EGO_ROLE_NAME,
         EntityRole,
         ScenarioRunner,
@@ -129,8 +131,16 @@ if TYPE_CHECKING:
         to_lanelet2 as to_lanelet2,
         to_opendrive as to_opendrive,
     )
+    from .driver import (
+        BaseEgoDriverClient as BaseEgoDriverClient,
+        ControlConfig as ControlConfig,
+        DriverCameraConfig as DriverCameraConfig,
+        DriverClientConfig as DriverClientConfig,
+        EgoDriverGrpcClient as EgoDriverGrpcClient,
+    )
     from .entity import (
         AutowareEntity as AutowareEntity,
+        CarlaDriverEntity as CarlaDriverEntity,
         EgoVehicle as EgoVehicle,
         SpawnLocation as SpawnLocation,
         SpawnPointIndex as SpawnPointIndex,
@@ -164,6 +174,9 @@ if TYPE_CHECKING:
     )
     from .scenario_base import BaseScenario as BaseScenario, EgoConfig as EgoConfig
     from .scenario_config import (
+        DriverCameraSpec as DriverCameraSpec,
+        DriverConfig as DriverConfig,
+        DriverControlSpec as DriverControlSpec,
         EgoVehicleConfig as EgoVehicleConfig,
         EntityConfig as EntityConfig,
         MapConfig as MapConfig,
@@ -233,6 +246,15 @@ __all__ = [
     "StickyCondition",
     "TemporaryStopCondition",
     "AutowareEntity",
+    "BaseEgoDriverClient",
+    "CarlaDriverEntity",
+    "ControlConfig",
+    "DriverCameraConfig",
+    "DriverCameraSpec",
+    "DriverClientConfig",
+    "DriverConfig",
+    "DriverControlSpec",
+    "EgoDriverGrpcClient",
     "EgoConfig",
     "EgoVehicle",
     "SpawnLocation",
@@ -367,6 +389,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "to_opendrive": (".coordinate", "to_opendrive"),
     # entity
     "AutowareEntity": (".entity", "AutowareEntity"),
+    "CarlaDriverEntity": (".entity", "CarlaDriverEntity"),
     "EgoVehicle": (".entity", "EgoVehicle"),
     "SpawnLocation": (".entity", "SpawnLocation"),
     "SpawnPointIndex": (".entity", "SpawnPointIndex"),
@@ -405,6 +428,15 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "EgoVehicleConfig": (".scenario_config", "EgoVehicleConfig"),
     "NpcVehicleConfig": (".scenario_config", "NpcVehicleConfig"),
     "SweepConfig": (".scenario_config", "SweepConfig"),
+    "DriverConfig": (".scenario_config", "DriverConfig"),
+    "DriverCameraSpec": (".scenario_config", "DriverCameraSpec"),
+    "DriverControlSpec": (".scenario_config", "DriverControlSpec"),
+    # driver
+    "BaseEgoDriverClient": (".driver", "BaseEgoDriverClient"),
+    "ControlConfig": (".driver", "ControlConfig"),
+    "DriverCameraConfig": (".driver", "DriverCameraConfig"),
+    "DriverClientConfig": (".driver", "DriverClientConfig"),
+    "EgoDriverGrpcClient": (".driver", "EgoDriverGrpcClient"),
     # utils
     "find_nearest_traffic_light": (".utils", "find_nearest_traffic_light"),
     "get_stop_line_linestrings": (".utils", "get_stop_line_linestrings"),

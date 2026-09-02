@@ -92,6 +92,7 @@ class BaseScenario(ABC):
         ground_projection: GroundProjectionConfig | None = None,
         random_seed: int = DEFAULT_RANDOM_SEED,
         ego_type: type[EgoVehicle] | None = None,
+        ego_entity: EgoVehicle | None = None,
     ) -> None:
         """Initialize the scenario with an ego vehicle configuration.
 
@@ -110,11 +111,17 @@ class BaseScenario(ABC):
                 actor.  Pass :class:`AutowareEntity` to disable TrafficManager
                 autopilot on the ego vehicle.  ``None`` (default) uses
                 :class:`EgoVehicle`.
+            ego_entity: Pre-built ego entity to use instead of instantiating
+                *ego_type*.  Required for entities that need constructor
+                arguments, such as
+                :class:`~autoware_carla_scenario.entity.carla_driver_entity.CarlaDriverEntity`
+                and its driver configuration.  Takes precedence over *ego_type*.
         """
         from .entity.ego import EgoVehicle as _EgoVehicle  # noqa: PLC0415
 
         self.ego_config = ego_config
         self.ego_type = ego_type or _EgoVehicle
+        self.ego_entity = ego_entity
         self._spawn_pose = spawn_pose
         self._ground_projection = ground_projection or GroundProjectionConfig()
         self.random_seed = random_seed
@@ -128,6 +135,22 @@ class BaseScenario(ABC):
         self._pass_conditions: List[BaseCondition] = []
         self._fail_conditions: List[BaseCondition] = []
         self._spectator_camera_config: Optional[SpectatorCameraConfig] = None
+
+    # ------------------------------------------------------------------
+    # Ego construction
+    # ------------------------------------------------------------------
+
+    def create_ego(self) -> "EgoVehicle":
+        """Return the ego entity :class:`ScenarioRunner` should spawn.
+
+        Returns :attr:`ego_entity` when one was supplied, otherwise a fresh instance of
+        :attr:`ego_type`.  Assigning ``scenario.ego_entity`` after construction is the
+        supported way to swap in a configured entity without changing the scenario
+        builder signature.
+        """
+        if self.ego_entity is not None:
+            return self.ego_entity
+        return self.ego_type()
 
     # ------------------------------------------------------------------
     # Client injection

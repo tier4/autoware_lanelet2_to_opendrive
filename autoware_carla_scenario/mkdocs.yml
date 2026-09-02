@@ -78,6 +78,7 @@ nav:
   - Installation: installation.md
   - Tutorial: tutorial.md
   - Usage: usage.md
+  - External Driver Interface: driver_interface.md
   - Architecture: architecture.md
   - API Reference: api.md
   - Development: development.md

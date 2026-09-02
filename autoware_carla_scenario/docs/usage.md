@@ -383,6 +383,46 @@ Each scenario run generates output in `outputs/YYYY-MM-DD/HH-MM-SS/`:
 
 ---
 
+## Driving the Ego with an External Policy
+
+By default CARLA's TrafficManager drives the ego. To hand it to an external driving
+policy over the `egodriver` gRPC contract instead, start the policy server and select
+the `carla_driver` entity:
+
+```bash
+# 1. Start the policy (in its own environment)
+uv run carla-driver-interface serve --policy route_follower --port 50051
+
+# 2. Run any scenario against it
+uv run scenario ego.entity=carla_driver driver.address=localhost:50051
+```
+
+`ego.entity` accepts:
+
+| Value | Behaviour |
+| --- | --- |
+| `autopilot` (default) | CARLA's TrafficManager drives the ego |
+| `autoware` | Nothing drives the ego; the actor is left for an external stack |
+| `carla_driver` | An external policy drives the ego |
+
+Common overrides:
+
+```bash
+# Query the policy every simulation tick instead of every other one
+uv run scenario ego.entity=carla_driver driver.policy_timestep_s=0.05
+
+# Pin the rig origin offset when the derived value looks wrong (CARLA 0.9.x)
+uv run scenario ego.entity=carla_driver driver.rear_axle_offset_m=-1.4
+
+# Send a smaller, cheaper camera frame
+uv run scenario ego.entity=carla_driver \
+    driver.cameras.0.image_width=480 driver.cameras.0.image_height=302
+```
+
+See [External Driver Interface](driver_interface.md) for the full reference.
+
+---
+
 ## `detect-no-3d-model` - 3D Model Detection
 
 Detects lanelets that do not have a matching 3D ground model in CARLA. Useful for identifying areas where vehicle ground-projection ray casting will fail. Requires a running CARLA server with the target map loaded.
