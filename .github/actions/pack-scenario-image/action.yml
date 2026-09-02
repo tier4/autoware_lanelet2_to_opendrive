@@ -59,7 +59,7 @@ inputs:
   build-args:
     description: >
       Newline-separated extra KEY=VALUE build arguments, for the Dockerfile
-      ARGs without a dedicated input (RUNTIME_BASE, UV_VERSION).
+      ARGs without a dedicated input (RUNTIME_BASE, UV_VERSION, LAYER_MTIME).
     required: false
     default: ""
   labels:
@@ -91,6 +91,21 @@ inputs:
       so several images built in the same workflow do not evict each other.
     required: false
     default: ""
+  base-cache-scope:
+    description: >
+      Second cache scope, read in addition to 'cache-scope' and shared by every
+      image built for the same client: the stages behind the CARLA and
+      dependency layers are the same for all of them. Defaults to one scope per
+      CARLA and Python version. Populated by 'warm-base-cache'.
+    required: false
+    default: ""
+  warm-base-cache:
+    description: >
+      Also export the build cache to 'base-cache-scope'. Off by default because
+      a scope has one occupant: turn it on in the one job that should own the
+      shared scope, not in every job of a matrix that packs several images.
+    required: false
+    default: "false"
 
 outputs:
   image-ref:
@@ -114,6 +129,8 @@ runs:
         CARLA_VERSION: ${{ inputs.carla-version }}
         TAGS_IN: ${{ inputs.tags }}
         CACHE_SCOPE_IN: ${{ inputs.cache-scope }}
+        BASE_CACHE_SCOPE_IN: ${{ inputs.base-cache-scope }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
         LOAD: ${{ inputs.load }}
         PUSH: ${{ inputs.push }}
         SMOKE_TEST: ${{ inputs.smoke-test }}
@@ -138,10 +155,20 @@ runs:
             "${IMAGE}:carla${CARLA_VERSION}-${GITHUB_SHA:0:7}")"
         fi
 
+        # Anything but [A-Za-z0-9_-] is not usable in a cache scope.
+        slug() { printf '%s' "$*" | tr -c 'A-Za-z0-9_-' '-'; }
+
         scope="${CACHE_SCOPE_IN}"
         if [ -z "${scope}" ]; then
-          # Anything but [A-Za-z0-9_-] is not usable in a cache scope.
-          scope="pack-scenario-$(printf '%s-%s' "${IMAGE}" "${CARLA_VERSION}" | tr -c 'A-Za-z0-9_-' '-')"
+          scope="pack-scenario-$(slug "${IMAGE}-${CARLA_VERSION}")"
+        fi
+
+        # Deliberately free of the image name: the client and dependency
+        # stages are identical for every image built against the same client,
+        # and this is where they are shared.
+        base_scope="${BASE_CACHE_SCOPE_IN}"
+        if [ -z "${base_scope}" ]; then
+          base_scope="pack-scenario-base-$(slug "carla${CARLA_VERSION}-py${PYTHON_VERSION}")"
         fi
 
         {
@@ -150,6 +177,7 @@ runs:
           echo "__TAGS__"
           echo "image-ref=$(printf '%s\n' "${tags}" | head -n 1)"
           echo "cache-scope=${scope}"
+          echo "base-cache-scope=${base_scope}"
         } >> "${GITHUB_OUTPUT}"
 
         echo "Building ${IMAGE} with CARLA ${CARLA_VERSION} (push=${PUSH})"
@@ -200,8 +228,12 @@ runs:
           SLIM=${{ inputs.slim }}
           ${{ inputs.build-args }}
         labels: ${{ inputs.labels }}
-        cache-from: ${{ inputs.cache == 'true' && format('type=gha,scope={0}', steps.plan.outputs.cache-scope) || '' }}
-        cache-to: ${{ inputs.cache == 'true' && format('type=gha,mode=max,scope={0}', steps.plan.outputs.cache-scope) || '' }}
+        cache-from: |
+          ${{ inputs.cache == 'true' && format('type=gha,scope={0}', steps.plan.outputs.cache-scope) || '' }}
+          ${{ inputs.cache == 'true' && format('type=gha,scope={0}', steps.plan.outputs.base-cache-scope) || '' }}
+        cache-to: |
+          ${{ inputs.cache == 'true' && format('type=gha,mode=max,scope={0}', steps.plan.outputs.cache-scope) || '' }}
+          ${{ inputs.cache == 'true' && inputs.warm-base-cache == 'true' && format('type=gha,mode=max,scope={0}', steps.plan.outputs.base-cache-scope) || '' }}
 
     - name: Smoke-test the image
       if: inputs.smoke-test == 'true'
