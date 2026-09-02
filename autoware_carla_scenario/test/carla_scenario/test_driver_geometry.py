@@ -89,33 +89,24 @@ def test_pose_rejects_wrong_dimensions() -> None:
         Pose(np.zeros(3), np.zeros(3))
 
 
-def test_from_rotation_matrix_round_trips_the_rotation() -> None:
-    for yaw, pitch, roll in [(0.0, 0.0, 0.0), (37.0, 0.0, 0.0), (10.0, 20.0, -30.0)]:
-        rotation = (
-            Pose.from_xyz_yaw(0.0, 0.0, 0.0, math.radians(yaw)).rotation_matrix
-            @ _rotation_about_y(math.radians(pitch))
-            @ _rotation_about_x(math.radians(roll))
-        )
-        pose = Pose.from_rotation_matrix(np.array([1.0, 2.0, 3.0]), rotation)
-        assert np.allclose(pose.rotation_matrix, rotation, atol=1e-9)
-        assert np.allclose(pose.position, [1.0, 2.0, 3.0])
-
-
-def test_from_rotation_matrix_handles_a_180_degree_turn() -> None:
-    """A trace-negative rotation must not fall through to a NaN quaternion."""
-    rotation = Pose.from_xyz_yaw(0.0, 0.0, 0.0, math.radians(180.0)).rotation_matrix
-    pose = Pose.from_rotation_matrix(np.zeros(3), rotation)
-    assert np.allclose(pose.rotation_matrix, rotation, atol=1e-9)
-
-
-def _rotation_about_x(angle: float) -> np.ndarray:
+def test_from_axis_angle_matches_the_principal_rotations() -> None:
+    angle = math.radians(30.0)
     cos, sin = math.cos(angle), math.sin(angle)
-    return np.array([[1.0, 0.0, 0.0], [0.0, cos, -sin], [0.0, sin, cos]])
+    expected = {
+        0: np.array([[1.0, 0.0, 0.0], [0.0, cos, -sin], [0.0, sin, cos]]),
+        1: np.array([[cos, 0.0, sin], [0.0, 1.0, 0.0], [-sin, 0.0, cos]]),
+        2: np.array([[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]]),
+    }
+    for axis, rotation in expected.items():
+        pose = Pose.from_axis_angle(axis, angle)
+        assert np.allclose(pose.rotation_matrix, rotation, atol=1e-12)
+        assert np.allclose(pose.position, np.zeros(3))
 
 
-def _rotation_about_y(angle: float) -> np.ndarray:
-    cos, sin = math.cos(angle), math.sin(angle)
-    return np.array([[cos, 0.0, sin], [0.0, 1.0, 0.0], [-sin, 0.0, cos]])
+def test_from_axis_angle_composes_into_a_yaw_pitch_roll_rotation() -> None:
+    """The z rotation must agree with ``from_xyz_yaw`` about the same axis."""
+    yaw = Pose.from_axis_angle(2, math.radians(45.0))
+    assert yaw.yaw == pytest.approx(math.radians(45.0), abs=1e-12)
 
 
 # ---------------------------------------------------------------------------

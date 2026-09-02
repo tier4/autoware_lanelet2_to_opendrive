@@ -84,29 +84,6 @@ def to_local_pose(
     return pose @ shift
 
 
-def _carla_rotation_matrix(
-    roll_deg: float, pitch_deg: float, yaw_deg: float
-) -> NDArray[np.float64]:
-    """Return the rotation matrix CARLA builds from ``(roll, pitch, yaw)`` degrees.
-
-    This reproduces the rotation block of ``carla.Transform.get_matrix()`` -- a
-    yaw about z, then a pitch about y, then a roll about x, in CARLA's left-handed
-    world -- so that a pose expressed with CARLA Euler angles round-trips through
-    it exactly.
-    """
-    cy, sy = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
-    cp, sp = math.cos(math.radians(pitch_deg)), math.sin(math.radians(pitch_deg))
-    cr, sr = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
-    return np.array(
-        [
-            [cp * cy, cy * sp * sr - sy * cr, -cy * sp * cr - sy * sr],
-            [cp * sy, sy * sp * sr + cy * cr, -sy * sp * cr + cy * sr],
-            [sp, -cp * sr, cp * cr],
-        ],
-        dtype=np.float64,
-    )
-
-
 def camera_extrinsics_to_rig(
     position_x: float,
     position_y: float,
@@ -120,16 +97,19 @@ def camera_extrinsics_to_rig(
     Camera extrinsics are configured in CARLA's convention (x forward, y right, z
     up, degrees), whereas the pose the contract advertises as ``rig_to_camera`` is
     right-handed (x forward, y left, z up).  Crossing that boundary is the same
-    ``y`` reflection ``S = diag(1, -1, 1)`` the rest of this module applies: the
-    translation's ``y`` flips and the rotation ``R`` becomes ``S R S``.  That
-    negates roll and yaw and leaves pitch, so the yaw-only case reduces to the
-    "negate the yaw" rule :func:`to_local_pose` already uses.
+    ``y`` reflection this module applies elsewhere: the translation's ``y`` flips,
+    and CARLA's ``yaw * pitch * roll`` rotation, rebuilt in the right-handed frame,
+    is the same rotation with the yaw and pitch angles negated and the roll kept.
+    The yaw-only case therefore reduces to the "negate the yaw" rule
+    :func:`to_local_pose` already uses.
     """
-    reflection = np.diag([1.0, -1.0, 1.0])
-    rotation = _carla_rotation_matrix(roll_deg, pitch_deg, yaw_deg)
-    rig_rotation = reflection @ rotation @ reflection
+    rotation = (
+        Pose.from_axis_angle(2, -math.radians(yaw_deg))
+        @ Pose.from_axis_angle(1, -math.radians(pitch_deg))
+        @ Pose.from_axis_angle(0, math.radians(roll_deg))
+    )
     position = np.array([position_x, -position_y, position_z], dtype=np.float64)
-    return Pose.from_rotation_matrix(position, rig_rotation)
+    return Pose(position, rotation.quat_xyzw)
 
 
 def rear_axle_offset(actor: "carla.Actor", override: Optional[float] = None) -> float:

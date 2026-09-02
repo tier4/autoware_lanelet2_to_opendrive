@@ -128,46 +128,17 @@ class Pose:
         )
 
     @classmethod
-    def from_rotation_matrix(
-        cls, position: Iterable[float], rotation: NDArray[np.float64]
-    ) -> "Pose":
-        """Return a pose from a translation and a ``(3, 3)`` rotation matrix.
-
-        The rotation is converted to the ``(x, y, z, w)`` quaternion this class
-        stores using Shepperd's method, which stays numerically stable by pivoting
-        on the largest diagonal term rather than trusting the trace alone.
+    def from_axis_angle(cls, axis: int, angle_rad: float) -> "Pose":
+        """Return a rotation-only pose about a principal axis.
 
         Args:
-            position: ``(3,)`` translation in metres.
-            rotation: A proper ``(3, 3)`` rotation matrix.
+            axis: ``0``, ``1`` or ``2`` for the x, y or z axis.
+            angle_rad: Rotation angle in radians (counter-clockwise).
         """
-        matrix = np.asarray(rotation, dtype=np.float64).reshape(3, 3)
-        trace = matrix[0, 0] + matrix[1, 1] + matrix[2, 2]
-        if trace > 0.0:
-            scale = math.sqrt(trace + 1.0) * 2.0
-            w = 0.25 * scale
-            x = (matrix[2, 1] - matrix[1, 2]) / scale
-            y = (matrix[0, 2] - matrix[2, 0]) / scale
-            z = (matrix[1, 0] - matrix[0, 1]) / scale
-        elif matrix[0, 0] >= matrix[1, 1] and matrix[0, 0] >= matrix[2, 2]:
-            scale = math.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) * 2.0
-            w = (matrix[2, 1] - matrix[1, 2]) / scale
-            x = 0.25 * scale
-            y = (matrix[0, 1] + matrix[1, 0]) / scale
-            z = (matrix[0, 2] + matrix[2, 0]) / scale
-        elif matrix[1, 1] >= matrix[2, 2]:
-            scale = math.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) * 2.0
-            w = (matrix[0, 2] - matrix[2, 0]) / scale
-            x = (matrix[0, 1] + matrix[1, 0]) / scale
-            y = 0.25 * scale
-            z = (matrix[1, 2] + matrix[2, 1]) / scale
-        else:
-            scale = math.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) * 2.0
-            w = (matrix[1, 0] - matrix[0, 1]) / scale
-            x = (matrix[0, 2] + matrix[2, 0]) / scale
-            y = (matrix[1, 2] + matrix[2, 1]) / scale
-            z = 0.25 * scale
-        return cls(_as_vector3(position), np.array([x, y, z, w], dtype=np.float64))
+        half = 0.5 * angle_rad
+        quat = [0.0, 0.0, 0.0, math.cos(half)]
+        quat[axis] = math.sin(half)
+        return cls(np.zeros(3), np.array(quat, dtype=np.float64))
 
     # ------------------------------------------------------------------
     # Derived quantities
