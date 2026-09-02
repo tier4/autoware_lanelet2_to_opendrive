@@ -24,17 +24,27 @@ _SCRIPT = (
     / "venv-layer.sh"
 )
 
-#: The default `normalize` stamps every exported file with this: 2020-01-01Z.
+#: What the helper stamps exported files with when LAYER_MTIME is unset.
 _EPOCH = 1577836800
 
 
-def _run(*args: str | Path) -> subprocess.CompletedProcess[str]:
-    """Run the helper, failing the test with its output if it errors."""
+def _run(
+    *args: str | Path, epoch: int | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the helper, failing the test with its output if it errors.
+
+    *epoch* goes through the environment because that is how it reaches the
+    script in the image: as the `LAYER_MTIME` build argument.
+    """
+    env = dict(os.environ)
+    if epoch is not None:
+        env["LAYER_MTIME"] = str(epoch)
     return subprocess.run(
         ["sh", str(_SCRIPT), *(str(arg) for arg in args)],
         capture_output=True,
         text=True,
         check=True,
+        env=env,
     )
 
 
@@ -112,15 +122,20 @@ def test_reassembling_the_layers_reproduces_the_virtualenv(
     _run("capture", venv, export, "scenario")
 
     stacked = tmp_path / "stacked"
-    stacked.mkdir()
-    for layer in ("carla", "deps", "scenario"):
-        subprocess.run(["cp", "-a", f"{export / layer}/.", str(stacked)], check=True)
+    _run("stack", export, stacked)
 
     assert _contents(stacked) == _contents(venv)
 
 
 def test_a_rewritten_file_moves_to_the_later_layer(venv: Path, tmp_path: Path) -> None:
-    """Otherwise the stack would keep the stale copy from the earlier layer."""
+    """Otherwise the stack would keep the stale copy from the earlier layer.
+
+    A path diff alone would never notice this file, since its path did not
+    change -- only the `-newer` half of the delta sees it. Note that the export
+    is hardlinked, so an in-place rewrite like the one below also reaches the
+    earlier layer's copy; what has to hold is that the stack ends up with the
+    new content, which is what is asserted here.
+    """
     export = tmp_path / "export"
 
     _install(venv, "shared.pth", "before")
@@ -129,10 +144,11 @@ def test_a_rewritten_file_moves_to_the_later_layer(venv: Path, tmp_path: Path) -
     _run("capture", venv, export, "deps")
 
     site = "lib/python3.10/site-packages"
-    assert (export / "carla" / site / "shared.pth").read_text() == "before"
-    # The later layer wins when they are stacked, so it has to carry the new
-    # content -- a path diff alone would never notice this file at all.
     assert (export / "deps" / site / "shared.pth").read_text() == "after"
+
+    stacked = tmp_path / "stacked"
+    _run("stack", export, stacked)
+    assert (stacked / site / "shared.pth").read_text() == "after"
 
 
 def test_a_new_file_with_an_old_timestamp_is_still_captured(
@@ -164,13 +180,17 @@ def test_the_state_directory_is_not_part_of_any_layer(
     assert not any(".state" in path for path in _layer_files(export / "carla"))
 
 
-def test_normalize_stamps_every_exported_path(venv: Path, tmp_path: Path) -> None:
-    """Equal content has to mean an equal layer, whenever it was installed."""
+def test_capture_stamps_every_exported_path(venv: Path, tmp_path: Path) -> None:
+    """Equal content has to mean an equal layer, whenever it was installed.
+
+    Stamped by `capture` rather than by a pass at the end: on the overlay
+    filesystem of a build, touching a file an earlier layer wrote copies it up
+    whole, so a late pass would rewrite the virtualenv to change nothing.
+    """
     export = tmp_path / "export"
 
     _install(venv, "carla/__init__.py")
     _run("capture", venv, export, "carla")
-    _run("normalize", export)
 
     layer = export / "carla"
     stamped = [layer, *layer.rglob("*")]
@@ -179,13 +199,28 @@ def test_normalize_stamps_every_exported_path(venv: Path, tmp_path: Path) -> Non
         assert path.lstat().st_mtime == _EPOCH, path
 
 
-def test_normalize_accepts_an_explicit_epoch(venv: Path, tmp_path: Path) -> None:
-    """`LAYER_MTIME` is a build argument, so the value has to be settable."""
+def test_normalize_restamps_what_a_later_pass_rewrote(
+    venv: Path, tmp_path: Path
+) -> None:
+    """Slimming rewrites shared objects after capture, so they need stamping."""
     export = tmp_path / "export"
 
     _install(venv, "carla/__init__.py")
     _run("capture", venv, export, "carla")
-    _run("normalize", export, "1000000000")
+    stripped = export / "carla" / "lib" / "python3.10" / "site-packages" / "carla"
+    (stripped / "__init__.py").write_text("stripped")
+
+    _run("normalize", export)
+
+    assert (stripped / "__init__.py").lstat().st_mtime == _EPOCH
+
+
+def test_the_epoch_comes_from_the_environment(venv: Path, tmp_path: Path) -> None:
+    """`LAYER_MTIME` is a build argument, so the value has to be settable."""
+    export = tmp_path / "export"
+
+    _install(venv, "carla/__init__.py")
+    _run("capture", venv, export, "carla", epoch=1_000_000_000)
 
     site = export / "carla" / "lib" / "python3.10" / "site-packages"
     assert (site / "carla" / "__init__.py").lstat().st_mtime == 1_000_000_000

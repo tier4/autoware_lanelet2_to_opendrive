@@ -148,11 +148,15 @@ def main(argv: list[str]) -> int:
 
     venv = Path(argv[1])
     sites = sorted(venv.glob("lib/python*/site-packages"))
-    if not sites:
-        # A layer that installed nothing importable -- console scripts only,
-        # say.  Nothing to slim, and not a reason to fail the build.
-        print(f"{venv}: no site-packages directory, nothing to slim")
-        return 0
+    if len(sites) != 1:
+        # Every layer installs something importable, so an empty tree here means
+        # the capture went wrong -- the characteristic failure of the split, and
+        # not something to slim quietly past.
+        print(
+            f"{venv}: expected one lib/python*/site-packages, found {len(sites)}",
+            file=sys.stderr,
+        )
+        return 1
     (site,) = sites
 
     before = directory_size(site)

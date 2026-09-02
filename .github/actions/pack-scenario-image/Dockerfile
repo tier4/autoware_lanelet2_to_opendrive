@@ -77,8 +77,9 @@ ARG SLIM=true
 # Timestamp stamped on every file that reaches the runtime image, in place of
 # the time it happened to be installed. Layer digests are computed over file
 # metadata as well as content, so without this an unchanged layer would be a
-# fresh download on every rebuild.
-ARG LAYER_MTIME=1577836800
+# fresh download on every rebuild. Declared without a value so that the default
+# lives in venv-layer.sh alone; build args reach that script as environment.
+ARG LAYER_MTIME
 
 # `strip` comes from binutils. Installed before anything volatile is copied in
 # so the apt layer caches across every rebuild; the stage is discarded, so
@@ -88,7 +89,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=uv /uv /usr/local/bin/uv
-COPY venv-layer.sh slim-venv.py /usr/local/bin/
+COPY venv-layer.sh /usr/local/bin/
 
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
@@ -150,11 +151,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # object and puts the original back if binutils produced a layout the ELF
 # loader would reject -- see its docstring; scipy's bundled OpenBLAS is one
 # such object under the binutils in Debian bookworm.
+COPY slim-venv.py /usr/local/bin/
 RUN set -eu; \
     if [ "${SLIM}" = "true" ]; then \
-        for layer in carla deps framework scenario; do \
+        for layer in /export/*/; do \
             echo "== ${layer}"; \
-            /opt/venv/bin/python /usr/local/bin/slim-venv.py "/export/${layer}"; \
+            /opt/venv/bin/python /usr/local/bin/slim-venv.py "${layer}"; \
         done; \
     fi
 
@@ -163,11 +165,13 @@ RUN set -eu; \
 # than at run time. The reassembled tree is also the last chance to notice that
 # the client is not the version that was asked for, or that slimming broke an
 # extension module.
-RUN sh /usr/local/bin/venv-layer.sh normalize /export "${LAYER_MTIME}" \
-    && rm -rf /opt/venv && mkdir -p /opt/venv \
-    && for layer in carla deps framework scenario; do \
-        cp -a "/export/${layer}/." /opt/venv/; \
-    done \
+#
+# It is built on a tmpfs over the virtualenv the installs left behind: at the
+# path the venv expects, since that is what its scripts and pyvenv.cfg name,
+# but without committing a third copy of it to this stage.
+RUN --mount=type=tmpfs,target=/opt/venv \
+    sh /usr/local/bin/venv-layer.sh normalize /export \
+    && sh /usr/local/bin/venv-layer.sh stack /export /opt/venv \
     && /opt/venv/bin/python -c "import carla, cv2, lanelet2, numpy, scipy.interpolate, shapely; from importlib.metadata import version; got = version('carla'); assert got == '${CARLA_VERSION}', 'expected CARLA ${CARLA_VERSION}, installed ' + got; print('CARLA ' + got + ' pinned; native extension modules import cleanly')"
 
 

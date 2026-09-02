@@ -304,6 +304,10 @@ jobs:
         # The first image already proved the runtime works; this one is here
         # for its layers.
         smoke-test: "false"
+        # Everything but the scenario layer is the same build as the first
+        # pack, so read its cache rather than resolving and installing the
+        # ~400 MB dependency closure a second time.
+        cache-scope: ${{ steps.pack.outputs.cache-scope }}
 
     - name: Check the two images share everything but the scenario layer
       if: matrix.carla-version == '0.10.0'
@@ -326,22 +330,16 @@ jobs:
 
 
         first, second = layers(os.environ["FIRST"]), layers(os.environ["SECOND"])
-        shared = 0
-        for left, right in zip(first, second):
-            if left != right:
-                break
-            shared += 1
 
         # Everything up to and including the framework layer has to match. The
         # two that may differ are the scenario layer -- which is the point --
         # and the `useradd` layer behind it, whose files carry the time the
         # build ran.
-        assert len(first) == len(second), f"{len(first)} layers vs {len(second)}"
-        assert shared >= len(first) - 2, (
-            f"only {shared} of {len(first)} layers are shared: the client, "
-            "dependency or framework layer now depends on the scenario package"
+        assert first[:-2] == second[:-2], (
+            "the client, dependency or framework layer now depends on the "
+            f"scenario package: {first} vs {second}"
         )
-        print(f"### Layer sharing — {shared} of {len(first)} layers identical")
+        print(f"### Layer sharing — {len(first) - 2} of {len(first)} layers identical")
         PY
 
   qc-validate:

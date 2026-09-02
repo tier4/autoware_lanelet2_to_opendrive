@@ -5,40 +5,45 @@
 # The Dockerfile next to this script fills /opt/venv in four steps -- the CARLA
 # client, the framework's third-party dependency closure, the framework wheels,
 # the scenario wheel -- and calls `capture` after each one.  Everything the step
-# added to (or rewrote in) the virtualenv is copied out into
-# <export-root>/<name>, and the runtime stage lays those trees back on top of
-# one another with one COPY, and so one layer, each.
+# added to (or rewrote in) the virtualenv is exported into <export-root>/<name>,
+# and the runtime stage lays those trees back on top of one another with one
+# COPY, and so one layer, each.  `stack` does the same reassembly on disk, which
+# is how the build checks that the layers really do add up to the virtualenv.
 #
 # The point of the split is the pull rather than the build.  A layer whose
 # inputs did not change keeps its digest, so a client that already holds an
 # image built for the same CARLA client and framework downloads only the
-# scenario layer -- a few hundred kB instead of the whole virtualenv.
-#
-# `normalize` is what makes that hold across rebuilds: it stamps every exported
-# file with one fixed timestamp, so identical content lands in an identical
-# layer even though the files were installed months apart.
+# scenario layer -- a few hundred kB instead of the whole virtualenv.  For that
+# to hold across rebuilds, identical content has to carry identical metadata, so
+# every exported file is stamped with LAYER_MTIME instead of the time it
+# happened to be installed.  `normalize` re-stamps whatever a later pass (the
+# slimming) rewrote.
 #
 # Usage:
 #   venv-layer.sh capture   <venv-dir> <export-root> <layer-name>
-#   venv-layer.sh normalize <export-root> [epoch-seconds]
+#   venv-layer.sh stack     <export-root> <dest-dir>
+#   venv-layer.sh normalize <export-root>
 #
 # State lives in <export-root>/.state, which the runtime stage never copies.
 
 set -eu
 
-#: 2020-01-01T00:00:00Z. Any fixed point does; a timestamp inside the range
-#: every archive format can represent avoids surprises in tooling downstream.
-DEFAULT_EPOCH=1577836800
+#: Stamped on every exported file. 2020-01-01T00:00:00Z; any fixed point does.
+#: Overridden by the Dockerfile ARG of the same name, which reaches this script
+#: as an environment variable.
+: "${LAYER_MTIME:=1577836800}"
 
 usage() {
     cat >&2 <<'USAGE'
 Usage: venv-layer.sh capture   <venv-dir> <export-root> <layer-name>
-       venv-layer.sh normalize <export-root> [epoch-seconds]
+       venv-layer.sh stack     <export-root> <dest-dir>
+       venv-layer.sh normalize <export-root>
 
-  capture    Copy everything the last install step added to <venv-dir> into
+  capture    Export everything the last install step added to <venv-dir> as
              <export-root>/<layer-name>, then re-baseline for the next step.
-  normalize  Stamp every file under <export-root> with a fixed timestamp so
-             unchanged content produces an unchanged layer.
+  stack      Reassemble the captured layers, in capture order, into <dest-dir>.
+  normalize  Re-stamp anything under <export-root> that is not already at
+             LAYER_MTIME, so unchanged content keeps its layer digest.
 USAGE
     exit 2
 }
@@ -48,15 +53,19 @@ abspath() {
         || { echo "venv-layer.sh: no such directory: $1" >&2; exit 1; }
 }
 
-# Every file and symlink in the virtualenv, as paths relative to its root.
+# Every file and symlink under a directory, as sorted paths relative to it.
+# Extra `find` predicates may be passed after the directory.
 list_tree() {
-    (cd "$1" && find . -mindepth 1 \( -type f -o -type l \) -print) | LC_ALL=C sort
+    dir=$1
+    shift
+    (cd "${dir}" && find . -mindepth 1 \( -type f -o -type l \) "$@" -print) \
+        | LC_ALL=C sort
 }
 
 capture() {
     [ $# -eq 3 ] || usage
     # The listings below run from inside the virtualenv, so every path the
-    # script hands to find or tar has to be absolute.
+    # script hands to find or cp has to be absolute.
     venv_dir=$(abspath "$1")
     mkdir -p "$2"
     export_root=$(abspath "$2")
@@ -77,27 +86,37 @@ capture() {
     # catches the second, which no path diff can see.
     {
         LC_ALL=C comm -13 "${seen}" "${state}/now"
-        (cd "${venv_dir}" && find . -mindepth 1 \( -type f -o -type l \) -newer "${seen}" -print)
+        list_tree "${venv_dir}" -newer "${seen}"
     } | LC_ALL=C sort -u > "${state}/delta"
 
     if [ -s "${state}/delta" ]; then
-        # --no-recursion: the list is already every file, and a directory named
-        # in it would otherwise drag in the files of a later layer.  Missing
-        # parent directories are created on extraction.
+        # -l: the export is a second *name* for the installed file rather than a
+        # second copy, so a captured layer costs its metadata and not its bytes
+        # -- and BuildKit records the second name as a link within the same
+        # layer diff. -a keeps modes and leaves symlinks as symlinks; --parents
+        # rebuilds the tree under the export directory. Falls back to a real
+        # copy when the export root is on another filesystem.
         #
-        # `set -e` covers the extracting tar, but the reading one only reports
-        # through a pipe -- and the shell in the image is dash, which has no
-        # pipefail -- so its failure is recorded by hand.  A half-copied layer
-        # must not pass for a complete one.
-        rm -f "${state}/read-failed"
-        { tar -C "${venv_dir}" --no-recursion -T "${state}/delta" -cf - \
-            || echo failed > "${state}/read-failed"; } \
-            | tar -C "${export_root}/${name}" -xf -
-        if [ -e "${state}/read-failed" ]; then
-            echo "venv-layer.sh: reading ${venv_dir} failed" >&2
-            exit 1
-        fi
+        # The alias is why a later step must *replace* a file rather than
+        # truncate it in place: an in-place rewrite reaches the copy an earlier
+        # layer already exported, and while stacking still yields the new
+        # content -- the delta above puts it in the later layer too -- the
+        # earlier layer's digest would move. uv replaces, and no path is
+        # captured twice in this build.
+        (
+            cd "${venv_dir}"
+            xargs -a "${state}/delta" -d '\n' cp -al --parents -t "${export_root}/${name}" 2>/dev/null \
+                || xargs -a "${state}/delta" -d '\n' cp -a --parents -t "${export_root}/${name}"
+        )
+        # Stamped here, in the step that created these files, rather than in a
+        # pass at the end: touching a file that a previous layer wrote copies it
+        # up whole, which is the entire virtualenv for the sake of its mtimes.
+        find "${export_root}/${name}" -exec touch -h -d "@${LAYER_MTIME}" {} +
     fi
+
+    # `stack` and the runtime image both need the order the layers were taken
+    # in, and this is the only place that knows it.
+    grep -qxF "${name}" "${state}/order" 2>/dev/null || echo "${name}" >> "${state}/order"
 
     mv "${state}/now" "${seen}"
     # The next step's files have to look newer than this marker, so it has to
@@ -107,14 +126,29 @@ capture() {
     echo "venv-layer: ${name}: $(wc -l < "${state}/delta" | tr -d ' ') path(s)"
 }
 
-normalize() {
-    [ $# -ge 1 ] || usage
+stack() {
+    [ $# -eq 2 ] || usage
     export_root=$(abspath "$1")
-    epoch=${2:-${DEFAULT_EPOCH}}
+    mkdir -p "$2"
+    dest=$(abspath "$2")
 
+    while IFS= read -r layer; do
+        [ -n "${layer}" ] || continue
+        cp -a "${export_root}/${layer}/." "${dest}/"
+    done < "${export_root}/.state/order"
+    echo "venv-layer: stacked $(tr '\n' ' ' < "${export_root}/.state/order")into ${dest}"
+}
+
+normalize() {
+    [ $# -eq 1 ] || usage
+    export_root=$(abspath "$1")
+
+    # Only what is not already stamped: on an overlay filesystem every touch
+    # copies the file up into the current layer, so re-stamping a file that is
+    # already correct would rewrite the virtualenv to change nothing.
     find "${export_root}" -mindepth 1 -path "${export_root}/.state" -prune -o \
-        -exec touch -h -d "@${epoch}" {} +
-    echo "venv-layer: stamped ${export_root} with @${epoch}"
+        -newermt "@${LAYER_MTIME}" -exec touch -h -d "@${LAYER_MTIME}" {} +
+    echo "venv-layer: stamped ${export_root} with @${LAYER_MTIME}"
 }
 
 [ $# -ge 1 ] || usage
@@ -122,6 +156,7 @@ action=$1
 shift
 case "${action}" in
     capture) capture "$@" ;;
+    stack) stack "$@" ;;
     normalize) normalize "$@" ;;
     -h|--help) usage ;;
     *) echo "venv-layer.sh: unknown command: ${action}" >&2; usage ;;

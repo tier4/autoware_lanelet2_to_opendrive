@@ -96,9 +96,10 @@ so two things could quietly defeat the split:
 
 - **Install timestamps.** The same wheel installed twice produces the same
   bytes at different times, and that alone is a different layer.
-  `venv-layer.sh normalize` therefore stamps every exported file with one fixed
-  timestamp (`LAYER_MTIME`, 2020-01-01 by default) before it is copied into the
-  image. A rebuild from a cold cache reproduces layers 1–3 byte for byte.
+  `venv-layer.sh` therefore stamps every exported file with one fixed timestamp
+  (`LAYER_MTIME`, 2020-01-01 by default) as it captures it, and re-stamps
+  afterwards whatever the slim pass rewrote. A rebuild from a cold cache
+  reproduces layers 1–3 byte for byte.
 - **The layers underneath.** A layer can only be reused together with its whole
   parent chain, so anything that varies has to sit *behind* the virtualenv
   rather than in front of it. The runtime stage therefore copies the four
@@ -117,20 +118,25 @@ split fails the build rather than the container.
 
 ### Sharing the build cache
 
-Layers are about the pull; `base-cache-scope` is the same idea for the build.
-It is a second GitHub Actions cache scope, keyed on the CARLA and Python
-versions but not on the image name, which the build reads in addition to
-`cache-scope`. Every image built for the same client can restore the client and
-dependency stages from it instead of resolving them again. A scope has one
-occupant, so exactly one job should write it:
+Layers are about the pull; `cache-scope` is the same idea for the build. It
+defaults to one scope per image and CARLA version, but images that share a
+client and framework are the same build up to their scenario layer, so pointing
+several of them at one scope lets the later ones restore the client and
+dependency stages instead of resolving them again. The action reports the scope
+it used, so a second build in the same workflow can just name the first's:
 
 ```yaml
 - uses: ./.github/actions/pack-scenario-image
+  id: first
   with:
     scenario-package-path: packages/first_scenario
     image: ghcr.io/my-org/first-scenario
-    # This job owns the shared scope; the others only read it.
-    warm-base-cache: "true"
+
+- uses: ./.github/actions/pack-scenario-image
+  with:
+    scenario-package-path: packages/second_scenario
+    image: ghcr.io/my-org/second-scenario
+    cache-scope: ${{ steps.first.outputs.cache-scope }}
 ```
 
 ## Keeping the image small
@@ -242,11 +248,9 @@ explaining further:
 | `framework-path` | uv workspace root supplying the framework. Defaults to the action's own checkout, which is what makes the pinned ref the framework version. Its members are read from `[tool.uv.workspace] members`, globs included. |
 | `with-ffmpeg` | Installs ffmpeg for `CameraRecorder`. The only input that adds an apt layer. |
 | `slim` | Strips the virtualenv (see above). On by default. |
-| `cache-scope` | Cache key namespace. Defaults to one scope per image and CARLA version, so images built in the same workflow do not evict each other. |
-| `base-cache-scope` | A second scope, read as well, keyed on the CARLA and Python versions only — see [sharing the build cache](#sharing-the-build-cache). |
-| `warm-base-cache` | Whether this job also *writes* that shared scope. Exactly one job should. |
+| `cache-scope` | Cache key namespace. Defaults to one scope per image and CARLA version, so images built in the same workflow do not evict each other — give two images the same scope to [share it](#sharing-the-build-cache) instead. |
 
-Outputs: `image-ref`, `tags`, `digest` (pushed images only).
+Outputs: `image-ref`, `tags`, `digest` (pushed images only), `cache-scope`.
 
 ### The smoke test
 
