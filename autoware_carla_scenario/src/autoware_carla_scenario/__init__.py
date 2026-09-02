@@ -3,6 +3,7 @@
 Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
+        AutowareEgoEntity,
         AutowareEntity,
         CarlaDriverEntity,
         DriverClientConfig,
@@ -138,7 +139,20 @@ if TYPE_CHECKING:
         DriverClientConfig as DriverClientConfig,
         EgoDriverGrpcClient as EgoDriverGrpcClient,
     )
+    from .autoware_bridge import (
+        AutowareBridge as AutowareBridge,
+        AutowareBridgeConfig as AutowareBridgeConfig,
+        AutowareInitSequence as AutowareInitSequence,
+        BridgePose as BridgePose,
+        FakeAutowareBridge as FakeAutowareBridge,
+        InitState as InitState,
+        LocalizationState as LocalizationState,
+        OperationMode as OperationMode,
+        RoutingState as RoutingState,
+        VehicleStatus as VehicleStatus,
+    )
     from .entity import (
+        AutowareEgoEntity as AutowareEgoEntity,
         AutowareEntity as AutowareEntity,
         CarlaDriverEntity as CarlaDriverEntity,
         EgoVehicle as EgoVehicle,
@@ -245,7 +259,19 @@ __all__ = [
     "StandstillCondition",
     "StickyCondition",
     "TemporaryStopCondition",
+    "AutowareEgoEntity",
     "AutowareEntity",
+    # autoware bridge
+    "AutowareBridge",
+    "AutowareBridgeConfig",
+    "AutowareInitSequence",
+    "BridgePose",
+    "FakeAutowareBridge",
+    "InitState",
+    "LocalizationState",
+    "OperationMode",
+    "RoutingState",
+    "VehicleStatus",
     "BaseEgoDriverClient",
     "CarlaDriverEntity",
     "ControlConfig",
@@ -388,6 +414,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "to_lanelet2": (".coordinate", "to_lanelet2"),
     "to_opendrive": (".coordinate", "to_opendrive"),
     # entity
+    "AutowareEgoEntity": (".entity", "AutowareEgoEntity"),
     "AutowareEntity": (".entity", "AutowareEntity"),
     "CarlaDriverEntity": (".entity", "CarlaDriverEntity"),
     "EgoVehicle": (".entity", "EgoVehicle"),
@@ -431,6 +458,17 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "DriverConfig": (".scenario_config", "DriverConfig"),
     "DriverCameraSpec": (".scenario_config", "DriverCameraSpec"),
     "DriverControlSpec": (".scenario_config", "DriverControlSpec"),
+    # autoware bridge
+    "AutowareBridge": (".autoware_bridge", "AutowareBridge"),
+    "AutowareBridgeConfig": (".autoware_bridge", "AutowareBridgeConfig"),
+    "AutowareInitSequence": (".autoware_bridge", "AutowareInitSequence"),
+    "BridgePose": (".autoware_bridge", "BridgePose"),
+    "FakeAutowareBridge": (".autoware_bridge", "FakeAutowareBridge"),
+    "InitState": (".autoware_bridge", "InitState"),
+    "LocalizationState": (".autoware_bridge", "LocalizationState"),
+    "OperationMode": (".autoware_bridge", "OperationMode"),
+    "RoutingState": (".autoware_bridge", "RoutingState"),
+    "VehicleStatus": (".autoware_bridge", "VehicleStatus"),
     # driver
     "BaseEgoDriverClient": (".driver", "BaseEgoDriverClient"),
     "ControlConfig": (".driver", "ControlConfig"),
