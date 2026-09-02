@@ -16,8 +16,8 @@ from autoware_carla_scenario.autoware_bridge import (
     RoutingState,
 )
 
-_INITIAL = BridgePose(x=1.0, y=2.0, yaw=0.5)
-_GOAL = BridgePose(x=10.0, y=20.0, yaw=1.5)
+_INITIAL = BridgePose.from_yaw(x=1.0, y=2.0, z=0.5, yaw=0.5)
+_GOAL = BridgePose.from_yaw(x=10.0, y=20.0, z=3.0, yaw=1.5)
 
 
 def _run_to_completion(seq: AutowareInitSequence, max_steps: int = 10_000) -> int:

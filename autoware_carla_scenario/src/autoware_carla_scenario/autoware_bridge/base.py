@@ -21,6 +21,7 @@ RPC.
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -53,21 +54,52 @@ class AutowareBridgeConfig:
 
 @dataclass(frozen=True)
 class BridgePose:
-    """A 2D map-frame pose used for pose initialization and goal setting.
+    """A full 6-DoF map-frame pose for pose initialization and goal setting.
 
-    The pose is expressed in the Autoware ``map`` frame (metres, radians).
-    A 2D pose (x, y, yaw) is sufficient for both ``initialpose`` and goal
-    poses; the interface node projects it onto the road surface.
+    Mirrors ``geometry_msgs/Pose`` (position + quaternion), which is how Autoware
+    and ``autoware_carla_interface`` hold poses natively, so no lossy conversion
+    is needed at the boundary.
+
+    ``z`` disambiguates multi-level roads (overpasses/高架): a 2D ``(x, y)`` alone
+    can match both an elevated road and the surface beneath it, which would let
+    localization or the interface node's ground projection snap to the wrong
+    level.  Orientation is a quaternion rather than a bare yaw so pitch/roll on
+    ramps and banked segments are represented exactly.  The scenario already
+    knows both from its snapped CARLA transform, so they are carried through
+    rather than re-estimated.
+
+    Use :meth:`from_yaw` when only a planar heading is available.
 
     Attributes:
         x: Position X in the map frame (metres).
         y: Position Y in the map frame (metres).
-        yaw: Heading in the map frame (radians).
+        z: Position Z in the map frame (metres) — disambiguates road level.
+        qx: Orientation quaternion x component.
+        qy: Orientation quaternion y component.
+        qz: Orientation quaternion z component.
+        qw: Orientation quaternion w component.
     """
 
     x: float
     y: float
-    yaw: float
+    z: float
+    qx: float
+    qy: float
+    qz: float
+    qw: float
+
+    @classmethod
+    def from_yaw(cls, x: float, y: float, z: float, yaw: float) -> "BridgePose":
+        """Build a pose from a position and a planar heading (yaw about +Z).
+
+        Args:
+            x: Position X in the map frame (metres).
+            y: Position Y in the map frame (metres).
+            z: Position Z in the map frame (metres).
+            yaw: Heading in the map frame (radians).
+        """
+        half = yaw * 0.5
+        return cls(x, y, z, 0.0, 0.0, math.sin(half), math.cos(half))
 
 
 class LocalizationState(Enum):

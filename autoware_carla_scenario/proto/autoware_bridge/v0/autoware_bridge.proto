@@ -26,12 +26,24 @@ syntax = "proto3";
 
 package autoware_carla_scenario.autoware_bridge.v0;
 
-// A 2D map-frame pose (metres, radians). Sufficient for both pose
-// initialization and goal poses; the interface node projects it onto the road.
-message Pose2D {
+// Orientation quaternion (matches geometry_msgs/Quaternion).
+message Quaternion {
   double x = 1;
   double y = 2;
-  double yaw = 3;
+  double z = 3;
+  double w = 4;
+}
+
+// A full 6-DoF map-frame pose (metres), mirroring geometry_msgs/Pose — the
+// representation Autoware and autoware_carla_interface hold natively, so no
+// lossy conversion is needed at the boundary. z disambiguates multi-level roads
+// (overpasses / 高架); the quaternion (not a bare yaw) represents pitch/roll on
+// ramps and banked segments exactly.
+message Pose {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+  Quaternion orientation = 4;
 }
 
 // Mirrors autoware_adapi_v1_msgs/LocalizationInitializationState.
@@ -69,7 +81,7 @@ message GetReadinessResponse {
 }
 
 message InitializePoseRequest {
-  Pose2D pose = 1;
+  Pose pose = 1;
 }
 message InitializePoseResponse {}
 
@@ -79,7 +91,7 @@ message GetLocalizationStateResponse {
 }
 
 message SetRouteRequest {
-  Pose2D goal = 1;
+  Pose goal = 1;
 }
 message SetRouteResponse {}
 
@@ -119,7 +131,7 @@ message StateUpdate {
   // monitoring localization accuracy. NOTE: scenario pass/fail conditions do
   // NOT use this — they read the CARLA ego actor's ground-truth transform
   // directly from the shared world. Unset until localization is initialized.
-  Pose2D estimated_pose = 8;
+  Pose estimated_pose = 8;
 }
 
 message SubscribeStateRequest {
