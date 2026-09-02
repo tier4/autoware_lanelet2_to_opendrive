@@ -73,6 +73,27 @@ class AutowareEgoEntity(EgoVehicle):
     here) and skips ``set_autopilot(True)`` for this actor, leaving it under
     Autoware's control.
 
+    .. warning::
+
+       Not yet wired into :class:`ScenarioRunner` — this class is the foundation
+       only.  Two runner-side gaps must be closed before an Autoware scenario can
+       run end to end (tracked separately):
+
+       * ``ScenarioRunner._destroy_all_dynamic_actors`` destroys every vehicle
+         before ``ego.spawn()``, so it would remove the interface-spawned ego and
+         :meth:`spawn` would only expire at ``attach_timeout``.  The runner must
+         exempt the interface-owned actor (and its sensors) or create the ego
+         after cleanup.
+       * The runner evaluates pass/fail conditions from the first tick without
+         waiting for :attr:`is_initialized`, so a condition already true near the
+         initial pose could record a result before routing/engage completes.  The
+         runner must gate scenario timing and condition evaluation on
+         :attr:`is_initialized`.
+
+       This entity already exposes the hooks (:attr:`is_initialized`,
+       :attr:`termination_requested`) the runner needs; the wiring itself is a
+       follow-up.
+
     Pose feedback to the scenario.  There are two paths, and the important one
     does **not** involve the bridge:
 
