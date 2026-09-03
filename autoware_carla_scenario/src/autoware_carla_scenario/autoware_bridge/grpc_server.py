@@ -43,11 +43,6 @@ __all__ = ["GrpcAutowareBridgeServer", "server_options"]
 #: client's channel options.
 MAX_MESSAGE_BYTES: int = 1 * 1024 * 1024
 
-#: Default worker threads for the server's RPC thread pool.  Only one client (the
-#: interface node) ever connects, polling ``GetMission`` and pushing readiness, so
-#: a small pool is plenty.
-_DEFAULT_MAX_WORKERS: int = 4
-
 
 def server_options() -> list[tuple[str, int]]:
     """Return the gRPC server options used for the bridge server."""
@@ -107,7 +102,8 @@ class GrpcAutowareBridgeServer(AutowareBridge):
         self,
         config: Optional[AutowareBridgeConfig] = None,
         *,
-        max_workers: int = _DEFAULT_MAX_WORKERS,
+        # Only one client (the interface node) ever connects, so a small pool is plenty.
+        max_workers: int = 4,
     ) -> None:
         self._config = config or AutowareBridgeConfig()
         self._lock = threading.Lock()
@@ -126,9 +122,11 @@ class GrpcAutowareBridgeServer(AutowareBridge):
             _AutowareBridgeServicer(self), self._server
         )
         self._port = self._server.add_insecure_port(self._config.address)
-        # add_insecure_port returns 0 when the bind fails; a caller that asked for
-        # a specific (non-zero) port must not silently get an unusable server.
-        if self._port == 0 and not self._config.address.endswith(":0"):
+        # add_insecure_port returns 0 both when it binds an ephemeral port (the
+        # caller asked for ":0") and when the bind fails.  Only the latter is an
+        # error, so branch on the requested port rather than the returned one.
+        requested_port = self._config.address.rsplit(":", 1)[-1]
+        if self._port == 0 and requested_port != "0":
             raise RuntimeError(
                 f"Failed to bind the AutowareBridge server to "
                 f"{self._config.address!r} (port already in use?)."
@@ -170,9 +168,8 @@ class GrpcAutowareBridgeServer(AutowareBridge):
     def _record_readiness(self, ready: bool) -> None:
         """Latch the readiness the client reported."""
         with self._lock:
-            was_ready = self._ready
             self._ready = ready
-        if ready and not was_ready:
+        if ready:
             logger.info("Autoware reported ready via ReportReadiness")
 
     # ------------------------------------------------------------------

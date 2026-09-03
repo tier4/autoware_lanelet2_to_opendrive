@@ -9,7 +9,8 @@ and the server end to end without needing a live Autoware stack or CARLA.
 from __future__ import annotations
 
 import math
-from typing import Iterator, Tuple
+from contextlib import contextmanager
+from typing import Iterator
 
 import grpc
 import pytest
@@ -41,14 +42,18 @@ def bridge() -> Iterator[GrpcAutowareBridgeServer]:
         server.close()
 
 
+@contextmanager
 def _client(
     bridge: GrpcAutowareBridgeServer,
-) -> Tuple[grpc.Channel, pb2_grpc.AutowareBridgeStub]:
-    """Return a channel + stub dialling *bridge* (the interface-node role)."""
+) -> Iterator[pb2_grpc.AutowareBridgeStub]:
+    """Yield a stub dialling *bridge* (the interface-node role); channel closed after."""
     channel = grpc.insecure_channel(
         f"localhost:{bridge.port}", options=server_options()
     )
-    return channel, pb2_grpc.AutowareBridgeStub(channel)
+    try:
+        yield pb2_grpc.AutowareBridgeStub(channel)
+    finally:
+        channel.close()
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +64,8 @@ def _client(
 def test_get_mission_unavailable_before_configure(
     bridge: GrpcAutowareBridgeServer,
 ) -> None:
-    channel, stub = _client(bridge)
-    try:
+    with _client(bridge) as stub:
         response = stub.GetMission(pb2.GetMissionRequest(), timeout=_RPC_TIMEOUT_S)
-    finally:
-        channel.close()
     assert response.available is False
 
 
@@ -72,11 +74,8 @@ def test_get_mission_returns_configured_mission(
 ) -> None:
     bridge.configure(_INITIAL, _GOAL)
 
-    channel, stub = _client(bridge)
-    try:
+    with _client(bridge) as stub:
         response = stub.GetMission(pb2.GetMissionRequest(), timeout=_RPC_TIMEOUT_S)
-    finally:
-        channel.close()
 
     assert response.available is True
     assert response.initial_pose.position.x == pytest.approx(1.0)
@@ -99,27 +98,21 @@ def test_not_ready_until_reported(bridge: GrpcAutowareBridgeServer) -> None:
 
 
 def test_report_readiness_latches(bridge: GrpcAutowareBridgeServer) -> None:
-    channel, stub = _client(bridge)
-    try:
+    with _client(bridge) as stub:
         assert bridge.is_ready() is False
         stub.ReportReadiness(
             pb2.ReportReadinessRequest(ready=True), timeout=_RPC_TIMEOUT_S
         )
-    finally:
-        channel.close()
     assert bridge.is_ready() is True
 
 
 def test_report_readiness_false_keeps_not_ready(
     bridge: GrpcAutowareBridgeServer,
 ) -> None:
-    channel, stub = _client(bridge)
-    try:
+    with _client(bridge) as stub:
         stub.ReportReadiness(
             pb2.ReportReadinessRequest(ready=False), timeout=_RPC_TIMEOUT_S
         )
-    finally:
-        channel.close()
     assert bridge.is_ready() is False
 
 
