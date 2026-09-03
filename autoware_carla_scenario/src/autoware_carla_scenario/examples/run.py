@@ -633,6 +633,25 @@ def run_scenario(
     lanelet2_path = (
         Path(cfg.map.lanelet2_path) if cfg.map.get("lanelet2_path") else None
     )
+
+    if xodr_path is None:
+        # Lanelet2-only map (no .xodr): the map loads without OpenDRIVE, so fail
+        # fast -- before CARLA -- if the scenario uses OpenDRIVE-based symbols.
+        # They only register at setup() (post-CARLA), so this scans the source.
+        import inspect  # noqa: PLC0415
+
+        from autoware_carla_scenario.opendrive_lint import (  # noqa: PLC0415
+            check_scenario_source,
+        )
+
+        module = inspect.getmodule(type(scenario))
+        try:
+            source = inspect.getsource(module) if module is not None else None
+        except (OSError, TypeError):
+            source = None
+        if source is not None:
+            check_scenario_source(source, type(scenario).__name__)
+
     cooldown = float(cfg.server.get("cooldown_seconds", 0.0))
     cooldown_max_retries = int(cfg.server.get("cooldown_max_retries", 0))
 
