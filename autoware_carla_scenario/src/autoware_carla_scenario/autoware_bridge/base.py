@@ -15,10 +15,14 @@ So the scenario framework only needs to (1) hand Autoware the scenario's initial
 pose and goal, and (2) wait for a single "ready" (initialized + routed + engaged
 and now driving) signal.  That is the entire contract below.
 
-The framework core depends only on the abstract :class:`AutowareBridge`; the
-concrete gRPC transport (``GrpcAutowareBridge``) and the wire contract in
-``proto/autoware_bridge/v0/autoware_bridge.proto`` are implemented separately so
-this package never imports ROS 2 / rclpy.  Tests use
+The framework core depends only on the abstract :class:`AutowareBridge`.  The
+concrete gRPC transport hosts the ``AutowareBridge`` *server*; the
+``autoware_carla_interface`` node is the *client* that dials it (splatsim-
+consistent - see the topology note in
+``proto/autoware_bridge/v0/autoware_bridge.proto``).  The transport and that wire
+contract are implemented separately, so this package never imports ROS 2 / rclpy
+(all ROS 2 / Autoware AD API I/O lives on the client, inside the interface node).
+Tests use
 :class:`~autoware_carla_scenario.autoware_bridge.fake.FakeAutowareBridge`.
 
 Ego pose/velocity for scenario conditions is NOT part of this contract: it is
@@ -38,7 +42,8 @@ class AutowareBridgeConfig:
     """Connection settings for a concrete :class:`AutowareBridge`.
 
     Attributes:
-        address: ``host:port`` of the interface node's bridge gRPC server.
+        address: ``host:port`` the bridge gRPC server (hosted by the framework)
+            binds to and that the ``autoware_carla_interface`` client dials.
         timeout_s: Per-RPC timeout in seconds.
         ready_timeout_ticks: Maximum world ticks to wait for Autoware to become
             ready before the scenario fails.  At 20 Hz, ``1200`` is ~60 s.
@@ -129,9 +134,12 @@ class BridgePose:
 class AutowareBridge(ABC):
     """Interface to the ``autoware_carla_interface`` node.
 
-    Concrete implementations translate these calls into the transport used to
-    reach the interface node (e.g. gRPC).  The contract is intentionally tiny:
-    hand Autoware the mission, then poll a single readiness flag.
+    Concrete implementations back these calls with a transport the interface
+    node connects to - a gRPC server the interface node dials as a client (see
+    the topology note in the proto).  :meth:`configure` records the mission for
+    the client to pull; :meth:`is_ready` returns the readiness the client last
+    reported.  The contract is intentionally tiny: hand Autoware the mission,
+    then poll a single readiness flag.
     """
 
     @abstractmethod
@@ -157,5 +165,5 @@ class AutowareBridge(ABC):
         """Release any transport resources.  Must be idempotent.
 
         The default is a no-op; transport-backed implementations (e.g. a gRPC
-        client) override this to close their channel.
+        server) override this to stop serving and release their port.
         """
