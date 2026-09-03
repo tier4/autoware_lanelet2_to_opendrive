@@ -215,18 +215,21 @@ def _build_autoware_ego_entity(cfg: DictConfig) -> EgoVehicle:
 
     ego_cfg = cfg.ego
     map_cfg = cfg.get("map") or {}
-    if not map_cfg.get("xodr_path") or not map_cfg.get("lanelet2_path"):
+    if not map_cfg.get("lanelet2_path"):
         msg = (
-            "ego.entity=autoware_ego needs a map with both 'xodr_path' and "
-            "'lanelet2_path' to derive the Autoware initial pose and goal."
+            "ego.entity=autoware_ego needs a map with a 'lanelet2_path' to "
+            "derive the Autoware initial pose and goal (OpenDRIVE is optional -- "
+            "the poses come from the Lanelet2 centerline)."
         )
         raise ValueError(msg)
 
-    # Load the map so the poses can be derived now.  The scenario reloads it
-    # (MapManager.reset + initialize) before running, so this is independent.
+    # Load the map so the poses can be derived now.  Only the Lanelet2 centerline
+    # is needed (lanelet2_to_map), so a lanelet2-only map (no 'xodr_path') is
+    # fine.  The scenario reloads the map (reset + initialize) before it runs,
+    # so this early load is independent.
     MapManager.reset()
     MapManager.get_instance().initialize(
-        xodr_path=Path(map_cfg["xodr_path"]),
+        xodr_path=Path(map_cfg["xodr_path"]) if map_cfg.get("xodr_path") else None,
         lanelet2_path=Path(map_cfg["lanelet2_path"]),
     )
 
