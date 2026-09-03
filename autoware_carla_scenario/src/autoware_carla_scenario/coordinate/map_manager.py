@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, ClassVar, Optional
 
@@ -89,31 +90,36 @@ class MapManager:
 
     def initialize(
         self,
-        xodr_path: Path,
-        lanelet2_path: Path,
+        xodr_path: Optional[Path] = None,
+        lanelet2_path: Path = None,  # type: ignore[assignment]
         carla_world: Any = None,
     ) -> None:
-        """Load both map files.
+        """Load the OpenDRIVE road network and the Lanelet2 map.
 
         Parameters
         ----------
         xodr_path:
-            Path to the OpenDRIVE (.xodr) file.
+            Path to the OpenDRIVE (.xodr) file.  When ``None``, the OpenDRIVE is
+            sourced from the live CARLA world instead (``carla_world`` is then
+            required) -- the scenario needs to ship only the Lanelet2 map, since
+            CARLA already holds the matching OpenDRIVE for its loaded level.
         lanelet2_path:
             Path to the Lanelet2 map file (.osm or .xml).
         carla_world:
-            Optional CARLA ``carla.World`` instance.  When provided, the
-            vertical offset (z_offset) is computed by averaging the
-            difference between Lanelet2 elevation and CARLA spawn-point
-            elevation across all map spawn points.  When ``None``, a
-            single-point fallback using the XODR reference line is used.
+            CARLA ``carla.World`` instance.  Required when *xodr_path* is ``None``
+            (its ``get_map().to_opendrive()`` provides the OpenDRIVE).  When
+            provided, the vertical offset (z_offset) is also computed by averaging
+            the difference between Lanelet2 elevation and CARLA spawn-point
+            elevation; when ``None``, a single-point XODR fallback is used.
 
         Raises
         ------
         RuntimeError
             If already initialized.
+        ValueError
+            If neither *xodr_path* nor *carla_world* is given.
         FileNotFoundError
-            If either map file does not exist.
+            If a provided map file does not exist.
         """
         if self._lanelet_map is not None or self._road_network is not None:
             raise RuntimeError(
@@ -121,13 +127,32 @@ class MapManager:
                 "Call MapManager.reset() before re-initializing (testing only)."
             )
 
-        if not xodr_path.exists():
-            raise FileNotFoundError(f"OpenDRIVE file not found: {xodr_path}")
         if not lanelet2_path.exists():
             raise FileNotFoundError(f"Lanelet2 file not found: {lanelet2_path}")
 
+        # Resolve the OpenDRIVE: a supplied file, or the live CARLA world's map
+        # (so a scenario can ship only the Lanelet2 map).  A CARLA-sourced
+        # OpenDRIVE is written to a temp file because RoadNetwork / pyxodr read a
+        # path; it is removed once parsing is done.
+        temp_xodr: Optional[Path] = None
+        if xodr_path is not None:
+            if not xodr_path.exists():
+                raise FileNotFoundError(f"OpenDRIVE file not found: {xodr_path}")
+            xodr_content = xodr_path.read_text(encoding="utf-8")
+        else:
+            if carla_world is None:
+                raise ValueError(
+                    "MapManager.initialize needs either xodr_path or carla_world "
+                    "(to source the OpenDRIVE from the live CARLA map)."
+                )
+            xodr_content = carla_world.get_map().to_opendrive()
+            handle, name = tempfile.mkstemp(suffix=".xodr")
+            temp_xodr = Path(name)
+            with open(handle, "w", encoding="utf-8") as tmp:
+                tmp.write(xodr_content)
+            xodr_path = temp_xodr
+
         # Parse geoReference from XODR to get the UTM origin
-        xodr_content = xodr_path.read_text(encoding="utf-8")
         lat, lon, alt = _parse_geo_reference(xodr_content)
         self._geo_origin = (lat, lon, alt)
 
@@ -175,6 +200,9 @@ class MapManager:
 
         # Build carla.Map for waypoint-based road/lane lookups (optional).
         self._build_carla_map(xodr_content, xodr_path.stem, carla_world)
+
+        if temp_xodr is not None:
+            temp_xodr.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
     # Properties
