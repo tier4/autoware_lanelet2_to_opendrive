@@ -272,6 +272,16 @@ class MapManager:
         return self._lanelet_map
 
     @property
+    def has_opendrive(self) -> bool:
+        """Whether an OpenDRIVE road network is available.
+
+        ``False`` for a lanelet2-only map, where OpenDRIVE-based conversions
+        (:func:`~.transform.to_opendrive`, :attr:`road_network`) are
+        unavailable and callers must work in Lanelet2/map coordinates instead.
+        """
+        return self._road_network is not None
+
+    @property
     def road_network(self) -> RoadNetwork:
         """The loaded pyxodr.RoadNetwork instance (roads are pre-loaded)."""
         if self._road_network is None:
