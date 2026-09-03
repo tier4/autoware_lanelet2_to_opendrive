@@ -30,6 +30,10 @@ Only installed code:
 The entry point is the `scenario` CLI and the working directory is `/work`,
 where Hydra writes its run directory.
 
+`/opt/venv` arrives as [four layers](#layer-layout), not one, so a client that
+already holds another image built the same way pulls only what actually
+differs.
+
 ## Stage layout
 
 `.github/actions/pack-scenario-image/Dockerfile` runs three stages, each
@@ -38,10 +42,10 @@ handing the next strictly less than it was given:
 ```mermaid
 flowchart LR
     A["wheelhouse<br/>(Alpine + uv)<br/>framework/ + scenario/ → wheels"]
-    B["venv<br/>(Debian slim)<br/>wheels + carla==X → /opt/venv,<br/>then slimmed"]
-    C["runtime<br/>(Debian slim)<br/>/opt/venv, no apt layer"]
-    A -- "*.whl only" --> B
-    B -- "/opt/venv only" --> C
+    B["venv<br/>(Debian slim)<br/>four installs → /export/&lt;layer&gt;,<br/>then slimmed"]
+    C["runtime<br/>(Debian slim)<br/>four COPY --link layers,<br/>no apt layer"]
+    A -- "*.whl + requirements.txt" --> B
+    B -- "/export/* only" --> C
 ```
 
 `wheelhouse` is Alpine because everything it touches is pure Python — `uv
@@ -54,6 +58,86 @@ The runtime is **not** Alpine, and cannot be. The CARLA client (the vendored
 fall back to, so a musl runtime cannot install them at all; the CARLA extension
 module additionally links glibc 2.34+ symbols directly, so even a forced
 install would not import. Debian slim is the smallest base that runs the code.
+
+## Layer layout
+
+An image is pulled as a stack of layers, and a client downloads only the ones
+it does not already have. A virtualenv shipped as a single `COPY` is a single
+layer, so changing one line of a scenario means pulling all ~400 MB of it
+again. The Dockerfile therefore installs `/opt/venv` in four steps and ships
+each step as its own layer, ordered from the input that changes least often to
+the one that changes on every commit:
+
+| # | Layer | Holds | Rebuilt when | Size |
+| --- | --- | --- | --- | --- |
+| 1 | `carla` | The virtualenv itself and the pinned CARLA client | `carla-version`, `python-version` or the base image changes | ~12 MB |
+| 2 | `deps` | The framework's third-party dependency closure — OpenCV, scipy, numpy, the matplotlib stack, … | `uv.lock` changes | ~400 MB |
+| 3 | `framework` | `autoware-carla-scenario` and `autoware-lanelet2-to-opendrive` | Framework code changes | ~2 MB |
+| 4 | `scenario` | The scenario wheel, plus any dependency it adds of its own | The scenario package changes | ~80 kB |
+
+(Sizes are approximate, for a scaffolded package with CARLA 0.10.0.)
+
+Layer 1 is installed on its own, before anything else and without a
+constraints file: the CARLA client declares no dependencies, so the layer is a
+function of the client version and the base image alone. Two images built for
+the same client share it whatever else they contain — which is what the
+`carla<version>` tag has always promised and now also means on the wire.
+
+So editing a scenario and rebuilding transfers the fourth layer. Bumping the
+framework transfers the third and fourth. Only a lock change moves the ~400 MB
+of dependencies, and only a client bump moves everything. The push is
+incremental for the same reason: a registry that already holds a blob is sent
+the new layer and nothing else.
+
+### What makes it hold
+
+Layer reuse is by digest, and a digest covers file metadata as well as content,
+so two things could quietly defeat the split:
+
+- **Install timestamps.** The same wheel installed twice produces the same
+  bytes at different times, and that alone is a different layer.
+  `venv-layer.sh` therefore stamps every exported file with one fixed timestamp
+  (`LAYER_MTIME`, 2020-01-01 by default) as it captures it, and re-stamps
+  afterwards whatever the slim pass rewrote. A rebuild from a cold cache
+  reproduces layers 1–3 byte for byte.
+- **The layers underneath.** A layer can only be reused together with its whole
+  parent chain, so anything that varies has to sit *behind* the virtualenv
+  rather than in front of it. The runtime stage therefore copies the four
+  layers first and only then creates the user and installs `ffmpeg`: `apt`
+  hands out whatever build it has today, and `useradd` writes the current date
+  into `/etc/shadow`, which would otherwise put a fresh digest on every layer
+  behind it. The copies use `COPY --link`, so each layer is built against an
+  empty base and stays the same blob wherever it lands.
+
+`slim-venv.py` runs once per layer rather than once over the virtualenv, so
+stripping a shared object rewrites it inside the layer that installed it
+instead of duplicating a stripped copy into a later one. The build then
+reassembles the four trees exactly as the runtime stage stacks them and imports
+the native extension modules from the result, so a file lost or shadowed by the
+split fails the build rather than the container.
+
+### Sharing the build cache
+
+Layers are about the pull; `cache-scope` is the same idea for the build. It
+defaults to one scope per image and CARLA version, but images that share a
+client and framework are the same build up to their scenario layer, so pointing
+several of them at one scope lets the later ones restore the client and
+dependency stages instead of resolving them again. The action reports the scope
+it used, so a second build in the same workflow can just name the first's:
+
+```yaml
+- uses: ./.github/actions/pack-scenario-image
+  id: first
+  with:
+    scenario-package-path: packages/first_scenario
+    image: ghcr.io/my-org/first-scenario
+
+- uses: ./.github/actions/pack-scenario-image
+  with:
+    scenario-package-path: packages/second_scenario
+    image: ghcr.io/my-org/second-scenario
+    cache-scope: ${{ steps.first.outputs.cache-scope }}
+```
 
 ## Keeping the image small
 
@@ -90,6 +174,10 @@ Two things do the work, measured on a scaffolded package with CARLA 0.10.0:
   virtualenv in a throwaway Debian stage, so no source tree, wheel, build cache
   or copy of `uv` reaches the final image.
 
+The [layer layout](#layer-layout) does not change any of these totals — the
+same bytes are simply split across four layers instead of one, so that a
+rebuild transfers only the layers that changed.
+
 What is left is dominated by dependencies with no smaller variant: OpenCV,
 scipy, numpy, and the matplotlib stack that `pyxodr` requires.
 
@@ -109,10 +197,13 @@ docker image inspect --format '{{ index .Config.Labels "io.autoware.carla-scenar
 
 The rest of the dependency tree is pinned too, so the same ref rebuilt months
 apart gives the same image: the build context carries `uv.lock`, the wheelhouse
-stage turns it into a constraints file with `uv export --frozen`, and the
-install is constrained by it. This buys reproducibility rather than size. Constraints only bound what is resolved, so a
-scenario package that brings dependencies of its own still installs — they are
-the one part that floats.
+stage exports it as a requirements file with `uv export --frozen`, and that
+file is both what the dependency layer installs and what constrains the two
+installs after it. This buys reproducibility rather than size — and, with the
+timestamps normalised, it is what lets an unchanged dependency layer keep its
+digest across rebuilds. Constraints only bound what is resolved, so a scenario
+package that brings dependencies of its own still installs — they are the one
+part that floats, and they land in the scenario layer.
 
 ## In a workflow
 
@@ -157,9 +248,9 @@ explaining further:
 | `framework-path` | uv workspace root supplying the framework. Defaults to the action's own checkout, which is what makes the pinned ref the framework version. Its members are read from `[tool.uv.workspace] members`, globs included. |
 | `with-ffmpeg` | Installs ffmpeg for `CameraRecorder`. The only input that adds an apt layer. |
 | `slim` | Strips the virtualenv (see above). On by default. |
-| `cache-scope` | Cache key namespace. Defaults to one scope per image and CARLA version, so images built in the same workflow do not evict each other. |
+| `cache-scope` | Cache key namespace. Defaults to one scope per image and CARLA version, so images built in the same workflow do not evict each other — give two images the same scope to [share it](#sharing-the-build-cache) instead. |
 
-Outputs: `image-ref`, `tags`, `digest` (pushed images only).
+Outputs: `image-ref`, `tags`, `digest` (pushed images only), `cache-scope`.
 
 ### The smoke test
 

@@ -283,6 +283,65 @@ jobs:
           '### Scenario image `{{ .Repository }}:{{ .Tag }}` — {{ .Size }}' \
           "${{ steps.pack.outputs.image-ref }}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
+    # The image is split into four layers so that a second scenario built on
+    # the same client and framework re-downloads only its own. Prove it on a
+    # second package: if a scenario ever leaks into one of the shared layers,
+    # every consumer starts pulling the whole virtualenv again, and nothing
+    # else in this suite would notice.
+    - name: Scaffold a second scenario package
+      if: matrix.carla-version == '0.10.0'
+      run: uv run scenario-new ci_probe_variant --output-dir "${RUNNER_TEMP}/packages"
+
+    - name: Pack the second package
+      if: matrix.carla-version == '0.10.0'
+      uses: ./.github/actions/pack-scenario-image
+      id: pack-variant
+      with:
+        scenario-package-path: ${{ runner.temp }}/packages/ci_probe_variant
+        image: ci-probe-scenario-variant
+        carla-version: ${{ matrix.carla-version }}
+        push: "false"
+        # The first image already proved the runtime works; this one is here
+        # for its layers.
+        smoke-test: "false"
+        # Everything but the scenario layer is the same build as the first
+        # pack, so read its cache rather than resolving and installing the
+        # ~400 MB dependency closure a second time.
+        cache-scope: ${{ steps.pack.outputs.cache-scope }}
+
+    - name: Check the two images share everything but the scenario layer
+      if: matrix.carla-version == '0.10.0'
+      env:
+        FIRST: ${{ steps.pack.outputs.image-ref }}
+        SECOND: ${{ steps.pack-variant.outputs.image-ref }}
+      run: |
+        python3 - <<'PY' | tee -a "${GITHUB_STEP_SUMMARY}"
+        import json
+        import os
+        import subprocess
+
+
+        def layers(ref: str) -> list[str]:
+            out = subprocess.run(
+                ["docker", "image", "inspect", "--format", "{{json .RootFS.Layers}}", ref],
+                capture_output=True, text=True, check=True,
+            ).stdout
+            return json.loads(out)
+
+
+        first, second = layers(os.environ["FIRST"]), layers(os.environ["SECOND"])
+
+        # Everything up to and including the framework layer has to match. The
+        # two that may differ are the scenario layer -- which is the point --
+        # and the `useradd` layer behind it, whose files carry the time the
+        # build ran.
+        assert first[:-2] == second[:-2], (
+            "the client, dependency or framework layer now depends on the "
+            f"scenario package: {first} vs {second}"
+        )
+        print(f"### Layer sharing — {len(first) - 2} of {len(first)} layers identical")
+        PY
+
   qc-validate:
     runs-on: ubuntu-latest
     steps:

@@ -14,7 +14,8 @@
 #                                           # that are not published to PyPI
 #     <out>/scenario/                       # the generated scenario package,
 #                                           # minus VCS, caches and build output
-#     <out>/slim-venv.py                    # run by the venv stage
+#     <out>/slim-venv.py                    # both run by the venv stage
+#     <out>/venv-layer.sh
 #
 # Members come from `[tool.uv.workspace] members` in the root manifest, globs
 # and all, so the set stays in step with the workspace itself.
@@ -203,8 +204,10 @@ fi
 
 copy_tree "${scenario_dir}" "${out_dir}/scenario"
 
-# The Dockerfile COPYs this, so it has to live in the context.
-cp "$(dirname "${BASH_SOURCE[0]}")/slim-venv.py" "${out_dir}/slim-venv.py"
+# The Dockerfile COPYs these, so they have to live in the context.
+for helper in slim-venv.py venv-layer.sh; do
+    cp "$(dirname "${BASH_SOURCE[0]}")/${helper}" "${out_dir}/${helper}"
+done
 
 echo "Assembled build context at ${out_dir} (${#member_paths[@]} workspace member(s): ${member_paths[*]})"
 du -sh "${out_dir}" 2>/dev/null || true

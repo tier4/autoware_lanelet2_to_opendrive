@@ -21,6 +21,11 @@ re-read and restored from a backup unless its LOAD segments still satisfy the
 loader's requirement.  A newer binutils simply strips everything and restores
 nothing.
 
+The argument is a virtualenv, or -- as the Dockerfile uses it -- one layer's
+worth of one: the tree that ``venv-layer.sh capture`` exported.  Slimming each
+layer separately is what keeps a stripped shared object in the layer that
+installed it instead of duplicating it into a later one.
+
 Usage: slim-venv.py <venv-dir>
 """
 
@@ -142,7 +147,17 @@ def main(argv: list[str]) -> int:
         return 2
 
     venv = Path(argv[1])
-    (site,) = venv.glob("lib/python*/site-packages")
+    sites = sorted(venv.glob("lib/python*/site-packages"))
+    if len(sites) != 1:
+        # Every layer installs something importable, so an empty tree here means
+        # the capture went wrong -- the characteristic failure of the split, and
+        # not something to slim quietly past.
+        print(
+            f"{venv}: expected one lib/python*/site-packages, found {len(sites)}",
+            file=sys.stderr,
+        )
+        return 1
+    (site,) = sites
 
     before = directory_size(site)
     prune(site)

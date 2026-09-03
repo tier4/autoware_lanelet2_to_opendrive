@@ -59,7 +59,7 @@ inputs:
   build-args:
     description: >
       Newline-separated extra KEY=VALUE build arguments, for the Dockerfile
-      ARGs without a dedicated input (RUNTIME_BASE, UV_VERSION).
+      ARGs without a dedicated input (RUNTIME_BASE, UV_VERSION, LAYER_MTIME).
     required: false
     default: ""
   labels:
@@ -89,6 +89,8 @@ inputs:
     description: >
       Cache key namespace. Defaults to one scope per image and CARLA version,
       so several images built in the same workflow do not evict each other.
+      Give two images the same scope to share it instead: everything behind
+      their scenario layer is the same build when the client and framework are.
     required: false
     default: ""
 
@@ -102,6 +104,11 @@ outputs:
   digest:
     description: "Image digest (empty unless the image was pushed)"
     value: ${{ steps.build.outputs.digest }}
+  cache-scope:
+    description: >
+      The cache scope this build used, given or derived. Pass it to a second
+      build in the same workflow to have it reuse these stages.
+    value: ${{ steps.plan.outputs.cache-scope }}
 
 runs:
   using: composite
