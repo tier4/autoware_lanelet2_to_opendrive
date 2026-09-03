@@ -31,12 +31,14 @@ from .base import (
     Vector3,
 )
 from .fake import FakeAutowareBridge
+from .grpc_server import GrpcAutowareBridgeServer
 
 __all__ = [
     "AutowareBridge",
     "AutowareBridgeConfig",
     "BridgePose",
     "FakeAutowareBridge",
+    "GrpcAutowareBridgeServer",
     "Quaternion",
     "Vector3",
 ]

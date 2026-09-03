@@ -144,6 +144,7 @@ if TYPE_CHECKING:
         AutowareBridgeConfig as AutowareBridgeConfig,
         BridgePose as BridgePose,
         FakeAutowareBridge as FakeAutowareBridge,
+        GrpcAutowareBridgeServer as GrpcAutowareBridgeServer,
     )
     from .entity import (
         AutowareEgoEntity as AutowareEgoEntity,
@@ -260,6 +261,7 @@ __all__ = [
     "AutowareBridgeConfig",
     "BridgePose",
     "FakeAutowareBridge",
+    "GrpcAutowareBridgeServer",
     "BaseEgoDriverClient",
     "CarlaDriverEntity",
     "ControlConfig",
@@ -451,6 +453,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "AutowareBridgeConfig": (".autoware_bridge", "AutowareBridgeConfig"),
     "BridgePose": (".autoware_bridge", "BridgePose"),
     "FakeAutowareBridge": (".autoware_bridge", "FakeAutowareBridge"),
+    "GrpcAutowareBridgeServer": (".autoware_bridge", "GrpcAutowareBridgeServer"),
     # driver
     "BaseEgoDriverClient": (".driver", "BaseEgoDriverClient"),
     "ControlConfig": (".driver", "ControlConfig"),

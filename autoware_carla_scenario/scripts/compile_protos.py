@@ -1,20 +1,26 @@
 #!/usr/bin/env python
-"""Compile the vendored alpasim ``.proto`` files into committed Python modules.
+"""Compile the project's ``.proto`` files into committed Python modules.
 
-The generated modules live in ``src/autoware_carla_scenario/driver/_proto`` and are
-checked into git so that the runtime never needs ``grpcio-tools`` installed.  Run this
-script after updating the vendored protos (see ``proto/README.md``)::
+Two independent groups are generated, each into its own package directory that is
+checked into git so the runtime never needs ``grpcio-tools`` installed:
+
+* the vendored alpasim ``egodriver`` contract -> ``driver/_proto`` (see
+  ``proto/README.md``);
+* the native ``AutowareBridge`` contract -> ``autoware_bridge/_proto`` (the wire
+  contract in ``proto/autoware_bridge/v0/autoware_bridge.proto``).
+
+Run this script after updating any of those protos::
 
     uv run python autoware_carla_scenario/scripts/compile_protos.py
 
-Pass ``--check`` to verify the committed output matches the vendored protos without
-writing anything.  ``test_proto_generated.py`` runs the same check.
+Pass ``--check`` to verify the committed output matches the protos without writing
+anything.  ``test_proto_generated.py`` runs the same check.
 
-``protoc`` emits absolute imports (``from alpasim_grpc.v0 import common_pb2``) that only
-resolve when the generated tree sits on ``sys.path``.  Since the output is nested inside
-this package instead, the generated files are flattened into a single directory and their
-cross-imports are rewritten to relative ones.  The descriptors themselves keep their
-original ``alpasim_grpc/v0/*.proto`` names, which is what preserves wire compatibility.
+``protoc`` emits absolute imports (``from <pkg>.v0 import x_pb2``) that only resolve
+when the generated tree sits on ``sys.path``.  Since each output is nested inside
+this package instead, the generated files are flattened into a single directory and
+their cross-imports are rewritten to relative ones.  The descriptors themselves keep
+their original ``<pkg>/v0/*.proto`` names, which is what preserves wire compatibility.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ import re
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -34,41 +41,92 @@ ALPASIM_REV = "68709245a5dc0f2eda4f8cb2c3aa8cbdfa913043"
 #: Upstream revision the vendored ``carla_driver`` extension proto was copied from.
 CARLA_DRIVER_INTERFACE_REV = "af1dcd3d3ddae7739f811e414a642d72d0440386"
 
-#: Proto files to compile, relative to the ``proto/`` include root.
-PROTO_FILES = (
-    "alpasim_grpc/v0/common.proto",
-    "alpasim_grpc/v0/sensorsim.proto",
-    "alpasim_grpc/v0/egodriver.proto",
-    "carla_driver/v0/carla_driver.proto",
-)
-
-#: Only ``egodriver`` declares a service this package talks to, so service stubs are
-#: generated for it alone.  ``common`` has no service and ``sensorsim``'s is implemented
-#: by alpasim's renderer, which this package replaces with CARLA.
-GRPC_SERVICE_PROTO = "alpasim_grpc/v0/egodriver.proto"
-
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROTO_ROOT = _PACKAGE_ROOT / "proto"
-OUTPUT_DIR = _PACKAGE_ROOT / "src" / "autoware_carla_scenario" / "driver" / "_proto"
+_SRC = _PACKAGE_ROOT / "src" / "autoware_carla_scenario"
 
-#: ``from alpasim_grpc.v0 import x_pb2 as y`` -> ``from . import x_pb2 as y``
-_ABSOLUTE_IMPORT = re.compile(
-    r"^from (?:alpasim_grpc|carla_driver)\.v0 import ", flags=re.MULTILINE
+
+@dataclass(frozen=True)
+class ProtoGroup:
+    """One independently generated set of protobuf modules.
+
+    Attributes:
+        proto_files: ``.proto`` paths (relative to :data:`PROTO_ROOT`) to compile.
+            Their top-level packages are the single source of truth for which
+            ``from <pkg>.v0 import`` lines get rewritten to relative imports.
+        grpc_service_proto: The single proto that declares a service to generate
+            gRPC stubs for, or ``None`` when the group has no service.
+        output_dir: Package directory the flattened modules are written to.
+        header: Provenance header prepended to every generated module.
+        contract_label: How the generated package ``__init__.py`` names the
+            contract, e.g. ``the ``AutowareBridge`` contract``.
+    """
+
+    proto_files: tuple[str, ...]
+    grpc_service_proto: str | None
+    output_dir: Path
+    header: str
+    contract_label: str
+
+    def import_pattern(self) -> re.Pattern[str]:
+        """Return the regex matching this group's absolute ``from <pkg>.v0 import``.
+
+        Derived from :attr:`proto_files` so the two never drift.
+        """
+        packages = sorted({Path(name).parts[0] for name in self.proto_files})
+        alternation = "|".join(re.escape(package) for package in packages)
+        return re.compile(rf"^from (?:{alternation})\.v0 import ", flags=re.MULTILINE)
+
+
+#: The vendored alpasim ``egodriver`` contract (plus the CARLA ground-truth
+#: extension).  Only ``egodriver`` declares a service this package talks to, so
+#: service stubs are generated for it alone: ``common`` has no service and
+#: ``sensorsim``'s is implemented by alpasim's renderer, which this package
+#: replaces with CARLA.
+EGODRIVER_GROUP = ProtoGroup(
+    proto_files=(
+        "alpasim_grpc/v0/common.proto",
+        "alpasim_grpc/v0/sensorsim.proto",
+        "alpasim_grpc/v0/egodriver.proto",
+        "carla_driver/v0/carla_driver.proto",
+    ),
+    grpc_service_proto="alpasim_grpc/v0/egodriver.proto",
+    output_dir=_SRC / "driver" / "_proto",
+    header=(
+        "# Generated by autoware_carla_scenario/scripts/compile_protos.py -- do not edit.\n"
+        "#\n"
+        f"# Sources: NVlabs/alpasim@{ALPASIM_REV[:7]} and\n"
+        f"#          hakuturu583/carla_driver_interface@{CARLA_DRIVER_INTERFACE_REV[:7]} (both Apache-2.0)\n"
+        "# Regenerate with: uv run python autoware_carla_scenario/scripts/compile_protos.py\n"
+    ),
+    contract_label="the alpasim ``egodriver`` contract",
 )
 
-_HEADER = f"""\
-# Generated by autoware_carla_scenario/scripts/compile_protos.py -- do not edit.
-#
-# Sources: NVlabs/alpasim@{ALPASIM_REV[:7]} and
-#          hakuturu583/carla_driver_interface@{CARLA_DRIVER_INTERFACE_REV[:7]} (both Apache-2.0)
-# Regenerate with: uv run python autoware_carla_scenario/scripts/compile_protos.py
-"""
+#: The native ``AutowareBridge`` contract.  A single self-contained proto that
+#: declares the service the scenario library hosts and ``autoware_carla_interface``
+#: dials (see the topology note in the proto).
+BRIDGE_GROUP = ProtoGroup(
+    proto_files=("autoware_bridge/v0/autoware_bridge.proto",),
+    grpc_service_proto="autoware_bridge/v0/autoware_bridge.proto",
+    output_dir=_SRC / "autoware_bridge" / "_proto",
+    header=(
+        "# Generated by autoware_carla_scenario/scripts/compile_protos.py -- do not edit.\n"
+        "#\n"
+        "# Source: proto/autoware_bridge/v0/autoware_bridge.proto (this repository)\n"
+        "# Regenerate with: uv run python autoware_carla_scenario/scripts/compile_protos.py\n"
+    ),
+    contract_label="the ``AutowareBridge`` contract",
+)
+
+#: Every group generated by this script.
+GROUPS = (EGODRIVER_GROUP, BRIDGE_GROUP)
 
 
-def _generate(destination: Path) -> None:
+def _generate(group: ProtoGroup, destination: Path) -> None:
     """Run ``protoc`` and write flattened, import-rewritten modules to *destination*.
 
     Args:
+        group: The proto group to compile.
         destination: Directory to populate.  Created if missing; existing generated
             modules are replaced.
 
@@ -87,37 +145,48 @@ def _generate(destination: Path) -> None:
         raw = Path(tmp)
         well_known = Path(protoc.__file__).parent / "_proto"
         include = [f"--proto_path={PROTO_ROOT}", f"--proto_path={well_known}"]
-        passes = (
+        passes = [
             [
                 "protoc",
                 *include,
                 f"--python_out={raw}",
                 f"--pyi_out={raw}",
-                *PROTO_FILES,
+                *group.proto_files,
             ],
-            ["protoc", *include, f"--grpc_python_out={raw}", GRPC_SERVICE_PROTO],
-        )
+        ]
+        if group.grpc_service_proto is not None:
+            passes.append(
+                [
+                    "protoc",
+                    *include,
+                    f"--grpc_python_out={raw}",
+                    group.grpc_service_proto,
+                ]
+            )
         for args in passes:
             code = protoc.main(args)
             if code != 0:
                 raise SystemExit(f"protoc failed with exit code {code}")
 
         destination.mkdir(parents=True, exist_ok=True)
+        import_pattern = group.import_pattern()
         generated = sorted(
             path
-            for package in {Path(name).parts[0] for name in PROTO_FILES}
+            for package in {Path(name).parts[0] for name in group.proto_files}
             for path in (raw / package / "v0").iterdir()
         )
         for path in generated:
             if path.suffix not in (".py", ".pyi"):
                 continue
-            text = _ABSOLUTE_IMPORT.sub("from . import ", path.read_text())
+            text = import_pattern.sub("from . import ", path.read_text())
             comment = "# " if path.suffix == ".pyi" else ""
-            header = "".join(f"{comment}{line}\n" for line in _HEADER.splitlines())
+            header = "".join(
+                f"{comment}{line}" for line in group.header.splitlines(True)
+            )
             (destination / path.name).write_text(f"{header}\n{text}")
 
     (destination / "__init__.py").write_text(
-        '"""Generated protobuf modules for the alpasim ``egodriver`` contract.\n'
+        f'"""Generated protobuf modules for {group.contract_label}.\n'
         "\n"
         "This package is generated -- see ``autoware_carla_scenario/proto/README.md``.\n"
         '"""\n'
@@ -139,18 +208,18 @@ def _module_names(directory: Path) -> set[str]:
     }
 
 
-def _check() -> int:
-    """Compare freshly generated output against the committed modules.
+def _check_group(group: ProtoGroup) -> bool:
+    """Compare one group's freshly generated output against its committed modules.
 
     Returns:
-        ``0`` when the committed output is up to date, ``1`` otherwise.
+        ``True`` when the committed output is stale (differs), ``False`` otherwise.
     """
     with tempfile.TemporaryDirectory() as tmp:
         fresh = Path(tmp) / "_proto"
-        _generate(fresh)
+        _generate(group, fresh)
 
         expected = _module_names(fresh)
-        actual = _module_names(OUTPUT_DIR)
+        actual = _module_names(group.output_dir)
 
         stale = False
         for name in sorted(expected - actual):
@@ -161,7 +230,7 @@ def _check() -> int:
             stale = True
         for name in sorted(expected & actual):
             want = (fresh / name).read_text()
-            have = (OUTPUT_DIR / name).read_text()
+            have = (group.output_dir / name).read_text()
             if want == have:
                 continue
             stale = True
@@ -177,6 +246,18 @@ def _check() -> int:
                     )
                 )
             )
+    return stale
+
+
+def _check() -> int:
+    """Compare every group's freshly generated output against the committed modules.
+
+    Returns:
+        ``0`` when all committed output is up to date, ``1`` otherwise.
+    """
+    stale = False
+    for group in GROUPS:
+        stale = _check_group(group) or stale
 
     if stale:
         print(
@@ -207,10 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         return _check()
 
-    if OUTPUT_DIR.is_dir():
-        shutil.rmtree(OUTPUT_DIR)
-    _generate(OUTPUT_DIR)
-    print(f"Wrote generated protobuf modules to {OUTPUT_DIR}")
+    for group in GROUPS:
+        if group.output_dir.is_dir():
+            shutil.rmtree(group.output_dir)
+        _generate(group, group.output_dir)
+        print(f"Wrote generated protobuf modules to {group.output_dir}")
     return 0
 
 
