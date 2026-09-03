@@ -38,9 +38,15 @@ messages wire-compatible with an upstream alpasim runtime or with
 
 ## Regenerating the Python stubs
 
-Generated modules are committed under
-`src/autoware_carla_scenario/driver/_proto/` so that the runtime never needs `grpcio-tools`.
-Regenerate them with:
+Generated modules are committed so that the runtime never needs `grpcio-tools`.
+`compile_protos.py` generates two independent groups:
+
+- the vendored alpasim `egodriver` contract into `src/autoware_carla_scenario/driver/_proto/`;
+- the native `AutowareBridge` contract (`autoware_bridge/v0/autoware_bridge.proto`,
+  authored in this repository, not vendored) into
+  `src/autoware_carla_scenario/autoware_bridge/_proto/`.
+
+Regenerate both with:
 
 ```bash
 uv run python autoware_carla_scenario/scripts/compile_protos.py
