@@ -4,6 +4,7 @@ defaults:
   - ego: default
   - entity: default
   - driver: default
+  - bridge: default
   - traffic_manager: default
   - scenario: intersection_passing/left_turn
   - map: nishishinjuku

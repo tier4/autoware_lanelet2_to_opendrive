@@ -27,7 +27,7 @@ it is cheap and safe from any environment.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from omegaconf import MISSING
 
@@ -118,10 +118,21 @@ class EgoVehicleConfig:
     #: Longitudinal offset along the lanelet centerline.
     spawn_s: float = 25.0
 
+    #: Goal lanelet the Autoware ego routes to (``autoware_ego`` only).  ``None``
+    #: falls back to the spawn lanelet.
+    goal_lanelet_id: Optional[int] = None
+
+    #: Longitudinal offset of the goal along its lanelet.  ``None`` falls back to
+    #: :attr:`spawn_s`.
+    goal_s: Optional[float] = None
+
     #: Which ego entity drives the vehicle.
     #:
     #: * ``"autopilot"`` -- CARLA's TrafficManager (default).
     #: * ``"autoware"`` -- no driver; the actor is left for an external stack.
+    #: * ``"autoware_ego"`` -- closed loop with Autoware: hosts the
+    #:   ``AutowareBridge`` server (configured by the ``bridge`` group) and waits
+    #:   for Autoware to initialize, route, and engage before the scenario runs.
     #: * ``"carla_driver"`` -- an external policy over the ``egodriver`` gRPC
     #:   contract, configured by the ``driver`` config group.
     entity: str = "autopilot"

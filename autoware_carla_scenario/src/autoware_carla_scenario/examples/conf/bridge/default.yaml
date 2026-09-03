@@ -1,0 +1,14 @@
+# @package _global_
+#
+# Connection settings for the AutowareBridge, used when `ego.entity: autoware_ego`.
+# The scenario library hosts this gRPC server; the autoware_carla_interface node is
+# the client that dials `address` (see the autoware_bridge proto topology note).
+bridge:
+  # host:port the bridge server binds to and the interface node dials.
+  address: localhost:50052
+  # Per-RPC timeout in seconds.
+  timeout_s: 60.0
+  # Max world ticks to wait for Autoware to become ready (20 Hz -> 1200 = ~60 s).
+  ready_timeout_ticks: 1200
+  # Seconds to wait for the interface node to spawn the ego actor before spawn() raises.
+  attach_timeout: 30.0

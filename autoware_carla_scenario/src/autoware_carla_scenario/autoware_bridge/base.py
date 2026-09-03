@@ -34,7 +34,8 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,25 @@ class AutowareBridgeConfig:
     timeout_s: float = 60.0
     ready_timeout_ticks: int = 1200
     attach_timeout: float = 30.0
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> "AutowareBridgeConfig":
+        """Return a config built from a plain mapping (e.g. a Hydra ``bridge`` node).
+
+        A silently dropped key is the failure mode this guards against: a typo in a
+        YAML override would otherwise leave the default in place with no indication.
+
+        Raises:
+            ValueError: If *mapping* holds a key this config does not define.
+        """
+        known = {field.name for field in fields(cls)}
+        unknown = sorted(set(mapping) - known)
+        if unknown:
+            raise ValueError(
+                f"Unknown AutowareBridgeConfig key(s): {unknown}. "
+                f"Known keys: {sorted(known)}"
+            )
+        return cls(**dict(mapping))
 
 
 @dataclass(frozen=True)

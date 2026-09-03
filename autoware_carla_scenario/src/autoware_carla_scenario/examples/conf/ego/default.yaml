@@ -4,5 +4,11 @@ ego:
   initial_speed_kmh: 0.0
   spawn_lanelet_id: 242
   spawn_s: 25.0
-  # Which entity drives the ego: autopilot | autoware | carla_driver
+  # Goal the Autoware ego routes to (used only when entity: autoware_ego).
+  # null falls back to the spawn lanelet/s.
+  goal_lanelet_id: null
+  goal_s: null
+  # Which entity drives the ego: autopilot | autoware | autoware_ego | carla_driver
+  #   autoware      - bare placeholder (spawns, opts out of TrafficManager, stands still)
+  #   autoware_ego  - closed loop: hosts the AutowareBridge server and waits for Autoware
   entity: autopilot

@@ -6,7 +6,13 @@ CARLA- and ROS 2-free: exercises the abstract contract via
 
 from __future__ import annotations
 
-from autoware_carla_scenario.autoware_bridge import BridgePose, FakeAutowareBridge
+import pytest
+
+from autoware_carla_scenario.autoware_bridge import (
+    AutowareBridgeConfig,
+    BridgePose,
+    FakeAutowareBridge,
+)
 
 _INITIAL = BridgePose.from_yaw(x=1.0, y=2.0, z=0.5, yaw=0.5)
 _GOAL = BridgePose.from_yaw(x=10.0, y=20.0, z=3.0, yaw=1.5)
@@ -46,3 +52,19 @@ def test_configure_recorded_in_calls() -> None:
     bridge = FakeAutowareBridge()
     bridge.configure(_INITIAL, _GOAL)
     assert "configure" in bridge.calls
+
+
+def test_config_from_mapping_overrides_and_defaults() -> None:
+    config = AutowareBridgeConfig.from_mapping(
+        {"address": "host:1234", "ready_timeout_ticks": 42}
+    )
+    assert config.address == "host:1234"
+    assert config.ready_timeout_ticks == 42
+    # Unspecified keys keep their defaults.
+    assert config.timeout_s == AutowareBridgeConfig().timeout_s
+    assert config.attach_timeout == AutowareBridgeConfig().attach_timeout
+
+
+def test_config_from_mapping_rejects_unknown_keys() -> None:
+    with pytest.raises(ValueError, match="Unknown AutowareBridgeConfig key"):
+        AutowareBridgeConfig.from_mapping({"addres": "typo:50052"})
