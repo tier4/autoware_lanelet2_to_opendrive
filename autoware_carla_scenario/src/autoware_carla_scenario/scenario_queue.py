@@ -253,10 +253,13 @@ class ScenarioQueue:
         elif self._map_name is not None:
             self._runner.load_map_by_name(self._map_name)
 
-        # Initialise MapManager when both map files are available.
-        # Pass the CARLA world so that spawn-point-based z_offset averaging
-        # is used instead of single-point sampling.
-        if self._xodr_path is not None and self._lanelet2_path is not None:
+        # Initialise MapManager whenever the Lanelet2 map is available.  Pass the
+        # CARLA world for two reasons: spawn-point-based z_offset averaging, and
+        # -- when no .xodr file is given -- sourcing the OpenDRIVE straight from
+        # the live CARLA map (its geoReference gives the exact projection origin,
+        # so coordinates match CARLA's own).  Only when the CARLA map also lacks
+        # OpenDRIVE does this fall back to a lanelet2-only load.
+        if self._lanelet2_path is not None:
             MapManager.reset()
             MapManager.get_instance().initialize(
                 xodr_path=self._xodr_path,
