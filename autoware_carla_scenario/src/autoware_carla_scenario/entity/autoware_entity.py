@@ -100,9 +100,10 @@ class AutowareEgoEntity(EgoVehicle):
     ego exactly as for a TrafficManager or driver ego, via
     ``find_actor_by_role_name(world, EGO_ROLE_NAME).get_transform()``.
 
-    The ``bridge`` is a required keyword argument: the live ``GrpcAutowareBridge``
-    is a follow-up (see ``proto/autoware_bridge/v0/autoware_bridge.proto``), so
-    callers pass a bridge explicitly today (e.g. ``FakeAutowareBridge`` in tests).
+    The ``bridge`` is a required keyword argument: the live gRPC transport (the
+    server the interface node dials as a client, splatsim-consistent) is a
+    follow-up (see ``proto/autoware_bridge/v0/autoware_bridge.proto``), so callers
+    pass a bridge explicitly today (e.g. ``FakeAutowareBridge`` in tests).
 
     Args:
         config: Bridge connection settings.  ``None`` uses

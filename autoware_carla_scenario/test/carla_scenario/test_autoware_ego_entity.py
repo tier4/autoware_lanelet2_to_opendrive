@@ -83,7 +83,7 @@ def test_use_autopilot_is_false() -> None:
 
 
 def test_constructor_requires_bridge() -> None:
-    # bridge is a required keyword argument until GrpcAutowareBridge lands.
+    # bridge is a required keyword argument until the live gRPC transport lands.
     with pytest.raises(TypeError):
         AutowareEgoEntity(initial_pose=_INITIAL, goal_pose=_GOAL)  # type: ignore[call-arg]
 
