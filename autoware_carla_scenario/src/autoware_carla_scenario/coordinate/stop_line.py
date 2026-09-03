@@ -10,6 +10,7 @@ from ..utils.stop_line import (
     get_stop_line_linestrings,
     get_stop_line_linestrings_with_following,
 )
+from ..opendrive_lint import requires_opendrive
 from .map_manager import MapManager
 from .poses import Lanelet2Pose
 
@@ -35,6 +36,7 @@ def _linestring_to_pose(ls: object, lanelet_id: int) -> Lanelet2Pose | None:
     return Lanelet2Pose(lanelet_id=lanelet_id, s=arc.length, t=0.0)
 
 
+@requires_opendrive
 def get_stop_line_poses(lanelet_id: int) -> list[Lanelet2Pose]:
     """Return Lanelet2Pose list for stop lines associated with the given lanelet.
 
@@ -67,6 +69,7 @@ def get_stop_line_poses(lanelet_id: int) -> list[Lanelet2Pose]:
     return poses
 
 
+@requires_opendrive
 def get_stop_line_poses_with_following(lanelet_id: int) -> list[Lanelet2Pose]:
     """Return stop line poses searching the lanelet and its successors.
 

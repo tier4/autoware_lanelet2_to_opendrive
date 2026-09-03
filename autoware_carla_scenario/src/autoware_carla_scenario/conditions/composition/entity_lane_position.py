@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 from ...coordinate.poses import CarlaWorldPose
 from ...coordinate.transform import project_onto_road, to_opendrive
 from ...entity_role import EntityRole
+from ...opendrive_lint import requires_opendrive
 from ..base import ScenarioResult, find_actor_by_role_name
 from ..comparison import ScalarComparisonRule
 from .base import CompositionCondition
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 _VALID_FIELDS = frozenset({"s", "t"})
 
 
+@requires_opendrive
 class EntityLanePositionCondition(CompositionCondition):
     """Pass condition that triggers when a named entity is on a specified OpenDRIVE road and lane.
 

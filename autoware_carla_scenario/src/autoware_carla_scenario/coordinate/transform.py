@@ -37,6 +37,7 @@ from autoware_lanelet2_extension_python.projection import MGRSProjector as _  # 
 import lanelet2.core
 import lanelet2.geometry
 
+from ..opendrive_lint import requires_opendrive
 from .map_manager import MapManager
 from .poses import AnyPose, CarlaWorldPose, Lanelet2Pose, OpenDrivePose
 
@@ -48,6 +49,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+@requires_opendrive
 def project_onto_road(pose: CarlaWorldPose, road_id: str) -> OpenDrivePose:
     """Project a CARLA world position onto a specific OpenDRIVE road.
 
@@ -133,6 +135,7 @@ def to_opendrive(pose: Lanelet2Pose) -> OpenDrivePose: ...
 def to_opendrive(pose: CarlaWorldPose) -> OpenDrivePose: ...
 
 
+@requires_opendrive
 def to_opendrive(pose: Union[Lanelet2Pose, CarlaWorldPose]) -> OpenDrivePose:
     """Convert a Lanelet2Pose or CarlaWorldPose to an OpenDrivePose.
 

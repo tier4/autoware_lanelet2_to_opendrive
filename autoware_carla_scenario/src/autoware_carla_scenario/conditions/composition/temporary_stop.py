@@ -16,6 +16,7 @@ import numpy as np
 from ...coordinate.map_manager import MapManager
 from ...coordinate.poses import AnyPose, OpenDrivePose
 from ...coordinate.transform import to_opendrive
+from ...opendrive_lint import requires_opendrive
 from ..and_condition import AndCondition
 from ..base import BaseCondition, ScenarioResult
 from ..comparison import ComparisonRule, ScalarComparisonRule
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@requires_opendrive
 class TemporaryStopCondition(CompositionCondition):
     """Pass when entity temporarily stops at any of the given positions.
 
