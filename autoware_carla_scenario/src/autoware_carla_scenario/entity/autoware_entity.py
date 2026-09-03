@@ -119,6 +119,10 @@ class AutowareEgoEntity(EgoVehicle):
     #: Autoware drives; TrafficManager must keep its hands off this actor.
     use_autopilot: bool = False
 
+    #: The interface node spawns the ego; this entity attaches to it.  The runner
+    #: exempts that actor (and its sensors) from leftover-actor cleanup.
+    spawns_own_actor: bool = False
+
     def __init__(
         self,
         config: Optional["AutowareBridgeConfig"] = None,

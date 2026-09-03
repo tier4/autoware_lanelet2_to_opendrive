@@ -333,6 +333,36 @@ def _lanelet2_to_carla(pose: Lanelet2Pose) -> CarlaWorldPose:
     )
 
 
+def lanelet2_to_map(pose: Lanelet2Pose) -> tuple[float, float, float, float]:
+    """Return the Autoware map-frame ``(x, y, z, yaw)`` of a Lanelet2 pose.
+
+    The Lanelet2 map is loaded from the same OSM Autoware localizes against, so its
+    raw centerline coordinates *are* the Autoware ``map`` frame (right-handed,
+    x=East, y=North).  Unlike :func:`_lanelet2_to_carla`, no MGRS/XODR offset,
+    z-offset, or handedness flip is applied -- those convert *into* the CARLA
+    frame, which the Autoware map frame is not.
+
+    Requires :class:`MapManager` to be initialized.
+
+    Args:
+        pose: The Lanelet2 (Frenet) pose to evaluate.
+
+    Returns:
+        ``(x, y, z, yaw)`` in the map frame; ``yaw`` is in radians (CCW about +Z).
+    """
+    mm = MapManager.get_instance()
+    lanelet = mm.lanelet_map.laneletLayer[pose.lanelet_id]
+    points = [(p.x, p.y, p.z) for p in lanelet.centerline]
+
+    x_cl, y_cl, z_cl, heading_cl = _interpolate_at_s(points, pose.s)
+    total_heading = heading_cl + pose.heading
+
+    # Lateral offset (positive t = left of the heading direction).
+    x = x_cl + pose.t * (-math.sin(total_heading))
+    y = y_cl + pose.t * math.cos(total_heading)
+    return x, y, z_cl, total_heading
+
+
 # ---------------------------------------------------------------------------
 # Forward: OpenDrivePose → CarlaWorldPose
 # ---------------------------------------------------------------------------

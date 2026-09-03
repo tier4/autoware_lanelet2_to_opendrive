@@ -191,11 +191,34 @@ def _unique_path(path: Path) -> Path:
         counter += 1
 
 
-def _destroy_all_dynamic_actors(world: "carla.World", scenario_name: str) -> None:
-    """Destroy all vehicles and sensors in the world for a clean state."""
-    destroyed = 0
+def _destroy_all_dynamic_actors(
+    world: "carla.World",
+    scenario_name: str,
+    exempt_role: Optional[str] = None,
+) -> None:
+    """Destroy all vehicles and sensors in the world for a clean state.
+
+    When *exempt_role* is set, a vehicle whose ``role_name`` matches it (and any
+    sensor attached to it) is left alone.  This preserves an ego spawned out of
+    band -- e.g. by ``autoware_carla_interface`` for an
+    :class:`~autoware_carla_scenario.entity.autoware_entity.AutowareEgoEntity`,
+    which attaches to that actor rather than spawning its own.
+    """
     actors = world.get_actors()
+    exempt_ids = set()
+    if exempt_role is not None:
+        exempt_ids = {
+            actor.id
+            for actor in actors.filter("vehicle.*")
+            if actor.attributes.get("role_name") == exempt_role
+        }
+    destroyed = 0
     for actor in [*actors.filter("vehicle.*"), *actors.filter("sensor.*")]:
+        if actor.id in exempt_ids:
+            continue
+        parent = actor.parent
+        if parent is not None and parent.id in exempt_ids:
+            continue  # a sensor attached to the exempt ego
         try:
             actor.destroy()
             destroyed += 1
@@ -437,10 +460,15 @@ class ScenarioRunner:
         world = self._world
         scenario_name = type(scenario).__name__
 
+        ego = scenario.create_ego()
+
         # Destroy any leftover actors from a previous scenario that may
         # have survived a failed reload_world().  On a clean world this
-        # is a no-op.
-        _destroy_all_dynamic_actors(world, scenario_name)
+        # is a no-op.  An ego spawned out of band (e.g. by
+        # autoware_carla_interface, which an AutowareEgoEntity attaches to) is
+        # exempted so cleanup does not remove the very actor we will attach to.
+        exempt_role = None if ego.spawns_own_actor else str(EGO_ROLE_NAME)
+        _destroy_all_dynamic_actors(world, scenario_name, exempt_role=exempt_role)
 
         # Enable synchronous mode so we control the simulation tick rate.
         # Original settings are not saved because reload_world() at the
@@ -457,7 +485,6 @@ class ScenarioRunner:
         tm.set_synchronous_mode(True)
         tm.set_random_device_seed(scenario.random_seed)
 
-        ego = scenario.create_ego()
         recording_started = False
         tick_count = 0
         result: Optional[ScenarioResult] = None
@@ -554,6 +581,28 @@ class ScenarioRunner:
                 # Give the ego entity a chance to drive itself before the
                 # scenario's own post-tick hooks observe the new state.
                 ego.on_tick(world, elapsed)
+
+                # Hold the scenario clock, actions, and pass/fail evaluation until
+                # the ego reports it is initialized.  An Autoware ego is not ready
+                # until localization/routing/engage have completed; conditions must
+                # not fire during that startup.  ``on_tick`` above keeps driving the
+                # readiness handshake; a startup timeout fails the scenario here.
+                # Non-Autoware egos have no ``is_initialized`` and never wait.
+                if not getattr(ego, "is_initialized", True):
+                    start_time = time.monotonic()  # keep elapsed ~0 during startup
+                    if ego.termination_requested:
+                        logger.warning(
+                            "[%s] Autoware did not become ready in time (tick %d)",
+                            scenario_name,
+                            tick_count,
+                        )
+                        result = ScenarioResult(
+                            passed=False,
+                            message="Autoware did not become ready in time",
+                            elapsed_seconds=tick_count * 0.05,
+                        )
+                        break
+                    continue
 
                 # Post-tick actions (receive elapsed)
                 for action in scenario._post_tick_actions:

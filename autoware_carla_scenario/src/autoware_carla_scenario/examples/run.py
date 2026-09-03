@@ -160,6 +160,9 @@ def build_ego_entity(cfg: DictConfig) -> EgoVehicle | None:
 
         return AutowareEntity()
 
+    if entity == "autoware_ego":
+        return _build_autoware_ego_entity(cfg)
+
     if entity == "carla_driver":
         from autoware_carla_scenario import CarlaDriverEntity  # noqa: PLC0415
         from autoware_carla_scenario.driver import (  # noqa: PLC0415
@@ -180,10 +183,79 @@ def build_ego_entity(cfg: DictConfig) -> EgoVehicle | None:
         return CarlaDriverEntity(DriverClientConfig.from_mapping(driver_dict), control)
 
     msg = (
-        f"Unknown ego.entity: {entity!r}. "
-        "Expected one of: 'autopilot', 'autoware', 'carla_driver'."
+        f"Unknown ego.entity: {entity!r}. Expected one of: "
+        "'autopilot', 'autoware', 'autoware_ego', 'carla_driver'."
     )
     raise ValueError(msg)
+
+
+def _build_autoware_ego_entity(cfg: DictConfig) -> EgoVehicle:
+    """Build the closed-loop :class:`AutowareEgoEntity` from the Hydra config.
+
+    Loads the map (so the spawn/goal Lanelet2 poses can be converted to map-frame
+    ``BridgePose``), hosts the ``AutowareBridge`` gRPC server, and hands both the
+    mission and the server to the entity.  The map is a singleton the scenario
+    reloads (reset + initialize) before it runs, so this early load is independent
+    -- it only needs the map to derive the (plain) poses now.
+
+    Raises:
+        ValueError: If the map lacks the files needed to derive map-frame poses.
+    """
+    from autoware_carla_scenario import (  # noqa: PLC0415
+        AutowareBridgeConfig,
+        AutowareEgoEntity,
+        GrpcAutowareBridgeServer,
+    )
+    from autoware_carla_scenario.autoware_bridge import BridgePose  # noqa: PLC0415
+    from autoware_carla_scenario.coordinate import (  # noqa: PLC0415
+        MapManager,
+        lanelet2_to_map,
+    )
+    from autoware_carla_scenario.coordinate.poses import Lanelet2Pose  # noqa: PLC0415
+
+    ego_cfg = cfg.ego
+    map_cfg = cfg.get("map") or {}
+    if not map_cfg.get("xodr_path") or not map_cfg.get("lanelet2_path"):
+        msg = (
+            "ego.entity=autoware_ego needs a map with both 'xodr_path' and "
+            "'lanelet2_path' to derive the Autoware initial pose and goal."
+        )
+        raise ValueError(msg)
+
+    # Load the map so the poses can be derived now.  The scenario reloads it
+    # (MapManager.reset + initialize) before running, so this is independent.
+    MapManager.reset()
+    MapManager.get_instance().initialize(
+        xodr_path=Path(map_cfg["xodr_path"]),
+        lanelet2_path=Path(map_cfg["lanelet2_path"]),
+    )
+
+    def _bridge_pose(pose: Lanelet2Pose) -> BridgePose:
+        x, y, z, yaw = lanelet2_to_map(pose)
+        return BridgePose.from_yaw(x=x, y=y, z=z, yaw=yaw)
+
+    spawn = Lanelet2Pose(
+        lanelet_id=int(ego_cfg["spawn_lanelet_id"]), s=float(ego_cfg["spawn_s"])
+    )
+    goal_lanelet_id = ego_cfg.get("goal_lanelet_id")
+    goal_s = ego_cfg.get("goal_s")
+    goal = Lanelet2Pose(
+        lanelet_id=int(goal_lanelet_id)
+        if goal_lanelet_id is not None
+        else spawn.lanelet_id,
+        s=float(goal_s) if goal_s is not None else spawn.s,
+    )
+
+    bridge_node = cfg.get("bridge")
+    bridge_map = _to_dict(bridge_node) if bridge_node is not None else {}
+    bridge_config = AutowareBridgeConfig.from_mapping(bridge_map)
+    server = GrpcAutowareBridgeServer(bridge_config)
+    return AutowareEgoEntity(
+        bridge_config,
+        bridge=server,
+        initial_pose=_bridge_pose(spawn),
+        goal_pose=_bridge_pose(goal),
+    )
 
 
 def run_scenario_with_queue(

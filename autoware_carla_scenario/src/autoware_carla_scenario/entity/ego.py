@@ -29,6 +29,13 @@ class EgoVehicle:
     #: TrafficManager autopilot on this actor after warm-up.
     use_autopilot: bool = True
 
+    #: When ``True`` (default), this entity spawns its own actor, so the runner's
+    #: leftover-actor cleanup may run freely.  Entities that instead attach to an
+    #: actor spawned out of band (see
+    #: :class:`~autoware_carla_scenario.entity.autoware_entity.AutowareEgoEntity`)
+    #: set this ``False`` so the runner exempts that actor from cleanup.
+    spawns_own_actor: bool = True
+
     def __init__(self) -> None:
         self._vehicle: Optional["carla.Actor"] = None
 
