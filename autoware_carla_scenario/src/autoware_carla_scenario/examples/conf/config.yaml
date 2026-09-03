@@ -6,8 +6,12 @@ defaults:
   - driver: default
   - bridge: default
   - traffic_manager: default
-  - scenario: intersection_passing/left_turn
+  # 'map' precedes 'scenario' so a scenario config can select its own map with
+  # `defaults: [override /map: <name>]` (Hydra only lets a group override another
+  # that appears earlier).  Scenarios that don't override it keep this default.
+  # The two groups set disjoint keys, so the order does not change the merge.
   - map: nishishinjuku
+  - scenario: intersection_passing/left_turn
 
 server:
   host: localhost
