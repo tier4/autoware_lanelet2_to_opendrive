@@ -116,6 +116,21 @@ def test_report_readiness_false_keeps_not_ready(
     assert bridge.is_ready() is False
 
 
+def test_readiness_latches_against_a_later_false(
+    bridge: GrpcAutowareBridgeServer,
+) -> None:
+    # Once ready is reported, a later regressed ``ready=False`` must not clear it,
+    # or the tick loop could miss the transition and time out.
+    with _client(bridge) as stub:
+        stub.ReportReadiness(
+            pb2.ReportReadinessRequest(ready=True), timeout=_RPC_TIMEOUT_S
+        )
+        stub.ReportReadiness(
+            pb2.ReportReadinessRequest(ready=False), timeout=_RPC_TIMEOUT_S
+        )
+    assert bridge.is_ready() is True
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------

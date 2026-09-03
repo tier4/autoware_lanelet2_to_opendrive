@@ -166,8 +166,17 @@ class GrpcAutowareBridgeServer(AutowareBridge):
         )
 
     def _record_readiness(self, ready: bool) -> None:
-        """Latch the readiness the client reported."""
+        """Latch the readiness the client reported: once ready, stay ready.
+
+        Reporting is order-tolerant: a transient ``ready=False`` arriving after a
+        ``True`` (e.g. the Autoware readiness aggregator briefly regressing) must
+        not clear a readiness the tick loop may not have observed yet.  The entity
+        already treats ``is_ready()`` as sticky, so latching here keeps the two
+        sides consistent and robust to report ordering.
+        """
         with self._lock:
+            if self._ready:
+                return
             self._ready = ready
         if ready:
             logger.info("Autoware reported ready via ReportReadiness")
