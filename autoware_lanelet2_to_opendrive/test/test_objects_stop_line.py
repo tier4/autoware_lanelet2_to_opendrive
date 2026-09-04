@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.objects import (
+    RoadSamplePointIndex,
     StopLineObject,
     find_nearest_road_for_linestring,
 )
@@ -287,6 +288,129 @@ def test_find_nearest_road_for_linestring_beyond_threshold():
         result = find_nearest_road_for_linestring(ls, [road_far], threshold_m=50.0)
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Unit tests – RoadSamplePointIndex
+# ---------------------------------------------------------------------------
+
+
+def _sequential_nearest_road(point_xy: tuple, roads: List) -> tuple:
+    """Reference implementation of the pre-vectorisation nearest-road scan.
+
+    Kept verbatim from the loop RoadSamplePointIndex replaced, so the tests
+    below pin the new implementation to the old one's exact choices.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive.objects import _sample_road_points
+
+    px, py = point_xy
+    best_road = None
+    best_dist = float("inf")
+
+    for road in roads:
+        if road.plan_view is None:
+            continue
+        for wx, wy, _, _ in _sample_road_points(road):
+            dist = math.hypot(px - wx, py - wy)
+            if dist < best_dist:
+                best_dist = dist
+                best_road = road
+
+    return best_road, best_dist
+
+
+def test_road_sample_point_index_matches_sequential_scan():
+    """The vectorised index must pick exactly what the old scan picked."""
+    roads = [
+        _make_mock_road(road_id=0, wx=0.0, wy=0.0),
+        _make_mock_road(road_id=1, wx=30.0, wy=-4.0, s=10.0),
+        _make_mock_road(road_id=2, wx=-15.0, wy=25.0, s=20.0),
+    ]
+    index = RoadSamplePointIndex(roads)
+
+    for px in (-20.0, -3.5, 0.0, 7.25, 31.0):
+        for py in (-10.0, 0.0, 4.75, 26.0):
+            expected_road, expected_dist = _sequential_nearest_road((px, py), roads)
+            actual_road, actual_dist = index.nearest(px, py)
+
+            assert actual_road is expected_road
+            assert actual_dist == expected_dist
+
+
+def test_road_sample_point_index_tie_goes_to_the_first_road():
+    """Coincident sample points must resolve to the earlier road, as before."""
+    first = _make_mock_road(road_id=0, wx=0.0, wy=0.0)
+    second = _make_mock_road(road_id=1, wx=0.0, wy=0.0)
+    roads = [first, second]
+
+    # The sequential scan kept the first minimum (strict `<`); so must argmin.
+    expected_road, _ = _sequential_nearest_road((0.0, 0.0), roads)
+    assert expected_road is first
+
+    actual_road, actual_dist = RoadSamplePointIndex(roads).nearest(0.0, 0.0)
+
+    assert actual_road is first
+    assert actual_dist == 0.0
+
+
+def test_road_sample_point_index_without_sample_points_reports_infinity():
+    """No sample points means (None, inf) — the state the old scan ended in."""
+    assert RoadSamplePointIndex([]).nearest(0.0, 0.0) == (None, float("inf"))
+
+    road = _make_mock_road(road_id=0, wx=0.0, wy=0.0)
+    road.plan_view = None
+    assert RoadSamplePointIndex([road]).nearest(0.0, 0.0) == (None, float("inf"))
+
+
+def test_road_sample_point_index_defers_and_caches_sampling():
+    """Roads are sampled on the first query only, never at construction."""
+    from unittest.mock import patch
+
+    from autoware_lanelet2_to_opendrive.opendrive import objects as objects_module
+
+    roads = [_make_mock_road(road_id=0, wx=0.0, wy=0.0)]
+
+    with patch.object(
+        objects_module,
+        "_sample_road_points",
+        wraps=objects_module._sample_road_points,
+    ) as spy:
+        index = objects_module.RoadSamplePointIndex(roads)
+        assert spy.call_count == 0
+
+        index.nearest(0.0, 0.0)
+        assert spy.call_count == 1
+
+        index.nearest(5.0, 5.0)
+        assert spy.call_count == 1
+
+
+def test_find_nearest_road_for_linestring_accepts_a_shared_index():
+    """A pre-built index must select the same road as an on-demand one."""
+    from unittest.mock import patch
+
+    roads = [
+        _make_mock_road(road_id=0, wx=0.0, wy=0.0),
+        _make_mock_road(road_id=1, wx=100.0, wy=100.0),
+    ]
+    shared_index = RoadSamplePointIndex(roads)
+
+    ls = MagicMock()
+    ls.id = 6006
+
+    pts_2d = np.array([[-0.5, 0.0], [0.5, 0.0]])
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.return_value = pts_2d
+        without_index = find_nearest_road_for_linestring(ls, roads)
+        with_index = find_nearest_road_for_linestring(
+            ls, roads, road_index=shared_index
+        )
+
+    assert without_index is roads[0]
+    assert with_index is without_index
 
 
 # ---------------------------------------------------------------------------
