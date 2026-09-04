@@ -1610,6 +1610,20 @@ def preprocess_and_convert_with_hydra(
 
         xodr_path = Path(conversion_config.output_path)
 
+        # Strictness of the post-conversion mapping cross-validation.
+        # Precedence: map > target > global (same ordering as the other
+        # per-map overrides above). ``or`` cannot be used here because the
+        # value is a boolean and False is a meaningful setting.
+        strict_mapping_validation = bool(
+            cfg.map.get(
+                "strict_mapping_validation",
+                cfg.target.get(
+                    "strict_mapping_validation",
+                    cfg.get("strict_mapping_validation", False),
+                ),
+            )
+        )
+
         # Serialize TrafficLightConfig for the analyze command to read back
         tl_config_dict = {
             "offset_x": tl_config.offset_x,
@@ -1629,6 +1643,7 @@ def preprocess_and_convert_with_hydra(
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
             traffic_light_config=tl_config_dict,
+            strict=strict_mapping_validation,
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`
