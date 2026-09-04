@@ -346,8 +346,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
             lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
             junctions: All junctions
-            routing_graph: Pre-built vehicle routing graph reused for the
-                outgoing-junction-link pass; built on demand when omitted.
+            routing_graph: Pre-built vehicle routing graph reused for every
+                pass below; built on demand when omitted.
 
         Returns:
             Mapping from lanelet ID to (road_id, lane_id) for all lanes.
@@ -359,6 +359,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             connecting_roads=connecting_roads,
             lanelet_to_road_id=lanelet_to_road_id,
             road_to_lanelet_ids=road_to_lanelet_ids,
+            routing_graph=routing_graph,
         )
 
         # Set junction links for incoming roads
@@ -383,7 +384,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Set lane links for all roads
         print("\n=== Building lane links for all roads ===")
-        lanelet_to_road_and_lane = Road.set_all_lane_links(self.lanelet_map, all_roads)
+        lanelet_to_road_and_lane = Road.set_all_lane_links(
+            self.lanelet_map, all_roads, routing_graph
+        )
         return lanelet_to_road_and_lane
 
     def _extract_and_assign_signals(

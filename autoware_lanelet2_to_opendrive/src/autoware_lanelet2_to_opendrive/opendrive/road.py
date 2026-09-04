@@ -143,10 +143,14 @@ def _resolve_candidate_road_ids(
     if has_real_junction:
         return []
     seen: List[int] = []
+    # ``seen_ids`` mirrors ``seen`` purely to keep the membership test O(1);
+    # ``seen`` remains the ordered result.
+    seen_ids: Set[int] = set()
     for group in groups:
         for ll in group:
             rid = mapping.get(ll.id)
-            if rid is not None and rid not in seen:
+            if rid is not None and rid not in seen_ids:
+                seen_ids.add(rid)
                 seen.append(rid)
     return seen
 
@@ -1792,6 +1796,7 @@ class Road:
         connecting_roads: List["Road"],
         lanelet_to_road_id: Dict[int, int],
         road_to_lanelet_ids: Dict[int, List[int]],
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> None:
         """Set predecessor/successor links for connecting roads inside junctions.
 
@@ -1808,14 +1813,17 @@ class Road:
             connecting_roads: List of roads inside junctions (junction >= 0)
             lanelet_to_road_id: Mapping from lanelet ID to road ID for ALL lanelets
             road_to_lanelet_ids: Mapping from road ID to list of lanelet IDs
+            routing_graph: Optional pre-built routing graph. If None, creates a new one.
         """
-        traffic_rules = lanelet2.traffic_rules.create(
-            lanelet2.traffic_rules.Locations.Germany,
-            lanelet2.traffic_rules.Participants.Vehicle,
-        )
-        routing_graph = RoutingGraph(
-            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
-        )
+        # Use provided routing graph or create a new one
+        if routing_graph is None:
+            traffic_rules = lanelet2.traffic_rules.create(
+                lanelet2.traffic_rules.Locations.Germany,
+                lanelet2.traffic_rules.Participants.Vehicle,
+            )
+            routing_graph = RoutingGraph(
+                lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
+            )
 
         # Get junction lanelet IDs (all lanelets belonging to connecting roads)
         junction_lanelet_ids: set[int] = set()
