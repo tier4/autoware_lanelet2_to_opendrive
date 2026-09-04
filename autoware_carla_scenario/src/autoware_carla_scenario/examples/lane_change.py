@@ -99,10 +99,7 @@ class LaneChangeScenario(BaseScenario):
         cfg = self._config
 
         # --- Compute ego spawn from Lanelet2Pose via OpenDrivePose ---
-        # This scenario derives its lane-change target from the OpenDRIVE road,
-        # so it requires an OpenDRIVE map (od_pose is None only lanelet2-only).
         od_pose = self._setup_ego_spawn()
-        assert od_pose is not None, "lane_change requires an OpenDRIVE map"
 
         # --- Set all traffic lights to green ---
         TrafficSignalAction(

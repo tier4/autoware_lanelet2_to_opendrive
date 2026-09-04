@@ -130,52 +130,28 @@ class MapManager:
         if not lanelet2_path.exists():
             raise FileNotFoundError(f"Lanelet2 file not found: {lanelet2_path}")
 
-        # Resolve the OpenDRIVE source, most specific first:
-        #   1. a supplied .xodr file;
-        #   2. the live CARLA world's OpenDRIVE (a scenario then ships only the
-        #      Lanelet2 map);
-        #   3. neither -> Lanelet2-only: derive the projection origin from the
-        #      Lanelet2 map itself.  OpenDRIVE-based features (road network,
-        #      lanelet<->road mapping, OpenDRIVE conversions) are unavailable and
-        #      raise if used.
-        # A CARLA-sourced OpenDRIVE is written to a temp file because pyxodr reads
-        # a path; it is removed once parsing is done.
+        # Resolve the OpenDRIVE: a supplied file, or the live CARLA world's map
+        # (so a scenario can ship only the Lanelet2 map).  A CARLA-sourced
+        # OpenDRIVE is written to a temp file because RoadNetwork / pyxodr read a
+        # path; it is removed once parsing is done.
         temp_xodr: Optional[Path] = None
-        xodr_content: Optional[str] = None
         if xodr_path is not None:
             if not xodr_path.exists():
                 raise FileNotFoundError(f"OpenDRIVE file not found: {xodr_path}")
             xodr_content = xodr_path.read_text(encoding="utf-8")
-        elif carla_world is not None:
-            candidate = carla_world.get_map().to_opendrive()
-            if _has_geo_reference(candidate):
-                xodr_content = candidate
-                handle, name = tempfile.mkstemp(suffix=".xodr")
-                temp_xodr = Path(name)
-                with open(handle, "w", encoding="utf-8") as tmp:
-                    tmp.write(xodr_content)
-                xodr_path = temp_xodr
-
-        try:
-            if xodr_content is not None:
-                assert xodr_path is not None  # noqa: S101 - set whenever content is
-                self._load_with_opendrive(
-                    xodr_path, xodr_content, lanelet2_path, carla_world
+        else:
+            if carla_world is None:
+                raise ValueError(
+                    "MapManager.initialize needs either xodr_path or carla_world "
+                    "(to source the OpenDRIVE from the live CARLA map)."
                 )
-            else:
-                self._load_lanelet2_only(lanelet2_path, carla_world)
-        finally:
-            if temp_xodr is not None:
-                temp_xodr.unlink(missing_ok=True)
+            xodr_content = carla_world.get_map().to_opendrive()
+            handle, name = tempfile.mkstemp(suffix=".xodr")
+            temp_xodr = Path(name)
+            with open(handle, "w", encoding="utf-8") as tmp:
+                tmp.write(xodr_content)
+            xodr_path = temp_xodr
 
-    def _load_with_opendrive(
-        self,
-        xodr_path: Path,
-        xodr_content: str,
-        lanelet2_path: Path,
-        carla_world: Any,
-    ) -> None:
-        """Load the Lanelet2 map and the OpenDRIVE road network (full features)."""
         # Parse geoReference from XODR to get the UTM origin
         lat, lon, alt = _parse_geo_reference(xodr_content)
         self._geo_origin = (lat, lon, alt)
@@ -225,38 +201,8 @@ class MapManager:
         # Build carla.Map for waypoint-based road/lane lookups (optional).
         self._build_carla_map(xodr_content, xodr_path.stem, carla_world)
 
-    def _load_lanelet2_only(self, lanelet2_path: Path, carla_world: Any) -> None:
-        """Load only the Lanelet2 map, deriving the projection from the map itself.
-
-        No OpenDRIVE is available, so :attr:`road_network` and the
-        lanelet<->road mapping stay unset and OpenDRIVE conversions raise.  The
-        Lanelet2 map is self-describing (its nodes carry ``lat``/``lon`` and
-        MGRS ``local_x``/``local_y``), which is all that
-        :func:`~autoware_carla_scenario.coordinate.transform.lanelet2_to_map` and
-        the CARLA<->Lanelet2 conversions need.
-        """
-        lat, lon, alt = _parse_lanelet2_origin(lanelet2_path)
-        self._geo_origin = (lat, lon, alt)
-
-        origin = lanelet2.io.Origin(lat, lon)
-        projector = MGRSProjector(origin)
-        self._lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
-
-        fwd = projector.forward(lanelet2.core.GPSPoint(lat, lon, alt))
-        self._mgrs_offset = (fwd.x, fwd.y)
-
-        # No OpenDRIVE: leave the road-based state empty (accessors raise).
-        self._road_network = None
-        self._road_lanelet_mapping = None
-        self._carla_map = None
-        # Lanelet2 z is absolute; without an XODR reference there is nothing to
-        # offset against, so CARLA<->Lanelet2 z is treated as aligned.
-        self._z_offset = 0.0
-
-        logger.info(
-            "MapManager loaded Lanelet2-only (no OpenDRIVE); road-network / "
-            "OpenDRIVE conversions are unavailable."
-        )
+        if temp_xodr is not None:
+            temp_xodr.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
     # Properties
@@ -272,27 +218,9 @@ class MapManager:
         return self._lanelet_map
 
     @property
-    def has_opendrive(self) -> bool:
-        """Whether an OpenDRIVE road network is available.
-
-        ``False`` for a lanelet2-only map, where OpenDRIVE-based conversions
-        (:func:`~.transform.to_opendrive`, :attr:`road_network`) are
-        unavailable and callers must work in Lanelet2/map coordinates instead.
-        """
-        return self._road_network is not None
-
-    @property
     def road_network(self) -> RoadNetwork:
         """The loaded pyxodr.RoadNetwork instance (roads are pre-loaded)."""
         if self._road_network is None:
-            if self._lanelet_map is not None:
-                raise RuntimeError(
-                    "OpenDRIVE is unavailable: this map was loaded Lanelet2-only "
-                    "(no .xodr and no CARLA OpenDRIVE). OpenDRIVE-based conditions "
-                    "and conversions (e.g. EntityLanePositionCondition, "
-                    "to_opendrive) are not supported for this map; write the "
-                    "scenario in Lanelet2/map coordinates (e.g. EntityInAreaCondition)."
-                )
             raise RuntimeError(
                 "MapManager is not initialized. Call initialize() first."
             )
@@ -565,38 +493,3 @@ def _parse_geo_reference(xodr_content: str) -> tuple[float, float, float]:
     alt = float(alt_match.group(1)) if alt_match else 0.0
 
     return lat, lon, alt
-
-
-def _has_geo_reference(xodr_content: str) -> bool:
-    """Return whether *xodr_content* carries a parseable geoReference origin.
-
-    Some CARLA levels return an OpenDRIVE without a usable ``<geoReference>``; in
-    that case the map must fall back to a Lanelet2-only load.
-    """
-    try:
-        _parse_geo_reference(xodr_content)
-        return True
-    except ValueError:
-        return False
-
-
-def _parse_lanelet2_origin(lanelet2_path: Path) -> tuple[float, float, float]:
-    """Return an ``(lat, lon, alt)`` origin from the Lanelet2 map's first node.
-
-    Lanelet2 OSM nodes carry ``lat``/``lon`` attributes; any node in the map's
-    MGRS grid yields the same local coordinates, so the first one is a fine
-    origin for the ``MGRSProjector`` (matching how the map's ``local_x``/
-    ``local_y`` were generated).
-
-    Raises:
-        ValueError: If no ``<node>`` with ``lat``/``lon`` is found.
-    """
-    with open(lanelet2_path, encoding="utf-8") as osm:
-        for line in osm:
-            if "<node" not in line:
-                continue
-            lat_match = re.search(r'lat=["\']([-\d.]+)["\']', line)
-            lon_match = re.search(r'lon=["\']([-\d.]+)["\']', line)
-            if lat_match and lon_match:
-                return float(lat_match.group(1)), float(lon_match.group(1)), 0.0
-    raise ValueError(f"No <node> with lat/lon found in Lanelet2 map: {lanelet2_path}")

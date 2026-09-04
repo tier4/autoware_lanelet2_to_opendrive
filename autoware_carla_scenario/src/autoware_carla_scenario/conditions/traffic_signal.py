@@ -9,7 +9,6 @@ from ..utils.traffic_light import (
     get_signal_ids_for_controller,
     lanelet2_traffic_light_id_to_opendrive_controller_id,
 )
-from ..opendrive_lint import requires_opendrive
 from .base import BaseCondition, ScenarioResult
 
 if TYPE_CHECKING:
@@ -18,7 +17,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@requires_opendrive
 class TrafficSignalCondition(BaseCondition):
     """Check whether a traffic light matches an expected state.
 

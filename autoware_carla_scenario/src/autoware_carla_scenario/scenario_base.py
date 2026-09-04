@@ -20,10 +20,8 @@ from .coordinate import (
     Lanelet2Pose,
     OpenDrivePose,
     snap_to_carla_road,
-    to_carla_world,
     to_opendrive,
 )
-from .coordinate.map_manager import MapManager
 from .entity._spawn import SpawnLocation, SpawnTransform
 from .entity.vehicle_entity import VehicleEntity, VehicleEntityConfig
 
@@ -204,24 +202,17 @@ class BaseScenario(ABC):
     # Abstract interface – must be implemented by subclasses
     # ------------------------------------------------------------------
 
-    def _setup_ego_spawn(self) -> Optional[OpenDrivePose]:
+    def _setup_ego_spawn(self) -> OpenDrivePose:
         """Convert the Lanelet2 spawn pose to CARLA and update ego_config.
 
-        Snaps :attr:`_spawn_pose` onto the CARLA drivable surface, updates
-        :attr:`ego_config` with the resulting spawn location, and registers
-        spectator-follow and position-logging callbacks.
-
-        On a map with OpenDRIVE the spawn is projected through the road network
-        (Lanelet2 -> OpenDRIVE -> CARLA), which also yields an
-        :class:`OpenDrivePose` useful for deriving target lane IDs and route
-        conditions.  On a lanelet2-only map the pose is converted straight to
-        CARLA world coordinates (via the Lanelet2 centerline) and snapped with
-        CARLA's own waypoint API -- no OpenDRIVE road network required -- and
-        ``None`` is returned.
+        Converts :attr:`_spawn_pose` through OpenDRIVE to a CARLA world
+        position, snaps it to the road surface, updates :attr:`ego_config`
+        with the resulting spawn location, and registers spectator-follow
+        and position-logging callbacks.
 
         Returns:
-            The intermediate :class:`OpenDrivePose`, or ``None`` on a
-            lanelet2-only map.
+            The intermediate :class:`OpenDrivePose` (useful for deriving
+            target lane IDs, route conditions, etc.).
 
         Raises:
             ValueError: If :attr:`_spawn_pose` is ``None``.
@@ -230,43 +221,24 @@ class BaseScenario(ABC):
             msg = f"spawn_pose is required for {type(self).__name__}"
             raise ValueError(msg)
         ll2_pose = self._spawn_pose
+        od_pose = to_opendrive(ll2_pose)
         world = self.world
+        snapped = snap_to_carla_road(
+            od_pose, world, ground_projection=self._ground_projection
+        )
 
-        od_pose: Optional[OpenDrivePose]
-        if MapManager.get_instance().has_opendrive:
-            od_pose = to_opendrive(ll2_pose)
-            snapped = snap_to_carla_road(
-                od_pose, world, ground_projection=self._ground_projection
-            )
-            logger.info(
-                "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
-                "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
-                ll2_pose.lanelet_id,
-                od_pose.road_id,
-                od_pose.lane_id,
-                od_pose.s,
-                snapped.x,
-                snapped.y,
-                snapped.z,
-                snapped.yaw,
-            )
-        else:
-            # Lanelet2-only: convert straight to CARLA world coords (no OpenDRIVE
-            # road network) and snap with CARLA's waypoint API.
-            od_pose = None
-            snapped = snap_to_carla_road(
-                to_carla_world(ll2_pose),
-                world,
-                ground_projection=self._ground_projection,
-            )
-            logger.info(
-                "Lanelet %d (lanelet2-only) -> CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
-                ll2_pose.lanelet_id,
-                snapped.x,
-                snapped.y,
-                snapped.z,
-                snapped.yaw,
-            )
+        logger.info(
+            "Lanelet %d -> OpenDRIVE road='%s' lane=%d s=%.1f -> "
+            "CARLA (%.1f, %.1f, %.3f) yaw=%.1f",
+            ll2_pose.lanelet_id,
+            od_pose.road_id,
+            od_pose.lane_id,
+            od_pose.s,
+            snapped.x,
+            snapped.y,
+            snapped.z,
+            snapped.yaw,
+        )
 
         self.ego_config.spawn_location = SpawnTransform(snapped.to_carla_transform())
         self.ego_config.od_pose = od_pose
