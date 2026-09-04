@@ -391,6 +391,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         all_roads: List[Road],
         mapping: RoadLaneletMapping,
         junction_lanelets: List[lanelet2.core.Lanelet],
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> SignalsAndControllers:
         """
         Extract traffic signals and assign to roads.
@@ -399,6 +400,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             all_roads: All roads
             mapping: Road-lanelet bidirectional mapping
             junction_lanelets: List of junction lanelets
+            routing_graph: Pre-built vehicle routing graph reused for the
+                signal reference-line fits; built on demand when omitted.
 
         Returns:
             SignalsAndControllers object with all signals and controllers
@@ -421,6 +424,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_lanelet_ids=junction_lanelet_ids,
             traffic_light_config=self.config.traffic_light,
             signal_config=self.config.signal,
+            routing_graph=routing_graph,
         )
         print(
             f"Extracted {len(signals_and_controllers.signals)} signals and "
@@ -466,6 +470,34 @@ class _Lanelet2ToOpenDRIVEConverter:
         """
         print("\n=== Associating controllers with junctions ===")
 
+        # Both indices below are invariant across the junction loop. Building
+        # them once turns the two per-junction full scans -- every road
+        # (O(J x R)) and every controller entry (O(J x C x E)) -- into
+        # lookups keyed by the handful of roads each junction touches.
+        controllers = signals_and_controllers.controllers
+
+        roads_by_junction_id: Dict[int, Set[int]] = {}
+        for road in all_roads:
+            roads_by_junction_id.setdefault(road.junction, set()).add(road.id)
+
+        # road_id -> positions in ``controllers`` of the controllers driving a
+        # signal on that road. Positions (not IDs) are stored so the emitted
+        # per-junction list keeps the original controller-list order even if
+        # the IDs are not ascending. Controllers with no control entries never
+        # enter the index, matching the previous ``if controller.controls``.
+        controller_positions_by_road: Dict[int, Set[int]] = {}
+        for position, controller in enumerate(controllers):
+            if not controller.controls:
+                continue
+            for control_entry in controller.controls:
+                signal_road_id = signals_and_controllers.signal_to_road_id.get(
+                    control_entry.signal_id
+                )
+                if signal_road_id is not None:
+                    controller_positions_by_road.setdefault(signal_road_id, set()).add(
+                        position
+                    )
+
         controllers_assigned_count = 0
         for junction in junctions:
             # Get all road IDs related to this junction
@@ -477,9 +509,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             }
 
             # Include roads that belong to this junction by attribute
-            junction_roads_by_attribute = {
-                road.id for road in all_roads if road.junction == junction.id
-            }
+            junction_roads_by_attribute = roads_by_junction_id.get(junction.id, set())
 
             junction_related_road_ids = (
                 junction_incoming_road_ids
@@ -487,23 +517,19 @@ class _Lanelet2ToOpenDRIVEConverter:
                 | junction_roads_by_attribute
             )
 
-            # Find controllers whose signals are on roads related to this junction
-            junction_controller_ids: List[int] = []
-            for controller in signals_and_controllers.controllers:
-                if controller.controls:
-                    # Get road IDs for all signals controlled by this controller
-                    controller_road_ids = set()
-                    for control_entry in controller.controls:
-                        signal_road_id = signals_and_controllers.signal_to_road_id.get(
-                            control_entry.signal_id
-                        )
-                        if signal_road_id is not None:
-                            controller_road_ids.add(signal_road_id)
+            # Find controllers whose signals are on roads related to this
+            # junction: a controller qualifies as soon as one of its signal
+            # roads is junction-related, which is exactly what the inverted
+            # index resolves per road.
+            matched_positions: Set[int] = set()
+            for related_road_id in junction_related_road_ids:
+                positions = controller_positions_by_road.get(related_road_id)
+                if positions:
+                    matched_positions.update(positions)
 
-                    # If any of the controller's roads are related to this junction,
-                    # associate the controller with the junction
-                    if controller_road_ids & junction_related_road_ids:
-                        junction_controller_ids.append(controller.id)
+            junction_controller_ids: List[int] = [
+                controllers[position].id for position in sorted(matched_positions)
+            ]
 
             junction.controller_ids = junction_controller_ids
             controllers_assigned_count += len(junction_controller_ids)
@@ -1150,9 +1176,15 @@ class _Lanelet2ToOpenDRIVEConverter:
             routing_graph=regular_result.routing_graph,
         )
 
-        # Step 5: Extract and assign signals
+        # Step 5: Extract and assign signals. Reuse the same routing graph the
+        # divergence / junction-completion / connection passes already share —
+        # the lanelet map is not mutated after Road.construct_from_lanelet_map,
+        # so a rebuild here would only repeat identical work.
         signals_and_controllers = self._extract_and_assign_signals(
-            all_roads, mapping, junction_lanelets
+            all_roads,
+            mapping,
+            junction_lanelets,
+            routing_graph=regular_result.routing_graph,
         )
 
         # Step 6: Create and assign controllers
