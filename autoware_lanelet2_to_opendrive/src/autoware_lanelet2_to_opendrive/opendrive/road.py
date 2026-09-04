@@ -1608,9 +1608,12 @@ class Road:
         ):
             # Issue #132 fix: Apply offset to junction ID
             junction_id = junction_index + junction_id_offset
-            # Find adjacent groups within this junction
+            # Find adjacent groups within this junction.  Hand over the
+            # routing graph built above: without it ``find_adjacent_groups``
+            # rebuilds a whole-map graph on every iteration, which dominates
+            # junction construction on large maps.
             adjacent_groups_in_junction = find_adjacent_groups(
-                lanelet_map, set(junction_group)
+                lanelet_map, set(junction_group), routing_graph
             )
 
             junction_road_ids = []

@@ -11,6 +11,8 @@ import lanelet2
 from .enums import ContactPoint
 
 if TYPE_CHECKING:
+    from lanelet2.routing import RoutingGraph
+
     from .road import Road
 
 log = logging.getLogger(__name__)
@@ -579,6 +581,8 @@ class Junction:
         lanelet_to_road_id: dict[int, int],
         connecting_road_ids: List[int],
         roads: Optional[List] = None,
+        routing_graph: Optional["RoutingGraph"] = None,
+        road_id_to_road: Optional[Dict[int, "Road"]] = None,
     ) -> List[Connection]:
         """Build junction connections from road topology.
 
@@ -595,6 +599,14 @@ class Junction:
             roads: Optional list of all Road objects for lane ID lookup.
                    Required to emit ``<laneLink>`` elements; when omitted
                    no connections are returned.
+            routing_graph: Optional pre-built vehicle routing graph. One is
+                   built from ``lanelet_map`` when omitted. Callers that
+                   invoke this once per junction should pass the graph they
+                   already hold — construction is whole-map work and would
+                   otherwise be repeated for every junction.
+            road_id_to_road: Optional pre-built ``road.id -> Road`` index over
+                   ``roads``. Derived from ``roads`` when omitted; pass it to
+                   avoid re-indexing the full road list per junction.
 
         Returns:
             List of Connection objects for this junction. Each Connection
@@ -602,22 +614,15 @@ class Junction:
             predecessor edge implied by the routing graph (#439: N:M
             lane links for multi-lane merges/splits).
         """
-        from lanelet2.routing import RoutingGraph, RoutingCostDistance
-        import lanelet2
+        # Create routing graph only when the caller has none to lend.
+        if routing_graph is None:
+            from ..util import create_routing_graph
 
-        # Create routing graph
-        traffic_rules = lanelet2.traffic_rules.create(
-            lanelet2.traffic_rules.Locations.Germany,
-            lanelet2.traffic_rules.Participants.Vehicle,
-        )
-        routing_graph = RoutingGraph(
-            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
-        )
+            routing_graph = create_routing_graph(lanelet_map)
 
         # Build road_id to Road mapping for lane ID lookup
-        road_id_to_road: dict[int, "Road"] = {}
-        if roads is not None:
-            road_id_to_road = {road.id: road for road in roads}
+        if road_id_to_road is None:
+            road_id_to_road = {road.id: road for road in roads} if roads else {}
 
         # Walk the routing graph once and collect direct longitudinal
         # predecessor lanelet ids per connecting (junction) lanelet.  The
