@@ -1,7 +1,7 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
 import logging
-from typing import Set, List, Union, Dict, Optional, Iterable, Literal
+from typing import Set, List, Tuple, Union, Dict, Optional, Iterable, Literal
 from enum import Enum
 from dataclasses import dataclass
 import lanelet2
@@ -9,7 +9,7 @@ from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from lanelet2.geometry import intersects2d
 import numpy as np
 
-from .config import COORDINATE_OFFSET
+from .config import COORDINATE_OFFSET, DEFAULT_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -581,6 +581,125 @@ def check_lanelet_groups_intersect(
             if intersects2d(lanelet_1, lanelet_2):
                 return True
     return False
+
+
+def lanelet_bounds_2d(
+    lanelet: lanelet2.core.Lanelet,
+) -> Optional[Tuple[float, float, float, float]]:
+    """Compute the 2D axis-aligned bounding box of a lanelet.
+
+    Raw map coordinates are used (no COORDINATE_OFFSET), so the box lives in
+    the same frame as the geometry that ``intersects2d`` operates on.
+
+    The lanelet polygon used by ``intersects2d`` is built from the points of
+    the left and right bounds, so every point of that polygon lies inside the
+    box returned here. A pair of lanelets whose boxes are disjoint therefore
+    cannot intersect.
+
+    Args:
+        lanelet: Lanelet to measure
+
+    Returns:
+        ``(min_x, min_y, max_x, max_y)``, or None if the lanelet has no
+        boundary points at all
+    """
+    xs: List[float] = []
+    ys: List[float] = []
+    for boundary in (lanelet.leftBound, lanelet.rightBound):
+        for point in boundary:
+            xs.append(point.x)
+            ys.append(point.y)
+
+    if not xs:
+        return None
+
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _bounds_overlap(
+    box_1: Tuple[float, float, float, float],
+    box_2: Tuple[float, float, float, float],
+) -> bool:
+    """Check whether two axis-aligned boxes overlap (touching counts as overlap)."""
+    return not (
+        box_1[2] < box_2[0]
+        or box_2[2] < box_1[0]
+        or box_1[3] < box_2[1]
+        or box_2[3] < box_1[1]
+    )
+
+
+def build_lanelet_intersection_adjacency(
+    lanelets: List[lanelet2.core.Lanelet],
+) -> List[Set[int]]:
+    """Compute which lanelets in a list intersect each other.
+
+    The naive way to answer this is to call ``intersects2d`` on every pair,
+    which is O(N^2) geometric tests. Instead the lanelets are bucketed into a
+    uniform grid over their bounding boxes and only pairs that share a cell
+    *and* whose boxes actually overlap are tested. Because a lanelet polygon
+    is contained in its bounding box, a discarded pair can never intersect,
+    so this filter produces no false negatives and the resulting adjacency is
+    identical to the exhaustive one.
+
+    The cell size is the largest bounding-box extent in the input, which caps
+    each lanelet at 2x2 cells and therefore keeps the grid at O(N) entries.
+
+    Args:
+        lanelets: Lanelets to relate, indexed by their position in the list
+
+    Returns:
+        List parallel to ``lanelets``; entry ``i`` holds the indices of the
+        lanelets that intersect ``lanelets[i]``. The relation is stored
+        symmetrically and never contains ``i`` itself.
+    """
+    count = len(lanelets)
+    adjacency: List[Set[int]] = [set() for _ in range(count)]
+    if count < 2:
+        return adjacency
+
+    boxes = [lanelet_bounds_2d(lanelet) for lanelet in lanelets]
+
+    # Candidate pairs are keyed by (lower index, higher index) so that a pair
+    # found through several cells is only tested once.
+    candidates: Set[Tuple[int, int]] = set()
+
+    # A lanelet without boundary points has no box to filter on, so it stays a
+    # candidate against everything rather than being silently dropped.
+    unbounded = [index for index, box in enumerate(boxes) if box is None]
+    for index in unbounded:
+        for other in range(count):
+            if other != index:
+                candidates.add((min(index, other), max(index, other)))
+
+    max_extent = 0.0
+    for box in boxes:
+        if box is not None:
+            max_extent = max(max_extent, box[2] - box[0], box[3] - box[1])
+    cell_size = max(max_extent, DEFAULT_CONFIG.geometry.spatial_grid_min_cell_size)
+
+    grid: Dict[Tuple[int, int], List[int]] = {}
+    for index, box in enumerate(boxes):
+        if box is None:
+            continue
+        for cell_x in range(int(box[0] // cell_size), int(box[2] // cell_size) + 1):
+            for cell_y in range(int(box[1] // cell_size), int(box[3] // cell_size) + 1):
+                grid.setdefault((cell_x, cell_y), []).append(index)
+
+    for bucket in grid.values():
+        for position, index in enumerate(bucket):
+            # Buckets are filled in ascending index order, so everything after
+            # `position` has a larger index and the pair is already ordered.
+            for other in bucket[position + 1 :]:
+                if _bounds_overlap(boxes[index], boxes[other]):
+                    candidates.add((index, other))
+
+    for index, other in candidates:
+        if intersects2d(lanelets[index], lanelets[other]):
+            adjacency[index].add(other)
+            adjacency[other].add(index)
+
+    return adjacency
 
 
 def sort_adjacent_groups(
