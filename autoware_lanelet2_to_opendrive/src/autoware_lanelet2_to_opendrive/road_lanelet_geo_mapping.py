@@ -56,6 +56,14 @@ _MATCH_THRESHOLD: float = DEFAULT_CONFIG.geo_mapping.match_threshold
 #: geometrically similar junction lanelets that connect different roads.
 _ENDPOINT_WEIGHT: float = 0.1
 
+#: Margin (m) by which a road reference line's bounding box is grown before
+#: it is tested against a lanelet boundary's bounding box.  Boundaries that
+#: fail this test are dropped without measuring a distance.  It is a filter
+#: only: it has to stay comfortably above ``_MATCH_THRESHOLD`` (and above the
+#: rescue pass's ``rescue_threshold_factor`` multiple of it) so that no pair
+#: whose mean distance could fall under either threshold is ever discarded.
+_CANDIDATE_BBOX_MARGIN: float = 10.0
+
 #: Total geometry length (m) below which a connecting road
 #: (``junction != -1``) is treated as a synthetic divergence/merge stub
 #: from the issue #291 pass and excluded from geometric matching. Real
@@ -245,6 +253,100 @@ def _bboxes_overlap(
         or a[1] > b[3] + margin
         or a[3] < b[1] - margin
     )
+
+
+@dataclass(frozen=True)
+class _BoundaryGrid:
+    """Uniform grid over lanelet boundary bounding boxes.
+
+    Answers "which boundaries could be near this road reference line?" without
+    walking every boundary.  Built in the same style as
+    :func:`~.util.build_lanelet_intersection_adjacency`: the cell size is the
+    largest bounding-box extent in the input, which caps each boundary at 2x2
+    cells and keeps the grid at O(N) entries.
+
+    Attributes:
+        cell_size: Edge length (m) of a grid cell.
+        cells: Cell coordinate -> positions of the boundaries touching it.
+        lids: Lanelet IDs in the iteration order of the source dict.
+        boxes: Bounding boxes parallel to ``lids``.
+    """
+
+    cell_size: float
+    cells: dict[tuple[int, int], list[int]]
+    lids: list[int]
+    boxes: list[tuple[float, float, float, float]]
+
+
+def _build_boundary_grid(
+    boundaries: dict[int, np.ndarray],
+    bboxes: dict[int, tuple[float, float, float, float]],
+) -> _BoundaryGrid:
+    """Bucket boundary bounding boxes into a uniform grid.
+
+    ``lids`` keeps the iteration order of ``boundaries`` so that a caller can
+    replay the original scan order from the positions the grid returns.
+
+    Args:
+        boundaries: Lanelet ID -> boundary polyline
+        bboxes: Lanelet ID -> bounding box of that polyline
+
+    Returns:
+        The populated grid.
+    """
+    lids = list(boundaries)
+    boxes = [bboxes[lid] for lid in lids]
+
+    max_extent = 0.0
+    for box in boxes:
+        max_extent = max(max_extent, box[2] - box[0], box[3] - box[1])
+    cell_size = max(max_extent, DEFAULT_CONFIG.geometry.spatial_grid_min_cell_size)
+
+    cells: dict[tuple[int, int], list[int]] = {}
+    for position, box in enumerate(boxes):
+        for cell_x in range(int(box[0] // cell_size), int(box[2] // cell_size) + 1):
+            for cell_y in range(int(box[1] // cell_size), int(box[3] // cell_size) + 1):
+                cells.setdefault((cell_x, cell_y), []).append(position)
+
+    return _BoundaryGrid(cell_size=cell_size, cells=cells, lids=lids, boxes=boxes)
+
+
+def _grid_candidate_positions(
+    grid: _BoundaryGrid,
+    query: tuple[float, float, float, float],
+    margin: float,
+) -> list[int]:
+    """Positions of the boundaries that may overlap ``query`` grown by ``margin``.
+
+    Every boundary whose box overlaps the grown query box shares at least one
+    cell with it — the overlap contains a point, that point sits in some cell,
+    and both the boundary and the swept cell range cover that cell.  The result
+    is therefore a superset of the exact test and the filter has no false
+    negatives; callers still confirm each position with
+    :func:`_bboxes_overlap`.
+
+    Args:
+        grid: Grid to query
+        query: ``(min_x, min_y, max_x, max_y)`` of the query box
+        margin: Distance (m) by which ``query`` is grown before the lookup
+
+    Returns:
+        Positions into ``grid.lids``, ascending, so that iterating them
+        reproduces the source dict's order.
+    """
+    cell_size = grid.cell_size
+    min_x = int((query[0] - margin) // cell_size)
+    max_x = int((query[2] + margin) // cell_size)
+    min_y = int((query[1] - margin) // cell_size)
+    max_y = int((query[3] + margin) // cell_size)
+
+    positions: set[int] = set()
+    for cell_x in range(min_x, max_x + 1):
+        for cell_y in range(min_y, max_y + 1):
+            bucket = grid.cells.get((cell_x, cell_y))
+            if bucket is not None:
+                positions.update(bucket)
+    return sorted(positions)
 
 
 def _directed_mean_distance(from_line: np.ndarray, to_line: np.ndarray) -> float:
@@ -622,7 +724,11 @@ def _compute_all_candidates(
     # Exclude them up front and report them separately (#493).
     skipped_synthetic = _synthetic_connector_road_ids(roads)
 
-    for road in roads:
+    # Uniform grids over the two boundary populations, built on first use so
+    # that a map with a single traffic rule never pays for the unused side.
+    grids: dict[bool, Optional[_BoundaryGrid]] = {True: None, False: None}
+
+    for road in tqdm(roads, desc="Computing road candidates", unit="road"):
         if road.id in skipped_synthetic:
             continue
 
@@ -645,8 +751,31 @@ def _compute_all_candidates(
             is_rht = all(lid < 0 for lid in lane_ids)
 
         boundaries = lanelet_left if is_rht else lanelet_right
-        bboxes = lanelet_left_bbox if is_rht else lanelet_right_bbox
+        grid = grids[is_rht]
+        if grid is None:
+            grid = _build_boundary_grid(
+                boundaries, lanelet_left_bbox if is_rht else lanelet_right_bbox
+            )
+            grids[is_rht] = grid
         ref_bbox = _bbox(ref_line)
+
+        # Grid pre-filter.  ``_grid_candidate_positions`` returns a superset of
+        # the boundaries whose box overlaps ``ref_bbox``, in ascending position
+        # order, and the exact test below trims it to precisely the set the
+        # earlier exhaustive scan kept — in the same order, which matters
+        # because the nearest-rejected diagnostic breaks ties by first-seen.
+        # Every boundary is bbox-tested exactly once instead of once per
+        # fallback level, so the skip count is also hoisted out of the loop.
+        near: list[tuple[int, np.ndarray]] = []
+        for position in _grid_candidate_positions(
+            grid, ref_bbox, _CANDIDATE_BBOX_MARGIN
+        ):
+            if _bboxes_overlap(
+                ref_bbox, grid.boxes[position], margin=_CANDIDATE_BBOX_MARGIN
+            ):
+                near_lid = grid.lids[position]
+                near.append((near_lid, boundaries[near_lid]))
+        n_bbox_skip = len(boundaries) - len(near)
 
         # Progressive fallback search with 3 levels:
         #   1. Symmetric distance + direction check  (strictest)
@@ -668,32 +797,45 @@ def _compute_all_candidates(
         raw_dists: dict[int, float] = {}
         best_rejected_dist: float = float("inf")
         best_rejected_lid: Optional[int] = None
-        n_bbox_skip = 0
         n_dir_skip = 0
 
         # Pre-compute reference line endpoints for endpoint penalty
         ref_start = ref_line[0]
         ref_end = ref_line[-1]
 
+        # A boundary that survives into more than one fallback level would
+        # otherwise be measured against the same reference line again.  The
+        # directed distance is also the first half of the symmetric one
+        # (``_symmetric_mean_distance(boundary, ref_line)`` is the max of the
+        # two directions), so both levels share a single measurement.
+        directed_cache: dict[int, float] = {}
+        symmetric_cache: dict[int, float] = {}
+
+        def _distance(lid: int, boundary: np.ndarray, metric: str) -> float:
+            directed = directed_cache.get(lid)
+            if directed is None:
+                directed = _directed_mean_distance(boundary, ref_line)
+                directed_cache[lid] = directed
+            if metric != "symmetric":
+                return directed
+            symmetric = symmetric_cache.get(lid)
+            if symmetric is None:
+                symmetric = max(directed, _directed_mean_distance(ref_line, boundary))
+                symmetric_cache[lid] = symmetric
+            return symmetric
+
         for require_dir, metric in _FALLBACK_LEVELS:
             candidates.clear()
             raw_dists.clear()
             best_rejected_dist = float("inf")
             best_rejected_lid = None
-            n_bbox_skip = 0
             n_dir_skip = 0
 
-            for lid, boundary in boundaries.items():
-                if not _bboxes_overlap(ref_bbox, bboxes[lid]):
-                    n_bbox_skip += 1
-                    continue
+            for lid, boundary in near:
                 if require_dir and not _same_direction(ref_line, boundary):
                     n_dir_skip += 1
                     continue
-                if metric == "symmetric":
-                    dist = _symmetric_mean_distance(boundary, ref_line)
-                else:
-                    dist = _directed_mean_distance(boundary, ref_line)
+                dist = _distance(lid, boundary, metric)
                 if dist <= _MATCH_THRESHOLD:
                     # Endpoint proximity penalty for candidate ranking.
                     # Correct matches have aligned start/end points;
