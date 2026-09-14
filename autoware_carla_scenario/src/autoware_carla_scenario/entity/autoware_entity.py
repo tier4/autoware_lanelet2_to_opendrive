@@ -44,9 +44,6 @@ from .ego import EgoVehicle
 
 logger = logging.getLogger(__name__)
 
-#: Polling interval while waiting for the interface node to spawn the ego actor.
-_ATTACH_POLL_INTERVAL_S: float = 0.5
-
 
 class AutowareEntity(EgoVehicle):
     """Ego vehicle controlled by Autoware instead of TrafficManager.
@@ -208,7 +205,14 @@ class AutowareEgoEntity(EgoVehicle):
                     "autoware_carla_interface is running and launched with "
                     "ego_vehicle_role_name:=Ego."
                 )
-            time.sleep(_ATTACH_POLL_INTERVAL_S)
+            # Drive the clock while waiting for the interface to spawn the ego.
+            # Synchronous mode is already enabled here, so the world is frozen
+            # until someone ticks it - and the interface spawns the "Ego" actor
+            # with wait_for_tick, needing a tick for that spawn to be applied and
+            # become visible to find_actor_by_role_name above. Ticking here (rather
+            # than sleeping) keeps the runner the sole clock owner and lets the
+            # interface stay a pure follower, avoiding a spawn/attach deadlock.
+            world.tick()
 
     def destroy(self) -> None:
         """Detach from the ego actor without destroying it.

@@ -51,9 +51,16 @@ class _FakeActorList:
 class _FakeWorld:
     def __init__(self, actors: List[_FakeActor]) -> None:
         self._actors = actors
+        self.tick_count = 0
 
     def get_actors(self) -> _FakeActorList:
         return _FakeActorList(self._actors)
+
+    def tick(self) -> int:
+        # AutowareEgoEntity.spawn() drives the clock while it waits for the ego,
+        # so the fake world must accept ticks.
+        self.tick_count += 1
+        return self.tick_count
 
 
 def _make_entity(bridge=None, **config_kwargs) -> AutowareEgoEntity:
