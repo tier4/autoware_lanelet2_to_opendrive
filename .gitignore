@@ -31,3 +31,7 @@ scenario_outputs
 
 # Auto-generated scenario packages (built by the scenario-new generator; not committed)
 scenario_packages/
+
+# Generated protobuf stubs (produced by scripts/compile_protos.py via the
+# hatchling build hook at build/uv-sync time; not committed)
+autoware_carla_scenario/src/autoware_carla_scenario/**/_proto/

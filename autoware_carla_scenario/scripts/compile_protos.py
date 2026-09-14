@@ -1,8 +1,11 @@
 #!/usr/bin/env python
-"""Compile the project's ``.proto`` files into committed Python modules.
+"""Compile the project's ``.proto`` files into generated Python modules.
 
-Two independent groups are generated, each into its own package directory that is
-checked into git so the runtime never needs ``grpcio-tools`` installed:
+Two independent groups are generated, each into its own package directory. The
+output is NOT committed: the hatchling build hook (``hatch_build.py``) runs this
+script at build time -- including the editable build that ``uv sync`` performs --
+so a fresh checkout produces the modules and every wheel/sdist ships them, while
+the installed runtime still never needs ``grpcio-tools``:
 
 * the vendored alpasim ``egodriver`` contract -> ``driver/_proto`` (see
   ``proto/README.md``);
