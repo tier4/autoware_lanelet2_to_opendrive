@@ -5,10 +5,11 @@ description = "CARLA scenario testing framework for Autoware"
 authors = [
     { name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }
 ]
-# Capped at 3.10 by the CARLA client alone: 0.10.0 is not published to PyPI and
-# the wheel vendored in carla_wheels/ is cp310-only. Nothing else in this package
-# — and nothing in autoware-lanelet2-to-opendrive — is limited to 3.10 any more.
-requires-python = ">=3.10,<3.11"
+# CARLA 0.10.0 is not on PyPI and ships as a per-ABI wheel (cp310 and cp312 both
+# exist); the deployed scenario wheelhouse is resolved for CPython 3.12, and the
+# interface's scenario_runner defaults to python3.12, so the package must install
+# on 3.12. Keep the floor at 3.10 (older CARLA wheels) and cap below 3.13.
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "pyxodr>=0.1.0",
     # Headless: the only OpenCV calls in this package are imencode and
