@@ -28,3 +28,6 @@ site/
 
 # Scenario output
 scenario_outputs
+
+# Auto-generated scenario packages (built by the scenario-new generator; not committed)
+scenario_packages/
