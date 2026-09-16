@@ -24,8 +24,10 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from tqdm import tqdm
 
+from .config import DEFAULT_CONFIG
 from .opendrive.enums import TrafficRule
 from .opendrive.geometry import Arc, GeometryBase, ParamPoly3, evaluate_plan_view_world
+from .util import CONVERTIBLE_LANELET_SUBTYPES, filter_lanelets_by_subtype
 
 if TYPE_CHECKING:
     import lanelet2.core
@@ -42,11 +44,10 @@ class MappingMismatchError(Exception):
 #: Mapping cache files are stored next to the source XODR file.
 
 #: Maximum mean distance (m) between a road reference line and a lanelet
-#: boundary for them to be considered a match.  This must be larger than
-#: the spline fitting error (max_avg_error=2.0 m in config) but smaller
-#: than a typical lane width (~3.5 m) so that we never confuse adjacent
-#: boundaries.
-_MATCH_THRESHOLD: float = 3.5
+#: boundary for them to be considered a match.  Defined in
+#: :class:`~.config.GeoMappingConstants`, which documents the window it has
+#: to sit in and why the current value sits at the top of it.
+_MATCH_THRESHOLD: float = DEFAULT_CONFIG.geo_mapping.match_threshold
 
 #: Weight for endpoint proximity penalty added to candidate distance.
 #: The penalty = (start_dist + end_dist) * weight, where start_dist and
@@ -981,9 +982,13 @@ def build_mapping(
        (negative-only = RHT, positive-only = LHT).
     2. RHT: road reference line was generated from a lanelet's **left**
        boundary.  LHT: from a lanelet's **right** boundary.
-    3. Compare the road's reference line polyline against all candidate
-       lanelet boundaries.  The one with the smallest mean nearest-point
-       distance (below ``_MATCH_THRESHOLD``) is the *reference lanelet*.
+    3. Compare the road's reference line polyline against the candidate
+       lanelet boundaries.  Candidates are the lanelets the conversion can
+       map — ``CONVERTIBLE_LANELET_SUBTYPES`` plus anything carrying
+       ``turn_direction`` — so that subtypes the converter never emits
+       (crosswalks, for instance) cannot win a road.  The candidate with the
+       smallest mean nearest-point distance (below ``_MATCH_THRESHOLD``) is
+       the *reference lanelet*.
     4. From the reference lanelet, walk adjacent lanelets (via shared
        boundary linestring IDs) and assign lane IDs from the road's
        lane structure.
@@ -1011,7 +1016,40 @@ def build_mapping(
     left_bound_to_lanelets: dict[int, list[int]] = {}
     right_bound_to_lanelets: dict[int, list[int]] = {}
 
-    lanelets = list(lanelet_map.laneletLayer)
+    # Restrict the candidate pool to the lanelets the conversion can actually
+    # place on a road, so both mappings search the same population.  Regular
+    # roads come from ``CONVERTIBLE_LANELET_SUBTYPES`` (see
+    # ``Road.construct_from_lanelet_map``) and connecting roads come from the
+    # lanelets carrying ``turn_direction`` (see
+    # ``Junction.construct_from_lanelet_map``), so the union of the two is the
+    # exact domain of the conversion-time mapping.  Without this filter a
+    # crosswalk — which has no conversion-time entry — could still win a road
+    # as its geometric match and be reported as a mismatch.
+    #
+    # ``filter_lanelets_by_subtype`` returns a set, so the ids are collected
+    # first and the layer is re-walked in its own order: downstream nearest
+    # neighbour searches break ties by iteration order, and the mapping is
+    # documented as deterministic.
+    all_lanelets = list(lanelet_map.laneletLayer)
+    convertible_ids = {
+        ll.id
+        for ll in filter_lanelets_by_subtype(all_lanelets, CONVERTIBLE_LANELET_SUBTYPES)
+    }
+    lanelets = [
+        ll
+        for ll in all_lanelets
+        if ll.id in convertible_ids or "turn_direction" in ll.attributes
+    ]
+    n_excluded = len(all_lanelets) - len(lanelets)
+    if n_excluded:
+        logger.info(
+            "Geometric mapping candidate pool: %d of %d lanelets "
+            "(%d excluded as non-convertible subtypes)",
+            len(lanelets),
+            len(all_lanelets),
+            n_excluded,
+        )
+
     for ll in tqdm(lanelets, desc="Pre-computing lanelet boundaries", unit="lanelet"):
         lid = ll.id
         lp = np.array([(p.x - offset_x, p.y - offset_y) for p in ll.leftBound])
@@ -1093,6 +1131,22 @@ def build_mapping(
 
     mapping: dict[int, tuple[int, int]] = {}
     matched_lanelets: set[int] = set()
+
+    # The adjacency walks below check ``resolved_references`` but not
+    # ``matched_lanelets``, so a later road can silently claim a lanelet an
+    # earlier road already committed.  Whether the first or the second claim is
+    # the correct one is not decidable here, so the walks are left alone and
+    # the collisions are recorded for reporting instead.
+    overwrites: list[tuple[int, tuple[int, int], tuple[int, int]]] = []
+
+    def _commit(walk: list[tuple[int, int, int]]) -> None:
+        """Write walk results into ``mapping``, recording any re-assignment."""
+        for lid, rid, lane_id in walk:
+            previous = mapping.get(lid)
+            if previous is not None and previous != (rid, lane_id):
+                overwrites.append((lid, previous, (rid, lane_id)))
+            mapping[lid] = (rid, lane_id)
+            matched_lanelets.add(lid)
 
     # Phase 1: compute candidate lists for every road (no exclusion)
     all_rc, no_candidate_diag, skipped_synthetic = _compute_all_candidates(
@@ -1211,15 +1265,15 @@ def build_mapping(
                         current = next_ll
 
         # Commit walk results
-        for lid, rid, lane_id in walk_result:
-            mapping[lid] = (rid, lane_id)
-            matched_lanelets.add(lid)
+        _commit(walk_result)
 
     # -- Rescue pass: attempt to assign dropped roads -----------------------
     # Roads that had candidates in Phase 1 but were dropped in Phase 2
     # (conflict resolution) get a second chance with a relaxed search
     # against currently unmatched lanelets.
-    _RESCUE_THRESHOLD: float = _MATCH_THRESHOLD * 1.5
+    _RESCUE_THRESHOLD: float = (
+        _MATCH_THRESHOLD * DEFAULT_CONFIG.geo_mapping.rescue_threshold_factor
+    )
     assigned_rc_indices = set(assignment.keys())
     rescued_road_ids: set[int] = set()
     for rc_idx in range(len(all_rc)):
@@ -1253,9 +1307,7 @@ def build_mapping(
                 if next_ll is None or next_ll in matched_lanelets:
                     break
                 current = next_ll
-            for lid, rid, lane_id in walk_result_rescue:
-                mapping[lid] = (rid, lane_id)
-                matched_lanelets.add(lid)
+            _commit(walk_result_rescue)
             rescued_road_ids.add(rc.road_id)
             logger.info(
                 "Rescue: road %d recovered via lanelet %d (dist=%.3f, lanes=%d/%d)",
@@ -1292,6 +1344,16 @@ def build_mapping(
         len(mapping),
         len({v[0] for v in mapping.values()}),
     )
+    if overwrites:
+        msg = (
+            f"  [Diag] Phase 3: {len(overwrites)} lanelets were re-assigned "
+            f"by a later road (the earlier assignment was dropped); "
+            f"{len({lid for lid, _, _ in overwrites})} distinct lanelets"
+        )
+        tqdm.write(msg)
+        logger.warning(msg)
+        for lid, previous, current in overwrites[:10]:
+            tqdm.write(f"    lanelet {lid}: {previous} -> {current}")
     if roads_no_candidates:
         msg = (
             f"  [Diag] Phase 1: {len(roads_no_candidates)} roads had 0 "
@@ -1374,12 +1436,19 @@ def validate_mapping_consistency(
     conversion_mapping: dict[int, tuple[int, int]],
     geo_mapping: GeoRoadLaneletMapping,
     preprocessing_log: dict | None = None,
-) -> None:
+    strict: bool = True,
+) -> bool:
     """Validate that conversion-time mapping matches geometric mapping.
 
     Compares each entry in the conversion-time mapping against the geometric
-    mapping.  Raises :class:`MappingMismatchError` if any lanelet ID maps to a
-    different ``(road_id, lane_id)`` pair.
+    mapping.  A lanelet ID that maps to a different ``(road_id, lane_id)``
+    pair — or that is present in only one of the two mappings — is a mismatch.
+
+    The geometric mapping is a *cross-check*, not the conversion output: it
+    re-derives the mapping from raw geometry and is subject to its own
+    matching-threshold and adjacency-walk heuristics.  A disagreement
+    therefore says the two derivations differ, not necessarily that the
+    emitted XODR is wrong, which is why ``strict`` exists.
 
     Args:
         conversion_mapping: Mapping produced during conversion
@@ -1388,10 +1457,17 @@ def validate_mapping_consistency(
         preprocessing_log: Optional preprocessing log dict (from
             ``PreprocessingLog.to_dict()``) to annotate mismatches with
             preprocessing context.
+        strict: When ``True`` (the default) a mismatch raises
+            :class:`MappingMismatchError`.  When ``False`` the mismatch is
+            logged as a warning and reported through the return value.
+
+    Returns:
+        ``True`` when the two mappings agree, ``False`` when they do not and
+        ``strict`` is ``False``.
 
     Raises:
         MappingMismatchError: When at least one entry differs between the two
-            mappings.
+            mappings and ``strict`` is ``True``.
     """
     # Build a set of merge-produced IDs and a lookup from the log.
     # Uses PreprocessingLog typed methods instead of raw dict parsing.
@@ -1437,17 +1513,30 @@ def validate_mapping_consistency(
     if mismatches:
         detail = "\n".join(mismatches[:20])
         total = len(mismatches)
-        raise MappingMismatchError(
+        summary = (
             f"Mapping mismatch: {total} entries differ between conversion-time "
             f"and geometric mappings:\n{detail}"
             + (f"\n  ... and {total - 20} more" if total > 20 else "")
         )
+        if strict:
+            raise MappingMismatchError(summary)
+        logger.warning(
+            "%s\nCross-validation is non-strict, so the conversion output is "
+            "kept.  Set strict_mapping_validation=true to fail instead.",
+            summary,
+        )
+        tqdm.write(
+            f"  Mapping cross-validation: {total} mismatching entries "
+            f"(non-fatal; see log for details)"
+        )
+        return False
 
     logger.info(
         "Cross-validation passed: conversion and geometric mappings agree "
         "(%d entries)",
         len(conversion_mapping),
     )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1497,6 +1586,7 @@ def validate_and_save_mapping(
     stop_line_mapping: dict[int, StopLineMappingEntry] | None = None,
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None,
     traffic_light_config: dict | None = None,
+    strict: bool = True,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
@@ -1526,13 +1616,18 @@ def validate_and_save_mapping(
         traffic_light_config: Optional dict of TrafficLightConfig fields
             (offset_x, offset_y, offset_z, hdg_offset) persisted for the
             ``analyze`` command to reverse the spawn offset.
+        strict: When ``True`` a cross-validation mismatch raises
+            :class:`MappingMismatchError`.  When ``False`` the mismatch is
+            logged as a warning and the already-written XODR and
+            ``.mapping.json`` are kept — the conversion itself succeeded, and
+            the geometric mapping is only a heuristic cross-check.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
 
     Raises:
         MappingMismatchError: When the conversion-time mapping disagrees with
-            the geometric mapping.
+            the geometric mapping and ``strict`` is ``True``.
     """
     # 1. SHA256
     xodr_sha256 = _sha256_of_file(xodr_path)
@@ -1559,10 +1654,11 @@ def validate_and_save_mapping(
     geo_mapping = build_mapping(
         lanelet_map, roads, mgrs_offset, xodr_sha256, osm_sha256
     )
-    validate_mapping_consistency(
-        lanelet_to_road_and_lane, geo_mapping, preprocessing_log
+    passed = validate_mapping_consistency(
+        lanelet_to_road_and_lane, geo_mapping, preprocessing_log, strict=strict
     )
-    logger.info("Cross-validation passed successfully!")
+    if passed:
+        logger.info("Cross-validation passed successfully!")
 
     return json_path
 
