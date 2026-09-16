@@ -47,6 +47,9 @@ from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
 )
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+from autoware_lanelet2_to_opendrive.opendrive.objects import (
+    RoadSamplePointIndex,
+)
 from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
     SignalsAndControllers,
 )
@@ -512,7 +515,11 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"Associated {controllers_assigned_count} controller references across {len(junctions)} junctions"
         )
 
-    def _extract_and_assign_crosswalks(self, all_roads: List[Road]) -> None:
+    def _extract_and_assign_crosswalks(
+        self,
+        all_roads: List[Road],
+        road_index: Optional[RoadSamplePointIndex] = None,
+    ) -> None:
         """Extract crosswalk lanelets and assign them as objects to the nearest roads.
 
         For each lanelet with subtype="crosswalk", this method:
@@ -522,6 +529,9 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         Args:
             all_roads: All roads (regular + connecting) to search and assign to.
+            road_index: Sample-point index over ``all_roads``, shared with the
+                stop line pass so the roads are sampled once.  Built on demand
+                when omitted.
         """
         from autoware_lanelet2_to_opendrive.util import filter_lanelets_by_subtype
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
@@ -539,7 +549,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_objects: Dict[int, List] = {}
 
         for lanelet in crosswalk_lanelets:
-            best_road = find_nearest_road(lanelet, all_roads)
+            best_road = find_nearest_road(lanelet, all_roads, road_index=road_index)
             if best_road is None:
                 continue
             obj = CrosswalkObject.construct_from_crosswalk_lanelet(
@@ -708,6 +718,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         stop_sign_stop_line_ids: Optional[Set[int]] = None,
         starting_signal_id: int = 0,
         road_marking_stop_line_ids: Optional[Set[int]] = None,
+        road_index: Optional[RoadSamplePointIndex] = None,
     ) -> Tuple[Dict[int, List[int]], Dict, Dict]:
         """Extract stop line linestrings and assign them as objects to nearest roads.
 
@@ -735,6 +746,9 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_marking_stop_line_ids: Set of stop line linestring IDs from
                 road_marking regulatory elements.  These produce YieldSign (205)
                 and StopLine (294) signal pairs.
+            road_index: Sample-point index over ``all_roads``, shared with the
+                crosswalk pass so the roads are sampled once.  Built on demand
+                when omitted.
 
         Returns:
             Tuple of:
@@ -792,7 +806,9 @@ class _Lanelet2ToOpenDRIVEConverter:
                 continue
             stop_line_ids_seen.add(ls.id)
 
-            best_road = find_nearest_road_for_linestring(ls, all_roads)
+            best_road = find_nearest_road_for_linestring(
+                ls, all_roads, road_index=road_index
+            )
             if best_road is None:
                 skipped_stop_lines[ls.id] = SkippedStopLineEntry(
                     reason="no_nearest_road"
@@ -1160,8 +1176,13 @@ class _Lanelet2ToOpenDRIVEConverter:
             signals_and_controllers, junctions, all_roads
         )
 
+        # Crosswalk and stop line placement both search every road reference
+        # line for the sample point nearest each object.  One shared index
+        # samples the roads once instead of once per object, twice over.
+        road_sample_index = RoadSamplePointIndex(all_roads)
+
         # Step 6.5: Extract crosswalks and assign as road objects
-        self._extract_and_assign_crosswalks(all_roads)
+        self._extract_and_assign_crosswalks(all_roads, road_sample_index)
 
         # Step 6.6: Build stop line -> traffic light signal associations
         print("\n=== Building stop line to traffic light associations ===")
@@ -1209,6 +1230,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             stop_sign_stop_line_ids,
             next_signal_id,
             road_marking_stop_line_ids=road_marking_stop_line_ids,
+            road_index=road_sample_index,
         )
 
         # Step 6.8: Add back-links to traffic light signals pointing to stop lines.

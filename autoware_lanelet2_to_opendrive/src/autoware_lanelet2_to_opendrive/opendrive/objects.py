@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import lanelet2
 import lxml.etree as ET
@@ -259,6 +259,139 @@ def _sample_road_points(road: Road) -> List[tuple]:
     return samples
 
 
+class RoadSamplePointIndex:
+    """Flattened world-space sample points of every road reference line.
+
+    Both nearest-road searches walk the sample points of every road once per
+    object they place, and sampling dominates that cost (a polynomial
+    evaluation per point).  This index samples every road once and keeps the
+    coordinates in contiguous float64 arrays, so each query is a single
+    vectorised ``argmin`` instead of a full re-sampling scan.
+
+    The flattening preserves the exact iteration order of the original nested
+    scan (``for road in all_roads`` then ``for point in
+    _sample_road_points(road)``).  ``np.argmin`` returns the first occurrence
+    of the minimum, so it selects the same sample point that the sequential
+    ``dist < best_dist`` scan kept, ties included.
+
+    Sampling is deferred until the first query so that a map with neither
+    crosswalks nor stop lines pays nothing, just as the per-object scan did.
+    """
+
+    def __init__(self, all_roads: List["Road"]) -> None:
+        """Bind the index to a road list without sampling it yet.
+
+        Args:
+            all_roads: Candidate roads, in the order the sequential scan
+                visited them.  Their plan views must not change afterwards;
+                the sampled coordinates are cached on the first query.
+        """
+        self._roads: Tuple["Road", ...] = tuple(all_roads)
+        self._sampled_arrays: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None
+
+    def _sampled(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return the (xs, ys, road_slots) arrays, sampling on the first call.
+
+        Returns:
+            Tuple of the flattened x coordinates, the flattened y coordinates,
+            and the index into ``self._roads`` that owns each point.
+        """
+        if self._sampled_arrays is not None:
+            return self._sampled_arrays
+
+        xs: List[float] = []
+        ys: List[float] = []
+        road_slots: List[int] = []
+
+        for slot, road in enumerate(self._roads):
+            # Mirrors the scan's `continue`: roads without a plan view, and
+            # roads whose plan view yields no points, contribute nothing.
+            if road.plan_view is None:
+                continue
+            samples = _sample_road_points(road)
+            if not samples:
+                continue
+            for wx, wy, _, _ in samples:
+                xs.append(wx)
+                ys.append(wy)
+            road_slots.extend([slot] * len(samples))
+
+        self._sampled_arrays = (
+            np.asarray(xs, dtype=np.float64),
+            np.asarray(ys, dtype=np.float64),
+            # int32 halves the slot array against the coordinate arrays; road
+            # counts stay far below 2**31.
+            np.asarray(road_slots, dtype=np.int32),
+        )
+        return self._sampled_arrays
+
+    def nearest(self, x: float, y: float) -> Tuple[Optional["Road"], float]:
+        """Find the road owning the sample point closest to ``(x, y)``.
+
+        Args:
+            x: World-space x coordinate.
+            y: World-space y coordinate.
+
+        Returns:
+            ``(road, distance)`` for the closest sample point, or
+            ``(None, inf)`` when no road contributed a sample point — the
+            state the sequential scan ended in for that case.
+        """
+        xs, ys, road_slots = self._sampled()
+        if xs.size == 0:
+            return None, float("inf")
+
+        # Squared distance is monotone in distance, so it ranks the points
+        # identically while skipping a sqrt per point.  Squared in place to
+        # keep only two temporaries alive at peak.
+        dx = xs - x
+        np.square(dx, out=dx)
+        dy = ys - y
+        np.square(dy, out=dy)
+        dx += dy
+
+        winner = int(np.argmin(dx))
+        road = self._roads[int(road_slots[winner])]
+        # Recompute the winning distance with math.hypot so the threshold
+        # comparison and the warning text see the same value the per-point
+        # scan produced.
+        best_dist = math.hypot(x - float(xs[winner]), y - float(ys[winner]))
+        return road, best_dist
+
+
+def _nearest_road_to_point(
+    centroid: np.ndarray,
+    all_roads: List["Road"],
+    threshold_m: float,
+    road_index: Optional[RoadSamplePointIndex],
+    label: str,
+) -> Optional["Road"]:
+    """Find the road nearest to a 2D point, subject to a distance threshold.
+
+    Args:
+        centroid: 2D point (x, y) to search around.
+        all_roads: Candidate roads, used only when ``road_index`` is omitted.
+        threshold_m: Maximum allowed distance in meters.
+        road_index: Pre-built index over ``all_roads``; built on demand when
+            None.
+        label: Object description used in the out-of-threshold warning.
+
+    Returns:
+        Nearest Road within ``threshold_m``, or None if none is close enough.
+    """
+    index = road_index if road_index is not None else RoadSamplePointIndex(all_roads)
+    best_road, best_dist = index.nearest(float(centroid[0]), float(centroid[1]))
+
+    if best_dist > threshold_m:
+        logger.warning(
+            f"{label}: nearest road is {best_dist:.1f}m away "
+            f"(threshold={threshold_m}m), skipping"
+        )
+        return None
+
+    return best_road
+
+
 def _project_point_onto_road(
     point: np.ndarray,
     road: Road,
@@ -466,6 +599,7 @@ def find_nearest_road_for_linestring(
     linestring: lanelet2.core.LineString3d,
     all_roads: List["Road"],
     threshold_m: float = _NEAREST_ROAD_THRESHOLD_M,
+    road_index: Optional[RoadSamplePointIndex] = None,
 ) -> Optional["Road"]:
     """Find the nearest road to a linestring's centroid.
 
@@ -473,6 +607,9 @@ def find_nearest_road_for_linestring(
         linestring: LineString to find the nearest road for
         all_roads: List of all candidate roads
         threshold_m: Maximum allowed distance in meters
+        road_index: Pre-built index over ``all_roads``.  Pass a shared one to
+            avoid re-sampling every road reference line for each linestring;
+            built on demand when omitted.
 
     Returns:
         Nearest Road within threshold_m, or None if no road is close enough.
@@ -483,32 +620,20 @@ def find_nearest_road_for_linestring(
 
     centroid = np.mean(pts, axis=0)
 
-    best_road: Optional[Road] = None
-    best_dist = float("inf")
-
-    for road in all_roads:
-        if road.plan_view is None:
-            continue
-        for wx, wy, _, _ in _sample_road_points(road):
-            dist = math.hypot(float(centroid[0]) - wx, float(centroid[1]) - wy)
-            if dist < best_dist:
-                best_dist = dist
-                best_road = road
-
-    if best_dist > threshold_m:
-        logger.warning(
-            f"Stop line linestring {linestring.id}: nearest road is {best_dist:.1f}m away "
-            f"(threshold={threshold_m}m), skipping"
-        )
-        return None
-
-    return best_road
+    return _nearest_road_to_point(
+        centroid,
+        all_roads,
+        threshold_m,
+        road_index,
+        label=f"Stop line linestring {linestring.id}",
+    )
 
 
 def find_nearest_road(
     lanelet: lanelet2.core.Lanelet,
     all_roads: List[Road],
     threshold_m: float = _NEAREST_ROAD_THRESHOLD_M,
+    road_index: Optional[RoadSamplePointIndex] = None,
 ) -> Optional[Road]:
     """Find the nearest road to a crosswalk lanelet's centroid.
 
@@ -516,6 +641,9 @@ def find_nearest_road(
         lanelet: Crosswalk lanelet to find the nearest road for
         all_roads: List of all candidate roads
         threshold_m: Maximum allowed distance in meters
+        road_index: Pre-built index over ``all_roads``.  Pass a shared one to
+            avoid re-sampling every road reference line for each lanelet;
+            built on demand when omitted.
 
     Returns:
         Nearest Road within threshold_m, or None if no road is close enough.
@@ -532,23 +660,10 @@ def find_nearest_road(
     p3 = right_pts[0]
     centroid = np.mean([p0, p1, p2, p3], axis=0)
 
-    best_road: Optional[Road] = None
-    best_dist = float("inf")
-
-    for road in all_roads:
-        if road.plan_view is None:
-            continue
-        for wx, wy, _, _ in _sample_road_points(road):
-            dist = math.hypot(float(centroid[0]) - wx, float(centroid[1]) - wy)
-            if dist < best_dist:
-                best_dist = dist
-                best_road = road
-
-    if best_dist > threshold_m:
-        logger.warning(
-            f"Crosswalk lanelet {lanelet.id}: nearest road is {best_dist:.1f}m away "
-            f"(threshold={threshold_m}m), skipping"
-        )
-        return None
-
-    return best_road
+    return _nearest_road_to_point(
+        centroid,
+        all_roads,
+        threshold_m,
+        road_index,
+        label=f"Crosswalk lanelet {lanelet.id}",
+    )
