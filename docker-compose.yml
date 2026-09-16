@@ -1,8 +1,14 @@
-x-dev-base: &dev-base
+x-carla-base: &carla-base
   build:
     context: .
     target: dev
   image: l2o-dev:local
+  # CARLA ships x86_64-only wheels, so every CARLA-dependent service pins
+  # linux/amd64 explicitly. This must not rely on a developer's
+  # DOCKER_DEFAULT_PLATFORM environment variable (see docs/docker.md): on
+  # Apple Silicon this forces QEMU emulation, but it keeps `uv sync --extra
+  # carla` working regardless of host architecture.
+  platform: linux/amd64
   volumes:
     - .:/workspace
     # Isolate the container's .venv from the host so the host-side
@@ -11,11 +17,34 @@ x-dev-base: &dev-base
     - uv-cache:/root/.cache/uv
   working_dir: /workspace
 
+x-native-base: &native-base
+  build:
+    context: .
+    target: dev-nocarla
+  image: l2o-dev-nocarla:local
+  # Deliberately no `platform:` here: these services build and run for the
+  # host's native architecture (arm64 on Apple Silicon, avoiding QEMU
+  # emulation). Do not add `platform: linux/amd64` to this anchor.
+  volumes:
+    - .:/workspace
+    # Separate cache volumes from the carla-based services: the two venvs
+    # differ in both dependency set and architecture, and sharing a named
+    # volume between them reproduces the `SystemError: initialization`
+    # class of failure documented in docs/docker.md.
+    - venv-nocarla-cache:/workspace/.venv
+    - uv-nocarla-cache:/root/.cache/uv
+  working_dir: /workspace
+
 services:
   dev:
-    <<: *dev-base
+    <<: *carla-base
     command: bash
     profiles: ["dev"]
+
+  dev-native:
+    <<: *native-base
+    command: bash
+    profiles: ["dev-native"]
 
   # CI-equivalent jobs invoke entrypoints directly from the venv (PATH already
   # contains /workspace/.venv/bin via the image ENV). We deliberately avoid
@@ -23,12 +52,27 @@ services:
   # source on every invocation, which can rebuild workspace packages and
   # destabilize the carefully-built native dependencies in the image.
   pytest:
-    <<: *dev-base
-    command: pytest -v --tb=short -n auto
+    <<: *carla-base
+    # `-o addopts=` disables the `--testmon` default from pyproject.toml.
+    # .testmondata is written to the bind-mounted repo root, so it is shared
+    # across this (amd64) service, pytest-native (arm64), and the host. Mixed
+    # architectures in one testmon history can select stale results and
+    # silently run nothing; forcing a full run here keeps this service
+    # aligned with CI (.github/workflows/ci.yml).
+    command: pytest -v --tb=short -n auto -o addopts=
     profiles: ["test"]
 
+  pytest-native:
+    <<: *native-base
+    # See the `pytest` service above for why `-o addopts=` is required here
+    # too. CARLA-dependent test modules are skipped automatically (see
+    # autoware_carla_scenario/test/carla_scenario/conftest.py); the skip
+    # count is printed in the pytest run header.
+    command: pytest -v --tb=short -n auto -o addopts=
+    profiles: ["test-native"]
+
   qc-validate:
-    <<: *dev-base
+    <<: *carla-base
     command:
       - bash
       - -lc
@@ -41,7 +85,7 @@ services:
     profiles: ["qc"]
 
   carla-import-test:
-    <<: *dev-base
+    <<: *carla-base
     command:
       - bash
       - -lc
@@ -57,7 +101,7 @@ services:
     profiles: ["carla"]
 
   lint:
-    <<: *dev-base
+    <<: *carla-base
     command: pre-commit run --all-files
     profiles: ["lint"]
 
@@ -65,6 +109,10 @@ services:
     build:
       context: .
       target: convert
+    # `convert` copies the venv from the CARLA-enabled `deps` stage
+    # (`COPY --from=deps` in the Dockerfile), so it needs the same
+    # linux/amd64 pin as the carla-base services above.
+    platform: linux/amd64
     image: l2o-convert:local
     volumes:
       - ./io:/io
@@ -73,3 +121,5 @@ services:
 volumes:
   uv-cache:
   venv-cache:
+  uv-nocarla-cache:
+  venv-nocarla-cache:

@@ -20,6 +20,19 @@
 **/build/
 **/dist/
 
+# Generated conversion artifacts. These land inside the directories the
+# Dockerfile COPYs wholesale, so a single local test run changes the build
+# context and invalidates the `uv sync` layer -- a ~695s lanelet2 rebuild
+# natively, 30+ minutes under amd64 emulation. All three are already ignored
+# by .gitignore.
+#
+# NOTE: .dockerignore patterns are NOT .gitignore patterns. A pattern without
+# `**/` matches only at the context root, so `*.xodr` alone would silently do
+# nothing for these nested paths. Verified empirically.
+**/*.xodr
+**/*processed.osm
+**/*.mapping.json
+
 # uv cache
 .uv-cache
 
