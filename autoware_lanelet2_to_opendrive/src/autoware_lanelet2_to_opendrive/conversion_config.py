@@ -12,6 +12,9 @@ from typing import Any, Dict, Optional, Set, Tuple
 from lanelet2.routing import RoutingGraph
 
 
+DEFAULT_SIGNAL_COUNTRY = "DE"
+
+
 class WidthReference(Enum):
     """Reference line for width calculation."""
 
@@ -162,6 +165,18 @@ class StopLineConfig:
 
 
 @dataclass
+class SignalConfig:
+    """Configuration for OpenDRIVE signal generation.
+
+    Attributes:
+        country: OpenDRIVE signal country code. Defaults to "DE" to preserve
+            existing output.
+    """
+
+    country: str = DEFAULT_SIGNAL_COUNTRY
+
+
+@dataclass
 class TrafficLightConfig:
     """Configuration for traffic light actor spawn offset.
 
@@ -246,6 +261,7 @@ class ConversionConfig:
         parking_lot: Configuration for parking-lot emission (P2-1). Controls
             whether parking spaces and areas are emitted as OpenDRIVE objects,
             and the geometry parameters used for stall sizing and association.
+        signal: Configuration for OpenDRIVE signal generation.
     """
 
     output_path: Optional[Path] = None
@@ -261,6 +277,7 @@ class ConversionConfig:
     stopline: StopLineConfig = field(default_factory=StopLineConfig)
     traffic_light: TrafficLightConfig = field(default_factory=TrafficLightConfig)
     parking_lot: ParkingLotConfig = field(default_factory=ParkingLotConfig)
+    signal: SignalConfig = field(default_factory=SignalConfig)
 
     def __post_init__(self):
         """Validate configuration after initialization."""

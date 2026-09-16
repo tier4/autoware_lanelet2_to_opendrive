@@ -45,6 +45,26 @@ FROM deps AS dev
 ENV PATH="/workspace/.venv/bin:${PATH}"
 CMD ["bash"]
 
+# deps-nocarla mirrors `deps` above but installs without the `carla` extra,
+# producing a venv that runs natively on the host architecture (no
+# linux/amd64 pin needed). The same non-determinism rationale documented in
+# the single `deps` stage comment above applies here as well.
+FROM base AS deps-nocarla
+COPY pyproject.toml uv.lock .python-version ./
+COPY autoware_lanelet2_to_opendrive/ autoware_lanelet2_to_opendrive/
+COPY autoware_carla_scenario/ autoware_carla_scenario/
+# carla_wheels/ must be copied even though this stage never installs the
+# carla extra: pyproject.toml's `[tool.uv] find-links = ["carla_wheels"]` is
+# an unconditional setting, so `uv sync` fails if the directory doesn't
+# exist. The wheel inside (carla-0.10.0-cp310-cp310-linux_x86_64.whl,
+# x86_64-only) is never used by this stage.
+COPY carla_wheels/ carla_wheels/
+RUN uv sync --frozen --dev
+
+FROM deps-nocarla AS dev-nocarla
+ENV PATH="/workspace/.venv/bin:${PATH}"
+CMD ["bash"]
+
 FROM base AS convert
 COPY --from=deps /workspace /workspace
 ENV PATH="/workspace/.venv/bin:${PATH}"
