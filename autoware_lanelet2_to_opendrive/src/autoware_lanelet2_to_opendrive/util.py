@@ -312,11 +312,13 @@ def find_adjacent_groups(
     Returns:
         List of sets, where each set contains lanelets that are laterally adjacent to each other
     """
-    all_lanelets_in_map = set(lanelet_map.laneletLayer)
-
-    # If target_lanelets is empty, use all lanelets from the map
+    # If target_lanelets is empty, use all lanelets from the map.
+    # The full-map set is materialised only in that branch: on large maps it
+    # is tens of thousands of elements, and every caller that passes a
+    # non-empty ``target_lanelets`` (junction / divergence grouping, called
+    # once per site) never reads it.
     if not target_lanelets:
-        lanelets_to_group = all_lanelets_in_map
+        lanelets_to_group = set(lanelet_map.laneletLayer)
     else:
         # Use only the target lanelets without adding adjacent ones from other groups
         # The adjacency relationships will be found in the DFS below

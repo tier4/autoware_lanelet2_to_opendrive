@@ -167,6 +167,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         regular_roads: List[Road],
         lanelet_to_road_id: Dict[int, int],
         num_regular_groups: int,
+        routing_graph: Optional[RoutingGraph] = None,
     ) -> Tuple[
         List[Road],
         List[Junction],
@@ -182,6 +183,9 @@ class _Lanelet2ToOpenDRIVEConverter:
             lanelet_to_road_id: Existing lanelet-to-road mapping from regular roads
             num_regular_groups: Total number of regular road groups (including failed ones),
                 used to assign non-overlapping IDs to junction roads
+            routing_graph: Pre-built vehicle routing graph reused for the
+                whole junction phase. Building one is whole-map work, so
+                without it every junction pays for its own graph.
 
         Returns:
             Tuple of:
@@ -231,6 +235,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             # onto a parallel regular road (root cause of issue #431).
             regular_roads=regular_roads,
             lanelet_to_road_id=lanelet_to_road_id,
+            routing_graph=routing_graph,
         )
 
         # Merge lanelet-to-road mappings
@@ -242,6 +247,12 @@ class _Lanelet2ToOpenDRIVEConverter:
             f"Using junction ID offset: {junction_id_offset} "
             f"(junction IDs will be {junction_id_offset}+)"
         )
+
+        # Hoisted out of the per-junction loop below: the road list and its
+        # id index are identical for every junction, so rebuilding them once
+        # per junction is O(total_roads * junctions) of pure overhead.
+        all_roads_for_junction = regular_roads + connecting_roads
+        road_id_to_road = {road.id: road for road in all_roads_for_junction}
 
         junctions = []
         for junction_index, junction_group in enumerate(junction_groups):
@@ -255,7 +266,6 @@ class _Lanelet2ToOpenDRIVEConverter:
 
             # Build connections for this junction
             connecting_road_ids = junction_to_roads.get(junction_id, [])
-            all_roads_for_junction = regular_roads + connecting_roads
             connections = Junction.build_connections_from_roads(
                 lanelet_map=self.lanelet_map,
                 junction_lanelet_group=junction_group,
@@ -263,6 +273,8 @@ class _Lanelet2ToOpenDRIVEConverter:
                 lanelet_to_road_id=lanelet_to_road_id,
                 connecting_road_ids=connecting_road_ids,
                 roads=all_roads_for_junction,
+                routing_graph=routing_graph,
+                road_id_to_road=road_id_to_road,
             )
 
             junction.connections = connections
@@ -1092,7 +1104,13 @@ class _Lanelet2ToOpenDRIVEConverter:
             junction_lanelet_to_road,
             junction_lanelets,
         ) = self._build_junction_structure(
-            regular_roads, lanelet_to_road_id, num_groups_after_synthesis
+            regular_roads,
+            lanelet_to_road_id,
+            num_groups_after_synthesis,
+            # Same reuse the divergence pass and ``_setup_connections`` rely
+            # on: the lanelet map is not mutated after construction, so the
+            # graph built by ``Road.construct_from_lanelet_map`` stays valid.
+            routing_graph=regular_result.routing_graph,
         )
 
         # Issue #291: fold synthetic divergence/merge junctions and their
