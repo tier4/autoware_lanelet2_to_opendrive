@@ -86,6 +86,30 @@ docker compose --profile dev run --rm dev
 docker compose --profile dev-native run --rm dev-native
 ```
 
+### Running from a git worktree
+
+If `.` is a [`git worktree`](https://git-scm.com/docs/git-worktree) rather
+than the main checkout, its `.git` is a text file pointing at an absolute
+host path inside the *main* repository's `.git/worktrees/<name>` directory —
+a location outside the `.:/workspace` bind mount, so it's invisible to the
+container. `docker-compose.yml` mounts an extra volume at
+`${GIT_COMMON_DIR}` on both the carla-base and native-base anchors to make
+that path resolve; export it before running any compose command from a
+worktree:
+
+```bash
+export GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir)
+docker compose --profile lint run --rm lint
+docker compose --profile test-native run --rm pytest-native
+```
+
+When `GIT_COMMON_DIR` is unset (the normal, non-worktree case) the volume
+falls back to a harmless empty directory and every command above works
+exactly as documented, with no extra step. The image also bakes in
+`git config --system --add safe.directory '*'` so that the bind-mounted
+`.git` (owned by the host UID) isn't rejected by git's "dubious ownership"
+check inside the container (which runs as root).
+
 The `dev` and `dev-native` profiles bind-mount the repository root at
 `/workspace`, so source edits on the host are immediately visible inside the
 container. Named volumes isolate state from the host, and the two
@@ -224,11 +248,9 @@ If the first run stalls on dependency builds, generate the XODR on the host
 
 ### Pre-commit fails with `Is it installed, and are you in a Git repository directory?`
 
-Hooks run inside a container that has `git` installed but cannot resolve the
-host's `.git` if you are working from a `git worktree`. The bind-mounted
-`.git` file inside a worktree points to a path under the parent repository
-that the container does not see. Run the lint profile from a regular checkout
-of the repository, or run pre-commit directly on the host.
+You are running from a `git worktree` without exporting `GIT_COMMON_DIR`
+first. See [Running from a git worktree](#running-from-a-git-worktree)
+above.
 
 ### `docker compose ... config` reports a YAML error
 

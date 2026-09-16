@@ -15,6 +15,9 @@ x-carla-base: &carla-base
     # interpreter path doesn't pollute the bind-mounted source tree.
     - venv-cache:/workspace/.venv
     - uv-cache:/root/.cache/uv
+    # Makes a worktree's .git file (which points outside .:/workspace)
+    # resolve inside the container. See docs/docker.md#running-from-a-git-worktree.
+    - ${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}:${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}
   working_dir: /workspace
 
 x-native-base: &native-base
@@ -33,6 +36,10 @@ x-native-base: &native-base
     # class of failure documented in docs/docker.md.
     - venv-nocarla-cache:/workspace/.venv
     - uv-nocarla-cache:/root/.cache/uv
+    # Same worktree fix as carla-base above (see
+    # docs/docker.md#running-from-a-git-worktree). The native services are
+    # the day-to-day path, so they need this at least as much as carla-base.
+    - ${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}:${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}
   working_dir: /workspace
 
 services:
