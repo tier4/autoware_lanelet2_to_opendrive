@@ -242,3 +242,253 @@ def test_extract_centerline_reuses_supplied_routing_graph(
             lanelet_map, adjacent_pair, routing_graph=routing_graph
         )
     assert spy.call_count == 0
+
+
+def _signal_construct_mocks():
+    """Minimal mocks to drive ``construct_from_lanelet_map`` with one signal."""
+    from unittest.mock import MagicMock, Mock
+
+    from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
+    from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
+
+    points = [MagicMock(x=10.0, y=5.0, z=8.0)]
+    linestring = MagicMock()
+    linestring.id = 1001
+    linestring.__len__ = Mock(return_value=len(points))
+    linestring.__getitem__ = Mock(side_effect=lambda i: points[i])
+    linestring.__iter__ = Mock(side_effect=lambda: iter(points))
+
+    traffic_light = MagicMock()
+    traffic_light.id = 9000
+    traffic_light.trafficLights = [linestring]
+    traffic_light.stopLine = None
+    traffic_light.attributes = {}
+
+    lanelet_map = MagicMock()
+    lanelet_map.laneletLayer.get.return_value = MagicMock()
+
+    mapping = RoadLaneletMapping(
+        road_to_lanelets={0: [100, 101], 1: [200, 201]},
+        lanelet_to_road={100: 0, 101: 0, 200: 1, 201: 1},
+    )
+
+    roads = []
+    for road_id, lane_map in ((0, {100: -1, 101: -2}), (1, {200: -1, 201: -2})):
+        road = MagicMock()
+        road.id = road_id
+        road.rule = TrafficRule.RHT
+        road.get_lanelet_to_lane_mapping.return_value = lane_map
+        road.get_half_width_at_s.return_value = -4.0
+        road.get_elevation_at_s.return_value = 0.0
+        roads.append(road)
+
+    return lanelet_map, mapping, roads, {9000: (traffic_light, [100, 200])}
+
+
+def test_signals_construct_reuses_supplied_routing_graph():
+    """SignalsAndControllers must not rebuild the graph when one is supplied.
+
+    The signals phase used to call ``create_routing_graph`` unconditionally,
+    paying for a full map-wide graph a second time on every conversion.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
+
+    lanelet_map, mapping, roads, tl_map = _signal_construct_mocks()
+    sentinel = object()
+
+    with (
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+            return_value=tl_map,
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.create_routing_graph"
+        ) as build,
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
+            return_value=(5.0, -3.0),
+        ) as position,
+    ):
+        SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=lanelet_map,
+            road_lanelet_mapping=mapping,
+            roads=roads,
+            routing_graph=sentinel,
+        )
+
+    assert build.call_count == 0
+    # ...and the supplied graph is what reaches the per-signal fit.
+    assert position.call_args.kwargs.get("routing_graph") is sentinel
+
+
+def test_signals_construct_builds_graph_when_none_supplied():
+    """Backward compatibility: omitting the graph keeps the single build."""
+    from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
+
+    lanelet_map, mapping, roads, tl_map = _signal_construct_mocks()
+
+    with (
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.filter_regulatory_element_by_type",
+            return_value=tl_map,
+        ),
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.create_routing_graph"
+        ) as build,
+        patch(
+            "autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers.SignalsAndControllers._calculate_signal_position",
+            return_value=(5.0, -3.0),
+        ),
+    ):
+        SignalsAndControllers.construct_from_lanelet_map(
+            lanelet_map=lanelet_map,
+            road_lanelet_mapping=mapping,
+            roads=roads,
+        )
+
+    assert build.call_count == 1
+
+
+def test_signal_position_cache_fits_each_road_once():
+    """A shared cache reuses one reference line per road, results unchanged.
+
+    ``_calculate_signal_position`` refits the road's reference line for every
+    (signal, road) pair; the B-spline solve dominates the signals phase on
+    maps where several traffic lights share a road.
+    """
+    from unittest.mock import Mock
+
+    import numpy as np
+
+    from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
+    from autoware_lanelet2_to_opendrive.spline import Splines
+
+    traffic_light = Mock()
+    traffic_light.stopLine = None
+    traffic_light.id = 1
+
+    point = Mock(x=10.0, y=5.0, z=2.0)
+    linestring = Mock()
+    linestring.__len__ = Mock(return_value=1)
+    linestring.__getitem__ = Mock(return_value=point)
+
+    spline = Splines(np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]]))
+    lanelet_map = Mock()
+    lanelet_map.laneletLayer.get.return_value = Mock()
+    mapping = Mock()
+    mapping.get_lanelets_for_road.return_value = [1, 2, 3]
+
+    cache: dict = {}
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
+    ) as mock_rl:
+        reference_line = Mock()
+        reference_line.centerline_2d = spline
+        mock_rl.construct_from_lanelet_groups.return_value = reference_line
+
+        def call(road_id):
+            return SignalsAndControllers._calculate_signal_position(
+                traffic_light=traffic_light,
+                light_linestring=linestring,
+                road_id=road_id,
+                lanelet_map=lanelet_map,
+                road_lanelet_mapping=mapping,
+                reference_line_cache=cache,
+            )
+
+        first = call(7)
+        second = call(7)
+        assert mock_rl.construct_from_lanelet_groups.call_count == 1
+        assert first == second
+
+        # A different road is a cache miss and must be fitted on its own.
+        call(8)
+        assert mock_rl.construct_from_lanelet_groups.call_count == 2
+
+    assert set(cache) == {7, 8}
+
+
+def test_signal_position_without_cache_still_fits_every_time():
+    """Omitting the cache keeps the previous (uncached) behaviour."""
+    from unittest.mock import Mock
+
+    import numpy as np
+
+    from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
+    from autoware_lanelet2_to_opendrive.spline import Splines
+
+    traffic_light = Mock()
+    traffic_light.stopLine = None
+    traffic_light.id = 1
+
+    point = Mock(x=10.0, y=5.0, z=2.0)
+    linestring = Mock()
+    linestring.__len__ = Mock(return_value=1)
+    linestring.__getitem__ = Mock(return_value=point)
+
+    spline = Splines(np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]]))
+    lanelet_map = Mock()
+    lanelet_map.laneletLayer.get.return_value = Mock()
+    mapping = Mock()
+    mapping.get_lanelets_for_road.return_value = [1, 2, 3]
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
+    ) as mock_rl:
+        reference_line = Mock()
+        reference_line.centerline_2d = spline
+        mock_rl.construct_from_lanelet_groups.return_value = reference_line
+
+        for _ in range(2):
+            SignalsAndControllers._calculate_signal_position(
+                traffic_light=traffic_light,
+                light_linestring=linestring,
+                road_id=7,
+                lanelet_map=lanelet_map,
+                road_lanelet_mapping=mapping,
+            )
+
+    assert mock_rl.construct_from_lanelet_groups.call_count == 2
+
+
+def test_signal_position_failed_fit_is_not_cached():
+    """A road whose fit raises must warn and fall back on every signal."""
+    from unittest.mock import Mock
+
+    from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
+
+    traffic_light = Mock()
+    traffic_light.stopLine = None
+    traffic_light.id = 1
+
+    point = Mock(x=10.0, y=5.0, z=2.0)
+    linestring = Mock()
+    linestring.__len__ = Mock(return_value=1)
+    linestring.__getitem__ = Mock(return_value=point)
+
+    lanelet_map = Mock()
+    lanelet_map.laneletLayer.get.return_value = Mock()
+    mapping = Mock()
+    mapping.get_lanelets_for_road.return_value = [1, 2, 3]
+
+    cache: dict = {}
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
+    ) as mock_rl:
+        mock_rl.construct_from_lanelet_groups.side_effect = RuntimeError("fit failed")
+
+        results = [
+            SignalsAndControllers._calculate_signal_position(
+                traffic_light=traffic_light,
+                light_linestring=linestring,
+                road_id=7,
+                lanelet_map=lanelet_map,
+                road_lanelet_mapping=mapping,
+                reference_line_cache=cache,
+            )
+            for _ in range(2)
+        ]
+
+    assert results == [(0.0, -4.0), (0.0, -4.0)]
+    assert mock_rl.construct_from_lanelet_groups.call_count == 2
+    assert cache == {}
