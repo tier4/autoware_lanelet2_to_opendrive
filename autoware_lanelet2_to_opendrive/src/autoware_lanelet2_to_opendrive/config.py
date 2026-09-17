@@ -124,8 +124,9 @@ class OpenDriveConstants:
                            - Junction 0 becomes ID 1000
                            - Junction 1 becomes ID 1001
                            - etc.
-                           This ensures junction IDs never collide with road IDs
-                           even for large maps with hundreds of roads.
+                           Once the highest road ID reaches the offset, junction
+                           IDs start at the next multiple of the offset above it
+                           instead, so they never collide with road IDs.
     """
 
     junction_id_offset: int = 1000

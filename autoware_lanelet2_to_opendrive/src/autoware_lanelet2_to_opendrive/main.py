@@ -1260,6 +1260,29 @@ class _Lanelet2ToOpenDRIVEConverter:
             all_roads.extend(parking_roads)
             print(f"Built {len(parking_roads)} parking roads")
 
+        # Step 6.95: Move the junction IDs above the road IDs (CARLA resolves
+        # both in one ID space). They were numbered from ``junction_id_offset``
+        # (issue #132) and written into the connecting roads and junction
+        # links as those were built, so shift every ID and reference by one
+        # amount now that all roads exist; the synthetic junctions (#291) keep
+        # their band 10000 above the others.
+        from autoware_lanelet2_to_opendrive.opendrive.junction import (
+            junction_id_base,
+            shift_junction_ids,
+        )
+
+        max_road_id = max((road.id for road in all_roads), default=-1)
+        junction_id_start = junction_id_base(
+            max_road_id, self.config.junction_id_offset
+        )
+        junction_id_shift = junction_id_start - self.config.junction_id_offset
+        if junction_id_shift:
+            shift_junction_ids(junctions, all_roads, junction_id_shift)
+            print(
+                f"Junction IDs start at {junction_id_start} instead of "
+                f"{self.config.junction_id_offset} (highest road ID {max_road_id})"
+            )
+
         # Step 7: Write OpenDRIVE output
         opendrive = self._write_opendrive_output(
             all_roads, junctions, signals_and_controllers
