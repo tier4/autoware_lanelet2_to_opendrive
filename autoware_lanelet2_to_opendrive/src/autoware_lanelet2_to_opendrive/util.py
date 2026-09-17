@@ -1,7 +1,17 @@
 """Utility functions for lanelet2 to OpenDRIVE conversion."""
 
 import logging
-from typing import Set, List, Union, Dict, Optional, Iterable, Literal
+from typing import (
+    Set,
+    List,
+    Union,
+    Dict,
+    Optional,
+    Iterable,
+    Literal,
+    Hashable,
+    Mapping,
+)
 from enum import Enum
 from dataclasses import dataclass
 import lanelet2
@@ -379,6 +389,44 @@ def find_adjacent_groups(
     return groups
 
 
+def _split_group_by_signature(
+    lanelet_map: lanelet2.core.LaneletMap,
+    group: Set[lanelet2.core.Lanelet],
+    sigs: Mapping[int, Hashable],
+    routing_graph: RoutingGraph,
+) -> List[Set[lanelet2.core.Lanelet]]:
+    """Cut ``group`` into laterally contiguous runs of equal signature.
+
+    Non-adjacent input (``sort_adjacent_groups`` raises) falls back to one
+    lateral component per signature bucket, so every emitted group is
+    itself adjacency-connected.
+    """
+    try:
+        sorted_lls = sort_adjacent_groups(lanelet_map, group, routing_graph)
+    except ValueError:
+        buckets: Dict[Hashable, Set[lanelet2.core.Lanelet]] = {}
+        for ll in group:
+            buckets.setdefault(sigs[ll.id], set()).add(ll)
+        parts: List[Set[lanelet2.core.Lanelet]] = []
+        for bucket in buckets.values():
+            parts.extend(find_adjacent_groups(lanelet_map, bucket, routing_graph))
+        return parts
+
+    parts = []
+    run: List[lanelet2.core.Lanelet] = []
+    run_sig: Optional[Hashable] = None
+    for lanelet in sorted_lls:
+        sig = sigs[lanelet.id]
+        if run and sig != run_sig:
+            parts.append(set(run))
+            run = []
+        run.append(lanelet)
+        run_sig = sig
+    if run:
+        parts.append(set(run))
+    return parts
+
+
 def split_groups_by_divergent_connections(
     lanelet_map: lanelet2.core.LaneletMap,
     groups: List[Set[lanelet2.core.Lanelet]],
@@ -467,34 +515,9 @@ def split_groups_by_divergent_connections(
                 continue
 
             any_split = True
-            try:
-                sorted_lls = sort_adjacent_groups(lanelet_map, group, routing_graph)
-            except ValueError:
-                # Non-adjacent input: partition by signature, then split each
-                # signature-bucket into laterally-connected components so the
-                # downstream sort_adjacent_groups call cannot fail on our
-                # output. find_adjacent_groups restricted to a target set is
-                # exactly that: lateral-only DFS over the subset.
-                buckets: Dict[frozenset, Set[lanelet2.core.Lanelet]] = {}
-                for ll in group:
-                    buckets.setdefault(sigs[ll.id], set()).add(ll)
-                for bucket in buckets.values():
-                    new_groups.extend(
-                        find_adjacent_groups(lanelet_map, bucket, routing_graph)
-                    )
-                continue
-
-            run: List[lanelet2.core.Lanelet] = []
-            run_sig: Optional[frozenset] = None
-            for lanelet in sorted_lls:
-                sig = sigs[lanelet.id]
-                if run and sig != run_sig:
-                    new_groups.append(set(run))
-                    run = []
-                run.append(lanelet)
-                run_sig = sig
-            if run:
-                new_groups.append(set(run))
+            new_groups.extend(
+                _split_group_by_signature(lanelet_map, group, sigs, routing_graph)
+            )
 
         if not any_split:
             return new_groups
@@ -510,6 +533,97 @@ def split_groups_by_divergent_connections(
         "indicates a cycle in the lateral grouping refinement, which "
         "should be impossible because each split strictly increases the "
         "group count"
+    )
+
+
+def split_junction_groups_by_connections(
+    lanelet_map: lanelet2.core.LaneletMap,
+    groups: List[Set[lanelet2.core.Lanelet]],
+    routing_graph: Optional[RoutingGraph] = None,
+    lanelet_to_road_id: Optional[Dict[int, int]] = None,
+) -> List[Set[lanelet2.core.Lanelet]]:
+    """Refine one junction's lateral lanelet groups so that the lanelets of
+    each group share the same incoming and outgoing roads.
+
+    A connecting road carries one road-level ``<predecessor>`` and one
+    ``<successor>``, and its lane links are read against those roads.
+    Laterally adjacent connecting lanelets that come from, or lead to,
+    different roads therefore have to become separate connecting roads --
+    the junction counterpart of :func:`split_groups_by_divergent_connections`.
+
+    A lanelet's signature is the pair (predecessor keys, successor keys).
+    A neighbour outside the junction is keyed by the regular road it belongs
+    to (``lanelet_to_road_id``), a neighbour inside the junction by the group
+    it currently belongs to, so chained connecting roads split only where
+    their neighbouring groups differ.  Neighbours missing from
+    ``lanelet_to_road_id`` cannot be told apart and share one key, so they
+    never cause a split on their own; a lanelet with no neighbour on one side
+    has an empty key set there and forms its own group.  Unlike the
+    regular-road splitter, the predecessor side is split too: no synthesis
+    pass covers connecting roads, and a connecting road's single
+    ``<predecessor>`` has to hold for every lane's link.  Splits are iterated
+    to a fixed point with the same provable bound as
+    :func:`split_groups_by_divergent_connections`.
+
+    Args:
+        lanelet_map: Map containing the lanelets.
+        groups: Lateral groups of one junction from :func:`find_adjacent_groups`.
+        routing_graph: Optional pre-built routing graph; created on demand.
+        lanelet_to_road_id: ``lanelet_id -> road_id`` of the regular roads
+            built before the junction phase.  Without it only the groups
+            inside the junction can split.
+
+    Returns:
+        Refined groups. Length is >= ``len(groups)``; the partition of
+        lanelets is preserved.
+    """
+    if routing_graph is None:
+        routing_graph = create_routing_graph(lanelet_map)
+    road_of = lanelet_to_road_id or {}
+
+    current_groups: List[Set[lanelet2.core.Lanelet]] = [set(g) for g in groups]
+    total_lanelets = sum(len(g) for g in current_groups)
+    iteration_cap = total_lanelets + 1
+
+    for _ in range(iteration_cap):
+        ll_to_gid: Dict[int, int] = {}
+        for gid, group in enumerate(current_groups):
+            for lanelet in group:
+                ll_to_gid[lanelet.id] = gid
+
+        def key(neighbour: lanelet2.core.Lanelet) -> tuple[str, int]:
+            if neighbour.id in ll_to_gid:
+                return ("group", ll_to_gid[neighbour.id])
+            if neighbour.id in road_of:
+                return ("road", road_of[neighbour.id])
+            return ("outside", -1)
+
+        def signature(lanelet: lanelet2.core.Lanelet) -> tuple[frozenset, frozenset]:
+            return (
+                frozenset(key(n) for n in routing_graph.previous(lanelet)),
+                frozenset(key(n) for n in routing_graph.following(lanelet)),
+            )
+
+        new_groups: List[Set[lanelet2.core.Lanelet]] = []
+        any_split = False
+        for group in current_groups:
+            sigs = {ll.id: signature(ll) for ll in group}
+            if len(set(sigs.values())) <= 1:
+                new_groups.append(group)
+                continue
+            any_split = True
+            new_groups.extend(
+                _split_group_by_signature(lanelet_map, group, sigs, routing_graph)
+            )
+
+        if not any_split:
+            return new_groups
+        current_groups = new_groups
+
+    raise RuntimeError(
+        "split_junction_groups_by_connections did not converge within "
+        f"{iteration_cap} iterations on {total_lanelets} lanelets; each split "
+        "strictly increases the group count, so this should be impossible"
     )
 
 

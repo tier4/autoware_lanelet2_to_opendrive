@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic Lanelet2 fixture: two incoming roads merge into one group of
+  adjacent connecting lanelets (the fan-in counterpart of junction_fanout_mini).
+
+  Layout (looking from above, driving direction +x, lanes about 3.5 m wide):
+    incoming  X  (id 5101, one lane, straight)          local_x 81700 -> 81720
+              Y1/Y2 (ids 5102-5103, two lanes, from the lower left)
+    junction  J1/J2/J3 (ids 5104-5106)   local_x 81720 -> 81735, turn_direction=straight
+    outgoing  A1/A2/A3 (ids 5107-5109)   local_x 81735 -> 81755
+  X continues into J1, Y1 and Y2 into J2 and J3; all three continue into A.
+  X and Y share the node where J1 and J2 meet but no boundary way, so they are
+  two roads, while J1-J3 are laterally adjacent.
+
+  The connecting road can carry a single road-level <predecessor> (X); the
+  lanes coming from Y must not emit <predecessor id> values that only exist
+  in Y, because they are read against X.
+
+  Node lat/lon place the layout (local_x -> east, local_y -> north); the
+  local_x/local_y tags follow the other mini fixtures and are not read.
+-->
+<osm generator="junction_fanin_mini_fixture">
+  <MetaInfo format_version="1" map_version="1"/>
+
+  <node id="3101" lat="35.688623" lon="139.692821">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50207.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3102" lat="35.688623" lon="139.692987">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81735.0"/>
+    <tag k="local_y" v="50207.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3103" lat="35.688623" lon="139.693208">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81755.0"/>
+    <tag k="local_y" v="50207.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3104" lat="35.688592" lon="139.692821">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50203.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3105" lat="35.688592" lon="139.692987">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81735.0"/>
+    <tag k="local_y" v="50203.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3106" lat="35.688592" lon="139.693208">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81755.0"/>
+    <tag k="local_y" v="50203.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3107" lat="35.688560" lon="139.692821">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3108" lat="35.688560" lon="139.692987">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81735.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3109" lat="35.688560" lon="139.693208">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81755.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3110" lat="35.688529" lon="139.692821">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3111" lat="35.688529" lon="139.692987">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81735.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3112" lat="35.688529" lon="139.693208">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81755.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3113" lat="35.688623" lon="139.692600">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50207.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3114" lat="35.688592" lon="139.692600">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50203.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3115" lat="35.688538" lon="139.692600">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50197.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3116" lat="35.688506" lon="139.692600">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50194.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3117" lat="35.688475" lon="139.692600">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50190.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- T_X: T_in -> T0 -->
+  <way id="4101">
+    <nd ref="3113"/>
+    <nd ref="3101"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- M_X: M_in -> M0 -->
+  <way id="4102">
+    <nd ref="3114"/>
+    <nd ref="3104"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- L_Y: Y_L -> M0 -->
+  <way id="4103">
+    <nd ref="3115"/>
+    <nd ref="3104"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- M_Y: Y_M -> N0 -->
+  <way id="4104">
+    <nd ref="3116"/>
+    <nd ref="3107"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- R_Y: Y_R -> B0 -->
+  <way id="4105">
+    <nd ref="3117"/>
+    <nd ref="3110"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- T_J: T0 -> T1 -->
+  <way id="4106">
+    <nd ref="3101"/>
+    <nd ref="3102"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- M_J: M0 -> M1 -->
+  <way id="4107">
+    <nd ref="3104"/>
+    <nd ref="3105"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- N_J: N0 -> N1 -->
+  <way id="4108">
+    <nd ref="3107"/>
+    <nd ref="3108"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- B_J: B0 -> B1 -->
+  <way id="4109">
+    <nd ref="3110"/>
+    <nd ref="3111"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- T_A: T1 -> T2 -->
+  <way id="4110">
+    <nd ref="3102"/>
+    <nd ref="3103"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- M_A: M1 -> M2 -->
+  <way id="4111">
+    <nd ref="3105"/>
+    <nd ref="3106"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- N_A: N1 -> N2 -->
+  <way id="4112">
+    <nd ref="3108"/>
+    <nd ref="3109"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- B_A: B1 -> B2 -->
+  <way id="4113">
+    <nd ref="3111"/>
+    <nd ref="3112"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- Lanelet X -->
+  <relation id="5101">
+    <member type="way" role="left" ref="4101"/>
+    <member type="way" role="right" ref="4102"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+  </relation>
+  <!-- Lanelet Y1 -->
+  <relation id="5102">
+    <member type="way" role="left" ref="4103"/>
+    <member type="way" role="right" ref="4104"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+  </relation>
+  <!-- Lanelet Y2 -->
+  <relation id="5103">
+    <member type="way" role="left" ref="4104"/>
+    <member type="way" role="right" ref="4105"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+  </relation>
+  <!-- Lanelet J1 -->
+  <relation id="5104">
+    <member type="way" role="left" ref="4106"/>
+    <member type="way" role="right" ref="4107"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+    <tag k="turn_direction" v="straight"/>
+  </relation>
+  <!-- Lanelet J2 -->
+  <relation id="5105">
+    <member type="way" role="left" ref="4107"/>
+    <member type="way" role="right" ref="4108"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+    <tag k="turn_direction" v="straight"/>
+  </relation>
+  <!-- Lanelet J3 -->
+  <relation id="5106">
+    <member type="way" role="left" ref="4108"/>
+    <member type="way" role="right" ref="4109"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+    <tag k="turn_direction" v="straight"/>
+  </relation>
+  <!-- Lanelet A1 -->
+  <relation id="5107">
+    <member type="way" role="left" ref="4110"/>
+    <member type="way" role="right" ref="4111"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+  </relation>
+  <!-- Lanelet A2 -->
+  <relation id="5108">
+    <member type="way" role="left" ref="4111"/>
+    <member type="way" role="right" ref="4112"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+  </relation>
+  <!-- Lanelet A3 -->
+  <relation id="5109">
+    <member type="way" role="left" ref="4112"/>
+    <member type="way" role="right" ref="4113"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+    <tag k="speed_limit" v="30"/>
+  </relation>
+</osm>

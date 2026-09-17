@@ -829,8 +829,9 @@ class Road:
         road_link_predecessor = self.link.predecessor if self.link else None
         road_link_successor = self.link.successor if self.link else None
 
-        # Issue #124 Part 1 fix: For connecting roads (junction >= 0), allow lane
-        # links even without road links
+        # Connecting roads (junction >= 0) only ever get road-typed links
+        # (set_connecting_road_links), so the junction membership checks
+        # below do not apply to them
         is_connecting_road = self.junction is not None and self.junction >= 0
 
         # Find predecessor lanelets
@@ -878,30 +879,11 @@ class Road:
                                 elif not is_connecting_road:
                                     continue
                             else:
-                                # Road link predecessor is a regular road
-                                # Lane link must reference the same road
-                                # (unless this is a connecting road)
-                                if (
-                                    pred_road_id != road_link_predecessor.element_id
-                                    and not is_connecting_road
-                                ):
-                                    # Lane predecessor differs from road link - check if it's a branching scenario
-                                    # Allow if predecessor is a connecting road (junction branching)
-                                    if road_id_to_road is not None:
-                                        pred_road = road_id_to_road.get(pred_road_id)
-                                        if (
-                                            pred_road is not None
-                                            and pred_road.junction is not None
-                                            and pred_road.junction >= 0
-                                        ):
-                                            # Predecessor is a connecting road - allow lane branching
-                                            pass
-                                        else:
-                                            # Predecessor is a regular road but doesn't match road link - skip
-                                            continue
-                                    else:
-                                        # Cannot validate - skip for safety
-                                        continue
+                                # Road link predecessor is a road: the lane link id is
+                                # read against that road, so the lane's predecessor
+                                # must lie in it (connecting roads included)
+                                if pred_road_id != road_link_predecessor.element_id:
+                                    continue
 
                         # Validate that the lane exists in the predecessor road
                         if road_lane_ids is not None:
@@ -961,30 +943,11 @@ class Road:
                                 elif not is_connecting_road:
                                     continue
                             else:
-                                # Road link successor is a regular road
-                                # Lane link must reference the same road
-                                # (unless this is a connecting road)
-                                if (
-                                    succ_road_id != road_link_successor.element_id
-                                    and not is_connecting_road
-                                ):
-                                    # Lane successor differs from road link - check if it's a branching scenario
-                                    # Allow if successor is a connecting road (junction branching)
-                                    if road_id_to_road is not None:
-                                        succ_road = road_id_to_road.get(succ_road_id)
-                                        if (
-                                            succ_road is not None
-                                            and succ_road.junction is not None
-                                            and succ_road.junction >= 0
-                                        ):
-                                            # Successor is a connecting road - allow lane branching
-                                            pass
-                                        else:
-                                            # Successor is a regular road but doesn't match road link - skip
-                                            continue
-                                    else:
-                                        # Cannot validate - skip for safety
-                                        continue
+                                # Road link successor is a road: the lane link id is
+                                # read against that road, so the lane's successor
+                                # must lie in it (connecting roads included)
+                                if succ_road_id != road_link_successor.element_id:
+                                    continue
 
                         # Validate that the lane exists in the successor road
                         if road_lane_ids is not None:
@@ -1466,7 +1429,10 @@ class Road:
         """Construct connecting roads from junction lanelet groups.
 
         Creates roads from lanelets inside junctions. These roads have their
-        junction field set to the appropriate junction ID.
+        junction field set to the appropriate junction ID.  Laterally adjacent
+        lanelets form one road only when they share their incoming and
+        outgoing roads (``split_junction_groups_by_connections``); a lateral
+        group whose lanes fan out becomes several connecting roads.
 
         When ``regular_roads`` and ``lanelet_to_road_id`` are provided, the
         junction phase pins each connecting road's reference-line endpoints
@@ -1497,8 +1463,10 @@ class Road:
             regular_roads: Already-built non-junction roads used to source
                 world-frame endpoints for connecting-road overrides.
             lanelet_to_road_id: Mapping ``lanelet_id -> road_id`` for regular
-                roads.  Used together with ``regular_roads`` to resolve which
-                regular road a connecting lanelet enters / leaves.
+                roads.  Keys the split of lateral groups by their incoming and
+                outgoing roads (without it, lateral groups split only along
+                other connecting groups) and, together with ``regular_roads``,
+                resolves which regular road a connecting lanelet enters / leaves.
             routing_graph: Pre-built routing graph (reused when available).
 
         Returns:
@@ -1507,7 +1475,7 @@ class Road:
             - Dict mapping junction_id -> list of road IDs in that junction
             - Dict mapping lanelet_id -> road_id for all junction lanelets
         """
-        from ..util import find_adjacent_groups
+        from ..util import find_adjacent_groups, split_junction_groups_by_connections
 
         connecting_roads = []
         junction_to_roads: dict[int, List[int]] = {}
@@ -1517,7 +1485,7 @@ class Road:
         regular_road_by_id: Dict[int, "Road"] = {r.id: r for r in (regular_roads or [])}
         ll_to_regular_road: Dict[int, int] = lanelet_to_road_id or {}
 
-        if regular_road_by_id and routing_graph is None:
+        if routing_graph is None:
             traffic_rules = lanelet2.traffic_rules.create(
                 lanelet2.traffic_rules.Locations.Germany,
                 lanelet2.traffic_rules.Participants.Vehicle,
@@ -1610,7 +1578,16 @@ class Road:
             junction_id = junction_index + junction_id_offset
             # Find adjacent groups within this junction
             adjacent_groups_in_junction = find_adjacent_groups(
-                lanelet_map, set(junction_group)
+                lanelet_map, set(junction_group), routing_graph
+            )
+            # Lanes that come from or lead to different roads cannot share a
+            # connecting road: its road-level links name one road each and
+            # the lane links are read against them
+            adjacent_groups_in_junction = split_junction_groups_by_connections(
+                lanelet_map,
+                adjacent_groups_in_junction,
+                routing_graph,
+                ll_to_regular_road,
             )
 
             junction_road_ids = []
@@ -1844,12 +1821,13 @@ class Road:
             if not road_lanelets:
                 continue
 
-            # Resolve links from the reference-line lanelet first. A
-            # connecting road may bundle several lanes; when those lanes
-            # diverge to different outgoing roads, ``_find_connected_road``
-            # (first match wins) must follow the lane the road's reference
-            # line is built from -- the one adjacent to it, ``|lane id| ==
-            # 1`` -- or the road-level link contradicts the geometry.
+            # Resolve links from the reference-line lanelet first. The lanes
+            # of a connecting road share their neighbouring roads after
+            # ``split_junction_groups_by_connections``, but a lanelet with two
+            # successors still makes ``_find_connected_road`` (first match
+            # wins) depend on which lane is asked first; follow the lane the
+            # road's reference line is built from -- the one adjacent to it,
+            # ``|lane id| == 1`` -- or the road-level link contradicts the geometry.
             lane_of = road.get_lanelet_to_lane_mapping()
             road_lanelets.sort(key=lambda ll: abs(lane_of.get(ll.id, 99)))
 

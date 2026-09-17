@@ -602,7 +602,8 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 **Processing:**
 1. Group junction lanelets by spatial overlap
 2. Create `Junction` objects for each group
-3. Build `ConnectingRoad` objects for junction lanes
+3. Build `ConnectingRoad` objects for junction lanes, one per group of adjacent
+   lanes that share the same incoming and outgoing roads
 4. Link connecting roads to incoming/outgoing roads
 
 **Output:** List of `Junction` objects with connections
