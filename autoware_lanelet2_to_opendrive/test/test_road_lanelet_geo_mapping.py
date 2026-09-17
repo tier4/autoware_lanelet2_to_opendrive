@@ -18,6 +18,7 @@ from autoware_lanelet2_to_opendrive.opendrive.geometry import (
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+    _MATCH_THRESHOLD,
     GeoRoadLaneletMapping,
     MappingMismatchError,
     _RoadCandidates,
@@ -25,6 +26,7 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     _sample_reference_line_from_road,
     parse_roads_from_xodr,
     save_mapping_json,
+    summarise_reference_match_accuracy,
     validate_mapping_consistency,
 )
 
@@ -164,6 +166,96 @@ class TestSaveMappingJson:
         assert data["skipped_synthetic_roads"] == [274, 290, 303]
         restored = GeoRoadLaneletMapping.from_dict(data)
         assert restored.skipped_synthetic_roads == [274, 290, 303]
+
+    def test_round_trip_preserves_reference_match_distances(
+        self, tmp_path: Path
+    ) -> None:
+        """Positional error against the Lanelet2 input survives the JSON."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            reference_match_distances={10: 0.1234, 11: 2.5},
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["reference_match_distances"] == {"10": 0.1234, "11": 2.5}
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.reference_match_distances == {10: 0.1234, 11: 2.5}
+
+    def test_absent_reference_match_distances_stay_absent(self, tmp_path: Path) -> None:
+        """Mappings from before this field existed round-trip unchanged."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert "reference_match_distances" not in data
+        assert GeoRoadLaneletMapping.from_dict(data).reference_match_distances is None
+
+
+# ---------------------------------------------------------------------------
+# summarise_reference_match_accuracy
+# ---------------------------------------------------------------------------
+
+
+def _mapping_with_distances(distances: dict[int, float]) -> GeoRoadLaneletMapping:
+    return GeoRoadLaneletMapping(
+        xodr_sha256="abc",
+        osm_sha256="def",
+        lanelet_to_road_and_lane={lid: (lid, -1) for lid in distances},
+        reference_match_distances=distances or None,
+    )
+
+
+class TestSummariseReferenceMatchAccuracy:
+    def test_no_distances_returns_empty(self) -> None:
+        assert summarise_reference_match_accuracy(_mapping_with_distances({})) == {}
+
+    def test_reports_distribution(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.1, 2: 0.2, 3: 0.3})
+        )
+        assert summary["count"] == 3
+        assert summary["median_m"] == pytest.approx(0.2)
+        assert summary["max_m"] == pytest.approx(0.3)
+        assert summary["match_threshold_m"] == _MATCH_THRESHOLD
+
+    def test_warn_threshold_defaults_to_half_the_matching_tolerance(self) -> None:
+        summary = summarise_reference_match_accuracy(_mapping_with_distances({1: 0.1}))
+        assert summary["warn_threshold_m"] == pytest.approx(_MATCH_THRESHOLD / 2.0)
+
+    def test_lists_worst_offenders_sorted_by_distance(self) -> None:
+        """A match just inside the tolerance passes matching but is not accurate."""
+        near_limit = _MATCH_THRESHOLD - 0.1
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.05, 2: near_limit, 3: _MATCH_THRESHOLD / 2.0})
+        )
+        assert [w["lanelet_id"] for w in summary["worst"]] == [2, 3]
+        assert summary["worst"][0]["distance_m"] == pytest.approx(near_limit)
+
+    def test_accurate_map_reports_no_offenders(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.01, 2: 0.02, 3: 0.03})
+        )
+        assert summary["worst"] == []
+
+    def test_explicit_warn_threshold_is_honoured(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.5, 2: 1.5}), warn_threshold=1.0
+        )
+        assert [w["lanelet_id"] for w in summary["worst"]] == [2]
+        assert summary["warn_threshold_m"] == 1.0
 
 
 # ---------------------------------------------------------------------------

@@ -139,6 +139,15 @@ class GeoRoadLaneletMapping:
     #: apart from genuine mapping failures (#493).
     skipped_synthetic_roads: list[int] | None = None
     traffic_light_config: dict | None = None
+    #: Mean nearest-point distance (m) between a road's reference line and the
+    #: boundary of the lanelet it was matched to, keyed by that lanelet's id.
+    #: This is the conversion's positional error measured against its own
+    #: Lanelet2 input. :func:`build_mapping` has always computed it to decide
+    #: matches; recording it lets accuracy be reported without converting the
+    #: same map twice. Keyed by lanelet id because those are input-side and
+    #: stable, unlike road ids, which are reassigned whenever preprocessing
+    #: changes the lanelet grouping.
+    reference_match_distances: dict[int, float] | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
         init=False,
@@ -182,6 +191,10 @@ class GeoRoadLaneletMapping:
             result["preprocessing_log"] = self.preprocessing_log
         if self.traffic_light_config is not None:
             result["traffic_light_config"] = self.traffic_light_config
+        if self.reference_match_distances is not None:
+            result["reference_match_distances"] = {
+                str(k): round(v, 4) for k, v in self.reference_match_distances.items()
+            }
         return result
 
     @classmethod
@@ -202,6 +215,11 @@ class GeoRoadLaneletMapping:
                 int(k): SkippedStopLineEntry.from_dict(v) for k, v in raw_ssl.items()
             }
 
+        raw_rmd = data.get("reference_match_distances")
+        reference_match_distances: dict[int, float] | None = None
+        if raw_rmd is not None:
+            reference_match_distances = {int(k): float(v) for k, v in raw_rmd.items()}
+
         return cls(
             xodr_sha256=data["xodr_sha256"],
             osm_sha256=data["osm_sha256"],
@@ -214,6 +232,7 @@ class GeoRoadLaneletMapping:
             skipped_stop_lines=skipped_stop_lines,
             skipped_synthetic_roads=data.get("skipped_synthetic_roads"),
             traffic_light_config=data.get("traffic_light_config"),
+            reference_match_distances=reference_match_distances,
         )
 
 
@@ -1106,6 +1125,18 @@ def build_mapping(
     # Phase 2: resolve conflicts iteratively
     assignment = _resolve_conflicts(all_rc)
 
+    # Keep the raw distance of every accepted match. ``candidates`` carries a
+    # ranking distance that folds in the endpoint penalty, so read ``raw_dists``
+    # instead: only that is the plain mean nearest-point distance between the
+    # road's reference line and the lanelet boundary it came from.
+    reference_match_distances: dict[int, float] = {}
+    for rc_idx, cand_idx in assignment.items():
+        rc = all_rc[rc_idx]
+        _, lid = rc.candidates[cand_idx]
+        raw = rc.raw_dists.get(lid)
+        if raw is not None:
+            reference_match_distances[lid] = float(raw)
+
     # Build resolved_references: lanelet_id -> rc_idx
     resolved_references: dict[int, int] = {}
     for rc_idx, cand_idx in assignment.items():
@@ -1347,6 +1378,7 @@ def build_mapping(
         osm_sha256=osm_sha256,
         lanelet_to_road_and_lane=mapping,
         skipped_synthetic_roads=sorted(skipped_synthetic) or None,
+        reference_match_distances=reference_match_distances or None,
     )
 
 
@@ -1363,6 +1395,76 @@ def _cache_path_for(xodr_path: Path) -> Path:
 def _preprocessed_osm_path_for(xodr_path: Path) -> Path:
     """Return the preprocessed OSM sidecar path next to the XODR file."""
     return xodr_path.parent / f"{xodr_path.stem}.preprocessed.osm"
+
+
+# ---------------------------------------------------------------------------
+# Accuracy reporting
+# ---------------------------------------------------------------------------
+
+
+def summarise_reference_match_accuracy(
+    mapping: GeoRoadLaneletMapping,
+    *,
+    warn_threshold: float | None = None,
+) -> dict:
+    """Summarise how closely the emitted roads follow their source lanelets.
+
+    :func:`build_mapping` measures, for every road it matches, the mean
+    nearest-point distance between that road's reference line and the boundary
+    of the lanelet the reference line was generated from. That figure is the
+    conversion's positional error against its own Lanelet2 input, but it was
+    only ever used as a matching tolerance (``_MATCH_THRESHOLD``) and then
+    thrown away. This turns it into something reportable.
+
+    The distinction matters: ``_MATCH_THRESHOLD`` asks "is this the same road?",
+    not "is this road accurate?". A road sitting 3.4 m from its source boundary
+    — most of a lane width — passes the tolerance without comment. Only the
+    distribution shows that.
+
+    Because the distances are keyed by lanelet id, this works from a single
+    conversion. Comparing two ``.xodr`` outputs instead requires converting the
+    same map twice and cannot be keyed on road ids at all, since those are
+    reassigned whenever preprocessing changes the lanelet grouping.
+
+    Args:
+        mapping: Mapping carrying ``reference_match_distances``.
+        warn_threshold: Distances at or above this many metres are listed
+            individually. Defaults to half of ``_MATCH_THRESHOLD``, i.e. the
+            point beyond which a match is closer to the tolerance limit than
+            to its own source geometry.
+
+    Returns:
+        Dictionary with ``count``, ``median_m``, ``p95_m``, ``max_m``,
+        ``match_threshold_m``, ``warn_threshold_m`` and ``worst`` — a list of
+        ``{"lanelet_id", "distance_m"}`` at or above the warn threshold, worst
+        first. Returns ``{}`` when no distances were recorded.
+    """
+    distances = mapping.reference_match_distances
+    if not distances:
+        return {}
+
+    if warn_threshold is None:
+        warn_threshold = _MATCH_THRESHOLD / 2.0
+
+    values = np.array(list(distances.values()), dtype=float)
+    worst = sorted(
+        (
+            {"lanelet_id": lid, "distance_m": float(d)}
+            for lid, d in distances.items()
+            if d >= warn_threshold
+        ),
+        key=lambda item: -item["distance_m"],
+    )
+
+    return {
+        "count": int(values.size),
+        "median_m": float(np.median(values)),
+        "p95_m": float(np.percentile(values, 95)),
+        "max_m": float(values.max()),
+        "match_threshold_m": _MATCH_THRESHOLD,
+        "warn_threshold_m": warn_threshold,
+        "worst": worst,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1563,6 +1665,37 @@ def validate_and_save_mapping(
         lanelet_to_road_and_lane, geo_mapping, preprocessing_log
     )
     logger.info("Cross-validation passed successfully!")
+
+    # 4. Report positional accuracy against the Lanelet2 input. The distances
+    #    are a by-product of the matching above, so this costs nothing extra.
+    #    Re-save the JSON so the figures outlive the log.
+    accuracy = summarise_reference_match_accuracy(geo_mapping)
+    if accuracy:
+        logger.info(
+            "Geometric accuracy vs Lanelet2 input: n=%d  median=%.3f m  "
+            "p95=%.3f m  max=%.3f m  (matching tolerance %.1f m)",
+            accuracy["count"],
+            accuracy["median_m"],
+            accuracy["p95_m"],
+            accuracy["max_m"],
+            accuracy["match_threshold_m"],
+        )
+        worst = accuracy["worst"]
+        if worst:
+            logger.warning(
+                "%d road(s) sit >= %.2f m from their source lanelet boundary "
+                "(within the %.1f m matching tolerance, so no match failed). "
+                "Worst: %s",
+                len(worst),
+                accuracy["warn_threshold_m"],
+                accuracy["match_threshold_m"],
+                ", ".join(
+                    f"lanelet {w['lanelet_id']} at {w['distance_m']:.2f} m"
+                    for w in worst[:10]
+                ),
+            )
+        conv_mapping.reference_match_distances = geo_mapping.reference_match_distances
+        save_mapping_json(conv_mapping, xodr_path)
 
     return json_path
 
