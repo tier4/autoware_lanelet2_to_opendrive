@@ -7,7 +7,8 @@ output_map_path: test/data/lanelet2_map_processed.osm
 mgrs_code: 54SUE
 
 # Merge operations - merge multiple lanelets into one
-# The merged lanelet is added to the map (originals are kept)
+# The merged lanelet replaces the originals: it is added under a new synthetic
+# id and every listed lanelet is removed from the map
 merge_operations:
   - lanelet_ids: [112, 114]
     validate: true
