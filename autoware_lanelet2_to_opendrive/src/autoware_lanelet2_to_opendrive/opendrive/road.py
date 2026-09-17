@@ -143,10 +143,12 @@ def _resolve_candidate_road_ids(
     if has_real_junction:
         return []
     seen: List[int] = []
+    seen_set: Set[int] = set()
     for group in groups:
         for ll in group:
             rid = mapping.get(ll.id)
-            if rid is not None and rid not in seen:
+            if rid is not None and rid not in seen_set:
+                seen_set.add(rid)
                 seen.append(rid)
     return seen
 

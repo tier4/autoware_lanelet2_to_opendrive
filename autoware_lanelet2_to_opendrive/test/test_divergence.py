@@ -67,6 +67,28 @@ def test_resolve_candidate_road_ids_preserves_order_of_first_appearance():
     assert _resolve_candidate_road_ids(groups, mapping) == [2, 1]
 
 
+def test_resolve_candidate_road_ids_dedupes_same_road_id_across_groups():
+    # Road id 1 is reachable via two distinct groups; it must appear only
+    # once, at the position of its first appearance (group order matters).
+    groups = [
+        {_StubLanelet(30)},
+        {_StubLanelet(10)},
+        {_StubLanelet(31)},
+    ]
+    mapping = {30: 2, 10: 1, 31: 2}
+
+    assert _resolve_candidate_road_ids(groups, mapping) == [2, 1]
+
+
+def test_resolve_candidate_road_ids_skips_lanelets_missing_from_mapping():
+    # A lanelet with no entry in ``mapping`` (e.g. not yet assigned to a
+    # road) must be silently skipped rather than raising or polluting order.
+    groups = [{_StubLanelet(99)}, {_StubLanelet(10)}]
+    mapping = {10: 1}
+
+    assert _resolve_candidate_road_ids(groups, mapping) == [1]
+
+
 def test_construct_from_lanelet_map_returns_deferred_candidate_dicts():
     """The signature must include deferred predecessor/successor candidate maps."""
     sig = inspect.signature(Road.construct_from_lanelet_map)
