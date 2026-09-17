@@ -64,13 +64,18 @@ def _build_planview_geometries(
     )
     from ..config import DEFAULT_CONFIG
 
-    if arcspiral_config is None or not arcspiral_config.enabled:
+    pp3_cfg = parampoly3_config or ParamPoly3Config()
+    # Disabled, or too short to split (see from_spline)
+    if (
+        arcspiral_config is None
+        or not arcspiral_config.enabled
+        or spline.total_length < pp3_cfg.min_segment_length
+    ):
         return cast(
             List[GeometryBase],
-            ParamPoly3.from_spline(spline, config=parampoly3_config),
+            ParamPoly3.from_spline(spline, config=pp3_cfg),
         )
 
-    pp3_cfg = parampoly3_config or ParamPoly3Config()
     runs: List[ClassifiedSegment] = classify_spline(
         spline,
         config=arcspiral_config,

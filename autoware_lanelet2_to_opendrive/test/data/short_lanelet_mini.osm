@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic Lanelet2 fixture: a lanelet shorter than parampoly3.min_segment_length.
+
+  Layout (looking from above, one lane of road, three lanelets chained along s):
+    Lanelet A (id=5001)  local_x 81700.0 -> 81710.0  (10 m)
+    Lanelet B (id=5002)  local_x 81710.0 -> 81710.3  (0.3 m, below the 0.5 m minimum)
+    Lanelet C (id=5003)  local_x 81710.3 -> 81720.3  (10 m)
+    left  bound: local_y=50200.0  (ways 4001 -> 4003 -> 4005)
+    right bound: local_y=50196.5  (ways 4002 -> 4004 -> 4006)
+  Consecutive ways share their end/start nodes, so B is the longitudinal
+  successor of A and C is the successor of B.
+
+  Lanelet B must still be emitted as a <road> with one planView geometry.
+  A road without geometry (length="0", empty <planView/>) crashes CARLA's
+  OpenDRIVE parser.
+
+  All nodes carry local_x/local_y/ele/mgrs_code so the MGRSProjector
+  (mgrs_grid=54SUE, offset=81655.73/50137.43) used by the
+  example_mgrs_offset map config resolves them.
+-->
+<osm generator="short_lanelet_mini_fixture">
+  <MetaInfo format_version="1" map_version="1"/>
+
+  <!-- Left boundary nodes (local_y=50200.0) -->
+  <node id="3001" lat="35.68856" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3002" lat="35.68865" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.0"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3003" lat="35.688653" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.3"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3004" lat="35.688743" lon="139.69260">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.3"/>
+    <tag k="local_y" v="50200.0"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- Right boundary nodes (local_y=50196.5) -->
+  <node id="3005" lat="35.68856" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81700.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3006" lat="35.68865" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.0"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3007" lat="35.688653" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81710.3"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+  <node id="3008" lat="35.688743" lon="139.69256">
+    <tag k="mgrs_code" v="54SUE817502"/>
+    <tag k="local_x" v="81720.3"/>
+    <tag k="local_y" v="50196.5"/>
+    <tag k="ele" v="34.0"/>
+  </node>
+
+  <!-- Lanelet A boundaries -->
+  <way id="4001">
+    <nd ref="3001"/>
+    <nd ref="3002"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <way id="4002">
+    <nd ref="3005"/>
+    <nd ref="3006"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- Lanelet B boundaries (0.3 m, continue 4001 / 4002) -->
+  <way id="4003">
+    <nd ref="3002"/>
+    <nd ref="3003"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <way id="4004">
+    <nd ref="3006"/>
+    <nd ref="3007"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- Lanelet C boundaries (continue 4003 / 4004) -->
+  <way id="4005">
+    <nd ref="3003"/>
+    <nd ref="3004"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <way id="4006">
+    <nd ref="3007"/>
+    <nd ref="3008"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- Lanelet A: 10 m -->
+  <relation id="5001">
+    <member type="way" role="left" ref="4001"/>
+    <member type="way" role="right" ref="4002"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+  </relation>
+
+  <!-- Lanelet B: 0.3 m, longitudinal successor of A -->
+  <relation id="5002">
+    <member type="way" role="left" ref="4003"/>
+    <member type="way" role="right" ref="4004"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+  </relation>
+
+  <!-- Lanelet C: 10 m, longitudinal successor of B -->
+  <relation id="5003">
+    <member type="way" role="left" ref="4005"/>
+    <member type="way" role="right" ref="4006"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="location" v="urban"/>
+  </relation>
+</osm>

@@ -14,12 +14,13 @@ signal:
   country: "DE"
 
 # ParamPoly3 segment generation configuration
-# CARLA crashes when loading segments shorter than 0.5m
+# Roads are never split into segments shorter than min_segment_length; a lanelet
+# shorter than that is emitted as a single straight segment (with a warning)
 parampoly3:
   # Enable dynamic segment calculation (prevents short segments)
   enabled: true
 
-  # Minimum allowed segment length (CARLA requirement)
+  # Minimum allowed segment length (floor for splitting roads, CARLA, #203)
   min_segment_length: 0.5  # meters
 
   # Target segment length for dynamic calculation

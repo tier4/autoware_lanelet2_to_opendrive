@@ -103,3 +103,19 @@ def test_endpoint_round_trip_through_evaluate_road_endpoints():
     assert start[1] == pytest.approx(expected_start[1], abs=0.05)
     assert end[0] == pytest.approx(expected_end[0], abs=0.10)
     assert end[1] == pytest.approx(expected_end[1], abs=0.10)
+
+
+def test_short_spline_becomes_single_straight_segment():
+    """A spline shorter than min_segment_length must yield one straight segment."""
+    points = np.array([[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]])
+    spline = Splines(points, num_control_points=4)
+    with pytest.warns(UserWarning, match="single straight segment"):
+        geoms = _build_planview_geometries(
+            spline,
+            parampoly3_config=ParamPoly3Config(),
+            arcspiral_config=ArcSpiralConfig(enabled=True),
+        )
+    assert len(geoms) == 1
+    assert geoms[0].length == pytest.approx(0.3, rel=1e-3)
+    assert geoms[0].bU == pytest.approx(1.0, rel=1e-3)
+    assert (geoms[0].cU, geoms[0].dU, geoms[0].cV, geoms[0].dV) == (0.0, 0.0, 0.0, 0.0)

@@ -590,6 +590,51 @@ class ParamPoly3(GeometryBase):
         )
 
     @classmethod
+    def straight_from_spline_window(
+        cls, spline: "Splines", s_start: float, s_end: float
+    ) -> "ParamPoly3":
+        """Build a straight ParamPoly3 along the chord of ``spline`` over [s_start, s_end].
+
+        v(p) = 0 and u(p) = (chord / arc length) * p: the length keeps the
+        window's arc length (the reference line's s-domain for elevation and
+        lane-width profiles) and p = length lands on the spline's end point.
+        Consumers that re-sample by travelled distance (e.g. CARLA) end up to
+        length - chord further along the chord instead.
+        """
+        from ..config import DEFAULT_CONFIG
+
+        start = spline.evaluate(s_start, derivative=0)
+        end = spline.evaluate(s_end, derivative=0)
+        dx = float(end[0] - start[0])
+        dy = float(end[1] - start[1])
+        chord = float(np.hypot(dx, dy))
+        length = float(s_end - s_start)
+        if chord > DEFAULT_CONFIG.geometry.epsilon:
+            hdg = float(np.arctan2(dy, dx))
+            b_u = chord / length
+        else:
+            # Coincident end points: keep the tangent heading and unit speed
+            tangent = spline.evaluate(s_start, derivative=1)
+            hdg = float(np.arctan2(tangent[1], tangent[0]))
+            b_u = 1.0
+        return cls(
+            s=float(s_start),
+            x=float(start[0]),
+            y=float(start[1]),
+            hdg=hdg,
+            length=length,
+            aU=0.0,
+            bU=b_u,
+            cU=0.0,
+            dU=0.0,
+            aV=0.0,
+            bV=0.0,
+            cV=0.0,
+            dV=0.0,
+            pRange="arcLength",
+        )
+
+    @classmethod
     def from_spline(
         cls,
         spline: "Splines",
@@ -602,13 +647,16 @@ class ParamPoly3(GeometryBase):
         This method divides the spline into segments and fits a cubic polynomial
         to each segment. The number of segments is automatically calculated based
         on road length to ensure no segment is shorter than minimum threshold.
+        A spline shorter than the minimum is emitted as a single straight segment.
 
         Args:
             spline: The Splines object to convert
             num_segments: Number of ParamPoly3 segments to create.
                           If None (default), automatically calculated to ensure
                           segments are >= min_segment_length (0.5m).
-                          If specified, uses the provided value (backward compatible).
+                          If specified, uses the provided value (backward compatible),
+                          except for a spline shorter than min_segment_length, which
+                          always yields one straight segment.
             config: ParamPoly3Config for customizing segment generation parameters.
                    If None, uses defaults from config.py.
 
@@ -648,10 +696,25 @@ class ParamPoly3(GeometryBase):
             # Legacy behavior: fixed 10 segments if dynamic mode is disabled
             num_segments = 10
 
+        import warnings
+
+        # Shorter than the minimum: emit the whole spline as one straight segment
+        if total_length < config.min_segment_length:
+            warnings.warn(
+                f"Spline length {total_length:.6f}m is below minimum "
+                f"{config.min_segment_length}m; emitting it as a single "
+                "straight segment",
+                UserWarning,
+            )
+            segment = cls.straight_from_spline_window(spline, 0.0, total_length)
+            is_valid, error_msg = cls._validate_segment(segment, min_segment_length=0.0)
+            if not is_valid:
+                warnings.warn(f"Skipping invalid segment: {error_msg}", UserWarning)
+                return []
+            return [segment]
+
         # Divide the spline into segments
         segment_length = total_length / num_segments
-
-        import warnings
 
         for i in range(num_segments):
             # Arc length bounds for this segment
