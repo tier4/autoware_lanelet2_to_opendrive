@@ -28,9 +28,13 @@ from ..conversion_config import (
     WidthEstimationConfig,
 )
 from ..util import (
+    BOUNDARY_ATTACHED_LANELET_SUBTYPES,
     CONVERTIBLE_LANELET_SUBTYPES,
     LaneletInput,
+    attach_boundary_adjacent_lanelets,
     filter_lanelets_by_subtype,
+    is_boundary_attached_lanelet,
+    lanelet_subtype,
     to_lanelet_list,
 )
 from .elevation import ElevationProfile
@@ -420,6 +424,7 @@ def _evaluate_lane_width(lane: "Lane", s: float) -> Optional[float]:
 
 
 if TYPE_CHECKING:
+    from ..util import BoundaryAttachmentResult
     from .signal import Signal
     from .lane import Lane
     from .junction import Junction
@@ -1008,6 +1013,63 @@ class Road:
                         break
 
     @staticmethod
+    def _log_boundary_attachment_summary(
+        all_lanelets: List[lanelet2.core.Lanelet],
+        attachable_lanelets: Set[lanelet2.core.Lanelet],
+        attachment: "BoundaryAttachmentResult",
+    ) -> None:
+        """Emit one aggregated line about non-vehicle lanelet handling.
+
+        Deliberately aggregated: on a real map this covers thousands of
+        lanelets (odaiba has 4,225 non-vehicle ones), and a per-lanelet
+        message would bury every other diagnostic.
+        """
+        attached_by_subtype: Dict[str, int] = {}
+        standalone_by_subtype: Dict[str, int] = {}
+        unattached_ids = {lanelet.id for lanelet in attachment.unattached}
+        for lanelet in attachable_lanelets:
+            subtype = lanelet_subtype(lanelet)
+            bucket = (
+                standalone_by_subtype
+                if lanelet.id in unattached_ids
+                else attached_by_subtype
+            )
+            bucket[subtype] = bucket.get(subtype, 0) + 1
+
+        def _fmt(counts: Dict[str, int]) -> str:
+            if not counts:
+                return "none"
+            return ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+
+        logger.info(
+            "Non-vehicle lanelets (%s): attached as lanes of the adjacent "
+            "road [%s]; kept as standalone roads because no road shares a "
+            "boundary linestring [%s]; %d bordered more than one road group "
+            "and joined the one with the smallest lanelet id",
+            ", ".join(BOUNDARY_ATTACHED_LANELET_SUBTYPES),
+            _fmt(attached_by_subtype),
+            _fmt(standalone_by_subtype),
+            len(attachment.ambiguous_ids),
+        )
+
+        # Subtypes that are not converted at all.  Previously silent; a
+        # single aggregated line makes the loss visible without one message
+        # per lanelet.
+        skipped: Dict[str, int] = {}
+        for lanelet in all_lanelets:
+            subtype = lanelet_subtype(lanelet)
+            if subtype in CONVERTIBLE_LANELET_SUBTYPES or subtype == "crosswalk":
+                continue
+            skipped[subtype or "<none>"] = skipped.get(subtype or "<none>", 0) + 1
+        if skipped:
+            logger.warning(
+                "Skipped %d lanelet(s) whose subtype has no OpenDRIVE lane "
+                "mapping: %s",
+                sum(skipped.values()),
+                _fmt(skipped),
+            )
+
+    @staticmethod
     def _extract_road_types_from_lanelets(
         lanelet_list: List[lanelet2.core.Lanelet],
     ) -> Optional[List[RoadTypeDefinition]]:
@@ -1022,8 +1084,19 @@ class Road:
         if not lanelet_list:
             return None
 
-        # Get the first lanelet to extract attributes
-        first_lanelet = lanelet_list[0]
+        # Take the attributes from a driving lanelet when the group has one.
+        # A group can now also contain shoulders / sidewalks / bicycle lanes,
+        # whose speed_limit and location describe the non-vehicle lane, not
+        # the road; letting one of those land in position 0 would change the
+        # whole road's <type> and speed limit.
+        first_lanelet = next(
+            (
+                lanelet
+                for lanelet in lanelet_list
+                if not is_boundary_attached_lanelet(lanelet)
+            ),
+            lanelet_list[0],
+        )
 
         # Extract speed limit
         speed_limit = None
@@ -1302,15 +1375,28 @@ class Road:
         # Include non-road subtypes so they can be emitted with the correct
         # OpenDRIVE lane type
         # (see Lane.construct_from_lanelet for the subtype -> LaneType mapping).
-        # Different subtypes form separate adjacent groups because the routing
-        # graph treats them as different participant classes, so e.g. walkways
-        # will not be grouped together with road lanelets here.
         road_lanelets = _filter_lanelets_outside_junction(
             filter_lanelets_by_subtype(all_lanelets, CONVERTIBLE_LANELET_SUBTYPES)
         )
 
         if not road_lanelets:
             raise ValueError("No lanelets found outside junctions")
+
+        # Split the candidates into the ones the vehicle routing graph can
+        # group (road / highway, plus walkway which is genuinely detached)
+        # and the ones it structurally cannot: the non-vehicle subtypes are
+        # not vertices of a ``Participants.Vehicle`` graph, so every
+        # left/right query on them returns None and they would each become
+        # their own link-less one-lane road overlapping the driving road
+        # they belong to.  They are folded into the driving road's lateral
+        # group after the vehicle grouping is final — see
+        # ``attach_boundary_adjacent_lanelets``.
+        attachable_lanelets = {
+            lanelet
+            for lanelet in road_lanelets
+            if is_boundary_attached_lanelet(lanelet)
+        }
+        primary_lanelets = set(road_lanelets) - attachable_lanelets
 
         # Create routing graph once and reuse for all operations
         traffic_rules = lanelet2.traffic_rules.create(
@@ -1324,9 +1410,11 @@ class Road:
         # Find adjacent groups of lanelets
         from ..util import find_adjacent_groups, split_groups_by_divergent_connections
 
-        # Pass the road_lanelets set to find_adjacent_groups so it only groups these
-        adjacent_groups = find_adjacent_groups(
-            lanelet_map, set(road_lanelets), routing_graph
+        # Pass the primary set to find_adjacent_groups so it only groups these
+        adjacent_groups = (
+            find_adjacent_groups(lanelet_map, primary_lanelets, routing_graph)
+            if primary_lanelets
+            else []
         )
 
         # Split groups whose lanelets fan out to more than one downstream
@@ -1335,8 +1423,33 @@ class Road:
         # that can only carry a road-level link to one of them, silently
         # dropping the other lane's link.
         # See specs/2026-05-22-road-successor-mis-merge-design.md.
+        #
+        # This runs BEFORE the non-vehicle attachment below on purpose: the
+        # splitter's signature is the set of downstream groups reached
+        # through the vehicle routing graph, which is empty for every
+        # non-vehicle lanelet.  Attaching first would give those lanelets a
+        # signature that differs from their road's and split them straight
+        # back out into their own road.
         adjacent_groups = split_groups_by_divergent_connections(
             lanelet_map, adjacent_groups, routing_graph
+        )
+
+        # Fold shoulders / pedestrian lanes / bicycle lanes into the lateral
+        # group of the driving road whose boundary linestring they share, so
+        # they become extra lanes of that road instead of overlapping
+        # standalone roads (issue: non-vehicle lanelets never grouped).
+        attachment = attach_boundary_adjacent_lanelets(
+            adjacent_groups, attachable_lanelets
+        )
+        adjacent_groups = attachment.groups
+        # Lanelets that reached no driving road keep their previous
+        # behaviour (one standalone road each); nothing is dropped.
+        if attachment.unattached:
+            adjacent_groups = adjacent_groups + find_adjacent_groups(
+                lanelet_map, attachment.unattached, routing_graph
+            )
+        Road._log_boundary_attachment_summary(
+            all_lanelets, attachable_lanelets, attachment
         )
 
         # Create roads from adjacent groups
