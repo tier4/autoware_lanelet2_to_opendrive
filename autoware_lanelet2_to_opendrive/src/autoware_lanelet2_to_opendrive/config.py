@@ -6,6 +6,7 @@ organized into logical dataclasses for easy access and modification.
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,28 @@ class ParamPoly3Constants:
                      Ensures at least one segment is created
         coefficient_epsilon: Threshold for rounding small coefficients to zero (1e-8)
                             Prevents numerical instability in paramPoly3
+        knot_aligned: Emit one paramPoly3 per B-spline knot span instead of
+                     re-approximating the fitted curve on an arbitrary uniform
+                     grid.  Inside a knot span the fitted cubic B-spline *is* a
+                     cubic polynomial, so the emitted paramPoly3 reproduces it
+                     exactly (position error at machine precision, no curvature
+                     jump at the piece boundaries).  Subdivision is only ever
+                     applied *inside* a span, which keeps that exactness.
+        knot_span_max_length: Optional cap (m) on the arc length of a single
+                     emitted piece.  ``None`` means "never subdivide a knot
+                     span"; a float subdivides a longer span into equal
+                     parameter slices (still exact).  A cap costs file size for
+                     no accuracy gain, so the default is ``None``.
+        arc_length_panels / arc_length_nodes: composite Gauss-Legendre rule used
+                     to compute the emitted ``@length`` as the true arc length
+                     of the emitted cubic.  This is what makes the declared
+                     length agree with the ASAM
+                     ``road.geometry.parampoly3.*_range`` checkers, which
+                     integrate |(u', v')| over the declared parameter range.
+        param_inversion_iterations: Newton steps used to invert "distance along
+                     the piece" -> normalized parameter p when sampling an
+                     emitted paramPoly3 (see
+                     ``opendrive.geometry.param_for_offset``).
     """
 
     min_segment_length: float = 0.5
@@ -157,6 +180,11 @@ class ParamPoly3Constants:
     max_segments: int = 100
     min_segments: int = 1
     coefficient_epsilon: float = 1e-8
+    knot_aligned: bool = True
+    knot_span_max_length: Optional[float] = None
+    arc_length_panels: int = 8
+    arc_length_nodes: int = 10
+    param_inversion_iterations: int = 3
 
 
 @dataclass(frozen=True)
