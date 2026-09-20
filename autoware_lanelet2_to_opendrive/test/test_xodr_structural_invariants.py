@@ -247,12 +247,126 @@ def test_connecting_road_claimed_by_two_junctions() -> None:
         '<connection id="0" incomingRoad="1" connectingRoad="2" contactPoint="start">'
         '<laneLink from="1" to="1"/></connection></junction>'
     )
-    # The second junction also disagrees about @junction, which is a separate
-    # statement about the same document; both are expected.
+    # The second junction also disagrees about @junction, and both junctions
+    # claim road 1's end between them. All three are separate statements about
+    # the same document; all three are expected.
     assert set(_codes(root)) == {
         "connecting_road_junction_mismatch",
         "connecting_road_shared",
+        "junction_claim_contested",
     }
+
+
+def test_two_junctions_claim_the_same_road_end() -> None:
+    """Road 1 ends at a junction, and two of them hold a row for that end.
+
+    Road 1's ``<link>`` names one junction, so the other's ``<connection>`` is
+    unreachable: a consumer arriving along road 1 never opens the second table
+    and nothing resolves into connecting road 3.
+    """
+    root = _doc(
+        _road(
+            "1",
+            link='<successor elementType="junction" elementId="1000"/>',
+        )
+        + _road("2", junction="1000")
+        + _road("3", junction="1001")
+        + '<junction id="1000">'
+        '<connection id="0" incomingRoad="1" connectingRoad="2" contactPoint="start">'
+        '<laneLink from="1" to="1"/></connection></junction>'
+        '<junction id="1001">'
+        '<connection id="0" incomingRoad="1" connectingRoad="3" contactPoint="start">'
+        '<laneLink from="1" to="1"/></connection></junction>'
+    )
+    # Two statements about the same document: the end is contested, and the
+    # row of the junction the slot does not name is the one that goes unread.
+    assert set(_codes(root)) == {"junction_claim_contested", "connection_unreachable"}
+
+
+def test_connection_whose_incoming_road_names_another_junction() -> None:
+    """Unread without being contested, so the two checks are independent.
+
+    Only junction 1000 holds a row for road 1, but road 1's ``<successor>``
+    names junction 1001 -- which claims nothing. Nobody arriving along road 1
+    ever opens 1000's table.
+    """
+    root = _doc(
+        _road(
+            "1",
+            link='<successor elementType="junction" elementId="1001"/>',
+        )
+        + _road("2", junction="1000")
+        + '<junction id="1000">'
+        '<connection id="0" incomingRoad="1" connectingRoad="2" contactPoint="start">'
+        '<laneLink from="1" to="1"/></connection></junction>'
+        '<junction id="1001"/>'
+    )
+    assert _codes(root) == ["connection_unreachable"]
+
+
+def test_one_junction_at_each_end_of_a_road_is_not_contested() -> None:
+    """The two ends of a road are two slots, so two junctions is correct."""
+    root = _doc(
+        _road(
+            "1",
+            link=(
+                '<predecessor elementType="junction" elementId="1001"/>'
+                '<successor elementType="junction" elementId="1000"/>'
+            ),
+        )
+        + _road("2", junction="1000")
+        + _road("3", junction="1001")
+        + '<junction id="1000">'
+        '<connection id="0" incomingRoad="1" connectingRoad="2" contactPoint="start">'
+        '<laneLink from="1" to="1"/></connection></junction>'
+        '<junction id="1001">'
+        '<connection id="0" incomingRoad="1" connectingRoad="3" contactPoint="end">'
+        '<laneLink from="1" to="1"/></connection></junction>'
+    )
+    assert check_invariants(root) == []
+
+
+@pytest.mark.parametrize("faults", [1, 2, 3])
+def test_contested_end_count_tracks_the_number_seeded(faults: int) -> None:
+    """Fault injection: the checker reports exactly as many as were seeded.
+
+    A checker that flagged every junction would pass a "more than zero"
+    assertion just as well, so the count is pinned rather than bounded.
+    """
+    body = ""
+    for i in range(faults):
+        incoming = str(10 + i)
+        body += _road(
+            incoming,
+            link=f'<successor elementType="junction" elementId="{1000 + i}"/>',
+        )
+        body += _road(str(20 + i), junction=str(1000 + i))
+        body += _road(str(30 + i), junction=str(2000 + i))
+        body += (
+            f'<junction id="{1000 + i}">'
+            f'<connection id="0" incomingRoad="{incoming}" '
+            f'connectingRoad="{20 + i}" contactPoint="start">'
+            '<laneLink from="1" to="1"/></connection></junction>'
+            f'<junction id="{2000 + i}">'
+            f'<connection id="0" incomingRoad="{incoming}" '
+            f'connectingRoad="{30 + i}" contactPoint="start">'
+            '<laneLink from="1" to="1"/></connection></junction>'
+        )
+    # Control: one junction whose road end nothing else claims.
+    body += _road("99", link='<successor elementType="junction" elementId="9000"/>')
+    body += _road("98", junction="9000")
+    body += (
+        '<junction id="9000">'
+        '<connection id="0" incomingRoad="99" connectingRoad="98" '
+        'contactPoint="start"><laneLink from="1" to="1"/></connection></junction>'
+    )
+
+    codes = _codes(_doc(body))
+    assert codes.count("junction_claim_contested") == faults
+    # Each seeded conflict also leaves exactly one row unread: the one held by
+    # the junction the incoming road's slot does not name.
+    assert codes.count("connection_unreachable") == faults
+    assert set(codes) == {"junction_claim_contested", "connection_unreachable"}
 
 
 def test_linked_roads_with_the_same_lanes_must_meet() -> None:
