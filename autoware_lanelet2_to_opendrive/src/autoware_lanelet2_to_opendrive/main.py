@@ -413,8 +413,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         # roads those rows point at. Merge such groups into one junction.
         # Must run after every pass above -- they are the ones that write the
         # slot -- and before set_all_lane_links, which reads the final links.
-        print("
-=== Merging junctions that claim the same road end ===")
+        print("\n=== Merging junctions that claim the same road end ===")
         from autoware_lanelet2_to_opendrive.junction_claims import (
             merge_contested_junction_claims,
         )

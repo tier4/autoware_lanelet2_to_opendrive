@@ -106,11 +106,7 @@ def _contested_ends(junctions: List[Junction]) -> int:
     claims: dict = {}
     for junction in junctions:
         for connection in junction.connections:
-            end = (
-                "end"
-                if connection.contact_point == ContactPoint.START
-                else "start"
-            )
+            end = "end" if connection.contact_point == ContactPoint.START else "start"
             claims.setdefault((connection.incoming_road, end), set()).add(junction.id)
     return sum(1 for claimants in claims.values() if len(claimants) > 1)
 
@@ -269,9 +265,7 @@ def test_the_two_ends_of_one_road_are_different_claims() -> None:
                 predecessor=Predecessor(
                     element_type=ElementType.JUNCTION, element_id=20
                 ),
-                successor=Successor(
-                    element_type=ElementType.JUNCTION, element_id=21
-                ),
+                successor=Successor(element_type=ElementType.JUNCTION, element_id=21),
             ),
         )
     ]
