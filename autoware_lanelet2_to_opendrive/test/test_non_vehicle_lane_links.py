@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import contextlib
 import io
+import subprocess
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import lanelet2
@@ -101,6 +104,12 @@ def _convert(lanelet_map: lanelet2.core.LaneletMap):
     ):
         opendrive, *_ = convert_lanelet2_to_opendrive(lanelet_map, config)
     return opendrive.to_xml()
+
+
+def _sid(element, name: str) -> str:
+    """An XML attribute as a plain ``str`` (absent becomes ``""``)."""
+    value = element.get(name) if element is not None else None
+    return "" if value is None else str(value)
 
 
 def _lane_link_ids(root, lane_type: str) -> List[Tuple[Optional[str], Optional[str]]]:
@@ -271,6 +280,299 @@ def test_consecutive_shoulders_emit_a_lane_link() -> None:
     assert any(
         pred is not None or succ is not None for pred, succ in shoulder_links
     ), f"every shoulder lane was emitted without a <link>: {shoulder_links}"
+
+
+NISHISHINJUKU_OSM = (Path(__file__).parent / "data" / "nishishinjuku.osm").resolve()
+
+
+def _convert_nishishinjuku(tmp_path: Path) -> Path:
+    """Run the CLI on the Shinjuku fixture and return the .xodr path."""
+    out = tmp_path / "nishishinjuku.xodr"
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "convert",
+            "map=nishishinjuku",
+            "target=default",
+            f"input_map_path={NISHISHINJUKU_OSM}",
+            f"output_map_path={out}",
+        ],
+        check=True,
+    )
+    return out
+
+
+def test_no_non_vehicle_lane_link_survives_at_a_junction_end(tmp_path: Path) -> None:
+    """LINT: a non-vehicle lane carries no ``<link>`` at a junction end.
+
+    Deliberately **not** a crash guard. CARLA never reads a lane's own
+    ``<link>`` id at a junction-typed road end -- ``GetJunctionLanes``
+    keys on ``link.from == lane_id`` and resolves ``link.to`` through the
+    ``<connection>`` table instead -- so a regression here is a
+    conformance defect, not a null dereference. The crash-carrying
+    populations are pinned by
+    ``test_every_lane_link_id_resolves_on_the_target_road``.
+
+    OpenDRIVE says the ``<link>`` element shall be omitted where a lane
+    starts or ends in a junction, and
+    ``road.lane.link.lanes_across_lane_sections`` skips those boundaries --
+    so such a link is silently wrong rather than a finding, and the ASAM
+    totals cannot catch it.
+
+    It arises because ``set_all_lane_links`` writes a lane link while the
+    road link at that end is still road-typed, and a later pass re-points
+    that end at a junction without clearing the lane link.  Measured on
+    nishishinjuku: 1 such shoulder link ships without
+    ``_drop_asymmetric_non_vehicle_lane_links``, 0 with it.
+
+    Needs the real map: the property depends on a junction, which the
+    synthetic fixtures above deliberately do not have.
+    """
+    root = ET.parse(_convert_nishishinjuku(tmp_path)).getroot()
+
+    offenders = []
+    for road in root.iter("road"):
+        road_link = road.find("link")
+        if road_link is None:
+            continue
+        junction_end = {}
+        for tag in ("predecessor", "successor"):
+            end = road_link.find(tag)
+            junction_end[tag] = (
+                end is not None and _sid(end, "elementType") == "junction"
+            )
+        for lane in road.iter("lane"):
+            if lane.get("type") not in ("sidewalk", "shoulder", "biking"):
+                continue
+            lane_link = lane.find("link")
+            if lane_link is None:
+                continue
+            for tag in ("predecessor", "successor"):
+                if lane_link.find(tag) is not None and junction_end[tag]:
+                    offenders.append((road.get("id"), lane.get("id"), tag))
+
+    assert not offenders, (
+        "non-vehicle lane <link> survives at a junction-typed road end, "
+        f"where the standard says to omit it: {offenders}"
+    )
+
+
+def test_every_lane_link_id_resolves_on_the_target_road(tmp_path: Path) -> None:
+    """CRASH GUARD: a lane ``<link>`` must name a lane that exists.
+
+    Covers the two populations CARLA actually reads: lane links at
+    **road-typed** road ends, and the junction ``<connection><laneLink>``
+    table.  Links at *junction-typed* road ends are deliberately skipped --
+    CARLA's ``GetJunctionLanes`` keys on ``link.from == lane_id`` and
+    resolves ``link.to``, so a lane's own ``<link>`` id is never consulted
+    there.  That population is a lint, pinned separately by
+    ``test_no_non_vehicle_lane_link_survives_at_a_junction_end``.
+
+    Where CARLA does read the id it dereferences the target lane behind
+    only a ``DEBUG_ASSERT``, so an id that does not exist is a **crash** in
+    a release build, not a warning -- and the ASAM bundle does not check it.
+
+    This is the same shape as the junction-end property above: a real
+    defect that no checker can see, so it has to be asserted directly.
+
+    Grouping non-vehicle lanelets onto a neighbouring road renumbers lanes,
+    and ``_find_closest_lane`` remaps a link whose target id is missing
+    rather than dropping it, so this is exactly the area where a dangling
+    id would arise. Checked over every lane, not just the non-vehicle ones,
+    because a renumbering defect would not respect that boundary.
+    """
+    root = ET.parse(_convert_nishishinjuku(tmp_path)).getroot()
+
+    lanes_of: dict[str, set[str]] = {}
+    ends_of: dict[str, dict[str, tuple[str, str] | None]] = {}
+    for road in root.iter("road"):
+        rid = _sid(road, "id")
+        lanes_of[rid] = {_sid(lane, "id") for lane in road.iter("lane")}
+        road_link = road.find("link")
+        ends: dict[str, Optional[Tuple[str, str]]] = {}
+        for tag in ("predecessor", "successor"):
+            e = road_link.find(tag) if road_link is not None else None
+            ends[tag] = (
+                None if e is None else (_sid(e, "elementType"), _sid(e, "elementId"))
+            )
+        ends_of[rid] = ends
+
+    dangling = []
+    for road in root.iter("road"):
+        rid = _sid(road, "id")
+        for lane in road.iter("lane"):
+            lane_link = lane.find("link")
+            if lane_link is None:
+                continue
+            for tag in ("predecessor", "successor"):
+                e = lane_link.find(tag)
+                if e is None:
+                    continue
+                end = ends_of[rid][tag]
+                # A junction-typed end is resolved through the junction's
+                # <connection> table, checked separately below.
+                if end is None or end[0] == "junction":
+                    continue
+                if _sid(e, "id") not in lanes_of.get(end[1], set()):
+                    dangling.append((rid, _sid(lane, "id"), tag, _sid(e, "id"), end[1]))
+
+    assert not dangling, (
+        "lane <link> names a lane that does not exist on the target road; "
+        f"CARLA dereferences this without a release guard: {dangling}"
+    )
+
+    # The junction <connection> table has the same exposure.
+    bad_connections = []
+    for junction in root.iter("junction"):
+        for connection in junction.iter("connection"):
+            incoming = _sid(connection, "incomingRoad")
+            connecting = _sid(connection, "connectingRoad")
+            for lane_link in connection.iter("laneLink"):
+                if _sid(lane_link, "from") not in lanes_of.get(incoming, set()):
+                    bad_connections.append(
+                        (
+                            _sid(junction, "id"),
+                            incoming,
+                            "from",
+                            _sid(lane_link, "from"),
+                        )
+                    )
+                if _sid(lane_link, "to") not in lanes_of.get(connecting, set()):
+                    bad_connections.append(
+                        (_sid(junction, "id"), connecting, "to", _sid(lane_link, "to"))
+                    )
+
+    assert (
+        not bad_connections
+    ), f"junction <laneLink> names a non-existent lane: {bad_connections}"
+
+
+def _unresolved_lane_links(root) -> Tuple[List[Tuple], List[Tuple]]:
+    """``(dangling lane links, dangling junction laneLinks)`` in a tree.
+
+    The predicate behind
+    ``test_every_lane_link_id_resolves_on_the_target_road``, factored out so
+    the fault-injection test below can prove it actually fires.
+    """
+    lanes_of: dict[str, set[str]] = {}
+    ends_of: dict[str, dict[str, Optional[Tuple[str, str]]]] = {}
+    for road in root.iter("road"):
+        rid = _sid(road, "id")
+        lanes_of[rid] = {_sid(lane, "id") for lane in road.iter("lane")}
+        road_link = road.find("link")
+        ends: dict[str, Optional[Tuple[str, str]]] = {}
+        for tag in ("predecessor", "successor"):
+            e = road_link.find(tag) if road_link is not None else None
+            ends[tag] = (
+                None if e is None else (_sid(e, "elementType"), _sid(e, "elementId"))
+            )
+        ends_of[rid] = ends
+
+    dangling = []
+    for road in root.iter("road"):
+        rid = _sid(road, "id")
+        for lane in road.iter("lane"):
+            lane_link = lane.find("link")
+            if lane_link is None:
+                continue
+            for tag in ("predecessor", "successor"):
+                e = lane_link.find(tag)
+                if e is None:
+                    continue
+                end = ends_of[rid][tag]
+                if end is None or end[0] == "junction":
+                    continue
+                if _sid(e, "id") not in lanes_of.get(end[1], set()):
+                    dangling.append((rid, _sid(lane, "id"), tag, _sid(e, "id"), end[1]))
+
+    bad_connections = []
+    for junction in root.iter("junction"):
+        for connection in junction.iter("connection"):
+            incoming = _sid(connection, "incomingRoad")
+            connecting = _sid(connection, "connectingRoad")
+            for lane_link in connection.iter("laneLink"):
+                if _sid(lane_link, "from") not in lanes_of.get(incoming, set()):
+                    bad_connections.append(
+                        (
+                            _sid(junction, "id"),
+                            incoming,
+                            "from",
+                            _sid(lane_link, "from"),
+                        )
+                    )
+                if _sid(lane_link, "to") not in lanes_of.get(connecting, set()):
+                    bad_connections.append(
+                        (_sid(junction, "id"), connecting, "to", _sid(lane_link, "to"))
+                    )
+    return dangling, bad_connections
+
+
+def test_the_resolvability_check_actually_fires(tmp_path: Path) -> None:
+    """Fault injection: prove the crash guard's predicate is evaluated.
+
+    A zero from an unvalidated checker is indistinguishable from a checker
+    that never evaluates its predicate, and this repository has catalogued
+    several of the latter.  So inject known-bad ids into a real converted
+    file and require the count to rise by **exactly** the number injected --
+    not merely to be non-zero, which a checker that flags everything would
+    also satisfy.
+
+    Covers both branches: a lane ``<link>`` at a road-typed end, and the
+    junction ``<connection><laneLink>`` table.
+    """
+    root = ET.parse(_convert_nishishinjuku(tmp_path)).getroot()
+    before_links, before_connections = _unresolved_lane_links(root)
+    assert not before_links and not before_connections, (
+        "fixture is not clean to begin with; the injection count below "
+        f"would be meaningless: {before_links} {before_connections}"
+    )
+
+    bogus = "97"
+    injected_links = 0
+    for road in root.iter("road"):
+        road_link = road.find("link")
+        if road_link is None:
+            continue
+        predecessor = road_link.find("predecessor")
+        if predecessor is None or _sid(predecessor, "elementType") != "road":
+            continue
+        for lane in road.iter("lane"):
+            lane_link = lane.find("link")
+            target = lane_link.find("predecessor") if lane_link is not None else None
+            if target is None:
+                continue
+            target.set("id", bogus)
+            injected_links += 1
+            break
+        if injected_links >= 2:
+            break
+
+    injected_connections = 0
+    for junction in root.iter("junction"):
+        for connection in junction.iter("connection"):
+            for lane_link in connection.iter("laneLink"):
+                lane_link.set("to", bogus)
+                injected_connections += 1
+                break
+            break
+        break
+
+    assert injected_links == 2 and injected_connections == 1, (
+        "the fixture no longer has the shape this injection needs "
+        f"({injected_links} lane links, {injected_connections} connections)"
+    )
+
+    after_links, after_connections = _unresolved_lane_links(root)
+    assert len(after_links) == injected_links, (
+        f"expected exactly {injected_links} dangling lane links after "
+        f"injection, got {len(after_links)}: {after_links}"
+    )
+    assert len(after_connections) == injected_connections, (
+        f"expected exactly {injected_connections} dangling junction "
+        f"laneLinks after injection, got {len(after_connections)}: "
+        f"{after_connections}"
+    )
 
 
 def test_a_shoulder_never_links_to_a_driving_lane() -> None:

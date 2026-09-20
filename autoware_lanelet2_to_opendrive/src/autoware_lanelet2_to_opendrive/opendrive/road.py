@@ -1975,6 +1975,17 @@ class Road:
         processed yet, so it can only be resolved once every road has its
         links.
 
+        It also removes a non-vehicle lane link at a junction-typed road
+        end, where OpenDRIVE says the ``<link>`` shall be omitted. **That
+        removal is invisible to the ASAM totals**: the checker deliberately
+        skips junction-boundary lanes, which is the very case the standard
+        excludes, so the error count is identical with and without this pass
+        (measured on nishishinjuku: 87 either way, while the number of
+        non-vehicle links at a junction end goes from 1 to 0). The totals
+        would hide a regression here in both directions, which is why
+        ``test_no_non_vehicle_lane_link_survives_at_a_junction_end`` asserts
+        the property directly rather than watching the count.
+
         This pass is strictly subtractive and touches only the lane types in
         :data:`_NON_VEHICLE_LANE_TYPES`. It can never add a link, never
         change a driving lane, and never alter a road-level link.
@@ -2002,6 +2013,8 @@ class Road:
             return None
 
         dropped = 0
+        dropped_junction_end = 0
+        dropped_no_reciprocal = 0
         for road in roads:
             road_link = road.link
             if road_link is None:
@@ -2021,6 +2034,7 @@ class Road:
                     if road_side is None or road_side.element_type != ElementType.ROAD:
                         setattr(lane, own_side, None)
                         dropped += 1
+                        dropped_junction_end += 1
                         continue
                     # Joining the target at its start means ITS predecessor
                     # points back at us; at its end, its successor does.
@@ -2040,13 +2054,33 @@ class Road:
                     if peer_link is None or peer_link.id != lane.lane_id:
                         setattr(lane, own_side, None)
                         dropped += 1
+                        dropped_no_reciprocal += 1
 
         if dropped:
+            # Split by cause, because they are different defects.
+            #
+            # "already at a junction end" is the stale-link class caught in
+            # the act: the standard says to omit a lane <link> there at all.
+            #
+            # "no reciprocal" covers two situations that look identical
+            # here.  One is the road-link guard passing on one side of a
+            # boundary and refusing on the other, which is an ASAM finding
+            # from whichever side the checker reaches.  The other is a link
+            # that is *about to become* stale: measured on nishishinjuku,
+            # road 261's predecessor is still road-typed toward road 259
+            # when this pass runs and is re-pointed at a junction
+            # afterwards, so the link never looks like a junction-end case
+            # to this code but is one by the time the file is written.
+            # Do not read this counter as "the junction-end case did not
+            # occur" -- it means this pass did not *see* it as one.
             logger.info(
-                "Dropped %d non-vehicle lane link(s) whose reciprocal was "
-                "refused by the road-link consistency guard; a one-sided "
-                "lane link is an ASAM finding on either side of the boundary",
+                "Dropped %d non-vehicle lane link(s): %d already at a "
+                "junction-typed road end, %d with no reciprocal (the "
+                "road-link guard refused the other side, or the end is "
+                "re-pointed at a junction after this pass)",
                 dropped,
+                dropped_junction_end,
+                dropped_no_reciprocal,
             )
 
     @staticmethod
