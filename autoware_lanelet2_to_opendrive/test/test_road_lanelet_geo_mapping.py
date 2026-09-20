@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -396,6 +397,146 @@ class TestResolveConflicts:
         result = _resolve_conflicts([rc_a, rc_b])
         # Winner (100) has no alt, loser (200) has alt -> advance loser
         assert result == {0: 0, 1: 1}
+
+
+# ---------------------------------------------------------------------------
+# _resolve_conflicts: pairwise swap search
+# ---------------------------------------------------------------------------
+
+
+def _exhaustive_swap_fix(
+    all_rc: list[_RoadCandidates], valid: dict[int, int]
+) -> dict[int, int]:
+    """Reference swap search: the every-pair scan the indexed one replaces.
+
+    Kept verbatim (bar the debug log) so the production search can be checked
+    against it for both result and cost.  It is the definition of correct
+    here: the two must pick the same swaps, in the same order.
+    """
+    valid = dict(valid)
+    swap_found = True
+    while swap_found:
+        swap_found = False
+        items = list(valid.items())
+        for i in range(len(items)):
+            rc_a, cand_a = items[i]
+            _, lid_a = all_rc[rc_a].candidates[cand_a]
+            raw_a = all_rc[rc_a].raw_dists.get(lid_a, float("inf"))
+            for j in range(i + 1, len(items)):
+                rc_b, cand_b = items[j]
+                _, lid_b = all_rc[rc_b].candidates[cand_b]
+                raw_b = all_rc[rc_b].raw_dists.get(lid_b, float("inf"))
+
+                raw_a_new = all_rc[rc_a].raw_dists.get(lid_b)
+                if raw_a_new is None:
+                    continue
+                raw_b_new = all_rc[rc_b].raw_dists.get(lid_a)
+                if raw_b_new is None:
+                    continue
+
+                if raw_a_new + raw_b_new < raw_a + raw_b:
+                    valid[rc_a] = next(
+                        ci
+                        for ci, (_, cand_lid) in enumerate(all_rc[rc_a].candidates)
+                        if cand_lid == lid_b
+                    )
+                    valid[rc_b] = next(
+                        ci
+                        for ci, (_, cand_lid) in enumerate(all_rc[rc_b].candidates)
+                        if cand_lid == lid_a
+                    )
+                    swap_found = True
+                    break
+            if swap_found:
+                break
+    return valid
+
+
+def _conflict_free_population(
+    rng: np.random.Generator, count: int, extras: int, pool: int
+) -> list[_RoadCandidates]:
+    """Roads whose *top* candidates are all distinct, so no road is in conflict.
+
+    The conflict loop then leaves every road on candidate 0 and the swap
+    search is the only thing that runs, which is what these tests measure.
+    Lower-ranked candidates are drawn from a shared pool, so roads do overlap
+    there and swaps are possible.
+    """
+    all_rc: list[_RoadCandidates] = []
+    for index in range(count):
+        top = (1.0 + float(rng.uniform(0.0, 0.5)), index)
+        others = {
+            int(rng.integers(count, count + pool)): 1.5 + float(rng.uniform(0.0, 1.0))
+            for _ in range(extras)
+        }
+        candidates = sorted([top] + [(dist, lid) for lid, dist in others.items()])
+        all_rc.append(_make_rc(1000 + index, candidates))
+    return all_rc
+
+
+class TestSwapSearch:
+    """The swap search finds pairs through a candidate index instead of
+    scanning every later road.  It must pick the same swaps as the exhaustive
+    scan, and it must stop being quadratic in the road count."""
+
+    def test_swap_is_applied_when_it_lowers_total_distance(self) -> None:
+        """Two roads each holding the other's nearer lanelet are swapped."""
+        # Greedy gives 100->10 and 200->20 (no conflict: different top
+        # candidates), but 100 is nearer 20 and 200 is nearer 10.
+        rc_a = _make_rc(100, [(1.0, 10), (2.0, 20)], raw_dists={10: 5.0, 20: 0.5})
+        rc_b = _make_rc(200, [(1.5, 20), (3.0, 10)], raw_dists={20: 5.0, 10: 0.5})
+        assert _resolve_conflicts([rc_a, rc_b]) == {0: 1, 1: 1}
+
+    def test_no_swap_when_it_would_not_help(self) -> None:
+        rc_a = _make_rc(100, [(1.0, 10), (2.0, 20)], raw_dists={10: 0.5, 20: 5.0})
+        rc_b = _make_rc(200, [(1.5, 20), (3.0, 10)], raw_dists={20: 0.5, 10: 5.0})
+        assert _resolve_conflicts([rc_a, rc_b]) == {0: 0, 1: 0}
+
+    def test_matches_the_exhaustive_scan(self) -> None:
+        """Same assignment as the every-pair reference, over random inputs."""
+        rng = np.random.default_rng(20260920)
+        for _ in range(40):
+            all_rc = _conflict_free_population(rng, count=60, extras=3, pool=20)
+            expected = _exhaustive_swap_fix(
+                all_rc, {index: 0 for index in range(len(all_rc))}
+            )
+            assert _resolve_conflicts(all_rc) == expected
+
+    def test_is_no_longer_quadratic(self) -> None:
+        """The indexed search must beat the exhaustive one by a wide margin.
+
+        A ratio rather than an absolute wall-clock, so a loaded runner slows
+        both sides.  The two are timed **interleaved** and the **fastest**
+        sample of each is compared: timing one side to completion and then the
+        other lets a load spike land entirely on one of them (see
+        ``test_issue_registration_is_no_longer_quadratic``).
+        """
+        rng = np.random.default_rng(11)
+        count = 2000
+        rounds = 3
+        all_rc = _conflict_free_population(rng, count=count, extras=2, pool=40)
+        start = {index: 0 for index in range(len(all_rc))}
+
+        indexed_samples: list[float] = []
+        exhaustive_samples: list[float] = []
+        for _ in range(rounds):
+            t0 = time.perf_counter()
+            indexed = _resolve_conflicts(all_rc)
+            indexed_samples.append(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            exhaustive = _exhaustive_swap_fix(all_rc, start)
+            exhaustive_samples.append(time.perf_counter() - t0)
+
+        assert indexed == exhaustive
+        fastest_indexed = min(indexed_samples)
+        fastest_exhaustive = min(exhaustive_samples)
+        assert fastest_indexed * 4 < fastest_exhaustive, (
+            f"indexed={fastest_indexed:.3f}s exhaustive={fastest_exhaustive:.3f}s "
+            f"for {count} roads (best of {rounds}; "
+            f"indexed={[round(v, 3) for v in indexed_samples]} "
+            f"exhaustive={[round(v, 3) for v in exhaustive_samples]})"
+        )
 
 
 # ---------------------------------------------------------------------------
