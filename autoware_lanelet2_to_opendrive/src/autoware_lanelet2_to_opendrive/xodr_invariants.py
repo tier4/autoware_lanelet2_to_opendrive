@@ -22,6 +22,20 @@ Nishi-Shinjuku it reports 22 violations over 15 distinct joins, the worst at
 the defect is pinned rather than hidden and cannot quietly get worse.  Every
 other code below is at zero on that map.
 
+Two of them -- ``junction_claim_contested`` and ``connection_unreachable`` --
+reach zero only *with* the junction-claim merge that landed alongside them,
+which is why they are in that commit and not an earlier one.  At its parent
+they fire once each on Nishi-Shinjuku (both ``target`` values: junctions 1002
+and 11002 both hold a ``<connection>`` for road 229's end, and road 229's
+``<successor>`` names 11002, so junction 1002's row is never read) and twelve
+times each on a 6,672-lanelet real map, where five road ends are contested
+across nine junctions.  ``junction_cluster`` and the ``*_mini`` fixtures were
+already at zero before the fix, so they do not witness it: the smallest input
+that does is Nishi-Shinjuku.  The two are independent -- a row can go unread
+without its end being contested, when the slot names a junction that claims
+nothing there -- so both are asserted rather than one standing in for the
+other.
+
 One candidate is **not here because it would fail on arrival**: a lane
 ``<link>`` on a regular road at a junction-typed end. The format says to omit
 it -- which lane you continue into is the junction's ``<connection>`` to
@@ -332,6 +346,8 @@ def _check_junctions(
 ) -> None:
     """``<connection>`` elements name real roads, in the roles the format gives them."""
     owners: Dict[str, Set[str]] = defaultdict(set)
+    # (incoming road, which of its ends) -> the junctions claiming that end.
+    claims: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
 
     for jid, junction in junctions.items():
         for connection in junction.findall("connection"):
@@ -339,6 +355,39 @@ def _check_junctions(
             incoming = connection.get("incomingRoad")
             connecting_road = connection.get("connectingRoad")
             where = f"junction {jid} connection {cid}"
+
+            # contactPoint="start" means the connecting road starts at the
+            # junction, so the incoming road arrives there and it is its END
+            # that this row claims -- and the other way round for "end".
+            claimed_end = (
+                "end"
+                if (connection.get("contactPoint") or "start") == "start"
+                else "start"
+            )
+            claims[(incoming, claimed_end)].add(jid)
+
+            # That end's one <link> slot is what a consumer arriving along the
+            # incoming road reads. When it names a different junction, this row
+            # is never consulted at all and the connecting road it points at
+            # has nothing resolving into it.
+            slot = "successor" if claimed_end == "end" else "predecessor"
+            element = None
+            if incoming in roads:
+                element = roads[incoming].find(f"link/{slot}")
+            if (
+                element is not None
+                and element.get("elementType") == "junction"
+                and element.get("elementId") != jid
+            ):
+                out.append(
+                    Violation(
+                        "connection_unreachable",
+                        where,
+                        f"incomingRoad {incoming} names junction "
+                        f"{element.get('elementId')} at its {claimed_end}, so this "
+                        "row is never consulted",
+                    )
+                )
 
             if incoming not in roads:
                 out.append(
@@ -425,6 +474,22 @@ def _check_junctions(
                     "connecting_road_shared",
                     f"road {rid}",
                     f"named as connectingRoad by junctions {sorted(jids)}",
+                )
+            )
+
+    # A road end carries one <link> slot, so it can name one junction. When
+    # two junctions hold <connection> rows for the same end, the slot names
+    # one of them and every row of the other is dead: a consumer arriving
+    # along that road never opens the second table, and the connecting roads
+    # those rows point at are emitted with nothing resolving into them.
+    for (incoming, end), jids in sorted(claims.items()):
+        if len(jids) > 1:
+            out.append(
+                Violation(
+                    "junction_claim_contested",
+                    f"road {incoming}/{end}",
+                    f"claimed by junctions {sorted(jids)}; the one <link> slot "
+                    "there can name only one of them",
                 )
             )
 
