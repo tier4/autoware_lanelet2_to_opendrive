@@ -223,6 +223,16 @@ def _roads_fed_by_a_lanelet_carrying_connector(tree: ET._ElementTree, mapping: d
     every one of them fed only by connectors carrying no lanelet.  That gap is
     real and pre-existing; it is not what this test is for, and scoping it out
     by the property keeps it visible rather than hiding it behind a proxy.
+
+    **The direction of the statement matters, and the obvious one is wrong.**
+    Stated as an *exclusion* -- "skip roads fed only by connectors carrying no
+    lanelet" -- this leaks: measured, it mis-classifies 34 roads that have the
+    link anyway, and an XODR-only variant of it mis-classifies 33.  Stated as
+    an *inclusion* -- "a road with at least one feeder carrying a source
+    lanelet must have the link" -- it is exact, with no exception on either
+    side of the merge.  It is the same property both times; only the quantifier
+    changes.  The exclusion form is the one to reach for first and the one to
+    discard, so it is written down here rather than rediscovered.
     """
     carries: set = {
         int(pair[0]) for pair in mapping["lanelet_to_road_and_lane"].values()
@@ -263,8 +273,16 @@ def test_lane_predecessor_links_restored_for_junction_outgoing_roads(
     """
     tree = ET.parse(str(nishishinjuku_xodr))
     mapping_path = Path(nishishinjuku_xodr).with_suffix(".mapping.json")
-    if not mapping_path.is_file():
-        pytest.skip(f"{mapping_path} not produced alongside the XODR")
+    # The sidecar is this test's premise, not an optional extra: the population
+    # is defined by which connectors carry a source lanelet, and only the
+    # sidecar records that.  The fixture above has already asserted the
+    # converter exited successfully, so a missing sidecar is a failure of the
+    # thing under test, not an environmental excuse -- skipping here would make
+    # the test go quiet exactly when it has stopped checking anything.
+    assert mapping_path.is_file(), (
+        f"{mapping_path} was not produced alongside the XODR; the converter "
+        f"exited successfully, so the sidecar is missing rather than unavailable"
+    )
     mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
 
     population = list(_roads_fed_by_a_lanelet_carrying_connector(tree, mapping))
