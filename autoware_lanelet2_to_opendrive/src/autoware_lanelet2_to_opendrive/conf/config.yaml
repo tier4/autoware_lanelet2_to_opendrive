@@ -14,6 +14,15 @@ output_map_path: null  # Optional: output file path
 dry_run: false    # If true, only validate without saving output
 verbose: false    # Enable detailed logging
 
+# Pre-flight inspection of the input map
+# Before anything is loaded, the .osm is scanned for the structural problems
+# that make lanelet2.io.load() refuse it, and each problem class is reported
+# with its count and element ids instead of the parser's flat error wall.
+# It is a diagnostic only: it never repairs the map, and it only names
+# problems that already stop the load, so it cannot reject a map that would
+# otherwise convert. Set to false to get the raw parser exception back.
+preflight: true
+
 # Mapping cross-validation
 # After conversion the lanelet -> (road_id, lane_id) mapping is re-derived
 # from raw geometry and compared against the mapping recorded during

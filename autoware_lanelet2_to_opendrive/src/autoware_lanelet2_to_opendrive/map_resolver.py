@@ -56,6 +56,7 @@ from typing import Optional
 import yaml
 
 from .conversion_config import ConversionConfig
+from .map_preflight import MapPreflightError, inspect_lanelet2_osm
 from .map_projector_info import MAP_PROJECTOR_INFO_FILENAME
 
 logger = logging.getLogger(__name__)
@@ -236,6 +237,18 @@ def _convert_lanelet2_to_xodr_cached(
     )
 
     projector = MGRSProjector(origin)
+
+    # Same pre-flight the CLI runs (see main.preprocess_and_convert_with_hydra):
+    # name the structural problems that stop the load, instead of letting the
+    # parser's flat error wall out. Diagnostic only -- every blocking finding
+    # is a constraint lanelet2.io.load enforces anyway.
+    if lanelet2_path.suffix == ".osm":
+        report = inspect_lanelet2_osm(lanelet2_path)
+        if not report.ok:
+            raise MapPreflightError(report)
+        if not report.inspected:
+            logger.warning("Pre-flight could not parse the map: %s", report.xml_error)
+
     lanelet_map = lanelet2.io.load(lanelet2_path, projector)
 
     # mgrs_code is already in config.origin.mgrs_code (merged above).
