@@ -2,6 +2,7 @@
 
 import logging
 from typing import (
+    Callable,
     FrozenSet,
     Set,
     List,
@@ -704,6 +705,162 @@ def build_boundary_lateral_adjacency(
                 right_of.setdefault(left_lanelet.id, set()).add(right_lanelet.id)
 
     return left_of, right_of
+
+
+#: Subtypes whose longitudinal succession is derived from shared boundary
+#: geometry rather than from the ``Participants.Vehicle`` routing graph.
+#:
+#: These are exactly the lanelets that carry no vehicle traffic and are
+#: therefore not vertices of that graph, so ``routing_graph.previous`` and
+#: ``routing_graph.following`` return empty for them and their OpenDRIVE
+#: lanes are emitted with no ``<link>`` at all.  Measured on the two
+#: reference maps, that was 11 of 11 non-vehicle lanes on nishishinjuku and
+#: 4,405 of 4,405 on odaiba.  See
+#: :func:`build_boundary_longitudinal_adjacency`.
+#:
+#: ``walkway`` is included for completeness -- a walkway that did share a
+#: boundary with another walkway would be linked -- but neither reference
+#: map contains such a pair: all 8 nishishinjuku and all 180 odaiba
+#: walkways share no linestring and no boundary endpoint with any lanelet.
+_LONGITUDINAL_GEOMETRY_SUBTYPES: FrozenSet[str] = frozenset(
+    BOUNDARY_ATTACHED_LANELET_SUBTYPES
+) | frozenset({"walkway"})
+
+
+def build_boundary_longitudinal_adjacency(
+    lanelets: LaneletInput,
+) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
+    """Derive longitudinal succession from *shared boundary endpoints*.
+
+    This is the longitudinal counterpart of
+    :func:`build_boundary_lateral_adjacency`, and exists for the same
+    reason: the non-vehicle subtypes are not vertices of a
+    ``Participants.Vehicle`` routing graph, so ``routing_graph.previous`` /
+    ``routing_graph.following`` return nothing for them and their lanes are
+    emitted with no ``<link>``.  A ``Participants.Pedestrian`` graph is not
+    an alternative -- on nishishinjuku it yields no edge for any subtype,
+    walkway and crosswalk included.
+
+    Lanelet ``a`` is followed by ``b`` when ``a``'s end cross-section *is*
+    ``b``'s start cross-section: same left boundary point and same right
+    boundary point.  That is exactly ``lanelet2.geometry.follows``, which is
+    used here as the authoritative check; a boundary-point-id index only
+    narrows the candidate pairs so the pass stays O(n) on maps with tens of
+    thousands of lanelets.
+
+    Both sides must be in :data:`_LONGITUDINAL_GEOMETRY_SUBTYPES`.  Vehicle
+    lanelets are therefore never an endpoint of an edge reported here, and
+    the routing graph remains the sole source of succession for them --
+    which is what keeps this pass from changing any vehicle route.
+
+    Args:
+        lanelets: Collection of lanelets to index.
+
+    Returns:
+        ``(previous_of, following_of)``.  ``previous_of[i]`` is the set of
+        ids of lanelets that end where lanelet ``i`` begins;
+        ``following_of[i]`` the ids that begin where ``i`` ends.  Ids absent
+        from a map have no neighbour on that side.
+    """
+    from lanelet2.geometry import follows
+
+    lanelet_list = [
+        lanelet
+        for lanelet in to_lanelet_list(lanelets)
+        if lanelet_subtype(lanelet) in _LONGITUDINAL_GEOMETRY_SUBTYPES
+    ]
+
+    # Candidate index: a pair can only be in succession when the preceding
+    # lanelet's end cross-section and the following one's start
+    # cross-section are built from the same two boundary points.
+    def _cross_section(
+        lanelet: lanelet2.core.Lanelet, at_end: bool
+    ) -> Optional[Tuple[int, int]]:
+        left, right = lanelet.leftBound, lanelet.rightBound
+        if len(left) == 0 or len(right) == 0:
+            return None
+        index = -1 if at_end else 0
+        return (left[index].id, right[index].id)
+
+    by_start: Dict[Tuple[int, int], List[lanelet2.core.Lanelet]] = {}
+    for lanelet in lanelet_list:
+        start = _cross_section(lanelet, at_end=False)
+        if start is not None:
+            by_start.setdefault(start, []).append(lanelet)
+
+    previous_of: Dict[int, Set[int]] = {}
+    following_of: Dict[int, Set[int]] = {}
+    for lanelet in lanelet_list:
+        end = _cross_section(lanelet, at_end=True)
+        if end is None:
+            continue
+        for candidate in by_start.get(end, ()):
+            if candidate.id == lanelet.id:
+                continue
+            # Authoritative orientation-aware check.  A lanelet whose own
+            # start and end cross-sections coincide (a degenerate loop)
+            # would otherwise report itself as its own neighbour through a
+            # third lanelet.
+            if not follows(lanelet, candidate):
+                continue
+            following_of.setdefault(lanelet.id, set()).add(candidate.id)
+            previous_of.setdefault(candidate.id, set()).add(lanelet.id)
+
+    return previous_of, following_of
+
+
+#: ``(previous_of, following_of)`` as returned by
+#: :func:`build_boundary_longitudinal_adjacency`.
+LongitudinalSuccession = Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]
+
+
+def resolve_lane_link_neighbours(
+    lanelet: lanelet2.core.Lanelet,
+    routing_lookup: Callable[[lanelet2.core.Lanelet], Iterable[lanelet2.core.Lanelet]],
+    succession: Optional[LongitudinalSuccession],
+    direction: ConnectionDirection,
+    lanelet_map: lanelet2.core.LaneletMap,
+) -> List[lanelet2.core.Lanelet]:
+    """Pick the source of a lane's predecessors or successors.
+
+    Vehicle lanelets keep the routing graph untouched.  A lanelet in
+    :data:`_LONGITUDINAL_GEOMETRY_SUBTYPES` is not a vertex of a
+    ``Participants.Vehicle`` graph, so ``routing_lookup`` returns nothing
+    for it and its OpenDRIVE lane was emitted with no ``<link>`` at all;
+    for those, the succession derived from shared boundary geometry is used
+    instead.
+
+    This function only chooses the neighbour list.  Every consistency check
+    the caller applies afterwards -- the road-link guard of issue #202, the
+    junction branches, and the target-lane validation -- runs unchanged on
+    the result, which is what keeps the emitted links schema-valid.
+
+    Args:
+        lanelet: The lanelet whose neighbours are wanted.
+        routing_lookup: ``routing_graph.previous`` or ``.following``.
+        succession: Precomputed geometric succession, or ``None`` to keep
+            the routing graph for every lanelet.
+        direction: Which side of ``succession`` to read.
+        lanelet_map: Map the neighbour ids are resolved against.
+
+    Returns:
+        The neighbouring lanelets, ordered by id when they come from
+        ``succession`` so the emitted link is reproducible run to run.
+    """
+    if succession is None or (
+        lanelet_subtype(lanelet) not in _LONGITUDINAL_GEOMETRY_SUBTYPES
+    ):
+        return list(routing_lookup(lanelet))
+
+    previous_of, following_of = succession
+    side = previous_of if direction is ConnectionDirection.PREVIOUS else following_of
+    neighbours = []
+    for neighbour_id in sorted(side.get(lanelet.id, ())):
+        try:
+            neighbours.append(lanelet_map.laneletLayer.get(neighbour_id))
+        except Exception:
+            continue
+    return neighbours
 
 
 @dataclass(frozen=True)
