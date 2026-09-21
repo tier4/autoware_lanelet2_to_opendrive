@@ -7,3 +7,6 @@ odaiba.osm
 
 # Generated OpenDRIVE files (built from .osm by the converter)
 nishishinjuku_carla.xodr
+
+# Fingerprint of the inputs that produced the file above. Regenerated with it.
+nishishinjuku_carla.xodr.inputs

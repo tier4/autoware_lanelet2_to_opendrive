@@ -109,6 +109,62 @@ pre-commit run
 pre-commit run --files <file1> <file2>
 ```
 
+#### `--all-files` means "all *tracked* files"
+
+**This is the single most important thing to know about the manual gate.**
+`pre-commit run --all-files` resolves its file list with `git ls-files`
+(`pre_commit/git.py::get_all_files`). That lists the index, not the working
+directory, so **a brand-new file that has not been `git add`-ed is invisible
+to it**. Every hook — `ruff-format`, `ruff`, `trailing-whitespace`,
+`mixed-line-ending` — silently skips it.
+
+The consequence is not theoretical. A new module that is written, then
+checked with `pre-commit run --all-files`, then staged, then committed, is
+committed *unformatted*, and CI's `lint-and-format` job fails on it — because
+that job runs the same command in a fresh checkout where the file **is**
+tracked, so there it does get formatted, and pre-commit exits 1 for having
+modified it.
+
+Therefore: **stage before you check.** See
+[The canonical commit sequence](#the-canonical-commit-sequence) below.
+
+### The canonical commit sequence
+
+Use this order every time. There is exactly one correct order and this is it:
+
+```bash
+# 1. Stage everything FIRST -- including new files, so the hooks can see them.
+#    `-A` stages contents; `git add -N .` (intent-to-add) also works if you
+#    want to keep the contents unstaged.
+git add -A
+
+# 2. Now run the hooks. They see the new files because step 1 tracked them.
+pre-commit run --all-files
+
+# 3. Re-stage: the hooks rewrite files in the WORKING TREE, not the index,
+#    so a hook that reformatted something has left the index holding the
+#    unformatted version. `-u` is correct here -- every path is tracked now.
+git add -u
+
+# 4. Commit. The installed hook re-runs and passes, because the tree is
+#    already clean.
+git commit -m "..."
+```
+
+**Why `git add -u` cannot come first.** `-u` stages modifications to files
+that are *already tracked* and nothing else. Run against a change that adds a
+new module, it stages the edits to existing files and leaves the new module
+untracked, so `git commit` produces a commit **with the new module missing**
+and `git status` still shows it as `??`. Verified in a throwaway repository:
+the sequence `git add -u` → `git commit` yields `1 file changed` for the
+pre-existing file only, and `?? newmod.py` afterwards.
+
+**Why the hooks are the only gate that matters.** A fresh clone has no
+`.git/hooks/pre-commit` until somebody runs `pre-commit install`. Until then
+`git commit` runs nothing at all, and step 2 above is the *only* check
+standing between the change and CI. Do not rely on the installed hook
+catching what the manual run missed.
+
 ### Common Lint Errors and Fixes
 
 If pre-commit hooks fail:
@@ -117,7 +173,7 @@ If pre-commit hooks fail:
 2. **Let pre-commit auto-fix when possible** - Many formatters (like black, isort) automatically fix issues
 3. **Stage the auto-fixed changes**:
    ```bash
-   git add -u
+   git add -u   # correct here: everything is already tracked from step 1
    ```
 4. **Retry the commit**:
    ```bash
@@ -137,17 +193,23 @@ If pre-commit hooks fail:
 
 3. **CRITICAL: Auto-format code BEFORE committing** to prevent CI/CD failures:
    ```bash
-   # Step 1: Run pre-commit on all files to auto-fix formatting issues
+   # Step 1: Stage everything first, so new files are visible to the hooks.
+   #         `pre-commit run --all-files` lists files with `git ls-files`;
+   #         an unstaged new file is simply not checked.
+   git add -A
+
+   # Step 2: Run pre-commit on all files to auto-fix formatting issues
    pre-commit run --all-files
 
-   # Step 2: If files were modified, stage the changes
+   # Step 3: If files were modified, re-stage them (hooks rewrite the
+   #         working tree, not the index)
    git add -u
 
-   # Step 3: Now commit (pre-commit will pass because code is already formatted)
+   # Step 4: Now commit (pre-commit will pass because code is already formatted)
    git commit -m "your message"
    ```
 
-   **Rationale**: GitHub Actions fails when pre-commit hooks modify files (exit code 1). By running `pre-commit run --all-files` before committing, formatters like `ruff-format` will fix issues locally first, preventing CI failures.
+   **Rationale**: GitHub Actions fails when pre-commit hooks modify files (exit code 1). By running `pre-commit run --all-files` before committing, formatters like `ruff-format` will fix issues locally first, preventing CI failures. Step 1 is not optional: without it the new files in the change are the ones CI reformats, which is exactly the case that fails.
 
 4. **Automated workflow for code generation and PR creation**:
 
@@ -156,26 +218,30 @@ If pre-commit hooks fail:
    ```bash
    # 1. Make code changes (via Write/Edit tools)
 
-   # 2. Auto-format all files
+   # 2. Stage everything, new files included, so the hooks can see them
+   git add -A
+
+   # 3. Auto-format all files
    pre-commit run --all-files
 
-   # 3. Stage all changes (including formatter modifications)
+   # 4. Re-stage the formatter's rewrites
    git add -u
 
-   # 4. Commit with proper message
+   # 5. Commit with proper message
    git commit -m "feat: your feature description
 
    Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 
-   # 5. Push to remote
+   # 6. Push to remote
    git push -u origin branch-name
 
-   # 6. Create PR using gh CLI
+   # 7. Create PR using gh CLI
    gh pr create --title "..." --body "..."
    ```
 
 5. **If a commit fails due to lint errors**:
    - Review the error output
+   - Run `git add -A` so that any new files are visible to the hooks
    - Run `pre-commit run --all-files` to let formatters auto-fix
    - Stage the fixes with `git add -u`
    - Retry the commit (without `--no-verify`)
@@ -191,7 +257,11 @@ If pre-commit hooks fail:
    - **check-yaml**: Validate YAML syntax
    - **check-toml**: Validate TOML syntax
    - **debug-statements**: Detect debug statements like `breakpoint()`
-   - **mixed-line-ending**: Detect mixed line endings
+   - **mixed-line-ending**: Normalise line endings to LF. Configured with
+     `args: [--fix=lf]`, **not** the default `--fix=auto`: `auto` only acts on
+     files that mix terminators and rewrites them to their own majority, so a
+     file that is consistently CRLF passes silently. `.gitattributes`
+     (`* text=auto eol=lf`) enforces the same rule at the git layer.
 
 7. **Understanding pre-commit hook results**:
    - **Passed**: Hook found no issues
@@ -343,26 +413,32 @@ When creating a PR (manually or through automation), **STRICTLY FOLLOW** this se
 ```bash
 # 1. Complete all code changes using Write/Edit tools
 
-# 2. Format all files before committing
+# 2. Stage everything BEFORE running the hooks.
+#    `pre-commit run --all-files` takes its file list from `git ls-files`,
+#    so an unstaged new file is never checked and reaches CI unformatted.
+git add -A
+
+# 3. Format all files before committing
 #    This step is CRITICAL to prevent CI failures
 pre-commit run --all-files
 
-# 3. Check if formatters modified any files
-#    If "files were modified by this hook" appears, proceed to step 4
-#    If all hooks passed, proceed to step 5
+# 4. Check if formatters modified any files
+#    If "files were modified by this hook" appears, proceed to step 5
+#    If all hooks passed, proceed to step 6
 
-# 4. Stage formatter changes
+# 5. Re-stage the formatter's rewrites (hooks edit the working tree,
+#    not the index, so the index still holds the unformatted version)
 git add -u
 
-# 5. Commit with proper message (hooks will pass now)
+# 6. Commit with proper message (hooks will pass now)
 git commit -m "feat: your feature description
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 
-# 6. Push to remote branch
+# 7. Push to remote branch
 git push -u origin feature-branch-name
 
-# 7. Create PR using gh CLI with template and version bump label
+# 8. Create PR using gh CLI with template and version bump label
 gh pr create --title "..." --body "..." --label "bump patch"
 # Note: Choose the appropriate label:
 #   - "bump patch" for bug fixes and minor changes
@@ -378,23 +454,34 @@ When you are asked to create a PR or when you autonomously decide to create a PR
    - Use Write/Edit tools to make all necessary code changes
    - Do NOT commit yet
 
-2. **Run pre-commit formatters**:
+2. **Stage everything, so the hooks can see the new files**:
+   ```bash
+   git add -A
+   ```
+   - `pre-commit run --all-files` enumerates files with `git ls-files`, which
+     lists the index. A file that has not been added is not checked, and the
+     formatter blind spot this creates shows up as a CI failure, not a local one.
+   - Do this **before** the formatters run, not after.
+
+3. **Run pre-commit formatters**:
    ```bash
    pre-commit run --all-files
    ```
    - This will auto-format code using `ruff-format`, `ruff`, etc.
    - Watch for "files were modified by this hook" messages
-   - If any hook reports modifications, proceed to step 3
-   - If all hooks pass without modifications, proceed to step 4
+   - If any hook reports modifications, proceed to step 4
+   - If all hooks pass without modifications, proceed to step 5
 
-3. **Stage formatter modifications** (if any hooks modified files):
+4. **Re-stage formatter modifications** (if any hooks modified files):
    ```bash
    git add -u
    ```
-   - This stages all tracked file modifications
-   - Includes formatting changes made by pre-commit hooks
+   - Hooks rewrite files in the working tree, not the index, so without this
+     the commit carries the pre-format version.
+   - `-u` is correct at this point precisely because step 2 already tracked
+     every path in the change.
 
-4. **Commit with formatted code**:
+5. **Commit with formatted code**:
    ```bash
    git commit -m "feat: implement feature X
 
@@ -403,14 +490,14 @@ When you are asked to create a PR or when you autonomously decide to create a PR
    Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
    ```
    - Pre-commit hooks run again but will pass immediately
-   - Code is already formatted from step 2
+   - Code is already formatted from step 3
 
-5. **Push to remote**:
+6. **Push to remote**:
    ```bash
    git push -u origin feature-branch-name
    ```
 
-6. **Create PR with version bump label**:
+7. **Create PR with version bump label**:
    - Read `.github/PULL_REQUEST_TEMPLATE.md` first
    - Use `gh pr create` with appropriate title, body, and **version bump label**
    - Follow template structure and emoji conventions
@@ -428,6 +515,9 @@ When you are asked to create a PR or when you autonomously decide to create a PR
 
 **Solution**:
 ```bash
+# Stage first, so any new files are actually checked
+git add -A
+
 # Run pre-commit to format
 pre-commit run --all-files
 
@@ -447,11 +537,13 @@ git push
 
 **Solution**:
 1. Pull the branch locally
-2. Run `pre-commit run --all-files`
-3. Fix any remaining errors manually
-4. Stage changes with `git add -u`
-5. Commit and push
-6. CI will re-run automatically
+2. Run `git add -A` (a no-op on a clean checkout, but it is what makes the
+   next step see any files you add while fixing)
+3. Run `pre-commit run --all-files`
+4. Fix any remaining errors manually
+5. Stage changes with `git add -u`
+6. Commit and push
+7. CI will re-run automatically
 
 ### Rationale
 
@@ -465,9 +557,11 @@ git push
 
 This formatting requirement is integrated into the commit workflow described in the Bash tool's "Committing changes with git" section. The sequence is:
 
-1. Write/Edit code → 2. **Format with pre-commit** → 3. Stage changes → 4. Commit → 5. Push
+1. Write/Edit code → 2. **Stage with `git add -A`** → 3. **Format with pre-commit** → 4. Re-stage with `git add -u` → 5. Commit → 6. Push
 
-**Step 2 is mandatory and must never be skipped.**
+**Steps 2 and 3 are mandatory and must never be skipped, and never reordered.**
+Formatting before staging leaves new files unchecked -- see
+[The canonical commit sequence](#the-canonical-commit-sequence).
 
 ### Automated Formatting in GitHub Actions
 
