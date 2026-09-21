@@ -420,9 +420,54 @@ class ReferenceLine:
         num_samples = max(10, int(np.ceil(total_length_2d / 0.1)) + 1)
         xy_arc_lengths_resampled = np.linspace(0, total_length_2d, num_samples)
 
+        # ``xy_arc_lengths`` measures the *polyline* through the source points;
+        # ``total_length_2d`` measures the *fitted* reference line.  The two
+        # lengths differ either way -- on the Nishi-Shinjuku fixture the fit is
+        # shorter for 795 of 1548 reference-line constructions and longer for
+        # the other 753 -- so interpolating one domain at abscissae taken from
+        # the other misplaces the last sample.  Where the fit is shorter it
+        # lands short of the final source point; where it is longer ``np.interp``
+        # clamps and flattens the tail.  Either way the road's terminal
+        # elevation stops being the source z, while s=0 stays exact because
+        # both domains start at 0.  That asymmetry is what
+        # asam.net:xodr:1.7.0:road.geometry.contact_point sees at a plain
+        # road-to-road joint, where it compares this road's end against the
+        # neighbour's (exact) start with a 1e-6 m tolerance.
+        #
+        # Map the source samples onto the reference line's own arc-length
+        # domain before interpolating, so both endpoints are reproduced
+        # exactly.
+        #
+        # The convention here is a *uniform* rescale.  It fixes the endpoints,
+        # which is the contract the rule tests, but it is not a claim about
+        # elevation accuracy in the road's interior: measured against a
+        # nearest-point-on-polyline reference it recovers only ~15% of the
+        # interior error and makes the worst road worse (25 mm -> 41 mm).
+        # Which source z belongs at which curve arc length is a separate,
+        # still-open question -- the fitted line sits up to 0.49 m laterally
+        # off the polyline it was fitted to, which is larger than the error
+        # being removed here.  ``Splines.param_at_arc_length`` is the
+        # candidate successor: the fit uses chord-length parameterisation
+        # over these same points with ``t_max == xy_arc_lengths[-1]``, so it
+        # is a true bridge between the two domains rather than an assumption
+        # of constant speed ratio.  It is unmeasured, so it is not used here.
+        if xy_arc_lengths[-1] > 0.0:
+            xy_arc_lengths_on_spline = xy_arc_lengths * (
+                total_length_2d / xy_arc_lengths[-1]
+            )
+            # ``linspace`` reproduces its stop value exactly, but the scaled
+            # array's last element can still miss it by one ulp.  Pin it so
+            # the final sample is an evaluation *at* the last source point
+            # rather than just before it.
+            xy_arc_lengths_on_spline[-1] = total_length_2d
+        else:  # pragma: no cover - degenerate zero-length polyline
+            xy_arc_lengths_on_spline = xy_arc_lengths
+
         # Interpolate z-coordinates at resampled positions
         relative_elevations = np.interp(
-            xy_arc_lengths_resampled, xy_arc_lengths, relative_elevations_raw
+            xy_arc_lengths_resampled,
+            xy_arc_lengths_on_spline,
+            relative_elevations_raw,
         )
 
         # Create height_spline mapping XY arc length -> relative elevation
