@@ -481,7 +481,9 @@ class ReferenceLine:
         return self._lane.level
 
     def get_elevation_profile(
-        self, geometry_s_values: list[float] | None = None
+        self,
+        geometry_s_values: list[float] | None = None,
+        road_length: float | None = None,
     ) -> ElevationProfile:
         """
         Get elevation profile from the reference line.
@@ -495,6 +497,25 @@ class ReferenceLine:
                 If provided, elevation segments will be aligned with these boundaries
                 (typically from ParamPoly3 geometries) to ensure consistency.
                 If None, uses the internal height_spline segment boundaries.
+            road_length: The road's own ``@length``, i.e. the upper bound of the
+                s-domain the emitted document declares.  The last elevation
+                segment is built to end exactly here.
+
+                Without it the last segment ends at
+                ``self.height_spline.total_length``, which is the arc length of
+                the *fitted* reference-line spline and is **not** the same
+                number as ``road@length``: the road's length is the sum of the
+                emitted ``<geometry>@length`` values, and the two disagree by
+                up to 265 um over Nishi-Shinjuku's 650 roads (p50 0.81 um).
+                Evaluating the profile at the road's own end then runs past the
+                last cubic's intended domain, giving an elevation that is wrong
+                by that overshoot times the local gradient -- measured at up to
+                12.1 um, on 6 of 650 roads.  Micron-scale, but it is a
+                bookkeeping error that reads as a geometry error, and it is
+                free to remove.
+
+                Only used when ``geometry_s_values`` is given; the fallback
+                branch below has no geometry to be consistent with.
 
         Returns:
             ElevationProfile object containing elevation segments with polynomial coefficients
@@ -509,13 +530,21 @@ class ReferenceLine:
         else:
             # Create elevation segments aligned with geometry boundaries
             # Use cubic Hermite interpolation to compute polynomial coefficients
+            #
+            # The final boundary is the road's declared length when the caller
+            # supplies it, so that the profile's s-domain is the same interval
+            # the rest of the <road> is written against.  See the ``road_length``
+            # argument for the size of the discrepancy this removes.
+            final_s = (
+                self.height_spline.total_length if road_length is None else road_length
+            )
             elevations = []
             for i in range(len(geometry_s_values)):
                 s_start = geometry_s_values[i]
                 s_end = (
                     geometry_s_values[i + 1]
                     if i + 1 < len(geometry_s_values)
-                    else self.height_spline.total_length
+                    else final_s
                 )
                 segment_length = s_end - s_start
 
