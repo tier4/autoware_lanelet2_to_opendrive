@@ -312,6 +312,19 @@ def _evaluate_elevation_profile(elevation_profile: ElevationProfile, s: float) -
     return z
 
 
+def _split_anchor_pose(
+    pose: Optional[Tuple[float, float, float, float]],
+) -> Tuple[Optional[Tuple[float, float, float]], Optional[float]]:
+    """Split an ``(x, y, z, heading)`` anchor pose into its two overrides.
+
+    ``None`` in, two ``None``s out: an endpoint that cannot be pinned is
+    not pinned in position *or* direction.
+    """
+    if pose is None:
+        return None, None
+    return (pose[0], pose[1], pose[2]), pose[3]
+
+
 def _evaluate_planview_endpoint_with_heading(
     plan_view: PlanView, at_start: bool
 ) -> Optional[Tuple[float, float, float]]:
@@ -432,13 +445,26 @@ class Road:
     # line — see :meth:`evaluate_lane_anchor_xyz` and #437.
     sorted_lanelet_ids: Optional[List[int]] = None
 
-    def evaluate_lane_anchor_xyz(
+    def evaluate_lane_anchor_pose(
         self,
         sorted_index: int,
         at_start: bool,
-    ) -> Optional[Tuple[float, float, float]]:
-        """Return the rendered ``(x, y, z)`` of the anchor boundary of the
-        lanelet at ``sorted_index`` at the road's ``s=0`` or ``s=length``.
+    ) -> Optional[Tuple[float, float, float, float]]:
+        """Return the rendered ``(x, y, z, heading)`` of the anchor boundary
+        of the lanelet at ``sorted_index`` at the road's ``s=0`` or
+        ``s=length``.
+
+        ``heading`` is this road's reference-line tangent angle at that
+        endpoint.  It is the second half of the contact contract: OpenDRIVE
+        places a lane border at ``reference(s) + t * normal(s)``, so two
+        roads whose lane borders must coincide have to agree on the tangent
+        as well as the point.  With the point shared and the widths equal,
+        a heading difference ``dpsi`` leaves the far border of a lane of
+        width ``w`` short by ``2 * w * sin(dpsi / 2)`` — on nishishinjuku
+        that is every one of the 59
+        ``lane_smoothness.contact_point_no_horizontal_gaps`` findings.  The
+        junction phase feeds it back as the connecting road's endpoint
+        tangent constraint.
 
         ``sorted_index`` is the 0-based position in
         :attr:`sorted_lanelet_ids` (left-to-right).  The anchor boundary is
@@ -514,7 +540,18 @@ class Road:
         x = x_ref + t * nx
         y = y_ref + t * ny
         z = _evaluate_elevation_profile(self.elevation_profile, s)
-        return (float(x), float(y), float(z))
+        return (float(x), float(y), float(z), float(heading))
+
+    def evaluate_lane_anchor_xyz(
+        self,
+        sorted_index: int,
+        at_start: bool,
+    ) -> Optional[Tuple[float, float, float]]:
+        """Position-only view of :meth:`evaluate_lane_anchor_pose`."""
+        pose = self.evaluate_lane_anchor_pose(
+            sorted_index=sorted_index, at_start=at_start
+        )
+        return None if pose is None else pose[:3]
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -1069,6 +1106,8 @@ class Road:
         routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
         end_xyz_override: Optional[Tuple[float, float, float]] = None,
+        start_hdg_override: Optional[float] = None,
+        end_hdg_override: Optional[float] = None,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -1091,6 +1130,13 @@ class Road:
             end_xyz_override: Optional world-frame (x, y, z) coordinate that
                 pins the reference-line end (s=length) exactly.  Used by the
                 junction phase to align with the linked outgoing road.
+            start_hdg_override: Optional world-frame tangent angle (radians)
+                that pins the reference-line direction at s=0, the direction
+                half of the same contact contract as ``start_xyz_override``.
+                Pinning only the point leaves the lane borders fanning out
+                from it by ``2 * w * sin(dpsi / 2)``.
+            end_hdg_override: The s=length counterpart of
+                ``start_hdg_override``.
 
         Returns:
             Road object constructed from the lanelet group
@@ -1111,6 +1157,8 @@ class Road:
             routing_graph=routing_graph,
             start_xyz_override=start_xyz_override,
             end_xyz_override=end_xyz_override,
+            start_hdg_override=start_hdg_override,
+            end_hdg_override=end_hdg_override,
         )
         centerline_2d = reference_line.centerline_2d
 
@@ -1521,16 +1569,21 @@ class Road:
         def _lane_aware_endpoint(
             group: Set[lanelet2.core.Lanelet],
             direction: str,
-        ) -> Optional[Tuple[float, float, float]]:
-            """Resolve the rendered XYZ at the connecting group's anchor lane.
+        ) -> Optional[Tuple[float, float, float, float]]:
+            """Resolve the rendered pose at the connecting group's anchor lane.
 
             Walks the routing graph from the *outermost* lanelet of the
             connecting group (leftmost for RHT, rightmost for LHT) in the
             requested direction and identifies the unique predecessor /
             successor lanelet ``pl`` that lives in a regular road ``R``.
-            Returns ``R``'s rendered ``(x, y, z)`` evaluated at the anchor
-            boundary of ``pl`` — i.e., the lane edge that ``pl`` shares
-            with the lane immediately closer to the road's reference line.
+            Returns ``R``'s rendered ``(x, y, z, heading)`` evaluated at the
+            anchor boundary of ``pl`` — i.e., the lane edge that ``pl``
+            shares with the lane immediately closer to the road's reference
+            line, plus ``R``'s reference-line tangent angle there.  The
+            heading pins the connecting road's endpoint *direction*; without
+            it the endpoint lands on the right point and then leaves along
+            its own lanelet's tangent, which is the whole of the residual
+            lane-border gap (see :meth:`evaluate_lane_anchor_pose`).
 
             This is the structurally correct pin target: it equals
             ``R.reference_end_xyz`` only when ``pl`` is itself the outermost
@@ -1580,7 +1633,7 @@ class Road:
 
             # ``previous`` ⇒ pin C's start to R's end; ``following`` ⇒ pin
             # C's end to R's start.
-            return r.evaluate_lane_anchor_xyz(
+            return r.evaluate_lane_anchor_pose(
                 sorted_index=sorted_index,
                 at_start=(direction == "following"),
             )
@@ -1613,8 +1666,12 @@ class Road:
                 # the connecting group's outermost lanelet, not the regular
                 # road's reference line.  See ``_lane_aware_endpoint`` and
                 # #437 for the wrong-pin case this fixes.
-                start_override = _lane_aware_endpoint(adjacent_group, "previous")
-                end_override = _lane_aware_endpoint(adjacent_group, "following")
+                start_override, start_hdg_override = _split_anchor_pose(
+                    _lane_aware_endpoint(adjacent_group, "previous")
+                )
+                end_override, end_hdg_override = _split_anchor_pose(
+                    _lane_aware_endpoint(adjacent_group, "following")
+                )
 
                 try:
                     road = Road.construct_from_lanelet_groups(
@@ -1629,6 +1686,8 @@ class Road:
                         routing_graph=routing_graph,
                         start_xyz_override=start_override,
                         end_xyz_override=end_override,
+                        start_hdg_override=start_hdg_override,
+                        end_hdg_override=end_hdg_override,
                     )
 
                     # Set the junction field to mark this as a connecting road

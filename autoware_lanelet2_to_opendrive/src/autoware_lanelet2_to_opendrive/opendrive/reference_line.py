@@ -75,6 +75,8 @@ class ReferenceLine:
         routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
         end_xyz_override: Optional[Tuple[float, float, float]] = None,
+        start_hdg_override: Optional[float] = None,
+        end_hdg_override: Optional[float] = None,
     ) -> "ReferenceLine":
         """
         Construct a ReferenceLine from a group of Lanelet2 lanelets.
@@ -99,6 +101,16 @@ class ReferenceLine:
                 spline fitting.  Used by the junction phase to pin a
                 connecting road's s=length endpoint to the outgoing road's
                 endpoint.
+            start_hdg_override: Optional world-frame tangent angle (radians)
+                that replaces the *direction* of the fitted spline's s=0
+                boundary constraint.  The position override above makes the
+                connecting road start at the right point; without this it
+                then leaves along its own lanelet's tangent, and OpenDRIVE
+                lane borders (``reference(s) + t * normal(s)``) fan out from
+                the shared point by ``2 * w * sin(dpsi / 2)`` — the whole of
+                the residual ``lane_smoothness`` gap at junction boundaries.
+            end_hdg_override: The s=length counterpart of
+                ``start_hdg_override``.
 
         Returns:
             ReferenceLine instance constructed from the center of the lanelet group
@@ -258,6 +270,22 @@ class ReferenceLine:
             start_vel, end_vel = -end_vel, -start_vel
             logger.debug("Reversed velocity vectors to match reversed boundary points")
 
+        # Apply the heading overrides (P0-2, direction half).  These must
+        # come *after* the reversal above: they are stated in the frame of
+        # the emitted reference line, which is what ``boundary_reversed``
+        # has just settled.  ``Splines`` scales its velocity targets by
+        # ``t_max`` internally and its own estimates are unit vectors, so a
+        # unit vector is the right magnitude to hand it.
+        if start_hdg_override is not None:
+            start_vel = np.array(
+                [np.cos(start_hdg_override), np.sin(start_hdg_override)],
+                dtype=float,
+            )
+        if end_hdg_override is not None:
+            end_vel = np.array(
+                [np.cos(end_hdg_override), np.sin(end_hdg_override)], dtype=float
+            )
+
         # Create B-spline directly from corrected points.  When the caller
         # overrode start/end points (junction endpoint fidelity, P0-2) the
         # override point can be up to a few decimetres away from the second
@@ -274,7 +302,12 @@ class ReferenceLine:
         # road in the matching, breaking conversion-vs-geo cross-validation.
         # 1e4 gives sub-millimetre endpoint accuracy while keeping the
         # interior within ~1 cm of the default-weight fit.
-        has_override = start_xyz_override is not None or end_xyz_override is not None
+        has_override = (
+            start_xyz_override is not None
+            or end_xyz_override is not None
+            or start_hdg_override is not None
+            or end_hdg_override is not None
+        )
         spline_hard_weight: Optional[float] = 1e4 if has_override else None
         centerline_2d = Splines(
             points_3d[:, :2],  # Use corrected XY points
