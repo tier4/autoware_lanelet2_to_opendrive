@@ -329,10 +329,21 @@ class GeoMappingConstants:
         rescue_threshold_factor: Multiplier applied to ``match_threshold``
             for the relaxed second-chance search over roads dropped during
             conflict resolution.
+        warn_threshold_factor: Multiplier applied to ``match_threshold`` to
+            obtain the default warn threshold of the positional-accuracy
+            report.  At the default of 0.5 a match is listed individually
+            once it sits closer to the tolerance limit than to its own
+            source geometry.
+        distance_report_decimals: Number of decimal places kept when the
+            reported reference-line distances (m) are serialised into the
+            mapping JSON.  Four places is sub-millimetre, far below any
+            geometric error the report is meant to surface.
     """
 
     match_threshold: float = 3.5
     rescue_threshold_factor: float = 1.5
+    warn_threshold_factor: float = 0.5
+    distance_report_decimals: int = 4
 
 
 @dataclass(frozen=True)

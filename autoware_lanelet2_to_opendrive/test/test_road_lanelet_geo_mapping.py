@@ -29,8 +29,12 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     _CANDIDATE_BBOX_MARGIN,
     _grid_candidate_positions,
     _RoadCandidates,
+    _REPORT_METRIC_NAME,
     _resolve_conflicts,
     _sample_reference_line_from_road,
+    _symmetric_mean_distance,
+    _symmetric_mean_polyline_distance,
+    build_mapping,
     parse_roads_from_xodr,
     save_mapping_json,
     summarise_reference_match_accuracy,
@@ -224,6 +228,28 @@ class TestSaveMappingJson:
         restored = GeoRoadLaneletMapping.from_dict(data)
         assert restored.reference_match_distances == {10: 0.1234, 11: 2.5}
 
+    def test_round_trip_preserves_rescued_reference_lanelets(
+        self, tmp_path: Path
+    ) -> None:
+        """Rescued matches are flagged so a report cannot claim they are
+        within the matching tolerance — the rescue pass accepts more."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            reference_match_distances={10: 0.5, 11: 4.6},
+            rescued_reference_lanelets=[11],
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["rescued_reference_lanelets"] == [11]
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.rescued_reference_lanelets == [11]
+
     def test_absent_reference_match_distances_stay_absent(self, tmp_path: Path) -> None:
         """Mappings from before this field existed round-trip unchanged."""
         xodr_path = tmp_path / "test.xodr"
@@ -246,12 +272,16 @@ class TestSaveMappingJson:
 # ---------------------------------------------------------------------------
 
 
-def _mapping_with_distances(distances: dict[int, float]) -> GeoRoadLaneletMapping:
+def _mapping_with_distances(
+    distances: dict[int, float],
+    rescued: list[int] | None = None,
+) -> GeoRoadLaneletMapping:
     return GeoRoadLaneletMapping(
         xodr_sha256="abc",
         osm_sha256="def",
         lanelet_to_road_and_lane={lid: (lid, -1) for lid in distances},
         reference_match_distances=distances or None,
+        rescued_reference_lanelets=rescued,
     )
 
 
@@ -293,6 +323,256 @@ class TestSummariseReferenceMatchAccuracy:
         )
         assert [w["lanelet_id"] for w in summary["worst"]] == [2]
         assert summary["warn_threshold_m"] == 1.0
+
+    def test_thresholds_come_from_the_geo_mapping_config(self) -> None:
+        summary = summarise_reference_match_accuracy(_mapping_with_distances({1: 0.1}))
+        geo = DEFAULT_CONFIG.geo_mapping
+        assert summary["warn_threshold_m"] == pytest.approx(
+            geo.match_threshold * geo.warn_threshold_factor
+        )
+        assert summary["rescue_threshold_m"] == pytest.approx(
+            geo.match_threshold * geo.rescue_threshold_factor
+        )
+
+    def test_metric_name_is_reported(self) -> None:
+        """All values share one metric, so the summary can name it."""
+        summary = summarise_reference_match_accuracy(_mapping_with_distances({1: 0.1}))
+        assert summary["metric"] == _REPORT_METRIC_NAME
+
+    def test_rescued_matches_above_the_tolerance_are_counted(self) -> None:
+        """A rescued road may sit beyond the matching tolerance; saying every
+        match is "within tolerance" would be wrong for it."""
+        rescue_dist = _MATCH_THRESHOLD + 1.0
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.1, 2: rescue_dist}, rescued=[2])
+        )
+        assert summary["rescued_count"] == 1
+        assert summary["above_match_threshold"] == 1
+        assert summary["max_m"] == pytest.approx(rescue_dist)
+        assert summary["worst"][0] == {
+            "lanelet_id": 2,
+            "distance_m": pytest.approx(rescue_dist),
+            "rescued": True,
+        }
+
+    def test_non_rescued_matches_are_flagged_as_such(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: _MATCH_THRESHOLD - 0.1})
+        )
+        assert summary["rescued_count"] == 0
+        assert summary["above_match_threshold"] == 0
+        assert summary["worst"][0]["rescued"] is False
+
+
+# ---------------------------------------------------------------------------
+# Reporting distance metric (point-to-segment vs point-to-vertex)
+# ---------------------------------------------------------------------------
+
+
+def _polyline(y: float, x_values: list[float]) -> np.ndarray:
+    """Horizontal polyline at height ``y`` through ``x_values``."""
+    return np.array([[float(x), float(y)] for x in x_values])
+
+
+class TestReportDistanceMetric:
+    """The reported accuracy must not charge boundary vertex spacing as error.
+
+    A Lanelet2 boundary is a handful of vertices metres apart; the road
+    reference line is sampled every 0.5 m.  Measured against the boundary's
+    *vertices*, a reference line lying exactly on the boundary still reports
+    roughly a quarter of the vertex spacing.
+    """
+
+    #: Boundary vertices 5 m apart, reference line sampled every 0.5 m.
+    SPARSE_X = [float(x) for x in range(0, 105, 5)]
+    DENSE_X = [0.5 * i for i in range(201)]
+
+    def test_perfect_fit_over_sparse_vertices_reports_zero(self) -> None:
+        boundary = _polyline(0.0, self.SPARSE_X)
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+    def test_matching_metric_is_left_unchanged(self) -> None:
+        """The vertex-based metric still reports ~1.25 m for the same input.
+
+        It is deliberately untouched: it decides matches, and this fix is a
+        reporting fix only.
+        """
+        boundary = _polyline(0.0, self.SPARSE_X)
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_distance(ref_line, boundary) == pytest.approx(
+            1.24, abs=0.01
+        )
+
+    def test_constant_offset_is_reported_exactly(self) -> None:
+        boundary = _polyline(0.0, self.SPARSE_X)
+        ref_line = _polyline(0.2, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.2
+        )
+
+    def test_two_point_boundary_is_handled(self) -> None:
+        boundary = _polyline(0.0, [0.0, 100.0])
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+    def test_duplicate_vertices_do_not_divide_by_zero(self) -> None:
+        boundary = np.array([[0.0, 0.0], [0.0, 0.0], [100.0, 0.0]])
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+
+# ---------------------------------------------------------------------------
+# build_mapping — positional accuracy report
+# ---------------------------------------------------------------------------
+
+
+def _make_linestring(y: float, x_values: list[float]):
+    """Lanelet2 LineString3d running along ``x_values`` at height ``y``."""
+    import lanelet2
+
+    points = [
+        lanelet2.core.Point3d(lanelet2.core.getId(), float(x), float(y), 0.0)
+        for x in x_values
+    ]
+    return lanelet2.core.LineString3d(lanelet2.core.getId(), points)
+
+
+def _make_lanelet(left, right):
+    """Convertible (``subtype=road``) lanelet from two boundary linestrings."""
+    import lanelet2
+
+    lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), left, right)
+    lanelet.attributes["subtype"] = "road"
+    return lanelet
+
+
+def _straight_road_xml(
+    road_id: int, y: float, length: float, lane_ids: list[int]
+) -> str:
+    """XODR ``<road>`` whose planView is a straight line at height ``y``."""
+    lanes = "".join(f"<lane id='{lid}' type='driving'/>" for lid in lane_ids)
+    return (
+        f"<road id='{road_id}' junction='-1'><planView>"
+        f"<geometry s='0.0' x='0.0' y='{y}' hdg='0.0' length='{length}'>"
+        f"<line/></geometry></planView>"
+        f"<lanes><laneSection s='0.0'><right>{lanes}</right></laneSection></lanes>"
+        f"</road>"
+    )
+
+
+def _parse_roads(*road_xml: str) -> list[Road]:
+    import lxml.etree as ET
+
+    return parse_roads_from_xodr(
+        Path("unused.xodr"),
+        xodr_root=ET.fromstring("<OpenDRIVE>" + "".join(road_xml) + "</OpenDRIVE>"),
+    )
+
+
+class TestBuildMappingAccuracyReport:
+    """``reference_match_distances`` must be an honest accuracy figure."""
+
+    #: 20 m of road; boundaries sampled at the reference-line sample spacing
+    #: so that these cases isolate one effect at a time.
+    DENSE_X = [0.5 * i for i in range(41)]
+
+    def test_perfect_fit_with_sparse_boundary_reports_zero(self) -> None:
+        """A road lying exactly on a 5 m-spaced boundary reports ~0 m, not ~1.25 m."""
+        import lanelet2
+
+        sparse_x = [float(x) for x in range(0, 105, 5)]
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, sparse_x), _make_linestring(-3.0, sparse_x)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        roads = _parse_roads(_straight_road_xml(1, 0.0, 100.0, [-1]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        assert mapping.lanelet_to_road_and_lane == {lanelet.id: (1, -1)}
+        assert mapping.reference_match_distances is not None
+        assert mapping.reference_match_distances[lanelet.id] == pytest.approx(
+            0.0, abs=1e-6
+        )
+
+    def test_rescued_road_is_included_in_the_report(self) -> None:
+        """A road recovered by the rescue pass carries positional error too.
+
+        Road 1 sits exactly on lanelet A; road 2 is within the matching
+        tolerance of A as well, loses the conflict and is dropped, then the
+        rescue pass recovers it on lanelet B at 4.6 m — beyond the 3.5 m
+        matching tolerance.  Omitting it understates ``max`` and ``p95``.
+        """
+        import lanelet2
+
+        lanelet_a = _make_lanelet(
+            _make_linestring(0.0, self.DENSE_X), _make_linestring(-3.0, self.DENSE_X)
+        )
+        lanelet_b = _make_lanelet(
+            _make_linestring(-8.0, self.DENSE_X), _make_linestring(-11.0, self.DENSE_X)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet_a)
+        lanelet_map.add(lanelet_b)
+
+        roads = _parse_roads(
+            _straight_road_xml(1, 0.0, 20.0, [-1]),
+            _straight_road_xml(2, -3.4, 20.0, [-1]),
+        )
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        distances = mapping.reference_match_distances
+        assert distances is not None
+        assert distances[lanelet_a.id] == pytest.approx(0.0, abs=1e-6)
+        assert distances[lanelet_b.id] == pytest.approx(4.6, abs=1e-6)
+        assert mapping.rescued_reference_lanelets == [lanelet_b.id]
+
+        summary = summarise_reference_match_accuracy(mapping)
+        assert summary["count"] == 2
+        assert summary["max_m"] == pytest.approx(4.6, abs=1e-6)
+        assert summary["rescued_count"] == 1
+        assert summary["above_match_threshold"] == 1
+
+    def test_distance_is_keyed_by_the_lanelet_the_walk_used(self) -> None:
+        """When the pre-walk corrects the reference, the key follows it.
+
+        The road's reference line is closest to the *inner* lanelet's left
+        boundary, so Phase 1 picks lanelet 2.  The adjacency pre-walk then
+        corrects the reference to lanelet 1 — the true edge lanelet — and the
+        distance belongs to lanelet 1, measured against *its* boundary.
+        """
+        import lanelet2
+
+        outer_left = _make_linestring(0.0, self.DENSE_X)
+        shared = _make_linestring(-3.0, self.DENSE_X)
+        inner_right = _make_linestring(-6.0, self.DENSE_X)
+        lanelet_1 = _make_lanelet(outer_left, shared)
+        lanelet_2 = _make_lanelet(shared, inner_right)
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet_1)
+        lanelet_map.add(lanelet_2)
+
+        roads = _parse_roads(_straight_road_xml(1, -2.6, 20.0, [-1, -2]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        assert mapping.lanelet_to_road_and_lane == {
+            lanelet_1.id: (1, -1),
+            lanelet_2.id: (1, -2),
+        }
+        distances = mapping.reference_match_distances
+        assert distances is not None
+        # Keyed by lanelet 1 (the reference the walk used), not lanelet 2
+        # (the Phase-1 pick), and measured against lanelet 1's boundary.
+        assert set(distances) == {lanelet_1.id}
+        assert distances[lanelet_1.id] == pytest.approx(2.6, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
