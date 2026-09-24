@@ -59,6 +59,21 @@ class SplineConstants:
         control_points_ratio: Ratio of control points to input points (base calculation)
         curvature_threshold: Threshold for high curvature detection (radians)
         curvature_multiplier: Multiplier for control points in high curvature regions
+        resample_spacing: Maximum spacing (m) between consecutive input points
+            handed to the reference-line spline fitter. Raw Lanelet2
+            boundaries are digitised with an arbitrary vertex density -- gaps
+            of tens of metres occur in practice -- while both the arc length
+            and the dynamic control-point count
+            (:func:`~autoware_lanelet2_to_opendrive.spline.compute_dynamic_control_points`)
+            are derived from the vertex *count*. A coarsely digitised
+            boundary therefore yields an under-parameterised fit that is
+            unconstrained between vertices and can bow metres away from the
+            polyline it is meant to reproduce. Subdividing every segment
+            longer than this value before fitting bounds that error; 0.5 m is
+            an order of magnitude below a lane width, so the inserted points
+            pin the curve to the polyline without adding meaningful shape of
+            their own. Only ever adds points, so densely digitised boundaries
+            are unaffected.
     """
 
     speed_epsilon: float = 1e-12
@@ -77,6 +92,7 @@ class SplineConstants:
     control_points_ratio: float = 0.4
     curvature_threshold: float = 0.2
     curvature_multiplier: float = 1.5
+    resample_spacing: float = 1.0
 
 
 @dataclass(frozen=True)

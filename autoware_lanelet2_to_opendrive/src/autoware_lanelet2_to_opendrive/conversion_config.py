@@ -90,8 +90,17 @@ class ArcSpiralConfig:
     reserved for follow-up issue #466b and is currently a no-op.
 
     Attributes:
-        enabled: Master switch. False (default) preserves byte-exact
-            paramPoly3 output for backward compatibility.
+        enabled: Master switch, off by default. Emitting <line>/<arc> runs
+            is attractive on size -- measured on nishishinjuku with boundary
+            resampling it cuts the geometry count from 9,159 to 4,609 and the
+            file from 6.35 MB to 3.98 MB, with the reference-line accuracy
+            report unchanged. It is off because it trades a different kind of
+            accuracy: ``arc_position_tol`` lets a run deviate from the fitted
+            spline, and with the default 0.05 m that pushes junction endpoints
+            out of tolerance (measured: 3 mismatches, worst 0.367 m, against
+            the 0.05 m budget asserted by
+            ``test_junction_endpoint_fidelity``). Tighten ``arc_position_tol``
+            or exclude junction roads before enabling it.
         arc_enabled: Detect constant-curvature arcs.
         spiral_enabled: Reserved (no-op until #466b lands).
         line_curvature_tol: median signed curvature below this (in

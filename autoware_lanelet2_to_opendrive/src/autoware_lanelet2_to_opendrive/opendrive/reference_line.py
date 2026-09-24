@@ -8,6 +8,7 @@ import lxml.etree as ET
 import numpy as np
 from lanelet2.routing import RoutingGraph
 
+from ..config import DEFAULT_CONFIG
 from ..cubic_spline_1d import CubicSpline1D
 from ..spline import Splines
 
@@ -20,6 +21,47 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
+
+
+def resample_points_3d(points_3d: np.ndarray, spacing: float) -> np.ndarray:
+    """Subdivide a boundary polyline so no segment is longer than ``spacing``.
+
+    Every segment whose 2D (XY) length exceeds ``spacing`` is split into the
+    smallest number of equal parts that brings it below the limit, and the
+    inserted points are interpolated linearly in x, y **and** z against the
+    2D cumulative arc length.  Because the interpolation is exactly the one
+    the height spline performs on its own input
+    (``np.interp`` over the XY arc length), adding these points leaves the
+    elevation profile unchanged.
+
+    Original vertices -- including the first and the last, which may carry a
+    junction endpoint override -- are preserved verbatim, and points are only
+    ever added, never dropped, so a densely digitised boundary is returned
+    unchanged.
+
+    Args:
+        points_3d: (N, 3) array of [x, y, z] boundary points.
+        spacing: Maximum allowed 2D distance between consecutive points (m).
+
+    Returns:
+        (M, 3) array with ``M >= N``, starting and ending on the input's
+        first and last point.
+    """
+    if len(points_3d) < 2 or spacing <= 0:
+        return points_3d
+
+    segment_lengths = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
+    subdivisions = np.maximum(np.ceil(segment_lengths / spacing).astype(int), 1)
+    if not np.any(subdivisions > 1):
+        return points_3d
+
+    pieces: List[np.ndarray] = []
+    for start, end, count in zip(points_3d[:-1], points_3d[1:], subdivisions):
+        fractions = (np.arange(count, dtype=float) / count)[:, np.newaxis]
+        pieces.append(start + fractions * (end - start))
+    pieces.append(points_3d[-1:])
+
+    return np.concatenate(pieces, axis=0)
 
 
 class ReferenceLine:
@@ -233,6 +275,18 @@ class ReferenceLine:
             if start_xyz_override is None:
                 points_3d = points_3d.copy()
             points_3d[-1] = override
+
+        # Densify the polyline before fitting.  The spline below is fitted to
+        # these points and its control-point count is derived from their
+        # number, so a coarsely digitised boundary (Lanelet2 gaps of tens of
+        # metres are common) produces an under-parameterised fit that is
+        # unconstrained between vertices and bows metres off the polyline.
+        # Resampling only inserts points, so the endpoint overrides applied
+        # above survive verbatim and dense boundaries are untouched.
+        points_3d = resample_points_3d(
+            points_3d, DEFAULT_CONFIG.spline.resample_spacing
+        )
+        logger.debug(f"Boundary points after resampling: {len(points_3d)}")
 
         # Calculate XY cumulative distances (2D arc length) directly from points
         xy_distances = np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)
