@@ -28,6 +28,12 @@ class GeometryConstants:
             ``type=curbstone`` or ``type=road_border``. Both ``inner`` and
             ``outer`` of the emitted ``<height>`` are set to this value, so
             the sidewalk surface sits flat on top of the curb. Issue #469.
+        spatial_grid_min_cell_size: Floor (m) on the cell size of the uniform
+            grid used to pre-filter candidate lanelet pairs before running an
+            exact geometric intersection test. Only guards against a
+            degenerate (zero-extent) input; it never affects the result,
+            because the grid is a filter and every surviving pair is still
+            confirmed geometrically.
     """
 
     epsilon: float = 1e-10
@@ -36,6 +42,7 @@ class GeometryConstants:
     divergence_min_segment_length: float = 0.01
     divergence_default_lane_width: float = 3.5
     sidewalk_height: float = 0.15
+    spatial_grid_min_cell_size: float = 1.0
 
 
 @dataclass(frozen=True)
