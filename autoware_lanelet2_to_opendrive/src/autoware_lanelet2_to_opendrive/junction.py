@@ -1,6 +1,6 @@
 """Junction-related utility functions for lanelet2 to OpenDRIVE conversion."""
 
-from typing import List, Set, Union
+from typing import Dict, List, Set, Union
 import lanelet2
 from .util import build_lanelet_intersection_adjacency
 
@@ -85,7 +85,8 @@ def find_junction_groups(
         new_groups = []
         merged_indices = set()
 
-        group_of = {}
+        # lanelet index -> index of the group currently holding it
+        group_of: Dict[int, int] = {}
         for group_index, group in enumerate(groups):
             for member in group:
                 group_of[member] = group_index
@@ -99,7 +100,7 @@ def find_junction_groups(
 
             # Groups holding at least one lanelet that intersects the current
             # group -- exactly the groups the pairwise scan would have matched.
-            neighbor_groups = set()
+            neighbor_groups: Set[int] = set()
             for member in current_group:
                 for neighbor in adjacency[member]:
                     neighbor_groups.add(group_of[neighbor])
