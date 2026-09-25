@@ -1,0 +1,29 @@
+# Line endings are a repository property, not a per-developer one.
+#
+# `core.autocrlf` and `core.eol` are user-level settings, so without a rule
+# here the terminator a blob ends up with depends on the machine it was
+# committed from. The cost is silent diff inflation: every untouched line in
+# such a file is rewritten with a different terminator, so a small edit is
+# recorded as a rewrite and the real change disappears into it.
+#
+# The `mixed-line-ending` pre-commit hook does NOT enforce this on its own.
+# Its default `--fix=auto` only acts on files that *mix* terminators, and
+# normalises those to their own majority; a file that is consistently CRLF is
+# not mixed, so the hook returns 0 without printing anything.
+# `.pre-commit-config.yaml` pins `--fix=lf` so the hook enforces the same rule
+# this file does.
+#
+# `text=auto` leaves git's binary detection in charge, so the .png and .whl
+# fixtures are untouched; they are listed explicitly below anyway, because an
+# explicit marker survives a future change to the detection heuristic.
+* text=auto eol=lf
+
+# Binary fixtures: never normalised, never diffed as text.
+*.png binary
+*.whl binary
+
+# Map data is text and is normalised with everything else. Listed explicitly
+# because these are large and a reviewer reaching for this file will want to
+# see that the decision was made deliberately rather than by omission.
+*.osm text eol=lf
+*.xodr text eol=lf
