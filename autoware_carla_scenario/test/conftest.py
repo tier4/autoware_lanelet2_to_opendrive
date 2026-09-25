@@ -49,6 +49,7 @@ _FINGERPRINT_SUFFIXES = frozenset({".py", ".yaml", ".yml"})
 # changing the target or the map selection here invalidates every stamp.
 _CONVERT_ARGV = ("uv", "run", "convert", "map=nishishinjuku", "target=carla")
 
+
 def _input_fingerprint(
     osm_path: Path | None = None,
     src_root: Path | None = None,
@@ -144,7 +145,6 @@ def _stamp_is_current(fingerprint: str) -> bool:
         return _STAMP_PATH.read_text(encoding="utf-8").strip() == fingerprint
     except OSError:
         return False
-
 
 
 @pytest.fixture(scope="session", autouse=True)
