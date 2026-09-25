@@ -52,6 +52,18 @@ def _make_mock_road(road_id: int, wx: float, wy: float, s: float = 0.0) -> Magic
     return road
 
 
+def _make_mock_point_road(road_id: int, wx: float, wy: float) -> MagicMock:
+    """Build a mock Road whose every sample point sits exactly on (wx, wy).
+
+    Zeroing the u coefficient freezes the sampled point at the geometry
+    origin, so the distance from a query point is exactly the one the test
+    computes for (wx, wy) — which is what the ulp-level tie tests below need.
+    """
+    road = _make_mock_road(road_id=road_id, wx=wx, wy=wy)
+    road.plan_view.geometries[0].bU = 0.0
+    return road
+
+
 def _make_mock_linestring(
     ls_id: int,
     points_2d: List[tuple],
@@ -351,6 +363,89 @@ def test_road_sample_point_index_tie_goes_to_the_first_road():
 
     assert actual_road is first
     assert actual_dist == 0.0
+
+
+def test_road_sample_point_index_near_tie_follows_hypot_ranking():
+    """A near-tie must resolve the way math.hypot ranked it, not dx**2+dy**2.
+
+    Crosswalks and stop lines sit near road ends, where consecutive roads
+    share an endpoint, so candidates that differ only in the last bits are
+    common.  For this pair the float squared distances are bit-identical —
+    a squared-distance ranking sees a tie and keeps the first road — while
+    hypot separates them and prefers the second.
+    """
+    farther = (77.01664853080946, -32.20271073441124)
+    nearer = (-57.88469802267071, 60.14931807083619)
+
+    assert farther[0] ** 2 + farther[1] ** 2 == nearer[0] ** 2 + nearer[1] ** 2
+    assert math.hypot(nearer[0], nearer[1]) < math.hypot(farther[0], farther[1])
+
+    roads = [
+        _make_mock_point_road(road_id=0, wx=farther[0], wy=farther[1]),
+        _make_mock_point_road(road_id=1, wx=nearer[0], wy=nearer[1]),
+    ]
+
+    expected_road, expected_dist = _sequential_nearest_road((0.0, 0.0), roads)
+    assert expected_road is roads[1]
+
+    actual_road, actual_dist = RoadSamplePointIndex(roads).nearest(0.0, 0.0)
+
+    assert actual_road is expected_road
+    assert actual_dist == expected_dist
+
+
+def test_road_sample_point_index_ignores_nan_sample_points():
+    """A road sampled to NaN must lose to a real one, as in the old scan."""
+    nan_road = _make_mock_point_road(road_id=0, wx=float("nan"), wy=float("nan"))
+    real_road = _make_mock_point_road(road_id=1, wx=3.0, wy=4.0)
+    roads = [nan_road, real_road]
+
+    # `NaN < best_dist` was always False, so the scan never kept the NaN road.
+    expected_road, expected_dist = _sequential_nearest_road((0.0, 0.0), roads)
+    assert expected_road is real_road
+
+    actual_road, actual_dist = RoadSamplePointIndex(roads).nearest(0.0, 0.0)
+
+    assert actual_road is real_road
+    assert actual_dist == expected_dist
+
+
+def test_road_sample_point_index_nan_query_reports_infinity():
+    """A NaN query makes every distance NaN, which must not match a road."""
+    roads = [_make_mock_point_road(road_id=0, wx=0.0, wy=0.0)]
+
+    assert RoadSamplePointIndex(roads).nearest(float("nan"), 0.0) == (
+        None,
+        float("inf"),
+    )
+    assert RoadSamplePointIndex(roads).nearest(0.0, float("nan")) == (
+        None,
+        float("inf"),
+    )
+
+
+def test_find_nearest_road_for_linestring_rejects_nan_centroid():
+    """A NaN centroid must not slip past the threshold check as a match.
+
+    `NaN > threshold_m` is False, so a NaN distance would otherwise be
+    accepted silently instead of being reported as out of range.
+    """
+    from unittest.mock import patch
+
+    roads = [_make_mock_point_road(road_id=0, wx=0.0, wy=0.0)]
+
+    ls = MagicMock()
+    ls.id = 7007
+
+    pts_2d = np.array([[float("nan"), 0.0], [float("nan"), 0.0]])
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
+    ) as mock_extract:
+        mock_extract.return_value = pts_2d
+        result = find_nearest_road_for_linestring(ls, roads)
+
+    assert result is None
 
 
 def test_road_sample_point_index_without_sample_points_reports_infinity():

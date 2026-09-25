@@ -270,9 +270,11 @@ class RoadSamplePointIndex:
 
     The flattening preserves the exact iteration order of the original nested
     scan (``for road in all_roads`` then ``for point in
-    _sample_road_points(road)``).  ``np.argmin`` returns the first occurrence
-    of the minimum, so it selects the same sample point that the sequential
-    ``dist < best_dist`` scan kept, ties included.
+    _sample_road_points(road)``).  Distances are ranked with ``np.hypot``, the
+    same value ``math.hypot`` gave the sequential scan, and ``np.nanargmin``
+    returns the first occurrence of the minimum, so the index selects the
+    sample point that the sequential ``dist < best_dist`` scan kept — exact
+    ties, near-ties and NaN coordinates included.
 
     Sampling is deferred until the first query so that a map with neither
     crosswalks nor stop lines pays nothing, just as the per-object scan did.
@@ -334,23 +336,32 @@ class RoadSamplePointIndex:
 
         Returns:
             ``(road, distance)`` for the closest sample point, or
-            ``(None, inf)`` when no road contributed a sample point — the
-            state the sequential scan ended in for that case.
+            ``(None, inf)`` when no road contributed a sample point and when
+            every distance is NaN — the states the sequential scan ended in
+            for those cases.
         """
         xs, ys, road_slots = self._sampled()
         if xs.size == 0:
             return None, float("inf")
 
-        # Squared distance is monotone in distance, so it ranks the points
-        # identically while skipping a sqrt per point.  Squared in place to
-        # keep only two temporaries alive at peak.
+        # Ranked with hypot rather than dx**2 + dy**2: squaring is monotone in
+        # exact arithmetic but rounds differently, so two candidates whose
+        # distances differ only in the last bits can swap order.  Objects sit
+        # near road ends, where consecutive roads share an endpoint, so those
+        # near-ties decide which road an object lands on.  Written into ``dx``
+        # to keep only two temporaries alive at peak.
         dx = xs - x
-        np.square(dx, out=dx)
         dy = ys - y
-        np.square(dy, out=dy)
-        dx += dy
+        np.hypot(dx, dy, out=dx)
 
-        winner = int(np.argmin(dx))
+        # NaN must never win: ``np.argmin`` would return a NaN's index, and
+        # the caller's ``best_dist > threshold_m`` guard is False for NaN, so
+        # the road would be accepted silently.  The sequential scan could not
+        # keep a NaN, because ``NaN < best_dist`` is always False.
+        if bool(np.all(np.isnan(dx))):
+            return None, float("inf")
+
+        winner = int(np.nanargmin(dx))
         road = self._roads[int(road_slots[winner])]
         # Recompute the winning distance with math.hypot so the threshold
         # comparison and the warning text see the same value the per-point
