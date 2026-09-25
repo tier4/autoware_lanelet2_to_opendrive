@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -43,6 +45,24 @@ repos:
 
   - repo: local
     hooks:
+      # These run at push time, not at commit time. Each is the whole suite --
+      # ``always_run`` with ``pass_filenames: false`` and ``--no-testmon``, so
+      # neither the changed files nor testmon's selection narrows them -- and
+      # the two cannot be merged (see below). At commit time that is two full
+      # suites back to back: measured at roughly 40 minutes here, against
+      # seconds for every other hook.
+      #
+      # ``default_install_hook_types`` at the top of this file is what makes a
+      # plain ``pre-commit install`` write the pre-push hook as well. Do not
+      # drop it: ``stages`` only says when a hook may run, never which git hook
+      # file gets installed, so without it these two are configured for a stage
+      # whose hook does not exist and run nowhere, silently.
+      #
+      # CI does not lose anything by this: the ``test`` job in ci.yml runs the
+      # same suites directly, across Python 3.10/3.11/3.12 with and without
+      # CARLA, which is strictly more than the single run this replaced in
+      # ``lint-and-format``.
+      #
       # Run each package's tests in a separate process to avoid a crash in
       # the lanelet2 C++ bindings that occurs when both suites run together
       # and the interpreter shuts down with multiple LaneletMap instances alive.
@@ -53,6 +73,7 @@ repos:
         types: [python]
         pass_filenames: false
         always_run: true
+        stages: [pre-push]
       - id: pytest-carla
         name: pytest (autoware_carla_scenario)
         entry: uv run pytest --no-testmon -m "not integration" autoware_carla_scenario/test
@@ -60,3 +81,4 @@ repos:
         types: [python]
         pass_filenames: false
         always_run: true
+        stages: [pre-push]

@@ -89,7 +89,11 @@ pre-commit install
 ### Usage
 
 #### Automatic Checking (Recommended)
-Once installed, pre-commit hooks run automatically on every `git commit`. The commit will be blocked if any checks fail.
+Once installed, the fast hooks run automatically on every `git commit` and the
+commit is blocked if any of them fail. The two test suites are **not** among
+them: they are declared `stages: [pre-push]` and run once before code leaves the
+machine, because each is the whole suite and the pair took roughly 40 minutes
+per commit.
 
 #### Manual Checking
 You can manually run pre-commit checks before committing:

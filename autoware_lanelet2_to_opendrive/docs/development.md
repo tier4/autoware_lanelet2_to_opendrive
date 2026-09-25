@@ -44,8 +44,11 @@ uv sync --dev --extra carla
 uv run pre-commit install
 ```
 
-The configured hooks (see [`.pre-commit-config.yaml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/.pre-commit-config.yaml))
-run automatically on every commit:
+This writes both the `pre-commit` and `pre-push` git hooks, because the config
+declares `default_install_hook_types: [pre-commit, pre-push]`.
+
+These hooks (see [`.pre-commit-config.yaml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/.pre-commit-config.yaml))
+run on every **commit**:
 
 - `pre-commit-hooks` v4.6.0: `trailing-whitespace`, `end-of-file-fixer`,
   `check-yaml` (excluding `mkdocs.yml`), `check-added-large-files`,
@@ -54,9 +57,12 @@ run automatically on every commit:
 - `ruff` v0.7.4 (`--fix`) and `ruff-format`
 - Local `mypy --ignore-missing-imports` over both workspace `src/` and
   `test/` trees
+and this runs on every **push** (`stages: [pre-push]`):
+
 - Local `pytest --no-testmon` runs for each workspace member, executed in
   separate processes to dodge a known shutdown-time crash in the
-  lanelet2 C++ bindings when both suites share an interpreter
+  lanelet2 C++ bindings when both suites share an interpreter. Neither the
+  changed files nor testmon narrows them, so each is the whole suite
 
 Never bypass hooks with `--no-verify`. If a hook auto-fixes a file,
 re-stage with `git add -u` and commit again.
