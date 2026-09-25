@@ -929,7 +929,13 @@ def _resolve_conflicts(
     # assignment[rc_idx] = index into all_rc[rc_idx].candidates
     assignment: dict[int, int] = {i: 0 for i in range(len(all_rc))}
 
+    # Both loops below run for an unknown number of rounds, so the bars count
+    # rounds rather than showing a percentage.  Without them this phase is
+    # silent, and on a large map that silence is indistinguishable from a hang.
+    rounds = tqdm(desc="Resolving candidate conflicts", unit="round")
+
     while True:
+        rounds.update()
         # Build claims: lanelet_id -> [(rc_idx, distance), ...]
         claims: dict[int, list[tuple[int, float]]] = {}
         for rc_idx, cand_idx in assignment.items():
@@ -1035,6 +1041,8 @@ def _resolve_conflicts(
         if not had_conflict:
             break
 
+    rounds.close()
+
     # Remove entries where the candidate index is out of range
     valid = {
         rc_idx: cand_idx
@@ -1047,26 +1055,47 @@ def _resolve_conflicts(
     # reduces the total raw distance, apply the swap.  Raw (geometric)
     # distances are used instead of ranking distances (which include the
     # endpoint penalty) for more accurate swap benefit calculation.
+    #
+    # Only a road whose own candidate set contains A's lanelet can be A's
+    # swap partner, so the pairs worth testing are found through an index
+    # rather than by walking every later road: the exhaustive form is
+    # quadratic in the road count and restarts after every swap, which cost
+    # 22 of the 26 minutes the mapping phase took on a 25k-lanelet map.
+    #
+    # ``raw_dists`` holds exactly the road's candidate lanelets and never
+    # changes here, so the index is built once.  ``order`` fixes each road's
+    # position for the whole search — ``valid`` only ever has existing keys
+    # reassigned below, never added or removed — and the per-lanelet position
+    # lists come out ascending, so the pairs are still visited in the
+    # ``i < j`` order of the exhaustive scan and the same swap is found first.
+    order = list(valid)
+    holders: dict[int, list[int]] = {}
+    for position, rc_idx in enumerate(order):
+        for cand_lid in all_rc[rc_idx].raw_dists:
+            holders.setdefault(cand_lid, []).append(position)
+
+    swaps = tqdm(desc="Fixing pairwise swaps", unit="pass")
     swap_found = True
     while swap_found:
+        swaps.update()
         swap_found = False
-        items = list(valid.items())
-        for i in range(len(items)):
-            rc_a, cand_a = items[i]
-            _, lid_a = all_rc[rc_a].candidates[cand_a]
-            raw_a = all_rc[rc_a].raw_dists.get(lid_a, float("inf"))
-            for j in range(i + 1, len(items)):
-                rc_b, cand_b = items[j]
-                _, lid_b = all_rc[rc_b].candidates[cand_b]
-                raw_b = all_rc[rc_b].raw_dists.get(lid_b, float("inf"))
+        for i, rc_a in enumerate(order):
+            _, lid_a = all_rc[rc_a].candidates[valid[rc_a]]
+            raw_dists_a = all_rc[rc_a].raw_dists
+            raw_a = raw_dists_a.get(lid_a, float("inf"))
+            for j in holders.get(lid_a, ()):
+                if j <= i:
+                    continue
+                rc_b = order[j]
+                _, lid_b = all_rc[rc_b].candidates[valid[rc_b]]
+                raw_dists_b = all_rc[rc_b].raw_dists
+                raw_b = raw_dists_b.get(lid_b, float("inf"))
 
-                # Does A have lid_b? Does B have lid_a?
-                raw_a_new = all_rc[rc_a].raw_dists.get(lid_b)
+                # Does A have lid_b?  B has lid_a by construction of the index.
+                raw_a_new = raw_dists_a.get(lid_b)
                 if raw_a_new is None:
                     continue
-                raw_b_new = all_rc[rc_b].raw_dists.get(lid_a)
-                if raw_b_new is None:
-                    continue
+                raw_b_new = raw_dists_b[lid_a]
 
                 if raw_a_new + raw_b_new < raw_a + raw_b:
                     # Find the candidate indices for the swapped lanelets
@@ -1096,6 +1125,8 @@ def _resolve_conflicts(
                     break
             if swap_found:
                 break
+
+    swaps.close()
 
     return valid
 
@@ -1418,21 +1449,37 @@ def build_mapping(
     )
     assigned_rc_indices = set(assignment.keys())
     rescued_road_ids: set[int] = set()
-    for rc_idx in range(len(all_rc)):
-        if rc_idx in assigned_rc_indices:
-            continue
+    dropped_rc_indices = [
+        rc_idx for rc_idx in range(len(all_rc)) if rc_idx not in assigned_rc_indices
+    ]
+    # Same grid pre-filter as Phase 1, for the same reason: the exhaustive
+    # form walks every boundary on the map once per dropped road.  The grid's
+    # default bbox margin below is ``_CANDIDATE_BBOX_MARGIN``, so querying it
+    # with that margin returns a superset of what the exact test keeps, in the
+    # boundary dict's own order — the nearest match is therefore unchanged,
+    # ties included.  Built on first use so a map with no dropped roads, or
+    # with a single traffic rule, never pays for it.
+    rescue_grids: dict[bool, Optional[_BoundaryGrid]] = {True: None, False: None}
+    for rc_idx in tqdm(dropped_rc_indices, desc="Rescuing dropped roads", unit="road"):
         rc = all_rc[rc_idx]
         boundaries = lanelet_left if rc.is_rht else lanelet_right
         bboxes = lanelet_left_bbox if rc.is_rht else lanelet_right_bbox
+        grid = rescue_grids[rc.is_rht]
+        if grid is None:
+            grid = _build_boundary_grid(boundaries, bboxes)
+            rescue_grids[rc.is_rht] = grid
         ref_bbox = _bbox(rc.ref_line)
         best_lid: Optional[int] = None
         best_dist = _RESCUE_THRESHOLD
-        for lid, boundary in boundaries.items():
+        for position in _grid_candidate_positions(
+            grid, ref_bbox, _CANDIDATE_BBOX_MARGIN
+        ):
+            lid = grid.lids[position]
             if lid in matched_lanelets:
                 continue
-            if not _bboxes_overlap(ref_bbox, bboxes[lid]):
+            if not _bboxes_overlap(ref_bbox, grid.boxes[position]):
                 continue
-            dist = _symmetric_mean_distance(boundary, rc.ref_line)
+            dist = _symmetric_mean_distance(boundaries[lid], rc.ref_line)
             if dist < best_dist:
                 best_dist = dist
                 best_lid = lid
@@ -1470,10 +1517,18 @@ def build_mapping(
     # separately rather than counted as 0-candidate matching failures.
     roads_no_candidates = all_road_ids - rc_road_ids - skipped_synthetic
     roads_dropped_phase2 = rc_road_ids - assigned_road_ids
+    # One pass over ``mapping`` instead of one per assigned road: the inner
+    # scan below used to walk all ~18k entries for each of the ~10k roads,
+    # 175M comparisons for a diagnostic line, and was the 95 seconds between
+    # the last rescue and "Built lanelet-to-road mapping" on a 25k-lanelet map.
+    lanes_by_road: dict[int, set[int]] = {}
+    for mapped_road_id, mapped_lane_id in mapping.values():
+        lanes_by_road.setdefault(mapped_road_id, set()).add(mapped_lane_id)
+
     roads_not_fully_mapped: list[tuple[int, tuple[int, ...]]] = []
     for rc_idx, cand_idx in assignment.items():
         rc = all_rc[rc_idx]
-        mapped_lanes = {v[1] for k, v in mapping.items() if v[0] == rc.road_id}
+        mapped_lanes = lanes_by_road.get(rc.road_id, set())
         expected_lanes = set(rc.walk_lane_ids)
         if mapped_lanes != expected_lanes:
             missing_lanes = expected_lanes - mapped_lanes
