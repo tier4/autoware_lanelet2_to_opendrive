@@ -17,9 +17,15 @@ from autoware_lanelet2_to_opendrive.opendrive.geometry import (
     PlanView,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     GeoRoadLaneletMapping,
     MappingMismatchError,
+    _bbox,
+    _bboxes_overlap,
+    _build_boundary_grid,
+    _CANDIDATE_BBOX_MARGIN,
+    _grid_candidate_positions,
     _RoadCandidates,
     _resolve_conflicts,
     _sample_reference_line_from_road,
@@ -590,3 +596,109 @@ class TestParseRoadsFromXodr:
         assert arc.curvature == pytest.approx(0.04)
         assert isinstance(pp3, ParamPoly3)
         assert pp3.cV == pytest.approx(0.1)
+
+
+# ---------------------------------------------------------------------------
+# Boundary grid pre-filter
+# ---------------------------------------------------------------------------
+
+
+class TestBoundaryGridPreFilter:
+    """The grid in front of the Phase-1 bbox test is a filter only: it must
+    return every boundary the exhaustive scan would have kept, in the same
+    order, so the candidate set and the nearest-rejected diagnostic are
+    unchanged."""
+
+    @staticmethod
+    def _population(
+        rng: np.random.Generator, count: int, extent: float
+    ) -> tuple[dict[int, np.ndarray], dict[int, tuple[float, float, float, float]]]:
+        boundaries: dict[int, np.ndarray] = {}
+        bboxes: dict[int, tuple[float, float, float, float]] = {}
+        for index in range(count):
+            start = rng.uniform(-extent, extent, size=2)
+            delta = rng.uniform(-40.0, 40.0, size=2)
+            pts = np.array([start, start + delta * 0.5, start + delta])
+            lid = 1000 + index * 7
+            boundaries[lid] = pts
+            bboxes[lid] = _bbox(pts)
+        return boundaries, bboxes
+
+    def test_grid_matches_exhaustive_scan(self) -> None:
+        rng = np.random.default_rng(20240513)
+        boundaries, bboxes = self._population(rng, 200, 300.0)
+        grid = _build_boundary_grid(boundaries, bboxes)
+
+        for _ in range(200):
+            start = rng.uniform(-300.0, 300.0, size=2)
+            delta = rng.uniform(-60.0, 60.0, size=2)
+            ref_bbox = _bbox(np.array([start, start + delta]))
+
+            exhaustive = [
+                lid
+                for lid in boundaries
+                if _bboxes_overlap(ref_bbox, bboxes[lid], margin=_CANDIDATE_BBOX_MARGIN)
+            ]
+            filtered = [
+                grid.lids[position]
+                for position in _grid_candidate_positions(
+                    grid, ref_bbox, _CANDIDATE_BBOX_MARGIN
+                )
+                if _bboxes_overlap(
+                    ref_bbox, grid.boxes[position], margin=_CANDIDATE_BBOX_MARGIN
+                )
+            ]
+            assert filtered == exhaustive
+
+    def test_grid_query_is_a_superset_of_the_exact_test(self) -> None:
+        """The cell sweep alone — before the exact test — already contains
+        every overlapping boundary."""
+        rng = np.random.default_rng(7)
+        boundaries, bboxes = self._population(rng, 120, 150.0)
+        grid = _build_boundary_grid(boundaries, bboxes)
+
+        for _ in range(100):
+            start = rng.uniform(-150.0, 150.0, size=2)
+            ref_bbox = _bbox(
+                np.array([start, start + rng.uniform(-50.0, 50.0, size=2)])
+            )
+            swept = {
+                grid.lids[position]
+                for position in _grid_candidate_positions(
+                    grid, ref_bbox, _CANDIDATE_BBOX_MARGIN
+                )
+            }
+            overlapping = {
+                lid
+                for lid in boundaries
+                if _bboxes_overlap(ref_bbox, bboxes[lid], margin=_CANDIDATE_BBOX_MARGIN)
+            }
+            assert overlapping <= swept
+
+    def test_margin_covers_the_rescue_threshold(self) -> None:
+        """The filter margin has to sit above every distance threshold that a
+        surviving pair is later measured against, or a real match could be
+        discarded before it is ever measured."""
+        rescue_threshold = (
+            DEFAULT_CONFIG.geo_mapping.match_threshold
+            * DEFAULT_CONFIG.geo_mapping.rescue_threshold_factor
+        )
+        assert _CANDIDATE_BBOX_MARGIN > rescue_threshold
+
+    def test_empty_population(self) -> None:
+        grid = _build_boundary_grid({}, {})
+        assert grid.lids == []
+        assert _grid_candidate_positions(grid, (0.0, 0.0, 10.0, 10.0), 10.0) == []
+
+    def test_zero_extent_boundaries_do_not_collapse_the_grid(self) -> None:
+        """A population of coincident points has no extent; the cell size
+        falls back to the configured floor rather than zero."""
+        boundaries = {1: np.array([[5.0, 5.0], [5.0, 5.0]])}
+        bboxes = {1: _bbox(boundaries[1])}
+        grid = _build_boundary_grid(boundaries, bboxes)
+
+        assert grid.cell_size == DEFAULT_CONFIG.geometry.spatial_grid_min_cell_size
+        assert (
+            grid.lids[_grid_candidate_positions(grid, (0.0, 0.0, 1.0, 1.0), 10.0)[0]]
+            == 1
+        )
