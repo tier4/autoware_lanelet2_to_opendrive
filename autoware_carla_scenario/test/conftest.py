@@ -83,15 +83,16 @@ def _input_fingerprint(
     source checkout with uncommitted edits, which is the case that bites, and
     an installed sdist has no git metadata at all.
 
-    Cost, measured in the ``dev`` container at ``818e8a00``: **587 ms** per
-    call, over 59 source files plus the 10.6 MB OSM -- the OSM read dominates,
-    and it is slower still across a bind mount.  It runs once per session.
+    The fingerprint itself is cheap and runs once per session; the OSM read
+    dominates it, and it is slower across a bind mount.
 
     The cost that matters is the other one: touching any converter source file
-    forces one reconversion on the next test run, measured at **~90 s**.  An
-    unchanged tree costs nothing (a no-op run of a single test completes in
-    0.8 s).  That is the intended trade -- 90 s once after a source change, in
-    exchange for the artifact meaning what it says.
+    forces one reconversion on the next test run, which is the bulk of the
+    time.  An unchanged tree costs nothing.  That is the intended trade -- one
+    reconversion after a source change, in exchange for the artifact meaning
+    what it says.  (See the commit that introduced this for the figures
+    measured at the time; they are not pinned here because they move with the
+    map and the host.)
 
     Note that the emitted XODR is **not byte-reproducible**: its ``<header>``
     carries a wall-clock ``date`` attribute, so two conversions of identical
