@@ -57,13 +57,12 @@ run on every **commit**:
 - `ruff` v0.7.4 (`--fix`) and `ruff-format`
 - Local `mypy --ignore-missing-imports` over both workspace `src/` and
   `test/` trees
-and this runs on every **push** (`stages: [pre-push]`):
+
+This runs on every **push** (`stages: [pre-push]`):
 
 - Local `pytest -o addopts= -n auto --no-testmon` runs for each workspace
   member, executed in separate processes to dodge a known shutdown-time
-  crash in the lanelet2 C++ bindings when both suites share an interpreter.
-  Neither the changed files nor testmon narrows them, so each is the whole
-  suite
+  crash in the lanelet2 C++ bindings when both suites share an interpreter
 
 Never bypass hooks with `--no-verify`. If a hook auto-fixes a file,
 re-stage with `git add -u` and commit again.
