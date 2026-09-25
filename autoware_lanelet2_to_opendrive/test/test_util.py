@@ -1006,3 +1006,60 @@ def test_maybe_wrap_passes_through_native_subclass():
     reg.trafficLights = [MagicMock()]  # has native property
     wrapped = _maybe_wrap(reg, "trafficLights")
     assert wrapped is reg  # not wrapped
+
+
+def test_lanelet_bounds_2d_contains_boundary_points(lanelet_map):
+    """The 2D bounding box must enclose every point of both boundaries."""
+    from autoware_lanelet2_to_opendrive.util import lanelet_bounds_2d
+
+    for lanelet in list(lanelet_map.laneletLayer)[:200]:
+        box = lanelet_bounds_2d(lanelet)
+        assert box is not None
+        min_x, min_y, max_x, max_y = box
+        assert min_x <= max_x and min_y <= max_y
+        for boundary in (lanelet.leftBound, lanelet.rightBound):
+            for point in boundary:
+                assert min_x <= point.x <= max_x
+                assert min_y <= point.y <= max_y
+
+
+def test_build_lanelet_intersection_adjacency_matches_exhaustive(lanelet_map):
+    """The bounding-box filter must not drop any intersecting pair.
+
+    The adjacency built with the spatial filter is compared against the
+    exhaustive all-pairs scan it replaces.
+    """
+    from lanelet2.geometry import intersects2d
+
+    from autoware_lanelet2_to_opendrive.junction import (
+        _filter_lanelets_inside_junction,
+    )
+    from autoware_lanelet2_to_opendrive.util import (
+        build_lanelet_intersection_adjacency,
+    )
+
+    lanelets = _filter_lanelets_inside_junction(list(lanelet_map.laneletLayer))
+    assert len(lanelets) > 1
+
+    adjacency = build_lanelet_intersection_adjacency(lanelets)
+
+    expected = [set() for _ in lanelets]
+    for i in range(len(lanelets)):
+        for j in range(i + 1, len(lanelets)):
+            if intersects2d(lanelets[i], lanelets[j]):
+                expected[i].add(j)
+                expected[j].add(i)
+
+    assert adjacency == expected
+
+
+def test_build_lanelet_intersection_adjacency_small_inputs(lanelet_map):
+    """Empty and single-element inputs need no geometry and stay empty."""
+    from autoware_lanelet2_to_opendrive.util import (
+        build_lanelet_intersection_adjacency,
+    )
+
+    assert build_lanelet_intersection_adjacency([]) == []
+
+    one = next(iter(lanelet_map.laneletLayer))
+    assert build_lanelet_intersection_adjacency([one]) == [set()]

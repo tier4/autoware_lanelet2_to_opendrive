@@ -175,3 +175,92 @@ def test_construct_from_lanelet_map(lanelet_map):
         assert junction.id == 100 + i
         assert junction.name is not None
         assert junction.connections == []
+
+
+def _reference_find_junction_groups(lanelets):
+    """Original O(M^2) grouping, kept as the equivalence reference.
+
+    This is the pre-spatial-index implementation, transcribed unchanged. It
+    calls intersects2d on every group pair on every pass; find_junction_groups
+    must return exactly the same nested lists.
+    """
+    from autoware_lanelet2_to_opendrive.util import check_lanelet_groups_intersect
+
+    if not lanelets:
+        return []
+
+    lanelet_list = list(lanelets)
+    groups = [[lanelet] for lanelet in lanelet_list]
+
+    changed = True
+    while changed:
+        changed = False
+        new_groups = []
+        merged_indices = set()
+
+        for i in range(len(groups)):
+            if i in merged_indices:
+                continue
+
+            current_group = groups[i]
+            merged_group = current_group.copy()
+
+            for j in range(i + 1, len(groups)):
+                if j in merged_indices:
+                    continue
+
+                if check_lanelet_groups_intersect(set(current_group), set(groups[j])):
+                    merged_group.extend(groups[j])
+                    merged_indices.add(j)
+                    changed = True
+
+            new_groups.append(merged_group)
+
+        groups = new_groups
+
+    return groups
+
+
+def test_find_junction_groups_matches_reference_implementation(lanelet_map):
+    """The spatially indexed grouping must reproduce the original exactly.
+
+    Not just the same membership: the same group order and the same member
+    order within each group, so that anything downstream keyed on position is
+    unaffected.
+    """
+    from autoware_lanelet2_to_opendrive.junction import (
+        _filter_lanelets_inside_junction,
+        find_junction_groups,
+    )
+
+    junction_lanelets = _filter_lanelets_inside_junction(list(lanelet_map.laneletLayer))
+    assert len(junction_lanelets) > 1
+
+    actual = find_junction_groups(junction_lanelets)
+    expected = _reference_find_junction_groups(junction_lanelets)
+
+    actual_ids = [[ll.id for ll in group] for group in actual]
+    expected_ids = [[ll.id for ll in group] for group in expected]
+
+    assert actual_ids == expected_ids
+
+
+def test_find_junction_groups_is_order_stable_for_subsets(lanelet_map):
+    """Sliced inputs must also match the reference, including ordering."""
+    from autoware_lanelet2_to_opendrive.junction import (
+        _filter_lanelets_inside_junction,
+        find_junction_groups,
+    )
+
+    junction_lanelets = _filter_lanelets_inside_junction(list(lanelet_map.laneletLayer))
+
+    for size in (2, 5, 17, 40):
+        subset = junction_lanelets[:size]
+        if len(subset) < size:
+            continue
+
+        actual = [[ll.id for ll in group] for group in find_junction_groups(subset)]
+        expected = [
+            [ll.id for ll in group] for group in _reference_find_junction_groups(subset)
+        ]
+        assert actual == expected, f"mismatch for subset size {size}"
