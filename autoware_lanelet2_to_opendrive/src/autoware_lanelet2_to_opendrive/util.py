@@ -513,6 +513,22 @@ def split_groups_by_divergent_connections(
     )
 
 
+#: Lanelet subtypes that become OpenDRIVE lanes on a regular (non-junction)
+#: road.  This is the candidate pool for :meth:`Road.construct_from_lanelet_map`
+#: and therefore the set of lanelets that can appear in the conversion-time
+#: ``lanelet_id -> (road_id, lane_id)`` mapping.  The geometric cross-validation
+#: pass in :mod:`road_lanelet_geo_mapping` shares this list so that both sides
+#: search the same population; a subtype present in only one of them produces
+#: a spurious mismatch.  See ``Lane.construct_from_lanelet`` for the
+#: subtype -> ``LaneType`` mapping.
+CONVERTIBLE_LANELET_SUBTYPES: List[str] = [
+    "road",
+    "highway",
+    "walkway",
+    "road_shoulder",
+]
+
+
 def filter_lanelets_by_subtype(
     lanelets: LaneletInput,
     subtypes: List[str],
