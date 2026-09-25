@@ -7,6 +7,11 @@ exclude_non_junction_signals: false
 # Traffic rule (RHT: Right-Hand Traffic, LHT: Left-Hand Traffic)
 traffic_rule: "RHT"
 
+# OpenDRIVE signal configuration
+signal:
+  # OpenDRIVE signal country code
+  country: "DE"
+
 # ParamPoly3 segment generation configuration
 parampoly3:
   # Enable dynamic segment calculation (recommended)

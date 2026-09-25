@@ -15,7 +15,7 @@ from ..util import (
     filter_regulatory_element_by_type,
 )
 from ..config import COORDINATE_OFFSET
-from ..conversion_config import TrafficLightConfig
+from ..conversion_config import SignalConfig, TrafficLightConfig
 
 if TYPE_CHECKING:
     from .road import Road
@@ -88,6 +88,7 @@ class SignalsAndControllers:
         exclude_non_junction_signals: bool = False,
         junction_lanelet_ids: Optional[Set[int]] = None,
         traffic_light_config: Optional[TrafficLightConfig] = None,
+        signal_config: Optional[SignalConfig] = None,
     ) -> "SignalsAndControllers":
         """
         Construct signals and controllers from Lanelet2 map.
@@ -109,6 +110,7 @@ class SignalsAndControllers:
             traffic_light_config: Configuration for traffic light actor spawn offset.
                   If provided, the offsets are rotated by hdg and subtracted from
                   positionInertial coordinates.
+            signal_config: Configuration for OpenDRIVE signal attributes.
 
         Returns:
             SignalsAndControllers object with populated signals and controllers
@@ -122,6 +124,9 @@ class SignalsAndControllers:
                - If it affects multiple roads, create a Controller to synchronize them
         """
         result = SignalsAndControllers()
+        signal_country = (
+            signal_config.country if signal_config is not None else SignalConfig.country
+        )
 
         # Build the map-wide routing graph once and reuse it for every
         # signal's ReferenceLine construction (avoids ~1 rebuild per signal).
@@ -250,6 +255,7 @@ class SignalsAndControllers:
                     lane_ids=lane_ids,
                     road_elevation_at_s=road_elevation_at_s,
                     position_inertial=position_inertial,
+                    country=signal_country,
                 )
 
                 result.add_signal(signal)
