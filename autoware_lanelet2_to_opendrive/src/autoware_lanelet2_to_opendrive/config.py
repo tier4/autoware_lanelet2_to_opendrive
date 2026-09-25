@@ -188,6 +188,36 @@ class ArcSpiralConstants:
 
 
 @dataclass(frozen=True)
+class GeoMappingConstants:
+    """Constants for the geometric lanelet -> (road_id, lane_id) mapping.
+
+    These govern the post-conversion cross-validation pass in
+    :mod:`autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping`, which
+    re-derives the mapping from raw geometry and compares it against the
+    mapping produced during conversion.
+
+    Attributes:
+        match_threshold: Maximum mean distance (m) between a road reference
+            line and a lanelet boundary for them to be considered a match.
+            It must be larger than the spline fitting error
+            (:attr:`SplineConstants.max_avg_error`, 2.0 m) and smaller than
+            a typical lane width so that an adjacent boundary is never
+            mistaken for the correct one.  The current value sits at the
+            upper end of that window: Japanese urban lanes are ~3.0 m wide
+            in practice, so 3.5 m does admit the neighbouring boundary as a
+            candidate.  Narrowing it trades false matches for unmatched
+            roads, which is why it is exposed here rather than silently
+            retuned — see issue discussion in the module docstring.
+        rescue_threshold_factor: Multiplier applied to ``match_threshold``
+            for the relaxed second-chance search over roads dropped during
+            conflict resolution.
+    """
+
+    match_threshold: float = 3.5
+    rescue_threshold_factor: float = 1.5
+
+
+@dataclass(frozen=True)
 class ConversionConstants:
     """Main container for all internal constants used in the conversion process.
 
@@ -228,6 +258,7 @@ class ConversionConstants:
         opendrive: OpenDRIVE format constants
         parampoly3: ParamPoly3 geometry generation constants
         arcspiral: Arc/spiral classifier internal tunables
+        geo_mapping: Geometric mapping cross-validation constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -237,6 +268,7 @@ class ConversionConstants:
     opendrive: OpenDriveConstants = OpenDriveConstants()
     parampoly3: ParamPoly3Constants = ParamPoly3Constants()
     arcspiral: ArcSpiralConstants = ArcSpiralConstants()
+    geo_mapping: GeoMappingConstants = GeoMappingConstants()
 
 
 @dataclass

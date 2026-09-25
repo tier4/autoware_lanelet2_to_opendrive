@@ -89,6 +89,36 @@ class TestValidateMappingConsistency:
         with pytest.raises(MappingMismatchError, match="3 entries differ"):
             validate_mapping_consistency(conversion, geo)
 
+    def test_strict_returns_true_on_match(self) -> None:
+        conversion = {10: (1, -1)}
+        geo = GeoRoadLaneletMapping(
+            xodr_sha256="a",
+            osm_sha256="b",
+            lanelet_to_road_and_lane={10: (1, -1)},
+        )
+        assert validate_mapping_consistency(conversion, geo) is True
+
+    def test_non_strict_returns_false_instead_of_raising(self) -> None:
+        conversion = {10: (1, -1), 20: (2, -1)}
+        geo = GeoRoadLaneletMapping(
+            xodr_sha256="a",
+            osm_sha256="b",
+            lanelet_to_road_and_lane={10: (1, -1), 20: (2, -2)},
+        )
+        assert validate_mapping_consistency(conversion, geo, strict=False) is False
+
+    def test_non_strict_logs_the_mismatch_detail(self, caplog) -> None:
+        conversion = {10: (1, -1)}
+        geo = GeoRoadLaneletMapping(
+            xodr_sha256="a",
+            osm_sha256="b",
+            lanelet_to_road_and_lane={10: (1, -2)},
+        )
+        with caplog.at_level("WARNING"):
+            validate_mapping_consistency(conversion, geo, strict=False)
+        assert "1 entries differ" in caplog.text
+        assert "lanelet 10" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # save_mapping_json

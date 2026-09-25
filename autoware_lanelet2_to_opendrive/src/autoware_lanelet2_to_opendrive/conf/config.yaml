@@ -13,3 +13,15 @@ output_map_path: null  # Optional: output file path
 # Global settings
 dry_run: false    # If true, only validate without saving output
 verbose: false    # Enable detailed logging
+
+# Mapping cross-validation
+# After conversion the lanelet -> (road_id, lane_id) mapping is re-derived
+# from raw geometry and compared against the mapping recorded during
+# conversion. The geometric mapping is a heuristic cross-check, so a
+# disagreement does not by itself mean the emitted XODR is wrong. When false
+# (default) mismatches are reported as warnings and the XODR and
+# .mapping.json are kept; when true a mismatch aborts the run.
+# Can be overridden per map (map.strict_mapping_validation) or per target
+# (target.strict_mapping_validation); map takes precedence over target,
+# which takes precedence over this global value.
+strict_mapping_validation: false
