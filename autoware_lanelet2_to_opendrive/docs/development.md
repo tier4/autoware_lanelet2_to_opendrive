@@ -59,13 +59,26 @@ run on every **commit**:
   `test/` trees
 and this runs on every **push** (`stages: [pre-push]`):
 
-- Local `pytest --no-testmon` runs for each workspace member, executed in
-  separate processes to dodge a known shutdown-time crash in the
-  lanelet2 C++ bindings when both suites share an interpreter. Neither the
-  changed files nor testmon narrows them, so each is the whole suite
+- Local `pytest -o addopts= -n auto --no-testmon` runs for each workspace
+  member, executed in separate processes to dodge a known shutdown-time
+  crash in the lanelet2 C++ bindings when both suites share an interpreter.
+  Neither the changed files nor testmon narrows them, so each is the whole
+  suite
 
 Never bypass hooks with `--no-verify`. If a hook auto-fixes a file,
 re-stage with `git add -u` and commit again.
+
+### pytest options are opt-in
+
+`pyproject.toml` sets no `addopts`, so `pytest <node id>` runs exactly the
+tests named, serially. Add what you want per invocation:
+
+- `-n N` (pytest-xdist) to parallelise. Each worker converts and loads maps on
+  its own; on a 32 GB host keep `N` small when other suites or containers run.
+- `--testmon` to run only the tests affected by your changes since the last
+  testmon run. It **deselects** everything else, including tests you named on
+  the command line by file, so never use it to verify a red or a green, or to
+  claim a full-suite pass.
 
 ## Project Structure
 
