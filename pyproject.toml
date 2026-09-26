@@ -48,6 +48,7 @@ ignore_errors = true
 testpaths = [
     "autoware_lanelet2_to_opendrive/test",
     "autoware_carla_scenario/test",
+    "scripts",
 ]
 addopts = "-n auto --testmon"
 markers = [
