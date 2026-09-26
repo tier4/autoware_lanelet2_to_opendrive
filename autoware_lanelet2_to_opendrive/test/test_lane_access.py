@@ -191,36 +191,11 @@ def test_construct_translates_full_recognised_set() -> None:
     assert all(a.rule == "allow" for a in lane.accesses)
 
 
-import subprocess  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-NISHISHINJUKU_OSM = (Path(__file__).parent / "data" / "nishishinjuku.osm").resolve()
-
-
-def _convert_nishishinjuku(tmp_path: Path) -> Path:
-    """Run the CLI on the Shinjuku fixture and return the .xodr path."""
-    out = tmp_path / "nishishinjuku.xodr"
-    subprocess.run(
-        [
-            "uv",
-            "run",
-            "convert",
-            "map=nishishinjuku",
-            "target=carla",
-            f"input_map_path={NISHISHINJUKU_OSM}",
-            f"output_map_path={out}",
-        ],
-        check=True,
-    )
-    return out
-
-
 def test_nishishinjuku_emits_passenger_car_access_for_vehicle_lanelets(
-    tmp_path: Path,
+    nishishinjuku_xodr,
 ) -> None:
     """At least one <lane> in the converted output carries the new <access>."""
-    out = _convert_nishishinjuku(tmp_path)
-    root = ET.parse(out).getroot()
+    root = ET.parse(nishishinjuku_xodr).getroot()
 
     matches = root.findall(".//lane/access[@rule='allow'][@restriction='passengerCar']")
     assert len(matches) >= 1, (

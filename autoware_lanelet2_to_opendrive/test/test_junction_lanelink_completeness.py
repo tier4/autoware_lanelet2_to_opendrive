@@ -15,47 +15,10 @@ junction-internal connector lanelet) therefore had no
 junction-bound lanes in Nishishinjuku) were silently dropped.
 """
 
-import subprocess
 from collections import defaultdict
-from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 import lxml.etree as ET
-import pytest
-
-
-@pytest.fixture(scope="session")
-def nishishinjuku_xodr(tmp_path_factory) -> Path:
-    """Convert the Nishishinjuku fixture once per session and return the XODR.
-
-    Mirrors ``test_connecting_road_links.py``: a fresh session-scoped
-    temp directory rather than a fixed cached path, so a regression test
-    always exercises the *current* converter.
-    """
-    fixture = Path(
-        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
-    ).resolve()
-    if not fixture.is_file():
-        pytest.skip(f"{fixture} not available; cannot build XODR")
-
-    xodr_path = tmp_path_factory.mktemp("lanelink_completeness") / "nishishinjuku.xodr"
-    cmd = [
-        "uv",
-        "run",
-        "convert",
-        "map=nishishinjuku",
-        "target=carla",
-        f"input_map_path={fixture}",
-        f"output_map_path={xodr_path}",
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError as exc:
-        pytest.skip(f"converter unavailable: {exc}")
-
-    if not xodr_path.is_file():
-        pytest.fail(f"converter exited successfully but {xodr_path} was not produced")
-    return xodr_path
 
 
 def _scan_missing_lane_links(

@@ -20,47 +20,7 @@ These tests pin the linked-ness of connecting roads so the broken
 membership test cannot silently return.
 """
 
-import subprocess
-from pathlib import Path
-
 import lxml.etree as ET
-import pytest
-
-
-@pytest.fixture(scope="session")
-def nishishinjuku_xodr(tmp_path_factory) -> Path:
-    """Convert the Nishishinjuku fixture once per session and return the XODR.
-
-    Only an end-to-end conversion exercises the ``_setup_connections``
-    pipeline ``set_connecting_road_links`` lives in. The output is written
-    into a fresh session-scoped temp directory rather than a fixed cached
-    path: a regression test must exercise the *current* conversion code,
-    never an XODR left behind by an earlier checkout.
-    """
-    fixture = Path(
-        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
-    ).resolve()
-    if not fixture.is_file():
-        pytest.skip(f"{fixture} not available; cannot build XODR")
-
-    xodr_path = tmp_path_factory.mktemp("connecting_links") / "nishishinjuku.xodr"
-    cmd = [
-        "uv",
-        "run",
-        "convert",
-        "map=nishishinjuku",
-        "target=carla",
-        f"input_map_path={fixture}",
-        f"output_map_path={xodr_path}",
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError as exc:
-        pytest.skip(f"converter unavailable: {exc}")
-
-    if not xodr_path.is_file():
-        pytest.fail(f"converter exited successfully but {xodr_path} was not produced")
-    return xodr_path
 
 
 def _connecting_roads(tree: ET._ElementTree) -> list:
