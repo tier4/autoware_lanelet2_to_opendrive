@@ -150,3 +150,36 @@ of the conversion time (about 40 s against about two minutes).
 to it: Nishi-Shinjuku is a real map too and its worst vertex gap is three
 times larger. Against the `*_mini` fixtures both real-derived maps supply that
 property; against each other they do not differ in it.
+
+## Reducing a failing map: `tools/reduce_lanelet2_map.py`
+
+A red test against `nishishinjuku.osm` costs about 160 s per run, because a
+changed converter has to convert the whole map again. `reduce_lanelet2_map.py`
+turns "this check fails on Nishishinjuku" into a map of a few lanelets on
+which the same check fails the same way, and which converts in seconds.
+
+It removes whole lanelets for as long as a test command still reports the
+failure (delta debugging), so every kept lanelet keeps its surveyed geometry.
+Unlike a hand-drawn `*_mini` fixture, the result can reproduce defects that
+depend on irregular vertex spacing or near-coincident endpoints. The tool's
+docstring covers the test command and the map config it needs.
+
+### Measured on a known fix
+
+The defect #583 fixes -- a connecting road whose lanelet's routing successor
+lies in a road the connecting road does not link to -- shows on Nishishinjuku
+as 15 such links on `master` `4fe02565` and none on #583. One of them
+(lanelet 309 -> 37) was reduced, with a test command that asks for exactly
+that link:
+
+| | |
+| --- | --- |
+| start (200 m crop, 1 hop) | 76 lanelets |
+| result | **5 lanelets** (37, 38, 39, 309, 310) |
+| search | 43 evaluations, 168 s |
+| conversion of the result | **3.9 s** (Nishishinjuku: about 160 s) |
+| on `master` | the link is present -- red |
+| on #583 | converts, the connecting road is split, the link is gone -- green |
+
+The hand-drawn `junction_fanout_mini.osm` #583 added for the same defect has 9
+lanelets.
