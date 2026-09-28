@@ -76,7 +76,7 @@ docker compose --profile dev   run --rm dev             # interactive shell
 
 Static checks that do not import the workspace (`ruff`, `ruff-format`, `mypy --ignore-missing-imports` on individual files) can also be run on the host for fast feedback.
 
-[`pre-commit`](https://pre-commit.com/) hooks (`ruff`, `ruff-format`, `mypy`, plus standard hygiene checks) are mandatory for every commit; install once with `uv run pre-commit install`. Run `uv run pre-commit run --all-files` before pushing to avoid CI formatting failures.
+[`pre-commit`](https://pre-commit.com/) hooks are mandatory; install once with `uv run pre-commit install`, which writes both the `pre-commit` and `pre-push` git hooks. The fast checks (`ruff`, `ruff-format`, `mypy`, plus standard hygiene checks) run on every commit; the two test suites run at push time instead, because each is the whole suite and the pair took roughly 40 minutes per commit. Run `uv run pre-commit run --all-files` before pushing to avoid CI formatting failures.
 
 ## Documentation
 
