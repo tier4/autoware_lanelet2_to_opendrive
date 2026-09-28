@@ -202,12 +202,6 @@ class Pose:
     def yaw(self) -> float:
         return quat_to_yaw(self.quat_xyzw)
 
-    def as_matrix(self) -> np.ndarray:
-        matrix = np.eye(4, dtype=np.float64)
-        matrix[:3, :3] = self.rotation_matrix
-        matrix[:3, 3] = self.position
-        return matrix
-
     # -- algebra -----------------------------------------------------------
 
     def __matmul__(self, other: Pose) -> Pose:
@@ -273,10 +267,6 @@ class Trajectory:
         return bool(self.poses)
 
     @staticmethod
-    def empty() -> Trajectory:
-        return Trajectory([], [])
-
-    @staticmethod
     def from_proto(proto: TrajectoryProto) -> Trajectory:
         return Trajectory(
             [int(p.timestamp_us) for p in proto.poses],
@@ -298,78 +288,16 @@ class Trajectory:
             return np.zeros((0, 3), dtype=np.float64)
         return np.stack([p.position for p in self.poses])
 
-    @property
-    def last_pose(self) -> Pose:
-        if not self.poses:
-            raise ValueError("empty trajectory has no last pose")
-        return self.poses[-1]
-
-    def append(self, timestamp_us: int, pose: Pose) -> None:
-        if self.timestamps_us and timestamp_us <= self.timestamps_us[-1]:
-            raise ValueError(
-                f"timestamps must strictly increase, got {timestamp_us} after "
-                f"{self.timestamps_us[-1]}"
-            )
-        self.timestamps_us.append(int(timestamp_us))
-        self.poses.append(pose)
-
-    def transform(self, delta: Pose) -> Trajectory:
-        """Left-multiply every pose: ``delta @ pose``.
-
-        Used the way alpasim uses it -- to re-express a trajectory given in
-        frame ``B`` into frame ``A``, pass ``pose_a_to_b``.
-        """
-        return Trajectory(
-            list(self.timestamps_us), [delta @ pose for pose in self.poses]
-        )
-
-    def interpolate(self, timestamp_us: int) -> Pose:
-        """Pose at ``timestamp_us``; linear in position, slerp in rotation.
-
-        Clamps to the endpoints outside the covered range, which is what the
-        controller wants when the driver's plan is shorter than the step.
-        """
-        if not self.poses:
-            raise ValueError("cannot interpolate an empty trajectory")
-        if timestamp_us <= self.timestamps_us[0]:
-            return self.poses[0]
-        if timestamp_us >= self.timestamps_us[-1]:
-            return self.poses[-1]
-
-        idx = int(np.searchsorted(np.asarray(self.timestamps_us), timestamp_us))
-        t0, t1 = self.timestamps_us[idx - 1], self.timestamps_us[idx]
-        p0, p1 = self.poses[idx - 1], self.poses[idx]
-        alpha = (timestamp_us - t0) / (t1 - t0)
-        return Pose(
-            (1.0 - alpha) * p0.position + alpha * p1.position,
-            _slerp(p0.quat_xyzw, p1.quat_xyzw, alpha),
-        )
-
-
-def _slerp(q0: np.ndarray, q1: np.ndarray, alpha: float) -> np.ndarray:
-    q0 = _normalize_quat(q0)
-    q1 = _normalize_quat(q1)
-    dot = float(np.dot(q0, q1))
-    if dot < 0.0:  # take the short way round
-        q1 = -q1
-        dot = -dot
-    if dot > 0.9995:  # nearly parallel: lerp is accurate and avoids div-by-zero
-        return _normalize_quat(q0 + alpha * (q1 - q0))
-    theta_0 = math.acos(dot)
-    theta = theta_0 * alpha
-    q_perp = _normalize_quat(q1 - q0 * dot)
-    return q0 * math.cos(theta) + q_perp * math.sin(theta)
-
 
 def dynamic_state_proto(
     linear_velocity: np.ndarray,
     angular_velocity: np.ndarray,
     linear_acceleration: np.ndarray,
-    angular_acceleration: np.ndarray | None = None,
 ) -> DynamicState:
-    """Build a :class:`DynamicState`; all vectors resolved in the rig frame."""
-    zero = np.zeros(3, dtype=np.float64)
-    ang_acc = zero if angular_acceleration is None else angular_acceleration
+    """Build a :class:`DynamicState`; all vectors resolved in the rig frame.
+
+    CARLA does not report angular acceleration, so it is always zero.
+    """
 
     def vec(values: np.ndarray) -> Vec3:
         arr = np.asarray(values, dtype=np.float64).reshape(3)
@@ -379,5 +307,5 @@ def dynamic_state_proto(
         linear_velocity=vec(linear_velocity),
         angular_velocity=vec(angular_velocity),
         linear_acceleration=vec(linear_acceleration),
-        angular_acceleration=vec(ang_acc),
+        angular_acceleration=Vec3(),
     )

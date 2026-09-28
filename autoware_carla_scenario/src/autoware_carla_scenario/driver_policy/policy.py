@@ -25,7 +25,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import math
-import queue
 import random
 import time
 import uuid
@@ -39,7 +38,6 @@ from .config import CameraConfig, EgoDriverPolicyConfig
 from .control import TrajectoryFollower, VehicleCommand
 from .conversions import (
     available_camera,
-    camera_pose_in_rig,
     carla_transform_to_pose,
     carla_vector_to_local,
     rig_pose_from_actor_transform,
@@ -99,8 +97,6 @@ class EgoSample:
 class _RawFrame:
     timestamp_us: int
     bgra: bytes
-    width: int
-    height: int
 
 
 class EgoDriverPolicy:
@@ -140,7 +136,9 @@ class EgoDriverPolicy:
         self._route: Optional[RouteProvider] = None
         self._ground_truth: Optional[CarlaGroundTruth] = None
         self._cameras: list[Any] = []
-        self._frame_queues: dict[str, queue.Queue[_RawFrame]] = {}
+        #: Newest unsent frame per camera. Written by the sensor callbacks,
+        #: taken by the policy step; older frames are simply overwritten.
+        self._latest_frames: dict[CameraConfig, _RawFrame] = {}
 
         self._latest: Optional[EgoSample] = None
         self._pending_egomotion: list[EgoSample] = []
@@ -178,11 +176,15 @@ class EgoDriverPolicy:
         world: Any,
         ego_actor: Any,
         *,
-        scene_id: str,
+        scenario_name: str = "",
         random_seed: int = 0,
         session_uuid: Optional[str] = None,
     ) -> None:
-        """Open the driver session. Call after warm-up, before the tick loop."""
+        """Open the driver session. Call after warm-up, before the tick loop.
+
+        The ``scene_id`` reported to the driver is ``config.scene_id``, or
+        ``"<map name>:<scenario_name>"`` when that is unset.
+        """
         import carla  # noqa: PLC0415 - keeps the module importable without CARLA
 
         self._carla = carla
@@ -194,6 +196,7 @@ class EgoDriverPolicy:
         self._rear_axle_offset_m = self._resolve_rear_axle_offset()
 
         carla_map = world.get_map()
+        scene_id = self.config.scene_id or f"{carla_map.name}:{scenario_name}"
         route = self._build_route(carla_map, random.Random(random_seed))
         self._route = RouteProvider(
             route,
@@ -206,7 +209,6 @@ class EgoDriverPolicy:
                 ego=ego_actor,
                 carla_map=carla_map,
                 config=self.config,
-                map_name=carla_map.name,
             )
         cameras = self._spawn_cameras()
 
@@ -339,8 +341,6 @@ class EgoDriverPolicy:
                 throttle=float(np.clip(command.throttle, 0.0, 1.0)),
                 steer=float(np.clip(command.steer, -1.0, 1.0)),
                 brake=float(np.clip(command.brake, 0.0, 1.0)),
-                hand_brake=command.hand_brake,
-                reverse=command.reverse,
             )
         )
 
@@ -389,7 +389,7 @@ class EgoDriverPolicy:
         """
         assert self._stub is not None
         timeout = self.config.driver_timeout_s
-        for logical_id, frame in self._drain_frames():
+        for cam, frame in self._take_frames():
             self._stub.submit_image_observation(
                 RolloutCameraImage(
                     session_uuid=self._session_uuid,
@@ -399,12 +399,12 @@ class EgoDriverPolicy:
                         frame_end_us=frame.timestamp_us,
                         image_bytes=encode_bgra(
                             frame.bgra,
-                            frame.width,
-                            frame.height,
+                            cam.width,
+                            cam.height,
                             self.config.image_format,
                             self.config.image_quality,
                         ),
-                        logical_id=logical_id,
+                        logical_id=cam.logical_id,
                     ),
                 ),
                 timeout=timeout,
@@ -488,12 +488,8 @@ class EgoDriverPolicy:
         self._pending_egomotion.append(sample)
 
     def _ego_sample(self, timestamp_us: int, frame_id: int) -> EgoSample:
-        transform = self._ego.get_transform()
-        location, rotation = transform.location, transform.rotation
         pose = rig_pose_from_actor_transform(
-            (location.x, location.y, location.z),
-            (rotation.pitch, rotation.yaw, rotation.roll),
-            self._rear_axle_offset_m,
+            self._ego.get_transform(), self._rear_axle_offset_m
         )
         velocity = self._ego.get_velocity()
         acceleration = self._ego.get_acceleration()
@@ -553,12 +549,7 @@ class EgoDriverPolicy:
             )
             return fallback
 
-        transform = self._ego.get_transform()
-        location, rotation = transform.location, transform.rotation
-        world_to_actor = carla_transform_to_pose(
-            (location.x, location.y, location.z),
-            (rotation.pitch, rotation.yaw, rotation.roll),
-        ).inverse()
+        world_to_actor = carla_transform_to_pose(self._ego.get_transform()).inverse()
         rear_x = []
         for wheel in wheels[2:4]:  # CARLA orders wheels FL, FR, RL, RR
             position_cm = wheel.position
@@ -597,12 +588,16 @@ class EgoDriverPolicy:
 
     def _spawn_cameras(self) -> list[AvailableCamera]:
         """Attach the configured cameras and describe them for ``start_session``."""
-        described = []
+        if not self.config.cameras:
+            return []
+        library = self._world.get_blueprint_library()
         for cam in self.config.cameras:
-            blueprint = self._world.get_blueprint_library().find("sensor.camera.rgb")
+            blueprint = library.find("sensor.camera.rgb")
             blueprint.set_attribute("image_size_x", str(cam.width))
             blueprint.set_attribute("image_size_y", str(cam.height))
             blueprint.set_attribute("fov", str(cam.fov_deg))
+            # Render only as often as the policy consumes frames.
+            blueprint.set_attribute("sensor_tick", str(self.config.policy_timestep_s))
             mount = self._carla.Transform(
                 self._carla.Location(x=cam.x, y=cam.y, z=cam.z),
                 self._carla.Rotation(
@@ -610,56 +605,31 @@ class EgoDriverPolicy:
                 ),
             )
             sensor = self._world.spawn_actor(blueprint, mount, attach_to=self._ego)
-            frames: queue.Queue[_RawFrame] = queue.Queue()
-            sensor.listen(self._frame_callback(cam, frames))
+            sensor.listen(self._frame_callback(cam))
             self._cameras.append(sensor)
-            self._frame_queues[cam.logical_id] = frames
-            described.append(
-                available_camera(
-                    cam.logical_id,
-                    cam.width,
-                    cam.height,
-                    cam.fov_deg,
-                    camera_pose_in_rig(
-                        cam.x,
-                        cam.y,
-                        cam.z,
-                        cam.pitch_deg,
-                        cam.yaw_deg,
-                        cam.roll_deg,
-                        self._rear_axle_offset_m,
-                    ),
-                )
-            )
-        return described
+        return [
+            available_camera(cam, self._rear_axle_offset_m)
+            for cam in self.config.cameras
+        ]
 
-    def _frame_callback(self, cam: CameraConfig, frames: queue.Queue[_RawFrame]) -> Any:
-        epoch = self.config.epoch_offset_us
+    def _frame_callback(self, cam: CameraConfig) -> Any:
+        latest, epoch = self._latest_frames, self.config.epoch_offset_us
 
         def callback(image: Any) -> None:
             # Runs on a CARLA client thread: copy out and encode later, on the
             # policy step, so a slow encoder cannot back up the sensor stream.
-            frames.put(
-                _RawFrame(
-                    timestamp_us=seconds_to_us(image.timestamp, epoch),
-                    bgra=bytes(image.raw_data),
-                    width=cam.width,
-                    height=cam.height,
-                )
+            latest[cam] = _RawFrame(
+                timestamp_us=seconds_to_us(image.timestamp, epoch),
+                bgra=bytes(image.raw_data),
             )
 
         return callback
 
-    def _drain_frames(self) -> list[tuple[str, _RawFrame]]:
-        """The newest frame per camera; anything older is stale and dropped."""
-        newest_frames = []
-        for logical_id, frames in self._frame_queues.items():
-            newest: Optional[_RawFrame] = None
-            while True:
-                try:
-                    newest = frames.get_nowait()
-                except queue.Empty:
-                    break
-            if newest is not None:
-                newest_frames.append((logical_id, newest))
-        return newest_frames
+    def _take_frames(self) -> list[tuple[CameraConfig, _RawFrame]]:
+        """The newest unsent frame per camera, in configuration order."""
+        taken = []
+        for cam in self.config.cameras:
+            frame = self._latest_frames.pop(cam, None)
+            if frame is not None:
+                taken.append((cam, frame))
+        return taken

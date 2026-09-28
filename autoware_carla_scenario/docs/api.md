@@ -124,7 +124,7 @@ contract) over gRPC. See [Ego Driver Policy](driver_policy.md).
 | `EgoDriverPolicyConfig` | Driver address, timing, cameras, route and ground-truth settings. |
 | `EgoDriverPolicy` | The Runtime role: submits observations, calls `drive`, tracks the plan. |
 | `CameraConfig`, `default_camera_rig` | Cameras streamed to the driver. |
-| `ControlConfig`, `TrajectoryFollower`, `VehicleCommand` | Pure pursuit + speed PID plan tracking. |
+| `ControlConfig` | Tuning for the pure pursuit + speed PID plan tracker. |
 
 ## Kinematics (`autoware_carla_scenario.kinematics`)
 

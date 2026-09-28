@@ -66,7 +66,6 @@ class CarlaGroundTruth:
             rebuilds the object on every ``get_map()`` call.
         config: Supplies the sight distance, the actor horizon and the lane-walk
             step.
-        map_name: Reported to the policy as the scene it is driving.
     """
 
     def __init__(
@@ -75,13 +74,12 @@ class CarlaGroundTruth:
         ego: Any,
         carla_map: Any,
         config: EgoDriverPolicyConfig,
-        map_name: str,
     ) -> None:
         self._world = world
         self._ego = ego
         self._map = carla_map
         self.config = config
-        self._map_name = map_name
+        self._map_name = carla_map.name
         #: Lane -> lights governing it, built on first use; lights do not move.
         self._stop_lines: dict[tuple[int, int], list[Any]] | None = None
         #: Light id -> where to stop for it, in the local frame. Same reason.
@@ -142,7 +140,8 @@ class CarlaGroundTruth:
             waypoint = self._ego_waypoint()
             if waypoint is not None and waypoint.is_junction:
                 return None
-            for light in self._lights_by_lane_ahead(self._lanes_ahead(sight)):
+            light = self._first_light_on(self._lanes_ahead(waypoint, sight))
+            if light is not None:
                 return light
         return (
             self._ego.get_traffic_light() if self._ego.is_at_traffic_light() else None
@@ -154,7 +153,9 @@ class CarlaGroundTruth:
             self._ego.get_transform().location, project_to_road=True
         )
 
-    def _lanes_ahead(self, distance_m: float) -> list[tuple[int, int]]:
+    def _lanes_ahead(
+        self, waypoint: Any | None, distance_m: float
+    ) -> list[tuple[int, int]]:
         """``(road_id, lane_id)`` of the lanes up to the next junction.
 
         Walked rather than guessed, because a stop line sits on the lane it
@@ -179,7 +180,6 @@ class CarlaGroundTruth:
         reported different lights, 76 m away one step and 3.9 m the next.
         """
         step = max(1.0, self.config.route_resolution_m)
-        waypoint = self._ego_waypoint()
         if waypoint is None or waypoint.is_junction:
             return []
         lanes = [(waypoint.road_id, waypoint.lane_id)]
@@ -199,19 +199,19 @@ class CarlaGroundTruth:
                 break
         return lanes
 
-    def _lights_by_lane_ahead(self, lanes: list[tuple[int, int]]) -> list[Any]:
-        """Lights whose stop lines lie on those lanes, nearest lane first.
+    def _first_light_on(self, lanes: list[tuple[int, int]]) -> Any | None:
+        """The first light whose stop line lies on those lanes, or ``None``.
 
         The lane list is in the order the ego will drive it, so the first hit
         is the first light it will meet.
         """
         if not lanes:
-            return []
+            return None
         stop_lines = self._stop_lines_by_lane()
-        found: list[Any] = []
         for lane in lanes:
-            found.extend(stop_lines.get(lane, ()))
-        return found
+            for light in stop_lines.get(lane, ()):
+                return light
+        return None
 
     def _stop_lines_by_lane(self) -> dict[tuple[int, int], list[Any]]:
         """Which light governs which lane, built once -- lights do not move."""
@@ -361,20 +361,18 @@ class CarlaGroundTruth:
     def _actor_states(self, pose_local_to_rig: Pose) -> list[CarlaActorState]:
         states = []
         ego_position = pose_local_to_rig.position
+        horizon_m = self.config.actor_horizon_m
         for actor in self._reportable_actors():
             if actor.id == self._ego.id:
                 continue
             transform = actor.get_transform()
-            location, rotation = transform.location, transform.rotation
-            pose = carla_transform_to_pose(
-                (location.x, location.y, location.z),
-                (rotation.pitch, rotation.yaw, rotation.roll),
-            )
-            if (
-                float(np.linalg.norm(pose.position - ego_position))
-                > self.config.actor_horizon_m
-            ):
+            location = transform.location
+            # Range check on the raw location first: most actors on a big map
+            # are out of range, and a full pose is not needed to tell.
+            offset = carla_vector_to_local(location.x, location.y, location.z)
+            if float(np.linalg.norm(offset - ego_position)) > horizon_m:
                 continue
+            pose = carla_transform_to_pose(transform)
 
             velocity = actor.get_velocity()
             extent = actor.bounding_box.extent

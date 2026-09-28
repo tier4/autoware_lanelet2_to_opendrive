@@ -76,14 +76,10 @@ class EgoDriverEntity(EgoVehicle):
     ) -> None:
         if self._vehicle is None:
             raise RuntimeError("the ego must be spawned before the tick loop starts")
-        config = self.policy.config
-        scene_id = config.scene_id or (
-            f"{world.get_map().name}:{type(scenario).__name__}"
-        )
         self.policy.start(
             world,
             self._vehicle,
-            scene_id=scene_id,
+            scenario_name=type(scenario).__name__,
             random_seed=scenario.random_seed,
         )
 

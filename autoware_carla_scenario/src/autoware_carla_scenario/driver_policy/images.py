@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from .config import SUPPORTED_IMAGE_FORMATS
 from .wire import ImageFormat
 
 __all__ = ["encode_bgra"]
@@ -19,11 +18,12 @@ __all__ = ["encode_bgra"]
 def encode_bgra(
     raw: bytes, width: int, height: int, image_format: int, quality: int = 90
 ) -> bytes:
-    """Encode CARLA's raw BGRA buffer as PNG or JPEG."""
+    """Encode CARLA's raw BGRA buffer as PNG or JPEG.
+
+    ``image_format`` is validated by :class:`~.config.EgoDriverPolicyConfig`.
+    """
     import cv2  # noqa: PLC0415 - heavy import, needed only when cameras are on
 
-    if image_format not in SUPPORTED_IMAGE_FORMATS:
-        raise ValueError(f"unsupported image format {image_format!r}")
     expected = width * height * 4
     if len(raw) != expected:
         raise ValueError(

@@ -1,7 +1,8 @@
 """Arc-length operations on polylines, shared by the driver and the runtime.
 
-Routes and plans are both polylines, and both need the same questions answered: how long is it, where is the point at distance
-``d``, which way does it head there, and how sharply does it bend.
+Routes and plans are both polylines, and both need the same questions answered:
+how long is it, where is the point at distance ``d``, and which way does it head
+there.
 
 Ported from ``carla_driver_interface.polyline``; pure numpy.
 
@@ -16,7 +17,7 @@ import math
 
 import numpy as np
 
-__all__ = ["arc_lengths", "max_curvature", "sample", "segment_heading"]
+__all__ = ["arc_lengths", "sample", "segment_heading"]
 
 
 def arc_lengths(points: np.ndarray) -> np.ndarray:
@@ -83,35 +84,3 @@ def sample(
 def segment_heading(p0: np.ndarray, p1: np.ndarray) -> float:
     """Heading in radians from ``p0`` to ``p1``, in the xy plane."""
     return math.atan2(float(p1[1] - p0[1]), float(p1[0] - p0[0]))
-
-
-def headings(points: np.ndarray) -> np.ndarray:
-    """Per-segment headings; ``(N-1,)`` for ``(N, 3)`` input."""
-    points = np.asarray(points, dtype=np.float64)
-    deltas = np.diff(points[:, :2], axis=0)
-    return np.arctan2(deltas[:, 1], deltas[:, 0])
-
-
-def max_curvature(points: np.ndarray) -> float:
-    """Largest Menger curvature over consecutive vertex triples, in 1/m.
-
-    0 for a straight or degenerate polyline. Vectorised over the triples.
-    """
-    points = np.asarray(points, dtype=np.float64)
-    if len(points) < 3:
-        return 0.0
-
-    a, b, c = points[:-2, :2], points[1:-1, :2], points[2:, :2]
-    ab = np.linalg.norm(b - a, axis=1)
-    bc = np.linalg.norm(c - b, axis=1)
-    ca = np.linalg.norm(a - c, axis=1)
-    # Twice the triangle area, via the 2-D cross product.
-    cross = (b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (
-        c[:, 0] - a[:, 0]
-    )
-
-    denominator = ab * bc * ca
-    usable = denominator > 1e-18
-    if not usable.any():
-        return 0.0
-    return float(np.max(2.0 * np.abs(cross[usable]) / denominator[usable]))

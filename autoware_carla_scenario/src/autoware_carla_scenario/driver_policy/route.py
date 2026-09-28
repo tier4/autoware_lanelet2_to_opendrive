@@ -53,16 +53,6 @@ class RouteProvider:
             return 1.0
         return min(1.0, self._progress_m / self.total_length_m)
 
-    def lateral_error_m(self, pose_local_to_rig: Pose) -> float:
-        """Signed offset of the ego from the route centreline. Does not advance.
-
-        Positive means the ego is to the left of the route. This is the honest
-        tracking metric: the driver's plan is anchored on the ego, so measuring
-        the ego against *that* is structurally zero.
-        """
-        nearest = self._sample(self._project(pose_local_to_rig.position))
-        return float(pose_local_to_rig.inverse().transform_points(nearest)[0][1])
-
     def waypoints_in_rig(self, pose_local_to_rig: Pose) -> np.ndarray:
         """The route ahead of ``pose_local_to_rig``, resampled, in the rig frame.
 

@@ -40,7 +40,10 @@ extend-exclude = ["autoware_carla_scenario/src/autoware_carla_scenario/driver_po
 
 [tool.mypy]
 ignore_missing_imports = true
-exclude = ["conftest\\.py$", "driver_policy/_proto/"]
+exclude = [
+    "conftest\\.py$",
+    "^autoware_carla_scenario/src/autoware_carla_scenario/driver_policy/_proto/",
+]
 
 [[tool.mypy.overrides]]
 # Pre-existing type errors in the l2o package are out of scope for this PR.

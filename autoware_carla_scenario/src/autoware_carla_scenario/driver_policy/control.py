@@ -61,17 +61,6 @@ class VehicleCommand:
     throttle: float = 0.0
     steer: float = 0.0
     brake: float = 0.0
-    hand_brake: bool = False
-    reverse: bool = False
-
-    #: Diagnostics, surfaced in rollout metrics rather than sent to CARLA.
-    target_speed_mps: float = 0.0
-    #: Lateral offset of the pure-pursuit target, in the rig frame. Positive is
-    #: to the left. This is what the steering command reacts to. It is *not* a
-    #: tracking error: the driver anchors its plan on the ego, so the ego's
-    #: offset from its own plan is structurally zero -- tracking is measured
-    #: against the route instead.
-    lookahead_lateral_offset_m: float = 0.0
 
 
 class TrajectoryFollower:
@@ -83,11 +72,6 @@ class TrajectoryFollower:
 
     def __init__(self, config: ControlConfig | None = None) -> None:
         self.config = config or ControlConfig()
-        self._integral = 0.0
-        self._previous_speed_error = 0.0
-        self._previous_steer = 0.0
-
-    def reset(self) -> None:
         self._integral = 0.0
         self._previous_speed_error = 0.0
         self._previous_steer = 0.0
@@ -117,22 +101,15 @@ class TrajectoryFollower:
         arc = polyline.arc_lengths(points)
 
         target_speed = _plan_speed(plan_in_local.timestamps_us, arc)
-        steer, lateral_offset = self._lateral(points, arc, current_speed_mps, dt_s)
+        steer = self._lateral(points, arc, current_speed_mps, dt_s)
         throttle, brake = self._longitudinal(target_speed, current_speed_mps, dt_s)
-
-        return VehicleCommand(
-            throttle=throttle,
-            steer=steer,
-            brake=brake,
-            target_speed_mps=target_speed,
-            lookahead_lateral_offset_m=lateral_offset,
-        )
+        return VehicleCommand(throttle=throttle, steer=steer, brake=brake)
 
     # -- lateral -----------------------------------------------------------
 
     def _lateral(
         self, points_in_rig: np.ndarray, arc: np.ndarray, speed_mps: float, dt_s: float
-    ) -> tuple[float, float]:
+    ) -> float:
         cfg = self.config
         lookahead = min(
             cfg.max_lookahead_m,
@@ -163,7 +140,7 @@ class TrajectoryFollower:
             )
         )
         self._previous_steer = command
-        return command, float(target[1])
+        return command
 
     # -- longitudinal ------------------------------------------------------
 
@@ -180,10 +157,9 @@ class TrajectoryFollower:
         derivative = (error - self._previous_speed_error) / dt_s
         self._previous_speed_error = error
 
+        proportional_derivative = cfg.speed_kp * error + cfg.speed_kd * derivative
         candidate = self._integral + error * dt_s
-        raw = (
-            cfg.speed_kp * error + cfg.speed_ki * candidate + cfg.speed_kd * derivative
-        )
+        raw = proportional_derivative + cfg.speed_ki * candidate
         # Anti-windup: only integrate while the command is not saturated, or
         # while the error pushes it back out of saturation.
         if (
@@ -194,11 +170,7 @@ class TrajectoryFollower:
             self._integral = float(
                 np.clip(candidate, -cfg.integral_limit, cfg.integral_limit)
             )
-        command = (
-            cfg.speed_kp * error
-            + cfg.speed_ki * self._integral
-            + cfg.speed_kd * derivative
-        )
+        command = proportional_derivative + cfg.speed_ki * self._integral
 
         if command >= 0.0:
             return float(min(command, 1.0)), 0.0

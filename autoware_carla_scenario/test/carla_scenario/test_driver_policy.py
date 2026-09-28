@@ -350,14 +350,16 @@ class TestWireContract:
 
 class TestConversions:
     def test_carla_y_is_mirrored(self) -> None:
-        pose = conversions.carla_transform_to_pose((1.0, 2.0, 3.0), (0.0, 90.0, 0.0))
+        pose = conversions.carla_transform_to_pose(
+            _Transform(_Vec(1.0, 2.0, 3.0), _Rot(yaw=90.0))
+        )
         np.testing.assert_allclose(pose.position, [1.0, -2.0, 3.0])
         # CARLA yaw +90 deg faces +y (right); mirrored, that is -90 deg.
         assert pose.yaw == pytest.approx(-math.pi / 2)
 
     def test_rig_origin_is_shifted_to_rear_axle(self) -> None:
         pose = conversions.rig_pose_from_actor_transform(
-            (10.0, 0.0, 0.0), (0.0, 0.0, 0.0), -1.4
+            _Transform(_Vec(10.0, 0.0, 0.0)), -1.4
         )
         np.testing.assert_allclose(pose.position, [8.6, 0.0, 0.0])
 
@@ -421,12 +423,12 @@ class TestClosedLoop:
     ) -> None:
         world = _World(_Ego())
         policy = self._policy(channel)
-        policy.start(world, world.ego, scene_id="FakeTown:Test", random_seed=7)
+        policy.start(world, world.ego, scenario_name="Test", random_seed=7)
         policy.close()
 
         assert len(driver.sessions) == 1
         session = driver.sessions[0]
-        assert session.debug_info.scene_id == "FakeTown:Test"
+        assert session.debug_info.scene_id == "Carla/Maps/FakeTown:Test"
         assert session.random_seed == 7
         assert driver.closed == [session.session_uuid]
         assert not policy.started
@@ -436,7 +438,7 @@ class TestClosedLoop:
     ) -> None:
         world = _World(_Ego())
         policy = self._policy(channel)
-        policy.start(world, world.ego, scene_id="s")
+        policy.start(world, world.ego, scenario_name="s")
         _run(policy, world, 40)
         policy.close()
 
@@ -450,7 +452,7 @@ class TestClosedLoop:
     ) -> None:
         world = _World(_Ego())
         policy = self._policy(channel)
-        policy.start(world, world.ego, scene_id="s")
+        policy.start(world, world.ego, scenario_name="s")
         _run(policy, world, 20)
         policy.close()
 
@@ -470,7 +472,7 @@ class TestClosedLoop:
     ) -> None:
         world = _World(_Ego())
         policy = self._policy(channel)
-        policy.start(world, world.ego, scene_id="s")
+        policy.start(world, world.ego, scenario_name="s")
         _run(policy, world, 2)
         policy.close()
 
@@ -484,7 +486,7 @@ class TestClosedLoop:
     ) -> None:
         world = _World(_Ego())
         policy = self._policy(channel)
-        policy.start(world, world.ego, scene_id="s")
+        policy.start(world, world.ego, scenario_name="s")
         _run(policy, world, 2)
         policy.close()
 
@@ -501,7 +503,7 @@ class TestClosedLoop:
     ) -> None:
         world = _World(_Ego())
         policy = self._policy(channel, send_renderer_data=False)
-        policy.start(world, world.ego, scene_id="s")
+        policy.start(world, world.ego, scenario_name="s")
         _run(policy, world, 2)
         policy.close()
 
@@ -515,7 +517,7 @@ class TestClosedLoop:
         # it onto the lane, moving forward, with the handedness right.
         world = _World(_Ego(y=0.0, yaw_deg=-20.0), lane_y=2.0)
         policy = self._policy(channel)
-        policy.start(world, world.ego, scene_id="s")
+        policy.start(world, world.ego, scenario_name="s")
         _run(policy, world, 200)
         policy.close()
 
@@ -532,7 +534,7 @@ class TestClosedLoop:
         for channel in _serve(driver):
             world = _World(_Ego())
             policy = self._policy(channel)
-            policy.start(world, world.ego, scene_id="s")
+            policy.start(world, world.ego, scenario_name="s")
             _run(policy, world, 20)
             policy.close()
 
@@ -540,6 +542,78 @@ class TestClosedLoop:
         assert policy.finished
         assert len(driver.drives) == 4
         assert world.ego.controls[-1].brake == 1.0
+
+
+class _Blueprint:
+    def __init__(self) -> None:
+        self.attributes: dict = {}
+
+    def set_attribute(self, key: str, value: str) -> None:
+        self.attributes[key] = value
+
+
+class _Camera:
+    def __init__(self, blueprint: _Blueprint) -> None:
+        self.blueprint = blueprint
+        self.callback: Any = None
+        self.destroyed = False
+
+    def listen(self, callback: Any) -> None:
+        self.callback = callback
+
+    def stop(self) -> None:
+        pass
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+
+class _CameraWorld(_World):
+    def __init__(self, ego: _Ego) -> None:
+        super().__init__(ego)
+        self.cameras: List[_Camera] = []
+
+    def get_blueprint_library(self) -> Any:
+        return types.SimpleNamespace(find=lambda name: _Blueprint())
+
+    def spawn_actor(self, blueprint: _Blueprint, mount: Any, attach_to: Any) -> _Camera:
+        camera = _Camera(blueprint)
+        self.cameras.append(camera)
+        return camera
+
+
+class TestCameras:
+    def test_newest_frame_is_sent_once(
+        self, fake_carla: Any, driver: _RecordingDriver, channel: grpc.Channel
+    ) -> None:
+        cam = CameraConfig(logical_id="front", width=4, height=2)
+        world = _CameraWorld(_Ego())
+        policy = EgoDriverPolicy(
+            EgoDriverPolicyConfig(rear_axle_offset_m=-1.4, cameras=(cam,)),
+            channel=channel,
+        )
+        policy.start(world, world.ego, scenario_name="s")
+        (camera,) = world.cameras
+        assert camera.blueprint.attributes["sensor_tick"] == "0.1"
+        assert [
+            c.logical_id
+            for c in driver.sessions[0].rollout_spec.vehicle.available_cameras
+        ] == ["front"]
+
+        def frame(t: float) -> Any:
+            return types.SimpleNamespace(timestamp=t, raw_data=bytes(4 * 2 * 4))
+
+        camera.callback(frame(0.00))
+        camera.callback(frame(0.05))  # overwrites the older, unsent frame
+        _run(policy, world, 4)  # two policy steps; only the first has a frame
+        policy.close()
+
+        assert len(driver.images) == 1
+        image = driver.images[0].camera_image
+        assert image.logical_id == "front"
+        assert image.frame_start_us == 50_000
+        assert image.image_bytes[:2] == b"\xff\xd8"  # JPEG
+        assert camera.destroyed
 
 
 # ---------------------------------------------------------------------------

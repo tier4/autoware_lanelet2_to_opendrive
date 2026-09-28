@@ -42,10 +42,9 @@ PROTO_FILES = (
 )
 GENERATED_PACKAGES = ("alpasim_grpc", "carla_driver")
 
-_ABSOLUTE_IMPORT = re.compile(
-    r"^from ((?:alpasim_grpc|carla_driver)\.v0) import ", re.M
-)
-_MODULE_NAME = re.compile(r"'((?:alpasim_grpc|carla_driver)\.v0\.\w+_pb2)'")
+_PACKAGES = "|".join(GENERATED_PACKAGES)
+_ABSOLUTE_IMPORT = re.compile(rf"^from ((?:{_PACKAGES})\.v0) import ", re.M)
+_MODULE_NAME = re.compile(rf"'((?:{_PACKAGES})\.v0\.\w+_pb2)'")
 
 
 def _rewrite_imports(path: Path) -> None:

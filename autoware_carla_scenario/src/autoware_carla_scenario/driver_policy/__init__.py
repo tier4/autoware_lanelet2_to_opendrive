@@ -26,9 +26,9 @@ Usage::
 """
 
 from .config import CameraConfig, EgoDriverPolicyConfig, default_camera_rig
-from .control import ControlConfig, TrajectoryFollower, VehicleCommand
+from .control import ControlConfig
 from .entity import EgoDriverEntity
-from .policy import EgoDriverPolicy, EgoSample
+from .policy import EgoDriverPolicy
 
 __all__ = [
     "CameraConfig",
@@ -36,8 +36,5 @@ __all__ = [
     "EgoDriverEntity",
     "EgoDriverPolicy",
     "EgoDriverPolicyConfig",
-    "EgoSample",
-    "TrajectoryFollower",
-    "VehicleCommand",
     "default_camera_rig",
 ]
