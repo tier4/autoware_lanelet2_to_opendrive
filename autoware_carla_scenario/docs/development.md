@@ -42,6 +42,7 @@ autoware_carla_scenario/
 │   │   │   └── composition/          # Composed conditions (lane position, area, speed, waypoint, ...)
 │   │   ├── coordinate/               # Lanelet2 / OpenDRIVE / CARLA-world transforms, MapManager, snap
 │   │   ├── entity/                   # VehicleEntity, EgoVehicle, AutowareEntity, spawn helpers
+│   │   ├── driver_policy/            # EgoDriverEntity: ego driven by an alpasim egodriver gRPC policy
 │   │   ├── examples/                 # Built-in scenarios + Hydra config tree (conf/)
 │   │   ├── kinematics/               # Frame-tagged Vector3, velocity, acceleration
 │   │   ├── sensor/                   # CameraSensorBase + CARLA RGB camera

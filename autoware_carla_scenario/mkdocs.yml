@@ -78,6 +78,7 @@ nav:
   - Installation: installation.md
   - Tutorial: tutorial.md
   - Usage: usage.md
+  - Ego Driver Policy: driver_policy.md
   - Architecture: architecture.md
   - API Reference: api.md
   - Development: development.md

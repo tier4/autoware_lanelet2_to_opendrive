@@ -31,9 +31,16 @@ dev = [
     "weasyprint>=68.0",
 ]
 
+[tool.ruff]
+# Generated protobuf/gRPC stubs are committed verbatim; reformatting them would
+# make them differ from a fresh compile_driver_protos.py run. force-exclude
+# applies this even when pre-commit passes the files explicitly.
+force-exclude = true
+extend-exclude = ["autoware_carla_scenario/src/autoware_carla_scenario/driver_policy/_proto"]
+
 [tool.mypy]
 ignore_missing_imports = true
-exclude = ["conftest\\.py$"]
+exclude = ["conftest\\.py$", "driver_policy/_proto/"]
 
 [[tool.mypy.overrides]]
 # Pre-existing type errors in the l2o package are out of scope for this PR.

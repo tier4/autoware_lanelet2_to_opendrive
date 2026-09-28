@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import carla
 
-    from ..scenario_base import EgoConfig
+    from ..scenario_base import BaseScenario, EgoConfig
 
 from ..constants import EGO_ROLE_NAME
 from ._spawn import spawn_vehicle_actor
@@ -55,6 +55,19 @@ class EgoVehicle:
             ground_projection=config.ground_projection,
         )
         return self._vehicle
+
+    # ------------------------------------------------------------------
+    # Tick-loop hooks (no-ops here; overridden by externally driven egos)
+    # ------------------------------------------------------------------
+
+    def on_tick_loop_start(self, world: "carla.World", scenario: BaseScenario) -> None:
+        """Called once after warm-up and initial speeds, before the first tick."""
+
+    def pre_tick(self, world: "carla.World") -> None:
+        """Called before every ``world.tick()``, after the scenario's own hooks."""
+
+    def post_tick(self, world: "carla.World") -> None:
+        """Called after every ``world.tick()``, before the scenario's own hooks."""
 
     def destroy(self) -> None:
         """Destroy the vehicle actor."""

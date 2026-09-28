@@ -107,11 +107,24 @@ tree internally:
 | Symbol | Description |
 |--------|-------------|
 | `VehicleEntity`, `VehicleEntityConfig` | Generic vehicle actor with retry-aware spawn. |
-| `EgoVehicle` | Subclass with the fixed `EGO_ROLE_NAME`. |
+| `EgoVehicle` | Subclass with the fixed `EGO_ROLE_NAME`. Its `on_tick_loop_start` / `pre_tick` / `post_tick` hooks let an externally driven ego run inside the tick loop. |
 | `AutowareEntity` | Marker base class for Autoware-managed entities. |
 | `SpawnLocation` (Protocol) | Tag interface implemented by spawn-point providers. |
 | `SpawnTransform` | Spawn at an explicit `carla.Transform`. |
 | `SpawnPointIndex` | Spawn at the N-th map spawn point. |
+
+## Ego driver policy (`autoware_carla_scenario.driver_policy`)
+
+Drives the ego from an external `egodriver.EgodriverService` (alpasim driver
+contract) over gRPC. See [Ego Driver Policy](driver_policy.md).
+
+| Symbol | Description |
+|--------|-------------|
+| `EgoDriverEntity` | Ego vehicle driven by an egodriver policy; pass `EgoDriverEntity.factory(config)` as `ego_type`. |
+| `EgoDriverPolicyConfig` | Driver address, timing, cameras, route and ground-truth settings. |
+| `EgoDriverPolicy` | The Runtime role: submits observations, calls `drive`, tracks the plan. |
+| `CameraConfig`, `default_camera_rig` | Cameras streamed to the driver. |
+| `ControlConfig`, `TrajectoryFollower`, `VehicleCommand` | Pure pursuit + speed PID plan tracking. |
 
 ## Kinematics (`autoware_carla_scenario.kinematics`)
 

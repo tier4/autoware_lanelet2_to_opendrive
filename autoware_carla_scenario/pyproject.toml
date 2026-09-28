@@ -25,6 +25,10 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "ffmpeg-python>=0.2.0",
+    # egodriver gRPC client (driver_policy). protobuf<5 matches the
+    # alpasim-grpc pin the vendored stubs were generated for.
+    "grpcio>=1.60",
+    "protobuf>=4.21,<5",
 ]
 
 [project.optional-dependencies]

@@ -1,3 +1,7 @@
+# Vendored .proto files and the stubs generated from them are kept verbatim
+# (see autoware_carla_scenario/proto/README.md), so no hook rewrites them.
+exclude: '^autoware_carla_scenario/(proto/alpasim_grpc/|src/autoware_carla_scenario/driver_policy/_proto/)'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

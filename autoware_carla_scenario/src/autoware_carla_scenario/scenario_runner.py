@@ -514,6 +514,10 @@ class ScenarioRunner:
             # Apply initial speeds after warm-up stabilisation
             scenario.set_initial_speed(ego_actor)
 
+            # Let an externally driven ego (e.g. EgoDriverEntity) open its
+            # session now that the world has settled.
+            ego.on_tick_loop_start(world, scenario)
+
             _vehicle_entity_module._warmup_done = True
 
             # Start native CARLA recorder
@@ -544,7 +548,9 @@ class ScenarioRunner:
                 for cb in scenario._pre_tick_callbacks:
                     cb(world)
 
+                ego.pre_tick(world)
                 world.tick()
+                ego.post_tick(world)
 
                 # Post-tick actions (receive elapsed)
                 for action in scenario._post_tick_actions:

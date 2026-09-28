@@ -4,6 +4,8 @@ Public API re-exported for convenience::
 
     from autoware_carla_scenario import (
         AutowareEntity,
+        EgoDriverEntity,
+        EgoDriverPolicyConfig,
         EGO_ROLE_NAME,
         EntityRole,
         ScenarioRunner,
@@ -112,6 +114,11 @@ if TYPE_CHECKING:
         find_actor_by_role_name as find_actor_by_role_name,
     )
     from .constants import EGO_ROLE_NAME as EGO_ROLE_NAME
+    from .driver_policy import (
+        EgoDriverEntity as EgoDriverEntity,
+        EgoDriverPolicy as EgoDriverPolicy,
+        EgoDriverPolicyConfig as EgoDriverPolicyConfig,
+    )
     from .coordinate import (
         CarlaWorldPose as CarlaWorldPose,
         CoordinateFrame as CoordinateFrame,
@@ -233,6 +240,9 @@ __all__ = [
     "StickyCondition",
     "TemporaryStopCondition",
     "AutowareEntity",
+    "EgoDriverEntity",
+    "EgoDriverPolicy",
+    "EgoDriverPolicyConfig",
     "EgoConfig",
     "EgoVehicle",
     "SpawnLocation",
@@ -365,6 +375,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "to_carla_world": (".coordinate", "to_carla_world"),
     "to_lanelet2": (".coordinate", "to_lanelet2"),
     "to_opendrive": (".coordinate", "to_opendrive"),
+    # driver_policy
+    "EgoDriverEntity": (".driver_policy", "EgoDriverEntity"),
+    "EgoDriverPolicy": (".driver_policy", "EgoDriverPolicy"),
+    "EgoDriverPolicyConfig": (".driver_policy", "EgoDriverPolicyConfig"),
     # entity
     "AutowareEntity": (".entity", "AutowareEntity"),
     "EgoVehicle": (".entity", "EgoVehicle"),
