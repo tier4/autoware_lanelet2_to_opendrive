@@ -22,9 +22,10 @@ detect the missing behaviour:
 ``red`` passes ``--runxfail``, so a red test committed under
 ``@pytest.mark.xfail(strict=True)`` is still checked as failing.
 
-Both clear the project's ``addopts`` (``-n auto --testmon``): testmon silently
-deselects tests it considers unaffected, and a single test does not need a
-pool of xdist workers. Pass ``-n N`` explicitly to parallelise.
+Both clear ``addopts`` and disable pytest-testmon, so an ``addopts`` added to
+the project later, or a stray ``--testmon``, cannot change what runs: testmon
+silently deselects tests it considers unaffected, which would turn a red into
+"nothing ran". Tests run serially; pass ``-n N`` explicitly to parallelise.
 
 The tests run inside a resident ``tdd`` compose service, so each invocation is
 a ``docker compose exec`` rather than a fresh container. Uses only the
@@ -168,7 +169,14 @@ def judge(mode: str, exit_code: int, junit_xml: Optional[str]) -> Verdict:
 
 def build_pytest_command(mode: str, args: Sequence[str], junit_path: str) -> list[str]:
     """The pytest invocation run inside the container."""
-    cmd = ["pytest", "-o", "addopts=", "-p", "no:testmon", f"--junitxml={junit_path}"]
+    cmd = [
+        "pytest",
+        "-o",
+        "addopts=",
+        "-p",
+        "no:pytest-testmon",
+        f"--junitxml={junit_path}",
+    ]
     if mode == "red":
         cmd.append("--runxfail")
     return cmd + list(args)

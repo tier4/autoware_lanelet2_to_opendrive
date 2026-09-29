@@ -106,10 +106,11 @@ too -- so read the reasons, not only the verdict.
 `@pytest.mark.xfail(strict=True)` is still checked as failing; `green` does
 not, so a leftover marker shows up as `XPASS(strict)`.
 
-Both clear the project's `addopts` (`-n auto --testmon`). testmon deselects
-tests it considers unaffected by the last change, which would turn a red into
-"nothing ran", and a single test does not need a pool of xdist workers. Pass
-`-n N` yourself to parallelise.
+Both clear `addopts` and disable pytest-testmon (`-p no:pytest-testmon`), so an
+`addopts` added to the project later, or a stray `--testmon`, cannot change
+what runs: testmon deselects tests it considers unaffected by the last change,
+which would turn a red into "nothing ran". Tests run serially; pass `-n N`
+yourself to parallelise.
 
 The tests run in a resident `tdd` compose service (`sleep infinity`, profile
 `tdd`), started on first use, so each run is a `docker compose exec` of a few

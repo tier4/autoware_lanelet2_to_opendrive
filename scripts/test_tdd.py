@@ -163,7 +163,9 @@ def test_green_names_a_strict_xpass() -> None:
 def test_command_neutralises_project_addopts() -> None:
     cmd = build_pytest_command("green", ["t.py::test_x"], "/tmp/j.xml")
     assert cmd[:3] == ["pytest", "-o", "addopts="]
-    assert "no:testmon" in cmd
+    # pytest-testmon registers its plugin as "pytest-testmon", not "testmon";
+    # "-p no:testmon" disables nothing.
+    assert "no:pytest-testmon" in cmd
     assert "--junitxml=/tmp/j.xml" in cmd
     assert cmd[-1] == "t.py::test_x"
 
