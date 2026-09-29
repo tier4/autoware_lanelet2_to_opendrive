@@ -72,12 +72,11 @@ repos:
       # and the interpreter shuts down with multiple LaneletMap instances alive.
       #
       # Both entries clear ``addopts`` with ``-o addopts=`` and then restate
-      # every option explicitly. ``pyproject.toml`` sets
-      # ``addopts = "-n auto --testmon"``, and passing only ``--no-testmon``
-      # -- as these hooks used to -- overrides half of that and leaves the
-      # hook silently inheriting ``-n auto``. That inheritance is invisible at
-      # the point of use: the entry line reads as a serial run and is not one.
-      # ``docker-compose.yml`` clears ``addopts`` for the same reason.
+      # every option explicitly, so the entry line is the whole command.
+      # ``pyproject.toml`` sets no ``addopts`` any more; the ``-o addopts=``
+      # stays as a guard, because an ``addopts`` added there later would
+      # otherwise leak into these hooks invisibly -- as ``-n auto`` once did,
+      # when the entries passed only ``--no-testmon`` and read as serial runs.
       #
       # ``-n auto`` is kept as the deliberate choice for a developer machine,
       # but it is now written down. If several of these run concurrently on
