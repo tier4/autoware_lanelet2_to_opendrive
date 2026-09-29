@@ -241,7 +241,7 @@ class Lane:
             subtype = lanelet.attributes["subtype"]
             if subtype in ["road", "highway"]:
                 lane_type = LaneType.DRIVING
-            elif subtype == "walkway":
+            elif subtype in ["walkway", "pedestrian_lane"]:
                 lane_type = LaneType.SIDEWALK
             elif subtype == "road_shoulder":
                 lane_type = LaneType.SHOULDER

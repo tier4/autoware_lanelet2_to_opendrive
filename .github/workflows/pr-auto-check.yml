@@ -58,7 +58,17 @@ jobs:
   end-of-file-fixer:
     name: Auto-fix End of File
     runs-on: ubuntu-latest
-    if: github.actor != 'github-actions[bot]'
+    # This job pushes a fix-up commit back to the PR branch, so it can only run
+    # when that branch lives in this repository. On a fork PR the checkout below
+    # cannot resolve `github.head_ref` against this repository and the job fails
+    # before doing any work. Skip it there — the `lint-and-format` job in ci.yml
+    # runs the same end-of-file-fixer hook as a hard check on every PR,
+    # fork included, so nothing goes unverified. Mirrors the guard on the
+    # `auto-format` job in ci.yml.
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'github-actions[bot]'
     permissions:
       contents: write
       pull-requests: write
