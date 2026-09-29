@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -12,6 +14,10 @@ repos:
       - id: check-toml
       - id: debug-statements
       - id: mixed-line-ending
+        # Default is --fix=auto, which only touches files that MIX
+        # terminators and normalises them to their own majority -- a file
+        # that is consistently CRLF passes silently. See .gitattributes.
+        args: [--fix=lf]
 
   # - repo: https://github.com/psf/black
   #   rev: 24.10.0
@@ -43,20 +49,57 @@ repos:
 
   - repo: local
     hooks:
+      # These run at push time, not at commit time. Each is the whole suite --
+      # ``always_run`` with ``pass_filenames: false`` and ``--no-testmon``, so
+      # neither the changed files nor testmon's selection narrows them -- and
+      # the two cannot be merged (see below). At commit time that is two full
+      # suites back to back: measured at roughly 40 minutes here, against
+      # seconds for every other hook.
+      #
+      # ``default_install_hook_types`` at the top of this file is what makes a
+      # plain ``pre-commit install`` write the pre-push hook as well. Do not
+      # drop it: ``stages`` only says when a hook may run, never which git hook
+      # file gets installed, so without it these two are configured for a stage
+      # whose hook does not exist and run nowhere, silently.
+      #
+      # CI does not lose anything by this: the ``test`` job in ci.yml runs the
+      # same suites directly, across Python 3.10/3.11/3.12 with and without
+      # CARLA, which is strictly more than the single run this replaced in
+      # ``lint-and-format``.
+      #
       # Run each package's tests in a separate process to avoid a crash in
       # the lanelet2 C++ bindings that occurs when both suites run together
       # and the interpreter shuts down with multiple LaneletMap instances alive.
+      #
+      # Both entries clear ``addopts`` with ``-o addopts=`` and then restate
+      # every option explicitly, so the entry line is the whole command.
+      # ``pyproject.toml`` sets no ``addopts`` any more; the ``-o addopts=``
+      # stays as a guard, because an ``addopts`` added there later would
+      # otherwise leak into these hooks invisibly -- as ``-n auto`` once did,
+      # when the entries passed only ``--no-testmon`` and read as serial runs.
+      #
+      # ``-n auto`` is kept as the deliberate choice for a developer machine,
+      # but it is now written down. If several of these run concurrently on
+      # one host, each sizing itself to the full core count, lower it: the
+      # observed failure mode is memory exhaustion taking the Docker daemon
+      # with it, not a test failure.
       - id: pytest-lanelet2
         name: pytest (autoware_lanelet2_to_opendrive)
-        entry: uv run pytest --no-testmon autoware_lanelet2_to_opendrive/test
+        entry: >-
+          uv run pytest -o addopts= -n auto --no-testmon
+          autoware_lanelet2_to_opendrive/test
         language: system
         types: [python]
         pass_filenames: false
         always_run: true
+        stages: [pre-push]
       - id: pytest-carla
         name: pytest (autoware_carla_scenario)
-        entry: uv run pytest --no-testmon -m "not integration" autoware_carla_scenario/test
+        entry: >-
+          uv run pytest -o addopts= -n auto --no-testmon
+          -m "not integration" autoware_carla_scenario/test
         language: system
         types: [python]
         pass_filenames: false
         always_run: true
+        stages: [pre-push]
