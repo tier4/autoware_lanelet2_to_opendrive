@@ -313,6 +313,53 @@ Design principles followed across the codebase:
 - **Fixture locking** — `test_xodr_fixture_locking.py` guards golden
   outputs against accidental drift
 
+## Red/green development
+
+Bug fixes and features are developed test-first. Refactorings, which by
+definition change no behaviour, are verified by unchanged output instead and
+have no red step.
+
+### The cycle
+
+```bash
+# 1. Write the test that states the missing behaviour, then confirm it fails
+python scripts/tdd.py red   autoware_lanelet2_to_opendrive/test/test_x.py::test_y
+
+# 2. Implement until it passes
+python scripts/tdd.py green autoware_lanelet2_to_opendrive/test/test_x.py::test_y
+
+# 3. Refactor, then run the full suite
+docker compose --profile test run --rm pytest
+```
+
+`red` accepts only tests that ran and failed; the
+[Docker guide](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
+lists everything it rejects. It prints each failure message: **read them**. A
+test that fails with an `ImportError` or `AttributeError` for the thing under
+test has shown only that the name is missing, not that the behaviour is.
+
+### Commit shape
+
+Record the red in history without ever committing a failing suite:
+
+1. `test: ...` -- the new test, marked
+   `@pytest.mark.xfail(strict=True, reason="#<issue>")`. The suite stays green,
+   and `tdd.py red` still checks it as failing (it passes `--runxfail`).
+2. `fix: ...` / `feat: ...` -- the implementation, and the marker removed.
+   `strict=True` makes a forgotten marker fail the suite as `XPASS(strict)`.
+
+A reviewer can check out the first commit alone to see what the test asserts
+and that it fails. Paste both verdicts into the PR's "Red/green evidence"
+block.
+
+### Choosing the map a test converts
+
+A test that converts `nishishinjuku.osm` pays about 160 s per run, even through
+the shared `nishishinjuku_xodr` fixture, because a changed converter has to
+convert again. When the defect can be reproduced on a small map, add one to
+`test/data/` (the `*_mini.osm` fixtures convert in about 5 s) and write the red
+against it.
+
 ## Release process
 
 Versioning is driven by the version-bump label on each merged PR. The
