@@ -27,6 +27,14 @@ services:
     command: pytest -v --tb=short -n auto
     profiles: ["test"]
 
+  # Resident container for scripts/tdd.py: each red/green run is a
+  # `docker compose exec` into it instead of a fresh container start.
+  tdd:
+    <<: *dev-base
+    command: sleep infinity
+    init: true
+    profiles: ["tdd"]
+
   qc-validate:
     <<: *dev-base
     command:

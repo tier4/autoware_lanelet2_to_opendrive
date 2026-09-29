@@ -78,6 +78,44 @@ an implicit sync against the bind-mounted source on every invocation, which
 can rebuild the workspace packages and destabilize the carefully-built native
 dependencies that the image already contains.
 
+## Red/green runs for test-driven development
+
+`scripts/tdd.py` runs selected tests in the container and says whether the
+result is a genuine red or green. It needs only a host Python 3.10+ (standard
+library) and Docker.
+
+```bash
+python scripts/tdd.py red   autoware_lanelet2_to_opendrive/test/test_x.py::test_y
+python scripts/tdd.py green autoware_lanelet2_to_opendrive/test/test_x.py::test_y
+python scripts/tdd.py run   autoware_lanelet2_to_opendrive/test/test_x.py   # no verdict
+python scripts/tdd.py stop                                                   # stop the container
+```
+
+Everything after the subcommand is passed to pytest.
+
+| | accepted only when | rejected, with the reason |
+| --- | --- | --- |
+| `red` | every selected test ran and **failed** | passes already; error in setup/teardown; skipped; collection error (e.g. an import failure at module level); nothing selected |
+| `green` | every selected test **passed** | failed; error; skipped; still marked `xfail`; nothing selected |
+
+A `red` verdict lists each failure message. A failure inside the test body can
+still be the wrong one -- an `ImportError` of the function under test fails
+too -- so read the reasons, not only the verdict.
+
+`red` passes `--runxfail`, so a test committed as red under
+`@pytest.mark.xfail(strict=True)` is still checked as failing; `green` does
+not, so a leftover marker shows up as `XPASS(strict)`.
+
+Both clear `addopts` and disable pytest-testmon (`-p no:pytest-testmon`), so an
+`addopts` added to the project later, or a stray `--testmon`, cannot change
+what runs: testmon deselects tests it considers unaffected by the last change,
+which would turn a red into "nothing ran". Tests run serially; pass `-n N`
+yourself to parallelise.
+
+The tests run in a resident `tdd` compose service (`sleep infinity`, profile
+`tdd`), started on first use, so each run is a `docker compose exec` of a few
+seconds rather than a fresh container. Stop it with `python scripts/tdd.py stop`.
+
 ## Using the `convert` distribution image
 
 The `convert` image is intended to be used standalone. Build it once, then
