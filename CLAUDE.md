@@ -72,60 +72,18 @@ When the user asks to "run the tests", "verify locally", or otherwise validate a
 
 ## Red/Green Development
 
-Bug fixes and features are developed test-first. Refactorings, which by
-definition change no behaviour, are verified by unchanged output instead and
-have no red step.
+**Bug fixes and features start from a failing test.** Write the test, confirm
+with `python scripts/tdd.py red <node id>` that it runs and fails for the
+reason you expect, then implement until `python scripts/tdd.py green <node id>`
+passes. Refactorings have no red step; say in the PR how unchanged behaviour
+was verified instead.
 
-### The cycle
-
-```bash
-# 1. Write the test that states the missing behaviour, then confirm it fails
-python scripts/tdd.py red   autoware_lanelet2_to_opendrive/test/test_x.py::test_y
-
-# 2. Implement until it passes
-python scripts/tdd.py green autoware_lanelet2_to_opendrive/test/test_x.py::test_y
-
-# 3. Refactor, then run the full suite
-docker compose --profile test run --rm pytest
-```
-
-`red` accepts only tests that ran and failed; see
-[`docs/docker.md`](docs/docker.md#redgreen-runs-for-test-driven-development)
-for everything it rejects. It lists each failure message: **read them**. A
-test that fails with an `ImportError` or `AttributeError` for the thing under
-test has shown only that the name is missing, not that the behaviour is.
-
-### Commit shape
-
-Record the red in history without ever committing a failing suite:
-
-1. `test: ...` -- the new test, marked
-   `@pytest.mark.xfail(strict=True, reason="#<issue>")`. The suite stays green,
-   and `tdd.py red` still checks it as failing (it passes `--runxfail`).
-2. `fix: ...` / `feat: ...` -- the implementation, and the marker removed.
-   `strict=True` makes a forgotten marker fail the suite as `XPASS(strict)`.
-
-A reviewer can check out the first commit alone to see what the test asserts
-and that it fails.
-
-### Choosing the map a test converts
-
-A test that converts `nishishinjuku.osm` pays about 160 s per run, even through
-the shared `nishishinjuku_xodr` fixture, because a changed converter has to
-convert again. When the defect can be reproduced on a small map, add one to
-`test/data/` (the `*_mini.osm` fixtures convert in about 5 s) and write the red
-against it.
-
-### Instructions for Claude Code
-
-1. For a bug fix or feature, write the test first and run
-   `python scripts/tdd.py red <node id>` before touching the implementation.
-   Quote its verdict and failure reasons in the PR.
-2. If the verdict is `NOT RED`, fix the test, not the verdict: a test that
-   passes before the change, or cannot be collected, proves nothing.
-3. Finish with `python scripts/tdd.py green <node id>`, then the full suite.
-4. Do not add a red step to a pure refactoring; say in the PR that there is
-   none and how unchanged behaviour was verified.
+- **Procedure for Claude Code**: the `red-green` skill
+  (`.claude/skills/red-green/SKILL.md`). Load it before writing the test.
+- **Team convention** (cycle, commit shape, choosing a map):
+  [`autoware_lanelet2_to_opendrive/docs/development.md`](autoware_lanelet2_to_opendrive/docs/development.md#redgreen-development).
+- **What `tdd.py` accepts and rejects**:
+  [`docs/docker.md`](docs/docker.md#redgreen-runs-for-test-driven-development).
 
 ## Pre-commit Hooks and Lint Checking
 
