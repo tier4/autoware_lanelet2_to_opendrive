@@ -1,8 +1,5 @@
 """Tests for Lanelet2 LineString -> OpenDRIVE RoadMark mapping (P0-3)."""
 
-import subprocess
-from pathlib import Path
-
 import lxml.etree as ET
 
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import (
@@ -121,7 +118,7 @@ def test_lane_change_left_right_rht_vs_lht():
     assert rm_right_lht.lane_change == RoadMarkLaneChange.INCREASE
 
 
-def test_nishishinjuku_emits_non_default_roadmarks(tmp_path):
+def test_nishishinjuku_emits_non_default_roadmarks(nishishinjuku_xodr):
     """End-to-end: nishishinjuku output should carry heterogeneous roadMarks.
 
     We require *some* variation beyond the former hard-coded "solid white":
@@ -129,29 +126,8 @@ def test_nishishinjuku_emits_non_default_roadmarks(tmp_path):
     attribute. If the underlying LineStrings really are all homogeneous the
     assertion still protects against the helper being unwired.
 
-    The converter may exit non-zero because of an unrelated mapping
-    cross-validation warning on the nishishinjuku fixture; we do not
-    propagate that failure here — the XODR is still written and is what we
-    actually assert on.
     """
-    fixture = Path(
-        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
-    ).resolve()
-    out = tmp_path / "n.xodr"
-    subprocess.run(
-        [
-            "uv",
-            "run",
-            "convert",
-            "map=nishishinjuku",
-            "target=carla",
-            f"input_map_path={fixture}",
-            f"output_map_path={out}",
-        ],
-        check=False,
-    )
-    assert out.is_file(), "converter did not write an output .xodr"
-    root = ET.parse(str(out)).getroot()
+    root = ET.parse(str(nishishinjuku_xodr)).getroot()
     rmarks = root.findall(".//roadMark")
     assert rmarks, "expected roadMark elements in output"
 
