@@ -14,6 +14,10 @@ repos:
       - id: check-toml
       - id: debug-statements
       - id: mixed-line-ending
+        # Default is --fix=auto, which only touches files that MIX
+        # terminators and normalises them to their own majority -- a file
+        # that is consistently CRLF passes silently. See .gitattributes.
+        args: [--fix=lf]
 
   # - repo: https://github.com/psf/black
   #   rev: 24.10.0
@@ -66,9 +70,25 @@ repos:
       # Run each package's tests in a separate process to avoid a crash in
       # the lanelet2 C++ bindings that occurs when both suites run together
       # and the interpreter shuts down with multiple LaneletMap instances alive.
+      #
+      # Both entries clear ``addopts`` with ``-o addopts=`` and then restate
+      # every option explicitly. ``pyproject.toml`` sets
+      # ``addopts = "-n auto --testmon"``, and passing only ``--no-testmon``
+      # -- as these hooks used to -- overrides half of that and leaves the
+      # hook silently inheriting ``-n auto``. That inheritance is invisible at
+      # the point of use: the entry line reads as a serial run and is not one.
+      # ``docker-compose.yml`` clears ``addopts`` for the same reason.
+      #
+      # ``-n auto`` is kept as the deliberate choice for a developer machine,
+      # but it is now written down. If several of these run concurrently on
+      # one host, each sizing itself to the full core count, lower it: the
+      # observed failure mode is memory exhaustion taking the Docker daemon
+      # with it, not a test failure.
       - id: pytest-lanelet2
         name: pytest (autoware_lanelet2_to_opendrive)
-        entry: uv run pytest --no-testmon autoware_lanelet2_to_opendrive/test
+        entry: >-
+          uv run pytest -o addopts= -n auto --no-testmon
+          autoware_lanelet2_to_opendrive/test
         language: system
         types: [python]
         pass_filenames: false
@@ -76,7 +96,9 @@ repos:
         stages: [pre-push]
       - id: pytest-carla
         name: pytest (autoware_carla_scenario)
-        entry: uv run pytest --no-testmon -m "not integration" autoware_carla_scenario/test
+        entry: >-
+          uv run pytest -o addopts= -n auto --no-testmon
+          -m "not integration" autoware_carla_scenario/test
         language: system
         types: [python]
         pass_filenames: false
