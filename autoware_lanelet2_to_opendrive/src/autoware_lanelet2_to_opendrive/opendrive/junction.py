@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Set
 import lxml.etree as ET
 import lanelet2
 
-from .enums import ContactPoint
+from .enums import ContactPoint, ElementType
 
 if TYPE_CHECKING:
     from .road import Road
@@ -736,3 +736,55 @@ class Junction:
         if not result:
             log.info("No <priority> emitted (no valid right_of_way REs)")
         return result
+
+
+def junction_id_base(max_road_id: int, junction_id_offset: int) -> int:
+    """Return the first multiple of ``junction_id_offset`` above ``max_road_id``.
+
+    CARLA resolves road and junction IDs in one ID space, so junction IDs start
+    at ``junction_id_offset`` (issue #132). Once the highest road ID reaches the
+    offset they would coincide with road IDs, so they start at the next multiple
+    of the offset above the highest road ID instead (4739 -> 5000 at the default
+    offset of 1000).
+
+    Args:
+        max_road_id: Highest road ID in the map (-1 when there are no roads)
+        junction_id_offset: Configured start of the junction IDs (positive)
+
+    Returns:
+        First junction ID to use
+    """
+    if junction_id_offset <= 0:
+        raise ValueError(
+            f"junction_id_offset must be positive, got {junction_id_offset}"
+        )
+    return max(max_road_id // junction_id_offset + 1, 1) * junction_id_offset
+
+
+def shift_junction_ids(
+    junctions: Iterable[Junction], roads: Iterable["Road"], shift: int
+) -> None:
+    """Add ``shift`` to every junction ID and to every reference to one.
+
+    References are the ``junction`` attribute of connecting roads and the
+    road links of type ``junction``. The same shift for every junction keeps
+    the synthetic divergence/merge junctions (issue #291) in their band above
+    the others.
+
+    Args:
+        junctions: All junctions
+        roads: All roads (regular + connecting)
+        shift: Amount to add; 0 leaves everything unchanged
+    """
+    if shift == 0:
+        return
+    for junction in junctions:
+        junction.id += shift
+    for road in roads:
+        if road.junction != -1:
+            road.junction += shift
+        if road.link is None:
+            continue
+        for element in (road.link.predecessor, road.link.successor):
+            if element is not None and element.element_type == ElementType.JUNCTION:
+                element.element_id += shift
