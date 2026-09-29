@@ -50,7 +50,9 @@ testpaths = [
     "autoware_carla_scenario/test",
     "scripts",
 ]
-addopts = "-n auto --testmon"
+# No addopts: a bare ``pytest <node id>`` runs exactly that test. Opt in to
+# ``-n N`` (pytest-xdist) or ``--testmon`` per invocation. See
+# autoware_lanelet2_to_opendrive/docs/development.md.
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring a running CARLA server",
