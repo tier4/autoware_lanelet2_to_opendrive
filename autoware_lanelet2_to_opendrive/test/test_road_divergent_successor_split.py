@@ -33,7 +33,7 @@ from autoware_lanelet2_to_opendrive.util import (
 
 
 def _road_lanelet_groups(lanelet_map):
-    """Build the same (road, highway, walkway, road_shoulder) grouping the
+    """Build the same road-construction subtype grouping the
     converter uses."""
     from autoware_lanelet2_to_opendrive.junction import (
         _filter_lanelets_outside_junction,
@@ -42,7 +42,14 @@ def _road_lanelet_groups(lanelet_map):
     road_lanelets = _filter_lanelets_outside_junction(
         filter_lanelets_by_subtype(
             lanelet_map.laneletLayer,
-            ["road", "highway", "walkway", "road_shoulder"],
+            [
+                "road",
+                "highway",
+                "walkway",
+                "pedestrian_lane",
+                "road_shoulder",
+                "bicycle_lane",
+            ],
         )
     )
     routing_graph = create_routing_graph(lanelet_map)

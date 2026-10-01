@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Set
 import lxml.etree as ET
 import lanelet2
 
-from .enums import ContactPoint
+from .enums import ContactPoint, ElementType
 
 if TYPE_CHECKING:
+    from lanelet2.routing import RoutingGraph
+
     from .road import Road
 
 log = logging.getLogger(__name__)
@@ -579,6 +581,8 @@ class Junction:
         lanelet_to_road_id: dict[int, int],
         connecting_road_ids: List[int],
         roads: Optional[List] = None,
+        routing_graph: Optional["RoutingGraph"] = None,
+        road_id_to_road: Optional[Dict[int, "Road"]] = None,
     ) -> List[Connection]:
         """Build junction connections from road topology.
 
@@ -595,6 +599,14 @@ class Junction:
             roads: Optional list of all Road objects for lane ID lookup.
                    Required to emit ``<laneLink>`` elements; when omitted
                    no connections are returned.
+            routing_graph: Optional pre-built vehicle routing graph. One is
+                   built from ``lanelet_map`` when omitted. Callers that
+                   invoke this once per junction should pass the graph they
+                   already hold — construction is whole-map work and would
+                   otherwise be repeated for every junction.
+            road_id_to_road: Optional pre-built ``road.id -> Road`` index over
+                   ``roads``. Derived from ``roads`` when omitted; pass it to
+                   avoid re-indexing the full road list per junction.
 
         Returns:
             List of Connection objects for this junction. Each Connection
@@ -602,22 +614,15 @@ class Junction:
             predecessor edge implied by the routing graph (#439: N:M
             lane links for multi-lane merges/splits).
         """
-        from lanelet2.routing import RoutingGraph, RoutingCostDistance
-        import lanelet2
+        # Create routing graph only when the caller has none to lend.
+        if routing_graph is None:
+            from ..util import create_routing_graph
 
-        # Create routing graph
-        traffic_rules = lanelet2.traffic_rules.create(
-            lanelet2.traffic_rules.Locations.Germany,
-            lanelet2.traffic_rules.Participants.Vehicle,
-        )
-        routing_graph = RoutingGraph(
-            lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
-        )
+            routing_graph = create_routing_graph(lanelet_map)
 
         # Build road_id to Road mapping for lane ID lookup
-        road_id_to_road: dict[int, "Road"] = {}
-        if roads is not None:
-            road_id_to_road = {road.id: road for road in roads}
+        if road_id_to_road is None:
+            road_id_to_road = {road.id: road for road in roads} if roads else {}
 
         # Walk the routing graph once and collect direct longitudinal
         # predecessor lanelet ids per connecting (junction) lanelet.  The
@@ -736,3 +741,55 @@ class Junction:
         if not result:
             log.info("No <priority> emitted (no valid right_of_way REs)")
         return result
+
+
+def junction_id_base(max_road_id: int, junction_id_offset: int) -> int:
+    """Return the first multiple of ``junction_id_offset`` above ``max_road_id``.
+
+    CARLA resolves road and junction IDs in one ID space, so junction IDs start
+    at ``junction_id_offset`` (issue #132). Once the highest road ID reaches the
+    offset they would coincide with road IDs, so they start at the next multiple
+    of the offset above the highest road ID instead (4739 -> 5000 at the default
+    offset of 1000).
+
+    Args:
+        max_road_id: Highest road ID in the map (-1 when there are no roads)
+        junction_id_offset: Configured start of the junction IDs (positive)
+
+    Returns:
+        First junction ID to use
+    """
+    if junction_id_offset <= 0:
+        raise ValueError(
+            f"junction_id_offset must be positive, got {junction_id_offset}"
+        )
+    return max(max_road_id // junction_id_offset + 1, 1) * junction_id_offset
+
+
+def shift_junction_ids(
+    junctions: Iterable[Junction], roads: Iterable["Road"], shift: int
+) -> None:
+    """Add ``shift`` to every junction ID and to every reference to one.
+
+    References are the ``junction`` attribute of connecting roads and the
+    road links of type ``junction``. The same shift for every junction keeps
+    the synthetic divergence/merge junctions (issue #291) in their band above
+    the others.
+
+    Args:
+        junctions: All junctions
+        roads: All roads (regular + connecting)
+        shift: Amount to add; 0 leaves everything unchanged
+    """
+    if shift == 0:
+        return
+    for junction in junctions:
+        junction.id += shift
+    for road in roads:
+        if road.junction != -1:
+            road.junction += shift
+        if road.link is None:
+            continue
+        for element in (road.link.predecessor, road.link.successor):
+            if element is not None and element.element_type == ElementType.JUNCTION:
+                element.element_id += shift

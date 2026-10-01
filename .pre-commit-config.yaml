@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -12,6 +14,10 @@ repos:
       - id: check-toml
       - id: debug-statements
       - id: mixed-line-ending
+        # Default is --fix=auto, which only touches files that MIX
+        # terminators and normalises them to their own majority -- a file
+        # that is consistently CRLF passes silently. See .gitattributes.
+        args: [--fix=lf]
 
   # - repo: https://github.com/psf/black
   #   rev: 24.10.0
@@ -43,20 +49,41 @@ repos:
 
   - repo: local
     hooks:
+      # ``default_install_hook_types`` at the top of this file is what makes a
+      # plain ``pre-commit install`` write the pre-push hook as well. Do not
+      # drop it: ``stages`` only says when a hook may run, never which git hook
+      # file gets installed, so without it these two are configured for a stage
+      # whose hook does not exist and run nowhere, silently.
+      #
       # Run each package's tests in a separate process to avoid a crash in
       # the lanelet2 C++ bindings that occurs when both suites run together
       # and the interpreter shuts down with multiple LaneletMap instances alive.
+      #
+      # ``-o addopts=`` is a guard: an ``addopts`` added to ``pyproject.toml``
+      # would otherwise leak into these hooks invisibly, so the entry line
+      # would no longer be the whole command.
+      #
+      # ``-n auto`` is a deliberate choice for a developer machine. If several
+      # of these run concurrently on one host, each sizing itself to the full
+      # core count, lower it: the observed failure mode is memory exhaustion
+      # taking the Docker daemon with it, not a test failure.
       - id: pytest-lanelet2
         name: pytest (autoware_lanelet2_to_opendrive)
-        entry: uv run pytest --no-testmon autoware_lanelet2_to_opendrive/test
+        entry: >-
+          uv run pytest -o addopts= -n auto --no-testmon
+          autoware_lanelet2_to_opendrive/test
         language: system
         types: [python]
         pass_filenames: false
         always_run: true
+        stages: [pre-push]
       - id: pytest-carla
         name: pytest (autoware_carla_scenario)
-        entry: uv run pytest --no-testmon -m "not integration" autoware_carla_scenario/test
+        entry: >-
+          uv run pytest -o addopts= -n auto --no-testmon
+          -m "not integration" autoware_carla_scenario/test
         language: system
         types: [python]
         pass_filenames: false
         always_run: true
+        stages: [pre-push]

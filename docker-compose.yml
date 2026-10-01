@@ -9,6 +9,9 @@ x-dev-base: &dev-base
     # interpreter path doesn't pollute the bind-mounted source tree.
     - venv-cache:/workspace/.venv
     - uv-cache:/root/.cache/uv
+    # Makes a worktree's .git file (which points outside .:/workspace)
+    # resolve inside the container. See docs/docker.md#running-from-a-git-worktree.
+    - ${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}:${GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}
   working_dir: /workspace
 
 services:
