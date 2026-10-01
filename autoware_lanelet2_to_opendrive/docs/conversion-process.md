@@ -88,7 +88,26 @@ flowchart TD
 
 #### **1.1: Origin Specification and Coordinate Systems**
 
-The converter supports three methods for specifying the map origin:
+**Canonical: `map_projector_info.yaml`**
+
+The preferred origin source is a `map_projector_info.yaml` file placed next
+to the input `.osm` map. When present with a supported `projector_type`
+(currently `MGRS`), it drives the frame and any `mgrs_grid`/`lat_lon` config
+keys below are ignored:
+```yaml
+projector_type: MGRS
+mgrs_grid: "54SUE"
+```
+
+**Legacy: explicit config keys**
+
+If no `map_projector_info.yaml` is found, the converter falls back to three
+explicit-key methods in the map config. This fallback still works unchanged
+but is deprecated (`DeprecationWarning` + log warning on use); see
+[#539](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/539)
+for the soft-deprecation and
+[#564](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/564)
+for the future-major removal tracking issue.
 
 **Method 1: MGRS Grid Code Only**
 ```yaml
@@ -421,7 +440,13 @@ remove_turn_direction_operations:
 
 #### **1.6: Validation and Error Handling**
 
-**Origin Validation** ([`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)):
+**Origin Resolution** ([`projection_resolver.py:resolve_projection`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/projection_resolver.py)):
+- Prefers a `map_projector_info.yaml` next to the input map; falls back to
+  the explicit `mgrs_grid`/`lat_lon` config keys otherwise
+- The fallback path (`resolve_projection_from_hydra`, also used by the
+  legacy [`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
+  wrapper) is deprecated: it emits a `DeprecationWarning` and a log warning
+  (see #539 / #564)
 - Ensures exactly one of: `mgrs_grid` (with optional `offset`) or `lat_lon`
 - Validates `offset` only used with `mgrs_grid`
 - Accepts the legacy `mgrs_code` field as a synonym for `mgrs_grid`
@@ -450,7 +475,8 @@ remove_turn_direction_operations:
 
 **Execution Sequence:**
 1. **Parse Hydra Config**: Load YAML configuration
-2. **Parse Origin**: Determine origin method (MGRS vs. lat/lon)
+2. **Resolve Origin**: Prefer `map_projector_info.yaml`; otherwise fall back
+   to the (deprecated) explicit `mgrs_grid`/`lat_lon` config keys
 3. **Set Coordinate Offset**: If offset specified, activate global offset
 4. **Run Preprocessing**: If operations configured, execute preprocessing
 5. **Load Map**: Load preprocessed (or original) Lanelet2 map

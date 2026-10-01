@@ -11,6 +11,7 @@ emitted ``.xodr`` is byte-identical.
 
 import logging
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -151,6 +152,25 @@ def resolve_projection_from_hydra(cfg: DictConfig) -> ResolvedProjection:
         raise ValueError(
             "The 'offset' field can only be used together with 'mgrs_grid'"
         )
+
+    # Soft-deprecation (issue #539): map_projector_info.yaml is now the
+    # canonical origin source (see resolve_projection); reaching this point
+    # means the origin fell back to the explicit mgrs_grid/lat_lon config
+    # keys. Emit both a DeprecationWarning (suppressed by default per PEP
+    # 565 outside __main__) and a logger.warning so CLI users actually see
+    # it. Removal is tracked separately in a future major version (#564).
+    warnings.warn(
+        "Specifying the map origin via 'mgrs_grid'/'lat_lon' config keys is "
+        "deprecated; provide a map_projector_info.yaml next to the .osm map "
+        "instead. This fallback will be removed in a future major version "
+        "(see #564).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    logger.warning(
+        "Origin resolved via legacy 'mgrs_grid'/'lat_lon' config keys "
+        "(deprecated). Prefer map_projector_info.yaml. See #564."
+    )
 
     if has_mgrs_grid:
         mgrs_grid = map_cfg.mgrs_grid

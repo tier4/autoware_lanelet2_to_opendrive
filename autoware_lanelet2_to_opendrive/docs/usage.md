@@ -110,11 +110,39 @@ configuration before running.
 
 ## Origin Specification
 
-Each map config in `conf/map/*.yaml` must specify exactly **one** origin
-method. Three are supported (see
+### Canonical: `map_projector_info.yaml`
+
+The preferred way to specify the map origin is a `map_projector_info.yaml`
+file placed next to the input `.osm` map (same directory). When present with
+a supported `projector_type` (currently `MGRS`), it is used as the origin
+source and any `mgrs_grid`/`lat_lon` keys in the map config are ignored:
+
+```yaml
+projector_type: MGRS
+mgrs_grid: 54SUE
+```
+
+This is the format Autoware itself writes alongside a map, so pointing the
+converter at an Autoware map directory "just works" with no per-map Hydra
+config needed for the origin.
+
+### Legacy: explicit `mgrs_grid` / `lat_lon` config keys
+
+If no `map_projector_info.yaml` is found (or its `projector_type` isn't yet
+supported), origin resolution falls back to explicit keys in the map config.
+**This fallback is deprecated**: it still works unchanged, but emits a
+`DeprecationWarning` (and a matching log warning) and may be removed in a
+future major version (tracked in
+[#564](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/564);
+the soft-deprecation itself is
+[#539](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/539)).
+Prefer `map_projector_info.yaml` for new configs.
+
+Each map config in `conf/map/*.yaml` must specify exactly **one** of the
+following (see
 [`example.yaml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/conf/map/example.yaml)):
 
-### Method 1 — MGRS grid only
+#### Method 1 — MGRS grid only
 
 ```yaml
 mgrs_grid: 54SUE815501
@@ -122,7 +150,7 @@ mgrs_grid: 54SUE815501
 
 The legacy field name `mgrs_code` is also accepted.
 
-### Method 2 — MGRS grid + offset
+#### Method 2 — MGRS grid + offset
 
 ```yaml
 mgrs_grid: 54SUE
@@ -135,7 +163,7 @@ offset:
 The offset is **subtracted** from every coordinate during export, so the
 resulting `.xodr` lives in a local frame anchored at the offset point.
 
-### Method 3 — Latitude / Longitude
+#### Method 3 — Latitude / Longitude
 
 ```yaml
 lat_lon:
