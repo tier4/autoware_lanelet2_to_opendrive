@@ -246,7 +246,9 @@ class ConversionConfig:
         exclude_non_junction_signals: If True, exclude traffic signals not
             associated with junction lanelets (required for CARLA compatibility)
         junction_id_offset: Offset added to junction IDs to avoid conflicts
-            with road IDs (default: 1000)
+            with road IDs (default: 1000). Once the highest road ID reaches the
+            offset, junction IDs start at the next multiple of the offset above
+            it instead
         traffic_rule: Traffic rule for lanes (RHT: Right-Hand Traffic,
             LHT: Left-Hand Traffic). Defaults to "RHT"
         parampoly3: Configuration for ParamPoly3 segment generation
@@ -284,6 +286,10 @@ class ConversionConfig:
         if self.traffic_rule not in ("RHT", "LHT", None):
             raise ValueError(
                 f"traffic_rule must be 'RHT' or 'LHT', got '{self.traffic_rule}'"
+            )
+        if self.junction_id_offset <= 0:
+            raise ValueError(
+                f"junction_id_offset must be positive, got {self.junction_id_offset}"
             )
 
     def with_mgrs_code(self, mgrs_code: str) -> "ConversionConfig":
