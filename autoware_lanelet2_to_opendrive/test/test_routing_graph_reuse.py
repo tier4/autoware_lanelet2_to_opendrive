@@ -8,7 +8,7 @@ guard the end-to-end call count so the redundancy cannot silently return.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -240,5 +240,70 @@ def test_extract_centerline_reuses_supplied_routing_graph(
     ) as spy:
         extract_centerline_as_spline_from_two_lanelets(
             lanelet_map, adjacent_pair, routing_graph=routing_graph
+        )
+    assert spy.call_count == 0
+
+
+@pytest.mark.slow
+def test_connecting_roads_do_not_rebuild_per_junction_group(
+    lanelet_map, routing_graph, regular_roads_result, monkeypatch
+):
+    """The per-junction ``find_adjacent_groups`` call must reuse the graph.
+
+    ``construct_connecting_roads_from_junctions`` builds one map-wide graph
+    up front, but used to omit it from the ``find_adjacent_groups`` call
+    inside its per-junction loop, so every junction rebuilt a whole-map
+    graph. Supplying the graph must drive the rebuild count to zero
+    regardless of how many junction groups are processed.
+    """
+    from autoware_lanelet2_to_opendrive.junction import (
+        _filter_lanelets_inside_junction,
+        find_junction_groups,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+    junction_lanelets = _filter_lanelets_inside_junction(list(lanelet_map.laneletLayer))
+    junction_groups = find_junction_groups(junction_lanelets)[:5]
+    assert junction_groups, "test map has no junction groups"
+
+    spy = MagicMock(wraps=util_mod.create_routing_graph)
+    monkeypatch.setattr(util_mod, "create_routing_graph", spy)
+
+    Road.construct_connecting_roads_from_junctions(
+        lanelet_map=lanelet_map,
+        junction_groups=junction_groups,
+        regular_roads=regular_roads_result.roads,
+        lanelet_to_road_id=regular_roads_result.lanelet_to_road,
+        routing_graph=routing_graph,
+    )
+    assert spy.call_count == 0
+
+
+def test_build_connections_from_roads_reuses_supplied_routing_graph(
+    lanelet_map, routing_graph
+):
+    """``Junction.build_connections_from_roads`` used to rebuild the graph
+    unconditionally; it is called once per junction, so the caller's graph
+    must be honoured."""
+    from autoware_lanelet2_to_opendrive.junction import (
+        _filter_lanelets_inside_junction,
+        find_junction_groups,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+
+    junction_lanelets = _filter_lanelets_inside_junction(list(lanelet_map.laneletLayer))
+    junction_groups = find_junction_groups(junction_lanelets)
+    assert junction_groups, "test map has no junction groups"
+
+    spy = MagicMock(wraps=util_mod.create_routing_graph)
+    with patch.object(util_mod, "create_routing_graph", spy):
+        Junction.build_connections_from_roads(
+            lanelet_map=lanelet_map,
+            junction_lanelet_group=junction_groups[0],
+            junction_id=0,
+            lanelet_to_road_id={},
+            connecting_road_ids=[],
+            roads=[],
+            routing_graph=routing_graph,
         )
     assert spy.call_count == 0
