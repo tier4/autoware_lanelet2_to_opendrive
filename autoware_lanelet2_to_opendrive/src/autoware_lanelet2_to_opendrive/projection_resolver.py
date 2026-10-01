@@ -18,11 +18,11 @@ from typing import Optional, Tuple
 
 import lanelet2
 import mgrs as mgrs_lib
-import yaml
 from autoware_lanelet2_extension_python.projection import MGRSProjector
 from omegaconf import DictConfig
 
 from .conversion_config import OriginSpec
+from .map_projector_info import MAP_PROJECTOR_INFO_FILENAME, MapProjectorInfo
 from .projection import (
     latlon_to_lanelet2_origin,
     latlon_to_proj_string,
@@ -244,10 +244,6 @@ def resolve_projection_from_hydra(cfg: DictConfig) -> ResolvedProjection:
     )
 
 
-#: Autoware ships this file next to the ``.osm`` map to declare the projector.
-MAP_PROJECTOR_INFO_FILENAME = "map_projector_info.yaml"
-
-
 def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjection]:
     """Build a :class:`ResolvedProjection` from a ``map_projector_info.yaml``.
 
@@ -264,22 +260,24 @@ def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjec
         projector types.
 
     Raises:
-        ValueError: If ``projector_type`` is MGRS but ``mgrs_grid`` is missing.
+        ValueError: If the file is malformed (see
+            :meth:`MapProjectorInfo.from_yaml`), or if ``projector_type`` is
+            MGRS but ``mgrs_grid`` is missing.
     """
-    data = yaml.safe_load(info_path.read_text(encoding="utf-8")) or {}
-    projector_type = str(data.get("projector_type", "")).strip()
+    info = MapProjectorInfo.from_yaml(info_path)
 
-    if projector_type.upper() == "MGRS":
-        mgrs_grid = data.get("mgrs_grid")
-        if not mgrs_grid:
+    if info.projector_type.upper() == "MGRS":
+        if info.mgrs_grid is None:
             raise ValueError(
                 f"{info_path}: projector_type 'MGRS' requires a 'mgrs_grid' field"
             )
-        origin = mgrs_to_lanelet2_origin(mgrs_grid)
-        origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(mgrs_grid, 0.0, 0.0)
+        origin = mgrs_to_lanelet2_origin(info.mgrs_grid)
+        origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
+            info.mgrs_grid, 0.0, 0.0
+        )
         return ResolvedProjection(
             origin=origin,
-            mgrs_code=mgrs_grid,
+            mgrs_code=info.mgrs_grid,
             origin_lat=origin_lat,
             origin_lon=origin_lon,
         )
@@ -287,7 +285,7 @@ def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjec
     logger.warning(
         "map_projector_info.yaml projector_type=%r is not yet supported; "
         "falling back to explicit origin keys",
-        projector_type,
+        info.projector_type,
     )
     return None
 
