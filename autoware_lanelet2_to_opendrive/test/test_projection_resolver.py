@@ -246,3 +246,10 @@ def test_map_projector_info_mgrs_without_grid_raises(tmp_path):
     osm = _write_map(tmp_path, projector_info="projector_type: MGRS\n")
     with pytest.raises(ValueError, match="requires a 'mgrs_grid'"):
         resolve_projection(_cfg({}), osm)
+
+
+def test_map_projector_info_malformed_field_raises(tmp_path):
+    """A wrongly-typed field is rejected at load time, naming the file."""
+    osm = _write_map(tmp_path, projector_info="projector_type: MGRS\nmgrs_grid: 54\n")
+    with pytest.raises(ValueError, match="'mgrs_grid' must be a string"):
+        resolve_projection(_cfg({}), osm)
