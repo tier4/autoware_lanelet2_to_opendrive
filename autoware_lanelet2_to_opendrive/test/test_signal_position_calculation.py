@@ -339,134 +339,96 @@ def test_calculate_signal_position_uses_linestring_centroid_fallback():
 
 def test_calculate_physical_position_centroid():
     """Test _calculate_physical_position returns centroid coordinates."""
-    from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
+    # Coordinate offset defaults to zero — no global to set up/tear down.
+    pt1 = Mock(x=10.0, y=20.0, z=5.0)
+    pt2 = Mock(x=14.0, y=24.0, z=7.0)
+    pt3 = Mock(x=12.0, y=22.0, z=6.0)
+    mock_ls = Mock()
+    mock_ls.__len__ = Mock(return_value=3)
+    mock_ls.__getitem__ = Mock(side_effect=lambda i: [pt1, pt2, pt3][i])
 
-    original_x = COORDINATE_OFFSET.x
-    original_y = COORDINATE_OFFSET.y
-    original_z = COORDINATE_OFFSET.z
-    COORDINATE_OFFSET.x = 0.0
-    COORDINATE_OFFSET.y = 0.0
-    COORDINATE_OFFSET.z = 0.0
+    pos = SignalsAndControllers._calculate_physical_position(
+        light_linestring=mock_ls,
+    )
 
-    try:
-        pt1 = Mock(x=10.0, y=20.0, z=5.0)
-        pt2 = Mock(x=14.0, y=24.0, z=7.0)
-        pt3 = Mock(x=12.0, y=22.0, z=6.0)
-        mock_ls = Mock()
-        mock_ls.__len__ = Mock(return_value=3)
-        mock_ls.__getitem__ = Mock(side_effect=lambda i: [pt1, pt2, pt3][i])
-
-        pos = SignalsAndControllers._calculate_physical_position(
-            light_linestring=mock_ls,
-        )
-
-        assert abs(pos.x - 12.0) < 1e-6
-        assert abs(pos.y - 22.0) < 1e-6
-        assert abs(pos.z - 6.0) < 1e-6
-        # hdg: LineString direction atan2(2,2) = π/4, then +π/2 for facing direction
-        linestring_hdg = math.atan2(22.0 - 20.0, 12.0 - 10.0)
-        expected_hdg = linestring_hdg + math.pi / 2
-        assert abs(pos.hdg - expected_hdg) < 1e-6
-    finally:
-        COORDINATE_OFFSET.x = original_x
-        COORDINATE_OFFSET.y = original_y
-        COORDINATE_OFFSET.z = original_z
+    assert abs(pos.x - 12.0) < 1e-6
+    assert abs(pos.y - 22.0) < 1e-6
+    assert abs(pos.z - 6.0) < 1e-6
+    # hdg: LineString direction atan2(2,2) = π/4, then +π/2 for facing direction
+    linestring_hdg = math.atan2(22.0 - 20.0, 12.0 - 10.0)
+    expected_hdg = linestring_hdg + math.pi / 2
+    assert abs(pos.hdg - expected_hdg) < 1e-6
 
 
 def test_calculate_physical_position_single_point():
     """Test _calculate_physical_position with single point has hdg=0."""
-    from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
+    # Coordinate offset defaults to zero — no global to set up/tear down.
+    pt = Mock(x=5.0, y=10.0, z=3.0)
+    mock_ls = Mock()
+    mock_ls.__len__ = Mock(return_value=1)
+    mock_ls.__getitem__ = Mock(return_value=pt)
 
-    original_x = COORDINATE_OFFSET.x
-    original_y = COORDINATE_OFFSET.y
-    original_z = COORDINATE_OFFSET.z
-    COORDINATE_OFFSET.x = 0.0
-    COORDINATE_OFFSET.y = 0.0
-    COORDINATE_OFFSET.z = 0.0
+    pos = SignalsAndControllers._calculate_physical_position(
+        light_linestring=mock_ls,
+    )
 
-    try:
-        pt = Mock(x=5.0, y=10.0, z=3.0)
-        mock_ls = Mock()
-        mock_ls.__len__ = Mock(return_value=1)
-        mock_ls.__getitem__ = Mock(return_value=pt)
-
-        pos = SignalsAndControllers._calculate_physical_position(
-            light_linestring=mock_ls,
-        )
-
-        assert abs(pos.x - 5.0) < 1e-6
-        assert abs(pos.y - 10.0) < 1e-6
-        assert abs(pos.z - 3.0) < 1e-6
-        assert pos.hdg == 0.0  # Single point → no direction
-    finally:
-        COORDINATE_OFFSET.x = original_x
-        COORDINATE_OFFSET.y = original_y
-        COORDINATE_OFFSET.z = original_z
+    assert abs(pos.x - 5.0) < 1e-6
+    assert abs(pos.y - 10.0) < 1e-6
+    assert abs(pos.z - 3.0) < 1e-6
+    assert pos.hdg == 0.0  # Single point → no direction
 
 
 def test_calculate_physical_position_custom_hdg_offset():
     """Test _calculate_physical_position with custom hdg_offset via TrafficLightConfig."""
-    from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
     from autoware_lanelet2_to_opendrive.conversion_config import TrafficLightConfig
 
-    original_x = COORDINATE_OFFSET.x
-    original_y = COORDINATE_OFFSET.y
-    original_z = COORDINATE_OFFSET.z
-    COORDINATE_OFFSET.x = 0.0
-    COORDINATE_OFFSET.y = 0.0
-    COORDINATE_OFFSET.z = 0.0
+    # Coordinate offset defaults to zero — no global to set up/tear down.
+    # Two-point linestring along +x: (0,0) → (10,0)
+    pt1 = Mock(x=0.0, y=0.0, z=5.0)
+    pt2 = Mock(x=10.0, y=0.0, z=5.0)
+    mock_ls = Mock()
+    mock_ls.__len__ = Mock(return_value=2)
+    mock_ls.__getitem__ = Mock(side_effect=lambda i: [pt1, pt2][i])
 
-    try:
-        # Two-point linestring along +x: (0,0) → (10,0)
-        pt1 = Mock(x=0.0, y=0.0, z=5.0)
-        pt2 = Mock(x=10.0, y=0.0, z=5.0)
-        mock_ls = Mock()
-        mock_ls.__len__ = Mock(return_value=2)
-        mock_ls.__getitem__ = Mock(side_effect=lambda i: [pt1, pt2][i])
+    # LineString direction = atan2(0, 10) = 0
+    linestring_direction = math.atan2(0.0, 10.0)
 
-        # LineString direction = atan2(0, 10) = 0
-        linestring_direction = math.atan2(0.0, 10.0)
+    # Test with custom hdg_offset = π (180°)
+    custom_offset = math.pi
+    config = TrafficLightConfig(hdg_offset=custom_offset)
+    pos = SignalsAndControllers._calculate_physical_position(
+        light_linestring=mock_ls,
+        traffic_light_config=config,
+    )
 
-        # Test with custom hdg_offset = π (180°)
-        custom_offset = math.pi
-        config = TrafficLightConfig(hdg_offset=custom_offset)
-        pos = SignalsAndControllers._calculate_physical_position(
-            light_linestring=mock_ls,
-            traffic_light_config=config,
-        )
+    expected_hdg = linestring_direction + custom_offset  # 0 + π = π
+    assert (
+        abs(pos.hdg - expected_hdg) < 1e-6
+    ), f"Expected hdg={expected_hdg}, got {pos.hdg}"
 
-        expected_hdg = linestring_direction + custom_offset  # 0 + π = π
-        assert (
-            abs(pos.hdg - expected_hdg) < 1e-6
-        ), f"Expected hdg={expected_hdg}, got {pos.hdg}"
+    # Test with custom hdg_offset = 0 (no rotation)
+    config_zero = TrafficLightConfig(hdg_offset=0.0)
+    pos_zero = SignalsAndControllers._calculate_physical_position(
+        light_linestring=mock_ls,
+        traffic_light_config=config_zero,
+    )
 
-        # Test with custom hdg_offset = 0 (no rotation)
-        config_zero = TrafficLightConfig(hdg_offset=0.0)
-        pos_zero = SignalsAndControllers._calculate_physical_position(
-            light_linestring=mock_ls,
-            traffic_light_config=config_zero,
-        )
+    expected_hdg_zero = linestring_direction + 0.0  # 0 + 0 = 0
+    assert (
+        abs(pos_zero.hdg - expected_hdg_zero) < 1e-6
+    ), f"Expected hdg={expected_hdg_zero}, got {pos_zero.hdg}"
 
-        expected_hdg_zero = linestring_direction + 0.0  # 0 + 0 = 0
-        assert (
-            abs(pos_zero.hdg - expected_hdg_zero) < 1e-6
-        ), f"Expected hdg={expected_hdg_zero}, got {pos_zero.hdg}"
+    # Test with default hdg_offset (+π/2) — same as no config
+    config_default = TrafficLightConfig()
+    pos_default = SignalsAndControllers._calculate_physical_position(
+        light_linestring=mock_ls,
+        traffic_light_config=config_default,
+    )
 
-        # Test with default hdg_offset (+π/2) — same as no config
-        config_default = TrafficLightConfig()
-        pos_default = SignalsAndControllers._calculate_physical_position(
-            light_linestring=mock_ls,
-            traffic_light_config=config_default,
-        )
+    pos_no_config = SignalsAndControllers._calculate_physical_position(
+        light_linestring=mock_ls,
+    )
 
-        pos_no_config = SignalsAndControllers._calculate_physical_position(
-            light_linestring=mock_ls,
-        )
-
-        assert (
-            abs(pos_default.hdg - pos_no_config.hdg) < 1e-6
-        ), f"Default config hdg={pos_default.hdg} != no config hdg={pos_no_config.hdg}"
-    finally:
-        COORDINATE_OFFSET.x = original_x
-        COORDINATE_OFFSET.y = original_y
-        COORDINATE_OFFSET.z = original_z
+    assert (
+        abs(pos_default.hdg - pos_no_config.hdg) < 1e-6
+    ), f"Default config hdg={pos_default.hdg} != no config hdg={pos_no_config.hdg}"

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from .lane import Lane
 from .reference_line import ReferenceLine
 from ..conversion_config import WidthEstimationConfig
+from ..config import CoordinateOffset
 from .enums import RoadMarkType, RoadMarkLaneChange
 from .lane_elements import road_mark_from_linestring_attrs
 from .xml_utils import replace_subnormal
@@ -85,6 +86,7 @@ class LaneSection:
         routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
         end_xyz_override: Optional[Tuple[float, float, float]] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> "LaneSection":
         """
         Construct a LaneSection from a group of Lanelet2 lanelets.
@@ -103,6 +105,8 @@ class LaneSection:
                 to the OUTERMOST lane's width calculation (P0-2 junction
                 endpoint fidelity, lane-width side).
             end_xyz_override: Optional analogous override for the s=length end.
+            offset: Coordinate offset to subtract from extracted boundary
+                points. Defaults to a zero offset.
 
         Returns:
             LaneSection instance constructed from the lanelet group
@@ -146,6 +150,7 @@ class LaneSection:
             routing_graph=routing_graph,
             start_xyz_override=start_xyz_override,
             end_xyz_override=end_xyz_override,
+            offset=offset,
         )
         lane_section._set_center_lane(reference_line)
 
@@ -194,6 +199,7 @@ class LaneSection:
                 reference_line_spline=reference_line_spline,
                 anchor_start_override=(start_xyz_override if is_outermost else None),
                 anchor_end_override=(end_xyz_override if is_outermost else None),
+                offset=offset,
             )
             if is_lht:
                 lane_section._add_left_lane(lane)

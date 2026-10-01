@@ -11,6 +11,7 @@ import lanelet2
 import lxml.etree as ET
 import numpy as np
 
+from ..config import CoordinateOffset
 from ..util import extract_points
 from .geometry import Arc, ParamPoly3, evaluate_plan_view_world
 
@@ -101,6 +102,7 @@ class CrosswalkObject:
         lanelet: lanelet2.core.Lanelet,
         road: Road,
         object_id: int,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> Optional[CrosswalkObject]:
         """Construct a CrosswalkObject from a crosswalk lanelet and its nearest road.
 
@@ -108,14 +110,16 @@ class CrosswalkObject:
             lanelet: Crosswalk lanelet with subtype="crosswalk"
             road: The nearest road to associate this crosswalk with
             object_id: ID for the resulting object (typically lanelet.id)
+            offset: Coordinate offset to subtract from extracted boundary
+                points. Defaults to a zero offset.
 
         Returns:
             CrosswalkObject if construction succeeds, None on failure.
         """
         try:
             # Extract 2D boundary points with coordinate offset applied
-            left_pts = extract_points(lanelet.leftBound, dimensions=2)
-            right_pts = extract_points(lanelet.rightBound, dimensions=2)
+            left_pts = extract_points(lanelet.leftBound, dimensions=2, offset=offset)
+            right_pts = extract_points(lanelet.rightBound, dimensions=2, offset=offset)
 
             if len(left_pts) < 2 or len(right_pts) < 2:
                 logger.warning(
@@ -143,8 +147,10 @@ class CrosswalkObject:
             s, t, road_hdg_at_s = projection
 
             # Compute absolute elevation of crosswalk from 3D boundary points
-            left_pts_3d = extract_points(lanelet.leftBound, dimensions=3)
-            right_pts_3d = extract_points(lanelet.rightBound, dimensions=3)
+            left_pts_3d = extract_points(lanelet.leftBound, dimensions=3, offset=offset)
+            right_pts_3d = extract_points(
+                lanelet.rightBound, dimensions=3, offset=offset
+            )
             crosswalk_absolute_z = float(
                 np.mean([left_pts_3d[:, 2].mean(), right_pts_3d[:, 2].mean()])
             )
@@ -396,6 +402,7 @@ class StopLineObject:
         object_id: int,
         width: float = 0.1,
         carla_format: bool = False,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> Optional["StopLineObject"]:
         """Construct a StopLineObject from a stop_line linestring and its nearest road.
 
@@ -405,12 +412,14 @@ class StopLineObject:
             object_id: ID for the resulting object (typically linestring.id)
             width: Painted width of the stop line in v-direction (along road), meters
             carla_format: If True, create a CARLA Stencil_STOP formatted object
+            offset: Coordinate offset to subtract from extracted linestring
+                points. Defaults to a zero offset.
 
         Returns:
             StopLineObject if construction succeeds, None on failure.
         """
         try:
-            pts = extract_points(linestring, dimensions=2)
+            pts = extract_points(linestring, dimensions=2, offset=offset)
             if len(pts) < 2:
                 logger.warning(
                     f"Stop line linestring {linestring.id} has fewer than 2 points, skipping"
@@ -429,7 +438,7 @@ class StopLineObject:
             s, t, road_hdg_at_s = projection
 
             # Compute z_offset from 3D points vs road elevation
-            pts_3d = extract_points(linestring, dimensions=3)
+            pts_3d = extract_points(linestring, dimensions=3, offset=offset)
             stop_line_absolute_z = float(np.mean(pts_3d[:, 2]))
             road_elevation_at_s = road.get_elevation_at_s(s)
             z_offset = stop_line_absolute_z - road_elevation_at_s
@@ -466,6 +475,7 @@ def find_nearest_road_for_linestring(
     linestring: lanelet2.core.LineString3d,
     all_roads: List["Road"],
     threshold_m: float = _NEAREST_ROAD_THRESHOLD_M,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Optional["Road"]:
     """Find the nearest road to a linestring's centroid.
 
@@ -473,11 +483,13 @@ def find_nearest_road_for_linestring(
         linestring: LineString to find the nearest road for
         all_roads: List of all candidate roads
         threshold_m: Maximum allowed distance in meters
+        offset: Coordinate offset to subtract from extracted linestring
+            points. Defaults to a zero offset.
 
     Returns:
         Nearest Road within threshold_m, or None if no road is close enough.
     """
-    pts = extract_points(linestring, dimensions=2)
+    pts = extract_points(linestring, dimensions=2, offset=offset)
     if len(pts) == 0:
         return None
 
@@ -509,6 +521,7 @@ def find_nearest_road(
     lanelet: lanelet2.core.Lanelet,
     all_roads: List[Road],
     threshold_m: float = _NEAREST_ROAD_THRESHOLD_M,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Optional[Road]:
     """Find the nearest road to a crosswalk lanelet's centroid.
 
@@ -516,12 +529,14 @@ def find_nearest_road(
         lanelet: Crosswalk lanelet to find the nearest road for
         all_roads: List of all candidate roads
         threshold_m: Maximum allowed distance in meters
+        offset: Coordinate offset to subtract from extracted boundary
+            points. Defaults to a zero offset.
 
     Returns:
         Nearest Road within threshold_m, or None if no road is close enough.
     """
-    left_pts = extract_points(lanelet.leftBound, dimensions=2)
-    right_pts = extract_points(lanelet.rightBound, dimensions=2)
+    left_pts = extract_points(lanelet.leftBound, dimensions=2, offset=offset)
+    right_pts = extract_points(lanelet.rightBound, dimensions=2, offset=offset)
 
     if len(left_pts) == 0 or len(right_pts) == 0:
         return None

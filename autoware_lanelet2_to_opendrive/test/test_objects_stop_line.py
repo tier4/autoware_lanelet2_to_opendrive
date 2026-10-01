@@ -175,7 +175,7 @@ def test_construct_from_linestring_basic():
     with patch(
         "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
     ) as mock_extract:
-        mock_extract.side_effect = lambda linestring, dimensions: (
+        mock_extract.side_effect = lambda linestring, dimensions, **kwargs: (
             pts_2d if dimensions == 2 else pts_3d
         )
 
@@ -232,7 +232,7 @@ def test_construct_from_linestring_returns_none_on_projection_failure():
     with patch(
         "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
     ) as mock_extract:
-        mock_extract.side_effect = lambda linestring, dimensions: (
+        mock_extract.side_effect = lambda linestring, dimensions, **kwargs: (
             pts_2d if dimensions == 2 else pts_3d
         )
         result = StopLineObject.construct_from_linestring(
@@ -359,7 +359,7 @@ def test_construct_from_linestring_carla_format():
     with patch(
         "autoware_lanelet2_to_opendrive.opendrive.objects.extract_points"
     ) as mock_extract:
-        mock_extract.side_effect = lambda linestring, dimensions: (
+        mock_extract.side_effect = lambda linestring, dimensions, **kwargs: (
             pts_2d if dimensions == 2 else pts_3d
         )
         result = StopLineObject.construct_from_linestring(

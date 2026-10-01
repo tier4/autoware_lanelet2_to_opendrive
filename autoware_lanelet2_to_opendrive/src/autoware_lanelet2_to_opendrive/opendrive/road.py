@@ -20,6 +20,7 @@ import numpy as np
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
 from tqdm import tqdm
 
+from ..config import CoordinateOffset
 from ..conversion_config import (
     ArcSpiralConfig,
     LaneLinksContext,
@@ -1079,6 +1080,7 @@ class Road:
         routing_graph: Optional[RoutingGraph] = None,
         start_xyz_override: Optional[Tuple[float, float, float]] = None,
         end_xyz_override: Optional[Tuple[float, float, float]] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -1101,6 +1103,8 @@ class Road:
             end_xyz_override: Optional world-frame (x, y, z) coordinate that
                 pins the reference-line end (s=length) exactly.  Used by the
                 junction phase to align with the linked outgoing road.
+            offset: Coordinate offset to subtract from extracted boundary
+                points. Defaults to a zero offset.
 
         Returns:
             Road object constructed from the lanelet group
@@ -1121,6 +1125,7 @@ class Road:
             routing_graph=routing_graph,
             start_xyz_override=start_xyz_override,
             end_xyz_override=end_xyz_override,
+            offset=offset,
         )
         centerline_2d = reference_line.centerline_2d
 
@@ -1156,6 +1161,7 @@ class Road:
                 routing_graph=routing_graph,
                 start_xyz_override=start_xyz_override,
                 end_xyz_override=end_xyz_override,
+                offset=offset,
             )
             lanes = Lanes(lane_sections=[lane_section])
             return lanes
@@ -1245,6 +1251,7 @@ class Road:
         parampoly3_config: Optional[ParamPoly3Config] = None,
         arcspiral_config: Optional[ArcSpiralConfig] = None,
         width_config: Optional[WidthEstimationConfig] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> "ConstructedRoadsResult":
         """Construct Roads from a lanelet map.
 
@@ -1255,6 +1262,8 @@ class Road:
             arcspiral_config: Configuration for arc/spiral primitive detection
                 (issue #466). Default ``None`` preserves byte-exact output.
             width_config: Configuration for width spline sampling
+            offset: Coordinate offset to subtract from extracted boundary
+                points. Defaults to a zero offset.
 
         Returns:
             ConstructedRoadsResult: roads, lanelet-to-road mapping, total
@@ -1345,6 +1354,7 @@ class Road:
                     arcspiral_config=arcspiral_config,
                     width_config=width_config,
                     routing_graph=routing_graph,
+                    offset=offset,
                 )
                 roads.append(road)
 
@@ -1462,6 +1472,7 @@ class Road:
         regular_roads: Optional[List["Road"]] = None,
         lanelet_to_road_id: Optional[Dict[int, int]] = None,
         routing_graph: Optional[RoutingGraph] = None,
+        offset: CoordinateOffset = CoordinateOffset(),
     ) -> Tuple[List["Road"], Dict[int, List[int]], Dict[int, int]]:
         """Construct connecting roads from junction lanelet groups.
 
@@ -1500,6 +1511,8 @@ class Road:
                 roads.  Used together with ``regular_roads`` to resolve which
                 regular road a connecting lanelet enters / leaves.
             routing_graph: Pre-built routing graph (reused when available).
+            offset: Coordinate offset to subtract from extracted boundary
+                points. Defaults to a zero offset.
 
         Returns:
             Tuple of:
@@ -1639,6 +1652,7 @@ class Road:
                         routing_graph=routing_graph,
                         start_xyz_override=start_override,
                         end_xyz_override=end_override,
+                        offset=offset,
                     )
 
                     # Set the junction field to mark this as a connecting road
@@ -2048,6 +2062,5 @@ class Road:
         )
         _apply_outgoing_junction_links(roads, outgoing_links)
         print(
-            f"Set junction predecessor links for {len(outgoing_links)} "
-            "outgoing roads"
+            f"Set junction predecessor links for {len(outgoing_links)} outgoing roads"
         )

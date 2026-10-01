@@ -3,7 +3,7 @@ import numpy as np
 import lanelet2
 from lanelet2.routing import RoutingGraph
 from typing import List, Optional, Set, Tuple
-from .config import DEFAULT_CONFIG
+from .config import DEFAULT_CONFIG, CoordinateOffset
 from .spline import Splines
 from .util import sort_adjacent_groups, extract_points_3d, extract_points_2d
 from .cubic_spline_1d import CubicSpline1D
@@ -181,7 +181,9 @@ def _get_end_vel(lanelet: lanelet2.core.Lanelet) -> np.ndarray:
 
 
 def extract_centerline_as_spline(
-    lanelet: lanelet2.core.Lanelet, num_control_points: Optional[int] = None
+    lanelet: lanelet2.core.Lanelet,
+    num_control_points: Optional[int] = None,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Splines:
     """
     Extract centerline from a Lanelet using midpoints between left and right borders.
@@ -193,6 +195,8 @@ def extract_centerline_as_spline(
         lanelet: A Lanelet2 lanelet object
         num_control_points: Number of control points for B-spline interpolation.
                            If None, automatically computed based on geometry complexity.
+        offset: Coordinate offset to subtract from extracted boundary points.
+            Defaults to a zero offset.
 
     Returns:
         Splines object that can be evaluated using arc length
@@ -205,8 +209,8 @@ def extract_centerline_as_spline(
         raise ValueError("Both boundaries must have at least 2 points")
 
     # Convert to numpy arrays with coordinate offset applied
-    left_points = extract_points_3d(left_bound)
-    right_points = extract_points_3d(right_bound)
+    left_points = extract_points_3d(left_bound, offset=offset)
+    right_points = extract_points_3d(right_bound, offset=offset)
 
     # Calculate cumulative arc lengths for both boundaries
     left_dists = np.linalg.norm(np.diff(left_points, axis=0), axis=1)
@@ -306,6 +310,7 @@ def extract_border_from_spline(
     border: str,
     num_control_points: Optional[int] = None,
     dimensions: int = 2,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Splines:
     """
     Extract border line from a Lanelet and return as B-spline with arc length parameterization.
@@ -316,6 +321,8 @@ def extract_border_from_spline(
         num_control_points: Number of control points for B-spline interpolation.
                            If None, automatically computed based on geometry complexity.
         dimensions: Number of dimensions (2 for XY only)
+        offset: Coordinate offset to subtract from extracted boundary points.
+            Defaults to a zero offset.
 
     Returns:
         Splines object that can be evaluated using arc length
@@ -346,7 +353,7 @@ def extract_border_from_spline(
 
     # Extract 2D points from the boundary (XY only, per OpenDRIVE spec)
     # Coordinate offset is applied automatically
-    points = extract_points_2d(boundary)
+    points = extract_points_2d(boundary, offset=offset)
 
     # Get velocity vectors perpendicular to the line connecting left and right boundaries
     # This ensures both left and right boundaries have consistent tangent directions at endpoints,
@@ -406,6 +413,7 @@ def estimate_lanelet_width_with_reference_line(
     config: WidthEstimationConfig,
     anchor_start_override: Optional[Tuple[float, float, float]] = None,
     anchor_end_override: Optional[Tuple[float, float, float]] = None,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Width1DSplineAdapter:
     """
     Estimate lanelet width as a spline using road reference line s-coordinates.
@@ -426,6 +434,8 @@ def estimate_lanelet_width_with_reference_line(
             XY components are used; Z is ignored.
         anchor_end_override: Optional (x, y, z) coordinate that replaces the
             last sample of the anchor boundary, used for the s=length side.
+        offset: Coordinate offset to subtract from extracted boundary points.
+            Defaults to a zero offset.
 
     Returns:
         Width1DSplineAdapter with s-coordinates aligned to road reference line
@@ -435,13 +445,13 @@ def estimate_lanelet_width_with_reference_line(
     """
     # Handle centerline reference - not affected by this issue
     if config.reference == WidthReference.CENTER_LINE:
-        return estimate_lanelet_width_as_spline(lanelet, config)
+        return estimate_lanelet_width_as_spline(lanelet, config, offset=offset)
 
     # Extract boundary points
     from .util import extract_points_3d
 
-    left_points = extract_points_3d(lanelet.leftBound)
-    right_points = extract_points_3d(lanelet.rightBound)
+    left_points = extract_points_3d(lanelet.leftBound, offset=offset)
+    right_points = extract_points_3d(lanelet.rightBound, offset=offset)
 
     # Determine anchor boundary based on traffic rule
     if config.reference == WidthReference.LEFT_BOUND:
@@ -548,6 +558,7 @@ def estimate_lanelet_width_with_reference_line(
 def estimate_lanelet_width_as_spline(
     lanelet: lanelet2.core.Lanelet,
     config: WidthEstimationConfig,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Width1DSplineAdapter:
     """
     Estimate lanelet width as a spline by measuring distances between corresponding
@@ -556,6 +567,8 @@ def estimate_lanelet_width_as_spline(
     Args:
         lanelet: A Lanelet2 lanelet object
         config: WidthEstimationConfig specifying width calculation parameters
+        offset: Coordinate offset to subtract from extracted boundary points.
+            Defaults to a zero offset.
 
     Returns:
         Width1DSplineAdapter object representing width as a function of arc length along the reference
@@ -574,8 +587,8 @@ def estimate_lanelet_width_as_spline(
         raise ValueError("Both boundaries must have at least 2 points")
 
     # Convert to numpy arrays with coordinate offset applied
-    left_points = extract_points_3d(left_bound)
-    right_points = extract_points_3d(right_bound)
+    left_points = extract_points_3d(left_bound, offset=offset)
+    right_points = extract_points_3d(right_bound, offset=offset)
 
     # Calculate cumulative arc lengths for both boundaries
     boundary_data = _compute_boundary_arc_lengths(left_points, right_points)
@@ -804,6 +817,7 @@ def extract_centerline_as_spline_from_two_lanelets(
     two_lanelets: Set[lanelet2.core.Lanelet],
     num_control_points: Optional[int] = None,
     routing_graph: Optional[RoutingGraph] = None,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Splines:
     """
     Extract centerline as spline from two adjacent lanelets using the left lanelet's right bound.
@@ -815,6 +829,8 @@ def extract_centerline_as_spline_from_two_lanelets(
                            If None, automatically computed based on geometry complexity.
         routing_graph: Optional pre-built routing graph for the same
             ``lanelet_map``. Reused when supplied; built only when ``None``.
+        offset: Coordinate offset to subtract from extracted boundary points.
+            Defaults to a zero offset.
 
     Returns:
         Splines object representing the right bound of the left lanelet
@@ -838,7 +854,7 @@ def extract_centerline_as_spline_from_two_lanelets(
         raise ValueError("Left lanelet must have at least 2 points in its right bound")
 
     # Extract 3D points with coordinate offset applied
-    points = extract_points_3d(right_bound)
+    points = extract_points_3d(right_bound, offset=offset)
 
     # Create and return the B-spline
     return Splines(

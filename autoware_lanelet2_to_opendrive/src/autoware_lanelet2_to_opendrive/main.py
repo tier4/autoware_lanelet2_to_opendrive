@@ -31,7 +31,7 @@ from autoware_lanelet2_to_opendrive.projection_resolver import (
 from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
 )
-from autoware_lanelet2_to_opendrive.config import COORDINATE_OFFSET
+from autoware_lanelet2_to_opendrive.config import CoordinateOffset
 from autoware_lanelet2_to_opendrive.geometry import compute_point_layer_bounds
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
@@ -141,6 +141,13 @@ class _Lanelet2ToOpenDRIVEConverter:
         """
         self.lanelet_map = lanelet_map
         self.config = config
+        # Coordinate offset threaded explicitly through the conversion call
+        # chain (replaces the former mutable module-level global).
+        self.offset = CoordinateOffset(
+            x=config.origin.offset_x,
+            y=config.origin.offset_y,
+            z=config.origin.offset_z,
+        )
 
     def _build_regular_roads(
         self,
@@ -159,6 +166,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             parampoly3_config=self.config.parampoly3,
             arcspiral_config=self.config.arcspiral,
             width_config=self.config.width_estimation,
+            offset=self.offset,
         )
         return result
 
@@ -231,6 +239,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             # onto a parallel regular road (root cause of issue #431).
             regular_roads=regular_roads,
             lanelet_to_road_id=lanelet_to_road_id,
+            offset=self.offset,
         )
 
         # Merge lanelet-to-road mappings
@@ -420,6 +429,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             exclude_non_junction_signals=self.config.exclude_non_junction_signals,
             junction_lanelet_ids=junction_lanelet_ids,
             traffic_light_config=self.config.traffic_light,
+            offset=self.offset,
         )
         print(
             f"Extracted {len(signals_and_controllers.signals)} signals and "
@@ -538,11 +548,11 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_objects: Dict[int, List] = {}
 
         for lanelet in crosswalk_lanelets:
-            best_road = find_nearest_road(lanelet, all_roads)
+            best_road = find_nearest_road(lanelet, all_roads, offset=self.offset)
             if best_road is None:
                 continue
             obj = CrosswalkObject.construct_from_crosswalk_lanelet(
-                lanelet, best_road, object_id=lanelet.id
+                lanelet, best_road, object_id=lanelet.id, offset=self.offset
             )
             if obj is not None:
                 road_objects.setdefault(best_road.id, []).append(obj)
@@ -790,7 +800,9 @@ class _Lanelet2ToOpenDRIVEConverter:
                 continue
             stop_line_ids_seen.add(ls.id)
 
-            best_road = find_nearest_road_for_linestring(ls, all_roads)
+            best_road = find_nearest_road_for_linestring(
+                ls, all_roads, offset=self.offset
+            )
             if best_road is None:
                 skipped_stop_lines[ls.id] = SkippedStopLineEntry(
                     reason="no_nearest_road"
@@ -803,6 +815,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 object_id=ls.id,
                 width=self.config.stopline.width,
                 carla_format=self.config.stopline.carla_stop_line,
+                offset=self.offset,
             )
             if obj is None:
                 skipped_stop_lines[ls.id] = SkippedStopLineEntry(
@@ -1261,6 +1274,7 @@ class _Lanelet2ToOpenDRIVEConverter:
                 self.lanelet_map,
                 starting_id,
                 self.config.parking_lot,
+                offset=self.offset,
             )
             all_roads.extend(parking_roads)
             print(f"Built {len(parking_roads)} parking roads")
@@ -1382,10 +1396,10 @@ def preprocess_and_convert_with_hydra(
     origin_lon = resolved.origin_lon
     offset_x, offset_y, offset_z = resolved.offset
 
-    # Set global coordinate offset for conversion
-    # This will be applied to all coordinates during OpenDRIVE export
-    COORDINATE_OFFSET.set(offset_x, offset_y, offset_z)
-    if COORDINATE_OFFSET.is_active:
+    # The coordinate offset is threaded explicitly through the conversion
+    # call chain via ``ConversionConfig.origin`` (see below) rather than a
+    # mutable global. Log here purely for operator visibility.
+    if CoordinateOffset(offset_x, offset_y, offset_z).is_active:
         logger.info(
             f"Coordinate offset enabled: x={offset_x}, y={offset_y}, z={offset_z}"
         )
@@ -1579,6 +1593,9 @@ def preprocess_and_convert_with_hydra(
             lon=origin_lon,
             scale_factor=resolved.scale_factor,
             geo_reference=resolved.geo_reference,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            offset_z=offset_z,
         ),
         exclude_non_junction_signals=exclude_non_junction_signals,
         traffic_rule=traffic_rule,

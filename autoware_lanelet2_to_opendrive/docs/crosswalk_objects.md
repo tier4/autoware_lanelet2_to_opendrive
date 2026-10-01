@@ -135,7 +135,8 @@ The `zOffset` attribute is set to the average elevation of the crosswalk:
 zOffset = mean([mean(leftBound[:].z), mean(rightBound[:].z)])
 ```
 
-Coordinate offset (from `COORDINATE_OFFSET`) is applied before this computation.
+The coordinate offset is passed explicitly through the extraction pipeline (no
+global) and applied before this computation.
 
 ## Lanelet2 Input Requirements
 
