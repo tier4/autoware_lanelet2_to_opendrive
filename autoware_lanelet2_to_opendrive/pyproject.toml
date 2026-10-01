@@ -23,6 +23,10 @@ dependencies = [
     "hydra-core>=1.3.2",
     "asam-qc-opendrive>=1.0.0",
     "pyxodr>=0.1.3",
+    # Used only by the TransverseMercator round-trip test (issue #541) to
+    # independently verify the PROJ string produced by
+    # latlon_to_tmerc_proj_string(); not used by production conversion code.
+    "pyproj>=3.6",
 ]
 
 [build-system]

@@ -52,11 +52,61 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from .conversion_config import ConversionConfig
 
 logger = logging.getLogger(__name__)
 
 _CACHE_DIR = Path("/tmp/autoware_lanelet2_to_opendrive_cache")
+
+#: Autoware ships this file next to the ``.osm`` map to declare the
+#: projector. Duplicated as a plain string (not imported from
+#: projection_resolver) to avoid pulling in its heavier dependencies here.
+_MAP_PROJECTOR_INFO_FILENAME = "map_projector_info.yaml"
+
+
+def _reject_unsupported_cache_path_projector(lanelet2_path: Path) -> None:
+    """Raise if a TransverseMercator ``map_projector_info.yaml`` sits next to *lanelet2_path*.
+
+    The cache path bypasses the projector-resolution layer entirely -- it
+    derives the origin only from ``mgrs_code``/``config.origin.lat``/
+    ``config.origin.lon`` and never reads ``map_projector_info.yaml``, so a
+    TransverseMercator map would silently be mis-projected as MGRS/lat-lon.
+    Fail loudly instead and point users at the non-cache conversion flow,
+    which does honor ``map_projector_info.yaml``. Reads the YAML directly
+    (rather than importing :mod:`.projection_resolver`) to avoid pulling in
+    ``lanelet2``/``autoware_lanelet2_extension_python`` for this cheap, early
+    check.
+
+    Args:
+        lanelet2_path: Path to the Lanelet2 ``.osm``/``.bin`` file.
+
+    Raises:
+        RuntimeError: If a sibling ``map_projector_info.yaml`` declares
+            ``projector_type: TransverseMercator``.
+    """
+    info_path = lanelet2_path.parent / _MAP_PROJECTOR_INFO_FILENAME
+    if not info_path.is_file():
+        return
+
+    try:
+        data = yaml.safe_load(info_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        # Malformed YAML is not this function's concern -- let the normal
+        # conversion path surface the error.
+        return
+
+    projector_type = str(data.get("projector_type", "")).strip()
+    if projector_type == "TransverseMercator":
+        raise RuntimeError(
+            f"{info_path} declares projector_type: TransverseMercator, which "
+            "the cached map-resolution path (resolve_map_to_xodr) does not "
+            "support -- it does not read map_projector_info.yaml. Please use "
+            "the non-cache conversion flow (preprocess_and_convert_with_hydra "
+            "/ the `convert` CLI) instead, which resolves TransverseMercator "
+            "origins correctly."
+        )
 
 
 def _sha256_of_file(path: Path) -> str:
@@ -120,9 +170,14 @@ def _convert_lanelet2_to_xodr_cached(
         FileNotFoundError: If *lanelet2_path* does not exist.
         ValueError: If the map origin cannot be determined from *config* or
                     *mgrs_code*.
+        RuntimeError: If a sibling ``map_projector_info.yaml`` declares
+                    ``projector_type: TransverseMercator``; the cache path
+                    does not support it.
     """
     if not lanelet2_path.exists():
         raise FileNotFoundError(f"Lanelet2 map not found: {lanelet2_path}")
+
+    _reject_unsupported_cache_path_projector(lanelet2_path)
 
     if config is None:
         config = ConversionConfig()

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic Lanelet2 fixture for issue #541 (TransverseMercator projector,
+  Japan plane rectangular coordinate system scale_factor=0.9999).
+
+  Same layout as the sibling tmerc_mini fixture (one lane of road, two
+  lanelets chained along s), but resolved through a scale_factor=0.9999
+  TransverseMercatorProjector rather than the UTM-fixed k=0.9996:
+    Lanelet A (id=9301)
+      left  bound = way 9111  (nodes 9011->9012)
+      right bound = way 9112  (nodes 9013->9014)
+    Lanelet B (id=9302, longitudinal successor of A)
+      left  bound = way 9113  (nodes 9012->9015)  continues A's left bound
+      right bound = way 9114  (nodes 9014->9016)  continues A's right bound
+
+  Nodes are placed a few tens of meters from the map_origin declared in the
+  sibling map_projector_info.yaml (lat=35.61739731, lon=139.7797546) so that
+  TransverseMercatorProjector (k=0.9999) resolves them to small, well-behaved
+  local coordinates near the origin. Node 9012 is shared between way 9111
+  (end) and way 9113 (start), and node 9014 is shared between way 9112 (end)
+  and way 9114 (start), so lanelet B is the longitudinal successor of A.
+-->
+<osm generator="tmerc_mini_k9999_fixture">
+  <MetaInfo format_version="1" map_version="1"/>
+
+  <!-- Left boundary: start node -->
+  <node id="9011" lat="35.61739731" lon="139.77975460">
+    <tag k="ele" v="0.0"/>
+  </node>
+  <!-- Left boundary: middle shared node (end of A's left, start of B's left) -->
+  <node id="9012" lat="35.61748715" lon="139.77975460">
+    <tag k="ele" v="0.0"/>
+  </node>
+  <!-- Right boundary: start node -->
+  <node id="9013" lat="35.61739731" lon="139.77979330">
+    <tag k="ele" v="0.0"/>
+  </node>
+  <!-- Right boundary: middle shared node -->
+  <node id="9014" lat="35.61748715" lon="139.77979330">
+    <tag k="ele" v="0.0"/>
+  </node>
+  <!-- Left boundary: end of B -->
+  <node id="9015" lat="35.61757699" lon="139.77975460">
+    <tag k="ele" v="0.0"/>
+  </node>
+  <!-- Right boundary: end of B -->
+  <node id="9016" lat="35.61757699" lon="139.77979330">
+    <tag k="ele" v="0.0"/>
+  </node>
+
+  <!-- Left boundary of lanelet A -->
+  <way id="9111">
+    <nd ref="9011"/>
+    <nd ref="9012"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Right boundary of lanelet A -->
+  <way id="9112">
+    <nd ref="9013"/>
+    <nd ref="9014"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Left boundary of lanelet B (continues 9111) -->
+  <way id="9113">
+    <nd ref="9012"/>
+    <nd ref="9015"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+  <!-- Right boundary of lanelet B (continues 9112) -->
+  <way id="9114">
+    <nd ref="9014"/>
+    <nd ref="9016"/>
+    <tag k="type" v="line_thin"/>
+    <tag k="subtype" v="solid"/>
+  </way>
+
+  <!-- Lanelet A -->
+  <relation id="9301">
+    <member type="way" role="left" ref="9111"/>
+    <member type="way" role="right" ref="9112"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="speed_limit" v="50"/>
+    <tag k="location" v="urban"/>
+  </relation>
+
+  <!-- Lanelet B: longitudinal successor of A -->
+  <relation id="9302">
+    <member type="way" role="left" ref="9113"/>
+    <member type="way" role="right" ref="9114"/>
+    <tag k="type" v="lanelet"/>
+    <tag k="subtype" v="road"/>
+    <tag k="speed_limit" v="50"/>
+    <tag k="location" v="urban"/>
+  </relation>
+</osm>
