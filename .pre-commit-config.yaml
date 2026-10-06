@@ -42,8 +42,6 @@ repos:
           - --ignore-missing-imports
           - autoware_lanelet2_to_opendrive/src
           - autoware_lanelet2_to_opendrive/test
-          - autoware_carla_scenario/src
-          - autoware_carla_scenario/test
         pass_filenames: false
         always_run: true
 
@@ -54,10 +52,6 @@ repos:
       # drop it: ``stages`` only says when a hook may run, never which git hook
       # file gets installed, so without it these two are configured for a stage
       # whose hook does not exist and run nowhere, silently.
-      #
-      # Run each package's tests in a separate process to avoid a crash in
-      # the lanelet2 C++ bindings that occurs when both suites run together
-      # and the interpreter shuts down with multiple LaneletMap instances alive.
       #
       # ``-o addopts=`` is a guard: an ``addopts`` added to ``pyproject.toml``
       # would otherwise leak into these hooks invisibly, so the entry line
@@ -72,16 +66,6 @@ repos:
         entry: >-
           uv run pytest -o addopts= -n auto --no-testmon
           autoware_lanelet2_to_opendrive/test
-        language: system
-        types: [python]
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-      - id: pytest-carla
-        name: pytest (autoware_carla_scenario)
-        entry: >-
-          uv run pytest -o addopts= -n auto --no-testmon
-          -m "not integration" autoware_carla_scenario/test
         language: system
         types: [python]
         pass_filenames: false

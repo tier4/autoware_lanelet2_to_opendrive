@@ -90,8 +90,8 @@ pre-commit install
 
 #### Automatic Checking (Recommended)
 Once installed, the fast hooks run automatically on every `git commit` and the
-commit is blocked if any of them fail. The two test suites are **not** among
-them: they are declared `stages: [pre-push]` and run once before code leaves the
+commit is blocked if any of them fail. The test suite is **not** among
+them: it is declared `stages: [pre-push]` and run once before code leaves the
 machine.
 
 #### Manual Checking

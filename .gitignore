@@ -13,11 +13,6 @@ wheels/
 *.xodr
 *processed.osm
 
-# Fingerprint sidecars recording which inputs produced a generated artifact.
-# Written by autoware_carla_scenario/test/conftest.py so that a derived XODR
-# built on an older checkout is regenerated rather than silently reused.
-*.xodr.inputs
-
 # pytest-testmon
 .testmondata*
 
@@ -30,6 +25,3 @@ site/
 
 # Lanelet2-to-OpenDRIVE mapping cache (auto-generated next to .xodr)
 *.mapping.json
-
-# Scenario output
-scenario_outputs

@@ -22,11 +22,10 @@ git clone https://github.com/tier4/autoware_lanelet2_to_opendrive.git
 cd autoware_lanelet2_to_opendrive
 ```
 
-The repository is a `uv` workspace with two members:
+The repository is a `uv` workspace whose only member is
 [`autoware_lanelet2_to_opendrive/`](https://github.com/tier4/autoware_lanelet2_to_opendrive/tree/master/autoware_lanelet2_to_opendrive)
-(the converter, this package) and
-[`autoware_carla_scenario/`](https://github.com/tier4/autoware_lanelet2_to_opendrive/tree/master/autoware_carla_scenario)
-(scenario / CARLA integration). A single `uv sync` installs both.
+(the converter, this package). The CARLA scenario framework that used to be
+the second member now lives in [its own repository](https://github.com/hakuturu583/autoware_carla_scenario).
 
 ### Installing dependencies
 
@@ -34,7 +33,7 @@ The repository is a `uv` workspace with two members:
 # Sync the workspace from uv.lock (frozen, reproducible)
 uv sync --dev
 
-# Optional: also pull in the CARLA Python wheel for the autoware_carla_scenario package
+# Optional: also pull in the CARLA Python wheel for carla-import-test
 uv sync --dev --extra carla
 ```
 
@@ -55,14 +54,13 @@ run on every **commit**:
   `check-merge-conflict`, `check-toml`, `debug-statements`,
   `mixed-line-ending`
 - `ruff` v0.7.4 (`--fix`) and `ruff-format`
-- Local `mypy --ignore-missing-imports` over both workspace `src/` and
+- Local `mypy --ignore-missing-imports` over the package's `src/` and
   `test/` trees
 
 This runs on every **push** (`stages: [pre-push]`):
 
-- Local `pytest -o addopts= -n auto --no-testmon` runs for each workspace
-  member, executed in separate processes to dodge a known shutdown-time
-  crash in the lanelet2 C++ bindings when both suites share an interpreter
+- Local `pytest -o addopts= -n auto --no-testmon` over the package's test
+  suite
 
 Never bypass hooks with `--no-verify`. If a hook auto-fixes a file,
 re-stage with `git add -u` and commit again.
@@ -110,7 +108,6 @@ autoware_lanelet2_to_opendrive/                 # repo root (uv workspace)
 │   │   ├── conf/                               # Hydra config (config.yaml, map/, target/)
 │   │   ├── types.py / util.py / py.typed
 │   └── test/                                   # pytest suite (testpaths in workspace pyproject)
-└── autoware_carla_scenario/                    # sister package
 ```
 
 ## Development Workflow

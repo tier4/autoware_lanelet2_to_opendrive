@@ -1,7 +1,8 @@
 """Utilities for using converted maps directly in CARLA scenario tests.
 
 This module provides helpers that bridge the Lanelet2 → OpenDRIVE conversion
-pipeline with the ``autoware_carla_scenario`` testing framework.  The central
+pipeline with a CARLA scenario testing framework such as
+`autoware_carla_scenario <https://github.com/hakuturu583/autoware_carla_scenario>`_.  The central
 entry-point is :func:`resolve_map_to_xodr`, which accepts either an existing
 ``.xodr`` file or a Lanelet2 ``.osm`` file and returns a path to a ready-to-use
 OpenDRIVE file.  Lanelet2 maps are converted on first use and the result is

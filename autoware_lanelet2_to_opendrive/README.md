@@ -2,7 +2,7 @@
 
 A Python package and Hydra-based CLI for converting [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) HD maps used by [Autoware](https://www.autoware.org/) into the [OpenDRIVE 1.4](https://www.asam.net/standards/detail/opendrive/) road-network format, with optional Lanelet2 preprocessing, ASAM QC validation, and a [CARLA](https://carla.org/)-specific output overlay.
 
-This package is a workspace member of the [`autoware_lanelet2_to_opendrive` repository](../README.md). The sibling [`autoware_carla_scenario`](../autoware_carla_scenario/) consumes the converted `.xodr` to drive Autoware scenarios in CARLA.
+This package is a workspace member of the [`autoware_lanelet2_to_opendrive` repository](../README.md). [`autoware_carla_scenario`](https://github.com/hakuturu583/autoware_carla_scenario), a separate repository, consumes the converted `.xodr` to drive Autoware scenarios in CARLA.
 
 ## Features
 
