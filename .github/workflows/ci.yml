@@ -17,9 +17,6 @@ jobs:
           - python-version: "3.10"
             carla-extra: "carla"
             runner: ubicloud-standard-8-ubuntu-2204
-          - python-version: "3.10"
-            carla-extra: "carla-0-9-16"
-            runner: ubicloud-standard-8-ubuntu-2204
 
     steps:
     - uses: actions/checkout@v4
@@ -38,9 +35,7 @@ jobs:
       run: uv run pytest -v --tb=short -n auto -o addopts=
 
     - name: Check package can be built
-      run: |
-        uv build --package autoware-lanelet2-to-opendrive
-        uv build --package autoware-carla-scenario
+      run: uv build --package autoware-lanelet2-to-opendrive
 
   lint-and-format:
     runs-on: ubicloud-standard-8-ubuntu-2204
@@ -121,27 +116,12 @@ jobs:
         config-file: mkdocs.ci.yml
         strict: "true"
 
-    - name: Build carla-scenario documentation
-      uses: ./.github/actions/build-docs
-      with:
-        package-dir: autoware_carla_scenario
-        config-file: mkdocs.ci.yml
-        strict: "true"
-
     - name: Upload lanelet2-to-opendrive documentation artifact
       uses: actions/upload-artifact@v4
       if: success()
       with:
         name: documentation-lanelet2-to-opendrive
         path: autoware_lanelet2_to_opendrive/site/
-        retention-days: 7
-
-    - name: Upload carla-scenario documentation artifact
-      uses: actions/upload-artifact@v4
-      if: success()
-      with:
-        name: documentation-carla-scenario
-        path: autoware_carla_scenario/site/
         retention-days: 7
 
   check-src-changes:

@@ -67,9 +67,7 @@ cd autoware_lanelet2_to_opendrive
 uv sync --dev
 ```
 
-The repository is a `uv` workspace containing two members
-(`autoware_lanelet2_to_opendrive` and `autoware_carla_scenario`); a single
-`uv sync` installs both.
+The repository is a `uv` workspace whose only member is this package.
 
 To run any of the console scripts:
 
@@ -83,22 +81,19 @@ uv run carla-import-test output.xodr --map-name my_map
 
 ### CARLA extra (optional)
 
-The `carla` Python wheel is required only by the `autoware_carla_scenario`
-workspace member (used by `carla-import-test` and the `carla` docker-compose
-profile). The optional extra is declared on that workspace, not on this
-package; the bundled wheels live under `carla_wheels/`:
+The CARLA client is required only by `carla-import-test` (and the `carla`
+docker-compose profile that runs it). It is the optional `carla` extra of this
+package, which installs [`typesafe-carla`](https://pypi.org/project/typesafe-carla/):
+the CARLA 0.10.0 (UE5) PythonAPI as a prebuilt extension module, imported as
+`typesafe_carla.carla`.
 
 ```bash
-# CARLA 0.10.0 (default expected by the carla docker profile)
 uv sync --dev --extra carla
-
-# Or pin to CARLA 0.9.16 (mutually exclusive with `carla`)
-uv sync --dev --extra carla-0-9-16
 ```
 
 `uv sync --dev` (without an extra) is sufficient for converting maps,
 running unit tests, building docs, and the QC pipeline; the extra is only
-needed when actually importing the `carla` Python package.
+needed when actually running `carla-import-test`.
 
 ## Verifying Installation
 

@@ -25,7 +25,7 @@ inputs:
     required: false
     default: "false"
   carla-extra:
-    description: "uv extra for CARLA version selection (e.g. 'carla' for 0.10.0, 'carla-0-9-16' for 0.9.16)"
+    description: "uv extra that installs the CARLA client for carla-import-test ('carla', typesafe-carla), or empty"
     required: false
     default: ""
   cache-suffix:

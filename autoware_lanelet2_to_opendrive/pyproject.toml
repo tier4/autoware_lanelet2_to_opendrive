@@ -25,6 +25,13 @@ dependencies = [
     "pyxodr>=0.1.3",
 ]
 
+[project.optional-dependencies]
+# Only `carla-import-test` imports the CARLA client. typesafe-carla ships the
+# CARLA 0.10.0 (UE5) PythonAPI as a prebuilt extension module,
+# `typesafe_carla.carla`, from PyPI -- the official 0.10.0 client is not
+# published there and would have to be vendored.
+carla = ["typesafe-carla>=0.3.0"]
+
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"

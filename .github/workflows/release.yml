@@ -224,24 +224,11 @@ jobs:
           enable-pdf: "true"
           pdf-output-path: documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
 
-      - name: Build carla-scenario documentation with PDF
-        if: steps.pr-labels.outputs.bump_type != 'none'
-        uses: ./.github/actions/build-docs
-        with:
-          package-dir: autoware_carla_scenario
-          version: ${{ steps.bump-version.outputs.new_version }}
-          enable-pdf: "true"
-          pdf-output-path: carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
-
       - name: Create documentation archive
         if: steps.pr-labels.outputs.bump_type != 'none'
         run: |
           cd autoware_lanelet2_to_opendrive/site
           zip -r ../../documentation-v${{ steps.bump-version.outputs.new_version }}.zip .
-          cd ../..
-
-          cd autoware_carla_scenario/site
-          zip -r ../../carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.zip .
           cd ../..
 
       - name: Upload HTML documentation to release
@@ -255,17 +242,6 @@ jobs:
           asset_name: documentation-v${{ steps.bump-version.outputs.new_version }}.zip
           asset_content_type: application/zip
 
-      - name: Upload carla-scenario HTML documentation to release
-        if: steps.pr-labels.outputs.bump_type != 'none'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: ./carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.zip
-          asset_name: carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.zip
-          asset_content_type: application/zip
-
       - name: Upload PDF documentation to release
         if: steps.pr-labels.outputs.bump_type != 'none'
         uses: actions/upload-release-asset@v1
@@ -275,17 +251,6 @@ jobs:
           upload_url: ${{ steps.create-release.outputs.upload_url }}
           asset_path: ./documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
           asset_name: documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
-          asset_content_type: application/pdf
-
-      - name: Upload carla-scenario PDF documentation to release
-        if: steps.pr-labels.outputs.bump_type != 'none'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: ./carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
-          asset_name: carla-scenario-documentation-v${{ steps.bump-version.outputs.new_version }}.pdf
           asset_content_type: application/pdf
 
       - name: Deploy to GitHub Pages with mike
@@ -302,12 +267,6 @@ jobs:
 
           # Set latest as default version
           uv run mike set-default --push --config-file autoware_lanelet2_to_opendrive/mkdocs.yml latest
-
-          # Deploy carla-scenario docs under /carla-scenario/ prefix
-          uv run mike deploy --push --update-aliases --deploy-prefix carla-scenario --config-file autoware_carla_scenario/mkdocs.yml ${{ steps.bump-version.outputs.new_version }} latest
-
-          # Set latest as default version for carla-scenario
-          uv run mike set-default --push --deploy-prefix carla-scenario --config-file autoware_carla_scenario/mkdocs.yml latest
 
       - name: No version bump needed
         if: steps.pr-labels.outputs.bump_type == 'none'

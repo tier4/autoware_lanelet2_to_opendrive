@@ -1,7 +1,8 @@
 """
 Validate a .xodr file against CARLA's map loading pipeline.
 
-Both tests run offline (no CARLA server required):
+Both tests run offline (no CARLA server required), on the CARLA 0.10.0 client
+from typesafe-carla (``uv sync --extra carla``):
   1. OpenDRIVE Parser  – carla.Map() parse + waypoint/topology generation
   2. Traffic Manager   – cook_in_memory_map() binary cooking
 
@@ -23,7 +24,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import carla  # type: ignore[import]
+import typesafe_carla.carla as carla  # type: ignore[import]
 
 logger = logging.getLogger(__name__)
 

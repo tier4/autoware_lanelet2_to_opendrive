@@ -1,21 +1,18 @@
 # Autoware Lanelet2 to OpenDRIVE
 
-A Python workspace for converting [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) HD maps used by [Autoware](https://www.autoware.org/) into the [OpenDRIVE](https://www.asam.net/standards/detail/opendrive/) road-network format, with a companion scenario-testing framework for validating Autoware on the [CARLA](https://carla.org/) simulator.
+A Python workspace for converting [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) HD maps used by [Autoware](https://www.autoware.org/) into the [OpenDRIVE](https://www.asam.net/standards/detail/opendrive/) road-network format.
 
-The repository is a [`uv`](https://docs.astral.sh/uv/) workspace with two packages:
+The repository is a [`uv`](https://docs.astral.sh/uv/) workspace whose package, [`autoware_lanelet2_to_opendrive`](autoware_lanelet2_to_opendrive/), provides the `convert` CLI that turns a Lanelet2 `.osm` map into an OpenDRIVE `.xodr` file, with optional Lanelet2 preprocessing, ASAM QC validation, and a CARLA-specific output overlay.
 
-- [`autoware_lanelet2_to_opendrive`](autoware_lanelet2_to_opendrive/) — the `convert` CLI that turns a Lanelet2 `.osm` map into an OpenDRIVE `.xodr` file, with optional Lanelet2 preprocessing, ASAM QC validation, and a CARLA-specific output overlay.
-- [`autoware_carla_scenario`](autoware_carla_scenario/) — a Hydra-driven scenario runner that loads the converted map into CARLA, drives an Autoware ego vehicle, evaluates pass/fail conditions, and records video/JSON results. Ships a FastAPI viewer for browsing runs.
+The CARLA scenario-testing framework that used to live here as `autoware_carla_scenario` has moved to its own repository, [hakuturu583/autoware_carla_scenario](https://github.com/hakuturu583/autoware_carla_scenario).
 
 ## Repository layout
 
 ```
 .
 ├── autoware_lanelet2_to_opendrive/   # Lanelet2 → OpenDRIVE converter (workspace member)
-├── autoware_carla_scenario/          # CARLA scenario testing framework (workspace member)
 ├── examples/                         # Standalone usage examples
 ├── docs/                             # Repository-level documentation (Docker, etc.)
-├── carla_wheels/                     # Local CARLA Python wheels resolved by uv
 ├── Dockerfile                        # Multi-stage image: dev / convert
 ├── docker-compose.yml                # CI-equivalent profiles: test / lint / qc / carla / dev / convert
 ├── pyproject.toml                    # uv workspace root
@@ -52,15 +49,11 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
   input_map_path=/path/to/map.osm \
   map=nishishinjuku target=carla
 
-# Run a CARLA scenario (requires CARLA installed via an extra and a running server)
-uv sync --dev --extra carla     # or --extra carla-0-9-16 for the legacy build
-uv run scenario scenario=intersection_passing/straight
+# carla-import-test needs the CARLA client, installed through an extra
+uv sync --dev --extra carla     # CARLA 0.10.0 client from typesafe-carla
 ```
 
-For full CLI options, configuration layout, and preprocessing operations, see the per-package READMEs:
-
-- [`autoware_lanelet2_to_opendrive/README.md`](autoware_lanelet2_to_opendrive/README.md)
-- [`autoware_carla_scenario/README.md`](autoware_carla_scenario/README.md)
+For full CLI options, configuration layout, and preprocessing operations, see [`autoware_lanelet2_to_opendrive/README.md`](autoware_lanelet2_to_opendrive/README.md).
 
 ## Development & CI
 
@@ -76,13 +69,11 @@ docker compose --profile dev   run --rm dev             # interactive shell
 
 Static checks that do not import the workspace (`ruff`, `ruff-format`, `mypy --ignore-missing-imports` on individual files) can also be run on the host for fast feedback.
 
-[`pre-commit`](https://pre-commit.com/) hooks are mandatory; install once with `uv run pre-commit install`, which writes both the `pre-commit` and `pre-push` git hooks. The fast checks (`ruff`, `ruff-format`, `mypy`, plus standard hygiene checks) run on every commit; the two test suites run at push time instead. Run `uv run pre-commit run --all-files` before pushing to avoid CI formatting failures.
+[`pre-commit`](https://pre-commit.com/) hooks are mandatory; install once with `uv run pre-commit install`, which writes both the `pre-commit` and `pre-push` git hooks. The fast checks (`ruff`, `ruff-format`, `mypy`, plus standard hygiene checks) run on every commit; the test suite runs at push time instead. Run `uv run pre-commit run --all-files` before pushing to avoid CI formatting failures.
 
 ## Documentation
 
-- Per-package guides served by MkDocs and published to GitHub Pages:
-  - [Autoware Lanelet2 to OpenDRIVE](https://tier4.github.io/autoware_lanelet2_to_opendrive/) — installation, usage, configuration reference, signals, signs, junctions, geometry classification.
-  - [Autoware CARLA Scenario](https://tier4.github.io/autoware_lanelet2_to_opendrive/carla-scenario/) — installation, usage, architecture, API reference, development guide.
+- [Package guide](https://tier4.github.io/autoware_lanelet2_to_opendrive/), served by MkDocs and published to GitHub Pages — installation, usage, configuration reference, signals, signs, junctions, geometry classification.
 - Repository-level references:
   - [`docs/docker.md`](docs/docker.md) — Docker build & test environment.
   - [`examples/README_cartesian_to_frenet.md`](examples/README_cartesian_to_frenet.md) — Cartesian ↔ Frenet conversion example.

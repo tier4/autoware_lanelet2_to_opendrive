@@ -37,8 +37,6 @@ WORKDIR /workspace
 FROM base AS deps
 COPY pyproject.toml uv.lock .python-version ./
 COPY autoware_lanelet2_to_opendrive/ autoware_lanelet2_to_opendrive/
-COPY autoware_carla_scenario/ autoware_carla_scenario/
-COPY carla_wheels/ carla_wheels/
 RUN uv sync --frozen --dev --extra carla
 
 FROM deps AS dev
