@@ -12,6 +12,7 @@ emitted ``.xodr`` is byte-identical.
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Tuple
 
 import lanelet2
@@ -20,6 +21,7 @@ from autoware_lanelet2_extension_python.projection import MGRSProjector
 from omegaconf import DictConfig
 
 from .conversion_config import OriginSpec
+from .map_projector_info import MAP_PROJECTOR_INFO_FILENAME, MapProjectorInfo
 from .projection import (
     latlon_to_lanelet2_origin,
     latlon_to_proj_string,
@@ -220,3 +222,79 @@ def resolve_projection_from_hydra(cfg: DictConfig) -> ResolvedProjection:
         origin_lat=latitude,
         origin_lon=longitude,
     )
+
+
+def _resolve_from_map_projector_info(info_path: Path) -> Optional[ResolvedProjection]:
+    """Build a :class:`ResolvedProjection` from a ``map_projector_info.yaml``.
+
+    Only ``projector_type: MGRS`` is supported here; it reproduces the exact
+    projector/geoReference of the equivalent explicit ``mgrs_grid`` config,
+    so existing MGRS outputs stay byte-identical. Other projector types
+    return ``None`` so the caller falls back to the explicit origin keys.
+
+    Args:
+        info_path: Path to the ``map_projector_info.yaml`` file.
+
+    Returns:
+        A :class:`ResolvedProjection` for MGRS, or ``None`` for unsupported
+        projector types.
+
+    Raises:
+        ValueError: If the file is malformed (see
+            :meth:`MapProjectorInfo.from_yaml`), or if ``projector_type`` is
+            MGRS but ``mgrs_grid`` is missing.
+    """
+    info = MapProjectorInfo.from_yaml(info_path)
+
+    if info.projector_type.upper() == "MGRS":
+        if info.mgrs_grid is None:
+            raise ValueError(
+                f"{info_path}: projector_type 'MGRS' requires a 'mgrs_grid' field"
+            )
+        origin = mgrs_to_lanelet2_origin(info.mgrs_grid)
+        origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
+            info.mgrs_grid, 0.0, 0.0
+        )
+        return ResolvedProjection(
+            origin=origin,
+            mgrs_code=info.mgrs_grid,
+            origin_lat=origin_lat,
+            origin_lon=origin_lon,
+        )
+
+    logger.warning(
+        "map_projector_info.yaml projector_type=%r is not yet supported; "
+        "falling back to explicit origin keys",
+        info.projector_type,
+    )
+    return None
+
+
+def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
+    """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
+
+    When that file sits next to ``input_map_path`` and declares a supported
+    projector, it drives the frame and any explicit ``cfg.map`` origin keys
+    are ignored. Otherwise resolution falls back to the explicit-key path
+    (:func:`resolve_projection_from_hydra`).
+
+    Args:
+        cfg: Hydra configuration object with a ``map`` section.
+        input_map_path: Path to the input ``.osm`` map. The
+            ``map_projector_info.yaml`` is looked up in its directory.
+
+    Returns:
+        A :class:`ResolvedProjection`.
+    """
+    info_path = Path(input_map_path).parent / MAP_PROJECTOR_INFO_FILENAME
+    if info_path.is_file():
+        resolved = _resolve_from_map_projector_info(info_path)
+        if resolved is not None:
+            logger.info(
+                "Using %s as the canonical origin source (explicit origin keys, "
+                "if any, are ignored)",
+                info_path,
+            )
+            return resolved
+
+    return resolve_projection_from_hydra(cfg)
