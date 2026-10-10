@@ -745,6 +745,50 @@ def test_find_connecting_lanelet_groups(lanelet_map):
     assert 227 in group_225_ids, "Lanelet 227 should be in the same group as 225"
 
 
+def test_find_connecting_lanelet_groups_returns_empty_without_connections(lanelet_map):
+    """A group with no connections must not degenerate into the whole map.
+
+    ``find_adjacent_groups`` deliberately treats an empty target set as
+    "group every lanelet in the map". ``find_connecting_lanelet_groups`` must
+    therefore short-circuit before delegating, otherwise a dead-end lanelet
+    reports the entire map as its connecting groups (and pays for a full-map
+    traversal on every call).
+    """
+    from autoware_lanelet2_to_opendrive.util import (
+        find_connecting_lanelet_groups,
+        ConnectionDirection,
+    )
+
+    terminal_lanelets = find_lanelets_without_next(lanelet_map)
+    assert terminal_lanelets, "Test map should contain at least one dead-end lanelet"
+    dead_end = next(iter(terminal_lanelets))
+
+    following_groups = find_connecting_lanelet_groups(
+        lanelet_map, {dead_end}, ConnectionDirection.FOLLOWING
+    )
+
+    assert following_groups == []
+
+
+def test_find_connecting_lanelet_groups_empty_input_group(lanelet_map):
+    """An empty input group has no connections, so the result is empty."""
+    from autoware_lanelet2_to_opendrive.util import (
+        find_connecting_lanelet_groups,
+        ConnectionDirection,
+    )
+
+    assert (
+        find_connecting_lanelet_groups(
+            lanelet_map, set(), ConnectionDirection.FOLLOWING
+        )
+        == []
+    )
+    assert (
+        find_connecting_lanelet_groups(lanelet_map, set(), ConnectionDirection.PREVIOUS)
+        == []
+    )
+
+
 def test_mgrs_to_lanelet2_origin():
     """Test conversion from MGRS grid code to lanelet2 origin."""
     # Test with simple MGRS grid

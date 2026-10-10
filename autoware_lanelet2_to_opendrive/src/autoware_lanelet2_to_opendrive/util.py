@@ -287,6 +287,14 @@ def find_connecting_lanelet_groups(
         for connected_ll in connections:
             connecting_lanelets.add(connected_ll)
 
+    # No connections at all means there is nothing to group. Returning early is
+    # required for correctness as well as speed: find_adjacent_groups treats an
+    # empty target set as "group every lanelet in the map", so forwarding an
+    # empty set here would report the whole map as connecting groups and make
+    # every dead-end lanelet group pay for a full-map traversal.
+    if not connecting_lanelets:
+        return []
+
     # Group the connecting lanelets by their adjacency
     groups = find_adjacent_groups(lanelet_map, connecting_lanelets, routing_graph)
 
