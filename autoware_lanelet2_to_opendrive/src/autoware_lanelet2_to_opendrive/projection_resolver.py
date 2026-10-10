@@ -32,6 +32,7 @@ from .projection import (
     latlon_to_tmerc_proj_string,
     mgrs_grid_with_offset_to_lanelet2_origin,
     mgrs_grid_with_offset_to_latlon,
+    mgrs_grid_with_offset_to_proj_string,
     mgrs_to_lanelet2_origin,
     mgrs_to_proj_string,
 )
@@ -106,6 +107,28 @@ class ResolvedProjection:
         if self.projector_type == "TransverseMercator":
             return latlon_to_tmerc_proj_string(
                 self.origin_lat, self.origin_lon, self.scale_factor
+            )
+        if self.mgrs_code is not None:
+            if self.offset_x == 0.0 and self.offset_y == 0.0:
+                # No offset: mgrs_code is the exact, authoritative grid
+                # square, so use it directly. Falling through to
+                # geo_reference_for_origin would prefer origin_lat/origin_lon
+                # instead (see its docstring), which for this case is the
+                # grid square's own south-west corner -- a point that sits
+                # exactly on a grid boundary. Re-deriving the grid from that
+                # corner via latlon_to_proj_string can round to the
+                # neighboring square, breaking frame consistency between the
+                # mgrs_grid and lat_lon origin specs (issue #550).
+                return mgrs_to_proj_string(self.mgrs_code)
+            # Offset present: fold it directly into the grid square's UTM
+            # corner instead of going through origin_lat/origin_lon, which
+            # are derived via mgrs_grid_with_offset_to_latlon and truncate
+            # the offset to whole meters (a ~1m error). This keeps
+            # geoReference exact while leaving origin_lat/origin_lon (and
+            # thus the actual exported coordinates, which MGRSProjector
+            # computes independently of the projector's origin) unchanged.
+            return mgrs_grid_with_offset_to_proj_string(
+                self.mgrs_code, self.offset_x, self.offset_y
             )
         return geo_reference_for_origin(self.to_origin_spec())
 

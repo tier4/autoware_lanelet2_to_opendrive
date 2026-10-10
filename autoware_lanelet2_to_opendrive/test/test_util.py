@@ -3,23 +3,25 @@
 from unittest.mock import MagicMock
 
 import lanelet2
+import pytest
+
 from autoware_lanelet2_to_opendrive.projection import (
-    mgrs_to_lanelet2_origin,
-    mgrs_grid_with_offset_to_latlon,
-    mgrs_grid_with_offset_to_lanelet2_origin,
     latlon_to_lanelet2_origin,
     latlon_to_proj_string,
+    mgrs_grid_with_offset_to_lanelet2_origin,
+    mgrs_grid_with_offset_to_latlon,
+    mgrs_to_lanelet2_origin,
 )
 from autoware_lanelet2_to_opendrive.util import (
     TrafficLightAdapter,
     _matches_element_type,
     _maybe_wrap,
+    check_lanelet_groups_intersect,
+    filter_lanelets_by_subtype,
+    find_adjacent_groups,
     find_lanelets_without_next,
     find_lanelets_without_previous,
     find_terminal_lanelets,
-    find_adjacent_groups,
-    filter_lanelets_by_subtype,
-    check_lanelet_groups_intersect,
     sort_adjacent_groups,
 )
 
@@ -655,8 +657,8 @@ def test_check_lanelet_groups_intersect(lanelet_map):
 def test_find_connecting_lanelet_groups(lanelet_map):
     """Test find_connecting_lanelet_groups with specific lanelets 228/229/230."""
     from autoware_lanelet2_to_opendrive.util import (
-        find_connecting_lanelet_groups,
         ConnectionDirection,
+        find_connecting_lanelet_groups,
     )
 
     # Find the specific lanelets 228, 229, 230
@@ -816,89 +818,98 @@ def test_mgrs_origin_conversion_consistency():
 
 
 def test_latlon_to_proj_string_basic():
-    """Test basic conversion from lat/lon to PROJ string."""
+    """Test basic conversion from lat/lon to PROJ string.
+
+    ``latlon_to_proj_string`` now delegates to the containing MGRS grid
+    square's ``+proj=tmerc`` frame (issue #550), so the origin is always
+    ``+lat_0=0`` at the UTM zone's central meridian, not the input point.
+    """
     # Test with Tokyo coordinates (Northern hemisphere)
     proj_string = latlon_to_proj_string(35.6895, 139.6917)
 
-    # Verify it contains expected components
-    assert "+proj=utm" in proj_string
-    assert "+zone=54" in proj_string  # Tokyo is in UTM zone 54
-    assert "+lat_0=35.6895" in proj_string
-    assert "+lon_0=139.6917" in proj_string
-    assert "+datum=WGS84" in proj_string
-    assert "+units=m" in proj_string
-    # Northern hemisphere should not have +south
-    assert "+south" not in proj_string
+    assert proj_string == (
+        "+proj=tmerc +lat_0=0 +lon_0=141 +k_0=0.9996 "
+        "+x_0=200000.0 +y_0=-3900000.0 +datum=WGS84 +units=m +no_defs"
+    )
 
 
 def test_latlon_to_proj_string_southern_hemisphere():
     """Test PROJ string generation for Southern hemisphere."""
-    # Test with Sydney coordinates (Southern hemisphere)
+    # Test with Sydney coordinates (Southern hemisphere, grid "56HLH")
     proj_string = latlon_to_proj_string(-33.8688, 151.2093)
 
-    assert "+proj=utm" in proj_string
-    assert "+zone=56" in proj_string  # Sydney is in UTM zone 56
-    assert "+lat_0=-33.8688" in proj_string
-    assert "+lon_0=151.2093" in proj_string
-    assert "+south" in proj_string  # Should have +south for Southern hemisphere
+    assert proj_string == (
+        "+proj=tmerc +lat_0=0 +lon_0=153 +k_0=0.9996 "
+        "+x_0=200000.0 +y_0=3800000.0 +datum=WGS84 +units=m +no_defs"
+    )
 
 
 def test_latlon_to_proj_string_nishishinjuku():
-    """Test PROJ string for Nishishinjuku area with offset."""
-    # Get lat/lon from MGRS grid with offset (same as nishishinjuku.yaml)
-    lat, lon = mgrs_grid_with_offset_to_latlon("54SUE", 81655.73, 50137.43)
+    """Test PROJ string for Nishishinjuku area with offset.
+
+    Verifies via a pyproj forward transform that the geoReference PROJ
+    string reproduces the expected MGRS-grid-relative offset, since
+    ``+lat_0``/``+lon_0`` no longer carry the input point's own coordinates.
+    """
+    pyproj = pytest.importorskip("pyproj")
+    from autoware_lanelet2_to_opendrive.projection import mgrs_to_proj_string
+
+    # Derive lat/lon for the full-precision offset point directly via pyproj,
+    # bypassing mgrs_grid_with_offset_to_latlon's 10-digit-MGRS-string round
+    # trip, which truncates the offset to whole meters (issue #550).
+    grid_proj_string = mgrs_to_proj_string("54SUE")
+    inverse = pyproj.Transformer.from_crs(grid_proj_string, "EPSG:4326", always_xy=True)
+    lon, lat = inverse.transform(81655.73, 50137.43)
 
     proj_string = latlon_to_proj_string(lat, lon)
+    assert proj_string.startswith("+proj=tmerc")
 
-    # Verify the coordinates in PROJ string match the input
-    assert f"+lat_0={lat}" in proj_string
-    assert f"+lon_0={lon}" in proj_string
-    assert "+zone=54" in proj_string  # Nishishinjuku is in UTM zone 54
+    transformer = pyproj.Transformer.from_crs(
+        "EPSG:4326", pyproj.CRS.from_proj4(proj_string), always_xy=True
+    )
+    x, y = transformer.transform(lon, lat)
+    # (lat, lon) is inside the same 100 km grid square, so latlon_to_proj_string
+    # re-derives the identical frame and the fractional offset survives exactly.
+    assert x == pytest.approx(81655.73, abs=1e-6)
+    assert y == pytest.approx(50137.43, abs=1e-6)
 
 
 def test_latlon_to_proj_string_vs_mgrs_to_proj_string():
-    """Test that latlon_to_proj_string produces different result than mgrs_to_proj_string when offset is applied."""
+    """latlon_to_proj_string must agree with mgrs_to_proj_string for the same grid.
+
+    Both the ``mgrs_grid`` and ``lat_lon`` origin specifications resolve to
+    the same ``MGRSProjector`` frame, so a lat/lon inside a given 100 km
+    grid square must produce the identical geoReference as that grid
+    square's ``mgrs_to_proj_string`` (issue #550 frame-consistency fix).
+    """
     from autoware_lanelet2_to_opendrive.projection import mgrs_to_proj_string
 
-    # Get lat/lon with offset (Nishishinjuku coordinates)
+    # Get lat/lon with offset (Nishishinjuku coordinates), still inside "54SUE"
     lat_with_offset, lon_with_offset = mgrs_grid_with_offset_to_latlon(
         "54SUE", 81655.73, 50137.43
     )
 
-    # Get PROJ string using lat/lon (with offset applied)
     proj_from_latlon = latlon_to_proj_string(lat_with_offset, lon_with_offset)
-
-    # Get PROJ string using MGRS grid only (without offset)
     proj_from_mgrs = mgrs_to_proj_string("54SUE")
 
-    # The two PROJ strings should be different because offset is applied
-    assert proj_from_latlon != proj_from_mgrs
-
-    # Verify specific coordinates are different
-    # lat/lon with offset should be around 35.688, 139.692 (Nishishinjuku)
-    assert f"+lat_0={lat_with_offset}" in proj_from_latlon
-    assert f"+lon_0={lon_with_offset}" in proj_from_latlon
-
-    # MGRS grid origin (54SUE0000000000) should be around 35.223, 138.802
-    assert "+lat_0=35.688" not in proj_from_mgrs  # Should not have offset lat
-    assert "+lon_0=139.692" not in proj_from_mgrs  # Should not have offset lon
+    assert proj_from_latlon == proj_from_mgrs
 
 
 def test_latlon_to_proj_string_utm_zone_calculation():
-    """Test UTM zone calculation for various longitudes."""
+    """Test UTM zone (central meridian) calculation for various longitudes."""
     # UTM zones are 6 degrees wide, starting at zone 1 from -180 to -174
 
-    # Zone 1: -180 to -174 (e.g., lon=-177 should be zone 1)
+    # Zone 1: -180 to -174 (e.g., lon=-177 should be zone 1, central meridian -177)
     proj_zone1 = latlon_to_proj_string(0.0, -177.0)
-    assert "+zone=1" in proj_zone1
+    assert "+lon_0=-177" in proj_zone1
 
-    # Zone 31: 0 to 6 (e.g., lon=3 should be zone 31)
+    # Zone 31: 0 to 6 (e.g., lon=3 should be zone 31, central meridian 3)
     proj_zone31 = latlon_to_proj_string(45.0, 3.0)
-    assert "+zone=31" in proj_zone31
+    assert "+lon_0=3" in proj_zone31
 
-    # Zone 60: 174 to 180 (e.g., lon=177 should be zone 60)
+    # Zone 60: 174 to 180 (e.g., lon=177 should be zone 60, central meridian 177)
     proj_zone60 = latlon_to_proj_string(0.0, 177.0)
-    assert "+zone=60" in proj_zone60
+    assert "+lon_0=177" in proj_zone60
 
 
 # ---------------------------------------------------------------------------

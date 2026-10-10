@@ -1,8 +1,8 @@
 """Tests for the TransverseMercator projector.
 
 Covers resolving a TransverseMercator ``map_projector_info.yaml`` (for both
-a UTM-style ``k=0.9996`` fixture and a Japan plane rectangular coordinate
-system ``k=0.9999`` fixture), the exact geoReference PROJ string, a pyproj
+a UTM-style ``k_0=0.9996`` fixture and a Japan plane rectangular coordinate
+system ``k_0=0.9999`` fixture), the exact geoReference PROJ string, a pyproj
 round trip, end-to-end ``.osm`` -> ``.xodr`` conversion, that the C++
 projector binding actually applies ``scale_factor``, error handling for
 invalid ``map_origin``/``scale_factor``, and that the MGRS path and the
@@ -34,13 +34,13 @@ EXPECTED_LAT = 35.61739731
 EXPECTED_LON = 139.7797546
 EXPECTED_SCALE_FACTOR = 0.9996
 EXPECTED_GEO_REFERENCE = (
-    "+proj=tmerc +lat_0=35.61739731 +lon_0=139.7797546 +k=0.9996 "
+    "+proj=tmerc +lat_0=35.61739731 +lon_0=139.7797546 +k_0=0.9996 "
     "+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
 )
 
 EXPECTED_K9999_SCALE_FACTOR = 0.9999
 EXPECTED_K9999_GEO_REFERENCE = (
-    "+proj=tmerc +lat_0=35.61739731 +lon_0=139.7797546 +k=0.9999 "
+    "+proj=tmerc +lat_0=35.61739731 +lon_0=139.7797546 +k_0=0.9999 "
     "+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
 )
 
@@ -271,7 +271,9 @@ def test_no_mgrs_regression():
 
     assert resolved.projector_type == "MGRS"
     assert resolved.scale_factor is None
-    assert resolved.geo_reference.startswith("+proj=utm")
+    # Issue #550: the MGRS geoReference is built as an explicit +proj=tmerc
+    # (grid-relative false easting/northing), not +proj=utm.
+    assert resolved.geo_reference.startswith("+proj=tmerc")
 
 
 # ---------------------------------------------------------------------------

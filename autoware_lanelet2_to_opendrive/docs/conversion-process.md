@@ -154,7 +154,24 @@ For OpenDRIVE `<geoReference>` element:
 - **From MGRS**: `mgrs_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/projection.py))
 - **From Lat/Lon**: `latlon_to_proj_string()` ([projection.py](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/projection.py))
 
-Format: `+proj=utm +zone=ZZ [+south] +lat_0=LAT +lon_0=LON +datum=WGS84 +units=m +no_defs`
+Autoware's `MGRSProjector` ignores the projector's origin and always emits
+coordinates relative to the south-west corner of the point's 100 km MGRS
+grid square (`fmod(utm_easting, 1e5)` / `fmod(utm_northing, 1e5)`).
+`+proj=utm` cannot express this offset -- it silently ignores `+x_0`/`+y_0`
+(and even `+lat_0`/`+lon_0`) overrides. The geoReference is therefore built
+as an explicit Transverse Mercator with the standard UTM scale factor and
+central meridian, and a false easting/northing shifted by the grid square's
+south-west corner:
+
+Format: `+proj=tmerc +lat_0=0 +lon_0=CM +k_0=0.9996 +x_0=X0 +y_0=Y0 +datum=WGS84 +units=m +no_defs`
+
+where `CM` is the UTM zone's central meridian and `X0`/`Y0` place the grid
+square's south-west corner at the projection origin. `latlon_to_proj_string()`
+derives the containing 100 km grid square and delegates to
+`mgrs_to_proj_string()`, so a `lat_lon` origin and an equivalent `mgrs_grid`
+origin in the same grid square produce an identical geoReference. Both
+functions assume all map coordinates fall within that single 100 km grid
+square, matching `MGRSProjector`'s own limitation.
 
 ---
 
