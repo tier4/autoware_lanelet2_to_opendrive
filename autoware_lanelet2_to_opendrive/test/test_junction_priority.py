@@ -260,8 +260,13 @@ def test_build_priorities_no_junction_lanelet_warns(caplog):
     )
 
 
-def test_build_priorities_conflict_both_emitted(caplog):
-    """RE1: A>B, RE2: B>A -> both <priority> emitted, ONE warning per pair."""
+def test_build_priorities_conflict_reports_once_and_drops_both(caplog):
+    """RE1: A>B, RE2: B>A -> neither emitted, ONE warning per pair.
+
+    Previously both directions were emitted and the conflict only warned.
+    That produced output stating "A outranks B and B outranks A", which is
+    not a thing a reader can act on, so both directions are now dropped.
+    """
     from autoware_lanelet2_to_opendrive.opendrive.junction import (
         _RightOfWayRecord,
         _build_priorities_from_records,
@@ -282,15 +287,14 @@ def test_build_priorities_conflict_both_emitted(caplog):
             records, lanelet_to_road_id, lanelet_to_junction_id
         )
 
-    assert result == {
-        9: [Priority(high=11, low=22), Priority(high=22, low=11)],
-    }
+    assert result == {}
     conflict_warnings = [
         rec for rec in caplog.records if "Conflicting priority" in rec.message
     ]
     assert len(conflict_warnings) == 1, conflict_warnings
     msg = conflict_warnings[0].message
     assert "junction 9" in msg
+    assert "dropped" in msg
     assert "REs [1] vs [2]" in msg or "REs [2] vs [1]" in msg
 
 
@@ -388,3 +392,69 @@ def test_junction_build_priorities_end_to_end_on_nishishinjuku(lanelet_map):
             assert p.high != p.low
             assert p.high in known_roads
             assert p.low in known_roads
+
+
+def test_mutually_conflicting_priorities_are_dropped():
+    """Two REs naming each other as yield produce no priority at all.
+
+    ``<priority high low/>`` is a strict order, so emitting both directions
+    says "A outranks B and B outranks A", which no reader can act on. Both
+    directions go, because nothing in the input distinguishes them: Lanelet2's
+    ``right_of_way`` lists what to yield *to*, and two approaches separated by
+    a signal phase legitimately yield to each other.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=1, row_lanelet_ids=(101,), yield_lanelet_ids=(102,)),
+        _RightOfWayRecord(re_id=2, row_lanelet_ids=(102,), yield_lanelet_ids=(101,)),
+    ]
+    result = _build_priorities_from_records(
+        records, {101: 1001, 102: 1002}, {101: 9, 102: 9}
+    )
+
+    assert result == {}, f"expected no priority, got {result}"
+
+
+def test_one_directional_priority_survives_alongside_a_conflict():
+    """Only the mutual pair is removed; an unopposed pair is kept."""
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=1, row_lanelet_ids=(101,), yield_lanelet_ids=(102,)),
+        _RightOfWayRecord(re_id=2, row_lanelet_ids=(102,), yield_lanelet_ids=(101,)),
+        _RightOfWayRecord(re_id=3, row_lanelet_ids=(101,), yield_lanelet_ids=(103,)),
+    ]
+    result = _build_priorities_from_records(
+        records,
+        {101: 1001, 102: 1002, 103: 1003},
+        {101: 9, 102: 9, 103: 9},
+    )
+
+    assert result == {9: [Priority(high=1001, low=1003)]}
+
+
+def test_conflicts_in_one_junction_do_not_affect_another():
+    from autoware_lanelet2_to_opendrive.opendrive.junction import (
+        _RightOfWayRecord,
+        _build_priorities_from_records,
+    )
+
+    records = [
+        _RightOfWayRecord(re_id=1, row_lanelet_ids=(101,), yield_lanelet_ids=(102,)),
+        _RightOfWayRecord(re_id=2, row_lanelet_ids=(102,), yield_lanelet_ids=(101,)),
+        _RightOfWayRecord(re_id=3, row_lanelet_ids=(201,), yield_lanelet_ids=(202,)),
+    ]
+    result = _build_priorities_from_records(
+        records,
+        {101: 1001, 102: 1002, 201: 2001, 202: 2002},
+        {101: 9, 102: 9, 201: 8, 202: 8},
+    )
+
+    assert result == {8: [Priority(high=2001, low=2002)]}
