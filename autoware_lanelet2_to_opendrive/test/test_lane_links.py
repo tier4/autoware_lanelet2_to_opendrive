@@ -1,9 +1,18 @@
 """Tests for lane predecessor and successor link functionality."""
 
 import lanelet2
+from autoware_lanelet2_to_opendrive.conversion_config import LaneLinksContext
+from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint, ElementType
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneType
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
+from autoware_lanelet2_to_opendrive.opendrive.road_links import (
+    Predecessor,
+    RoadLink,
+    Successor,
+)
 
 
 def test_lane_has_lanelet_id(lanelet_map):
@@ -214,3 +223,157 @@ def test_connected_lanelets_have_lane_links(lanelet_map):
     print(
         f"Successfully created road with {len(road.lanes.lane_sections)} lane section(s)"
     )
+
+
+# --- lane links must lie in the road-level linked road ---------------------
+#
+# ``_set_single_lane_links`` resolves each lane's neighbour from the routing
+# graph.  When the road-level link names a road, the lane link id is read
+# against that road, so a neighbour lanelet that lives in another road must
+# not produce a lane link.  The stand-ins below replace the lanelet map and
+# routing graph with plain dicts so the rule is tested without a map fixture.
+
+
+class _Lanelet:
+    """Stand-in for lanelet2.core.Lanelet: only the id is used."""
+
+    def __init__(self, lanelet_id: int):
+        self.id = lanelet_id
+
+
+class _LaneletLayer:
+    def __init__(self, lanelet_ids):
+        self._lanelets = {i: _Lanelet(i) for i in lanelet_ids}
+
+    def get(self, lanelet_id: int) -> _Lanelet:
+        return self._lanelets[lanelet_id]
+
+
+class _LaneletMap:
+    def __init__(self, lanelet_ids):
+        self.laneletLayer = _LaneletLayer(lanelet_ids)
+
+
+class _RoutingGraph:
+    """Stand-in for lanelet2.routing.RoutingGraph built from id dicts."""
+
+    def __init__(self, lanelet_map: _LaneletMap, following, previous):
+        self._map = lanelet_map
+        self._following = following
+        self._previous = previous
+
+    def following(self, lanelet: _Lanelet):
+        return [
+            self._map.laneletLayer.get(i) for i in self._following.get(lanelet.id, [])
+        ]
+
+    def previous(self, lanelet: _Lanelet):
+        return [
+            self._map.laneletLayer.get(i) for i in self._previous.get(lanelet.id, [])
+        ]
+
+
+def _make_road(road_id, lanelet_by_lane, junction=-1, predecessor=None, successor=None):
+    """Build a Road whose right lanes map lane id -> source lanelet id."""
+    section = LaneSection(s_offset=0.0)
+    section.right_lanes = {
+        lane_id: Lane(lane_id=lane_id, lane_type=LaneType.DRIVING, lanelet_id=ll)
+        for lane_id, ll in lanelet_by_lane.items()
+    }
+    link = None
+    if predecessor is not None or successor is not None:
+        link = RoadLink(
+            predecessor=(
+                Predecessor(ElementType.ROAD, predecessor, ContactPoint.END)
+                if predecessor is not None
+                else None
+            ),
+            successor=(
+                Successor(ElementType.ROAD, successor, ContactPoint.START)
+                if successor is not None
+                else None
+            ),
+        )
+    return Road(
+        id=road_id,
+        length=10.0,
+        junction=junction,
+        link=link,
+        lanes=Lanes(lane_sections=[section]),
+    )
+
+
+def _fan_out_fixture(following_of_lane_1=(5007,), previous_of_lane_3=(5003,)):
+    """Connecting road 3 (lanes -1..-3) between road 0 and roads 1 (one lane) / 2.
+
+    Lane -1 continues into road 1, lanes -2 and -3 into road 2, but the
+    road-level successor of road 3 can only name road 1.
+    """
+    incoming = _make_road(0, {-1: 5001, -2: 5002, -3: 5003})
+    one_lane = _make_road(1, {-1: 5007})
+    two_lanes = _make_road(2, {-1: 5008, -2: 5009})
+    connecting = _make_road(
+        3, {-1: 5004, -2: 5005, -3: 5006}, junction=1000, predecessor=0, successor=1
+    )
+    roads = [incoming, one_lane, two_lanes, connecting]
+    lanelet_map = _LaneletMap(range(5001, 5010))
+    routing_graph = _RoutingGraph(
+        lanelet_map,
+        following={5004: list(following_of_lane_1), 5005: [5008], 5006: [5009]},
+        previous={5004: [5001], 5005: [5002], 5006: list(previous_of_lane_3)},
+    )
+    context = LaneLinksContext(
+        lanelet_map=lanelet_map,
+        lanelet_to_road_and_lane={
+            lane.lanelet_id: (road.id, lane.lane_id)
+            for road in roads
+            for lane in road.lanes.lane_sections[0].right_lanes.values()
+        },
+        routing_graph=routing_graph,
+        road_lane_ids={
+            road.id: set(road.lanes.lane_sections[0].right_lanes) for road in roads
+        },
+        road_id_to_road={road.id: road for road in roads},
+    )
+    return connecting, context
+
+
+def _links(road):
+    lanes = road.lanes.lane_sections[0].right_lanes
+    return {
+        lane_id: (
+            lane.predecessor.id if lane.predecessor else None,
+            lane.successor.id if lane.successor else None,
+        )
+        for lane_id, lane in lanes.items()
+    }
+
+
+def test_lane_successor_outside_the_linked_road_is_not_emitted():
+    """Lanes continuing into a road other than the road-level successor get no link."""
+    connecting, context = _fan_out_fixture()
+
+    connecting.set_lane_links(context)
+
+    # Previously lanes -2 and -3 were linked to lanes -1 and -2 of road 2, ids
+    # that CARLA then looked up in road 1 (lane -2 does not exist there).
+    assert _links(connecting) == {-1: (-1, -1), -2: (-2, None), -3: (-3, None)}
+
+
+def test_lane_successor_in_the_linked_road_wins_over_an_earlier_candidate():
+    """A later routing candidate inside the linked road is still used."""
+    connecting, context = _fan_out_fixture(following_of_lane_1=(5009, 5007))
+
+    connecting.set_lane_links(context)
+
+    assert _links(connecting)[-1] == (-1, -1)
+
+
+def test_lane_predecessor_outside_the_linked_road_is_not_emitted():
+    """The predecessor side applies the same rule."""
+    # lane -3 arrives from road 2 while the road-level predecessor is road 0
+    connecting, context = _fan_out_fixture(previous_of_lane_3=(5008,))
+
+    connecting.set_lane_links(context)
+
+    assert _links(connecting)[-3] == (None, None)
