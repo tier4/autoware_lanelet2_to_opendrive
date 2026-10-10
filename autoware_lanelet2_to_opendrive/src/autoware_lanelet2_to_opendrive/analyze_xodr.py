@@ -588,7 +588,12 @@ def _evaluate_road_xy(
     """
     import math
 
-    from .opendrive.geometry import Arc, ParamPoly3, evaluate_plan_view_world
+    from .opendrive.geometry import (
+        Arc,
+        ParamPoly3,
+        evaluate_plan_view_world,
+        param_for_offset,
+    )
 
     if road.plan_view is None or not road.plan_view.geometries:
         return None
@@ -600,7 +605,8 @@ def _evaluate_road_xy(
             geom = g
             break
 
-    p = s - geom.s
+    # Honour paramPoly3@pRange when turning travelled distance into p.
+    p = param_for_offset(geom, s - geom.s)
 
     # Reference-line point and tangent heading, per geometry type.
     if isinstance(geom, ParamPoly3):

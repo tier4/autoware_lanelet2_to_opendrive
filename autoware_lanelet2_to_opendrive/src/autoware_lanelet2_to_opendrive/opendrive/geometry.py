@@ -1,7 +1,8 @@
 """OpenDRIVE geometry definitions."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from functools import lru_cache
+from typing import Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 import lxml.etree as ET
 import numpy as np
 
@@ -11,6 +12,117 @@ from .xml_utils import replace_subnormal
 if TYPE_CHECKING:
     from ..spline import Splines
     from ..conversion_config import ParamPoly3Config
+
+
+#: ``paramPoly3@pRange`` values defined by ASAM OpenDRIVE.
+PARAM_RANGE_ARC_LENGTH = "arcLength"
+PARAM_RANGE_NORMALIZED = "normalized"
+
+
+@lru_cache(maxsize=8)
+def _gauss_legendre_unit(panels: int, nodes: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Composite Gauss-Legendre abscissae/weights for the unit interval."""
+    x, w = np.polynomial.legendre.leggauss(nodes)
+    edges = np.linspace(0.0, 1.0, panels + 1)
+    half = 0.5 / panels
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    abscissae = (centers[:, None] + half * x[None, :]).ravel()
+    weights = np.tile(w * half, panels)
+    return abscissae, weights
+
+
+def param_poly3_speed(
+    coeffs: Sequence[float], p: "np.ndarray | float"
+) -> "np.ndarray | float":
+    """Return ``|(du/dp, dv/dp)|`` of a paramPoly3 at parameter ``p``.
+
+    Args:
+        coeffs: ``(aU, bU, cU, dU, aV, bV, cV, dV)``.
+        p: Parameter value(s) in the geometry's own ``pRange``.
+
+    Returns:
+        The parametric speed, i.e. the integrand of the arc-length integral
+        that ASAM's ``road.geometry.parampoly3.*_range`` checkers evaluate.
+    """
+    _, bU, cU, dU, _, bV, cV, dV = coeffs
+    du = bU + 2.0 * cU * p + 3.0 * dU * p * p
+    dv = bV + 2.0 * cV * p + 3.0 * dV * p * p
+    return np.hypot(du, dv)
+
+
+def param_poly3_arc_length(
+    coeffs: Sequence[float],
+    p_end: float,
+    p_start: float = 0.0,
+    panels: Optional[int] = None,
+    nodes: Optional[int] = None,
+) -> float:
+    """Return the true arc length of a paramPoly3 between two parameters.
+
+    Computed with a composite Gauss-Legendre rule, which converges to machine
+    precision on the smooth ``sqrt(quartic)`` integrand.  The emitted
+    ``geometry@length`` is set from this function so that the declared length
+    matches the curve the coefficients actually describe -- the condition both
+    ``road.geometry.parampoly3.arclength_range`` (``pRange="arcLength"``) and
+    ``road.geometry.parampoly3.normalized_range`` (``pRange="normalized"``)
+    check to a 1 mm tolerance.
+    """
+    from ..config import DEFAULT_CONFIG
+
+    if panels is None:
+        panels = DEFAULT_CONFIG.parampoly3.arc_length_panels
+    if nodes is None:
+        nodes = DEFAULT_CONFIG.parampoly3.arc_length_nodes
+
+    span = float(p_end) - float(p_start)
+    if span == 0.0:
+        return 0.0
+    abscissae, weights = _gauss_legendre_unit(panels, nodes)
+    p = p_start + span * abscissae
+    return float(np.dot(weights, param_poly3_speed(coeffs, p)) * span)
+
+
+def end_param(geom: "GeometryBase") -> float:
+    """Return the parameter value at the *end* of a planView geometry.
+
+    ``length`` for every primitive whose parameter is arc length, and ``1.0``
+    for a ``paramPoly3`` declared ``pRange="normalized"``.
+    """
+    if isinstance(geom, ParamPoly3) and geom.pRange == PARAM_RANGE_NORMALIZED:
+        return 1.0
+    return float(geom.length)
+
+
+def param_for_offset(geom: "GeometryBase", ds: float) -> float:
+    """Return the curve parameter ``p`` reached ``ds`` metres into ``geom``.
+
+    For arc-length-parameterised primitives this is the identity.  For a
+    ``pRange="normalized"`` paramPoly3 the mapping is genuinely non-linear, so
+    it is inverted by Newton iteration on the arc-length integral (the same
+    thing CARLA does internally by tabulating ``s`` in
+    ``GeometryParamPoly3::PreComputeSpline``).  Sampling with the naive
+    ``ds / length`` guess instead would reintroduce exactly the mis-location
+    that ``pRange="arcLength"`` was falsely promising not to have.
+    """
+    if not isinstance(geom, ParamPoly3) or geom.pRange != PARAM_RANGE_NORMALIZED:
+        return float(ds)
+
+    from ..config import DEFAULT_CONFIG
+
+    length = float(geom.length)
+    if length <= 0.0:
+        return 0.0
+
+    coeffs = geom.coefficients()
+    target = float(np.clip(ds, 0.0, length))
+    p = target / length
+    for _ in range(DEFAULT_CONFIG.parampoly3.param_inversion_iterations):
+        travelled = param_poly3_arc_length(coeffs, p, panels=1)
+        speed = float(param_poly3_speed(coeffs, p))
+        if speed <= DEFAULT_CONFIG.geometry.epsilon:
+            break
+        p = float(np.clip(p + (target - travelled) / speed, 0.0, 1.0))
+    return p
 
 
 def evaluate_plan_view_world(
@@ -37,8 +149,11 @@ def evaluate_plan_view_world(
         x: Geometry start X (world frame).
         y: Geometry start Y (world frame).
         hdg: Geometry heading at start (radians).
-        p: Arc-length parameter at which to evaluate (``0`` gives the
-            start, ``length`` gives the end).
+        p: Curve parameter at which to evaluate. ``0`` gives the start;
+            the end is ``length`` for ``<line/>``/``<arc>`` and for a
+            ``pRange="arcLength"`` paramPoly3, but ``1`` for a
+            ``pRange="normalized"`` one -- use :func:`end_param` /
+            :func:`param_for_offset` rather than assuming.
         param_poly3_coeffs: Optional ``(aU, bU, cU, dU, aV, bV, cV, dV)``.
         arc_curvature: Optional constant curvature κ (1/m). Positive κ
             curves to the left of the start heading; negative to the right.
@@ -128,7 +243,7 @@ def evaluate_road_endpoints(
         start_xy = _eval_geometry_world(first_geom, p=0.0)
         last_geom = geometries[-1]
         last_length = float(last_geom.get("length", "0.0"))
-        end_xy = _eval_geometry_world(last_geom, p=last_length)
+        end_xy = _eval_geometry_world(last_geom, p=element_end_param(last_geom))
         if start_xy is None or end_xy is None:
             continue
 
@@ -146,6 +261,23 @@ def evaluate_road_endpoints(
         )
 
     return results
+
+
+def element_end_param(geom_elem: ET._Element) -> float:
+    """``end_param`` for a raw lxml ``<geometry>`` element.
+
+    Use this instead of ``float(geom.get("length"))`` whenever a parsed
+    ``<geometry>`` is evaluated at its end: a ``pRange="normalized"``
+    paramPoly3 ends at ``p = 1``, and feeding it ``length`` instead
+    extrapolates the cubic far outside the road.
+    """
+    param_poly3 = geom_elem.find("paramPoly3")
+    if (
+        param_poly3 is not None
+        and param_poly3.get("pRange", PARAM_RANGE_ARC_LENGTH) == PARAM_RANGE_NORMALIZED
+    ):
+        return 1.0
+    return float(geom_elem.get("length", "0.0"))
 
 
 def _eval_geometry_world(
@@ -338,8 +470,27 @@ class ParamPoly3(GeometryBase):
     bV: float = 0.0  # coefficient b for v coordinate
     cV: float = 0.0  # coefficient c for v coordinate
     dV: float = 0.0  # coefficient d for v coordinate
-    pRange: str = "arcLength"  # range of parameter p (arcLength or normalized)
+    pRange: str = PARAM_RANGE_ARC_LENGTH  # arcLength or normalized
     geometry_type = GeometryType.PARAMPOLY3
+
+    def coefficients(
+        self,
+    ) -> Tuple[float, float, float, float, float, float, float, float]:
+        """Return ``(aU, bU, cU, dU, aV, bV, cV, dV)``."""
+        return (
+            self.aU,
+            self.bU,
+            self.cU,
+            self.dU,
+            self.aV,
+            self.bV,
+            self.cV,
+            self.dV,
+        )
+
+    def arc_length(self) -> float:
+        """Return the true arc length of this segment over its ``pRange``."""
+        return param_poly3_arc_length(self.coefficients(), end_param(self))
 
     @staticmethod
     def _calculate_optimal_num_segments(
@@ -520,6 +671,216 @@ class ParamPoly3(GeometryBase):
         return True, ""
 
     @classmethod
+    def exact_from_spline_span(
+        cls,
+        spline: "Splines",
+        t_start: float,
+        t_end: float,
+        s_start: float,
+        coefficient_epsilon: Optional[float] = None,
+    ) -> "ParamPoly3":
+        """Build the ParamPoly3 that *reproduces* ``spline`` on ``[t_start, t_end]``.
+
+        ``t_start`` and ``t_end`` must lie inside a single knot span of the
+        fitted cubic B-spline (see :meth:`Splines.breakpoints`).  There the
+        spline is one cubic polynomial in ``t``, so its restriction to the
+        window, reparameterised by ``p = (t - t_start) / (t_end - t_start)``,
+        is again exactly cubic and is written down by a 3-term Taylor
+        expansion -- no fitting, no residual:
+
+            u(p), v(p) = R(-hdg) * sum_{n=1..3} C^(n)(t_start) * dt^n * p^n / n!
+
+        The emitted geometry therefore has *zero* position error against the
+        fitted reference line and, because neighbouring windows share the
+        spline's own C2 continuity, no curvature jump at the seam.  This
+        replaces the previous cubic-Hermite re-approximation, which discarded
+        the second derivatives and split independently of the knots.
+
+        ``pRange`` is ``"normalized"`` because that is what the coefficients
+        express: ``p`` is the spline's own parameter mapped to ``[0, 1]``, not
+        travelled distance.  ``length`` is the true arc length of the emitted
+        cubic, so the declaration is consistent with ASAM's
+        ``road.geometry.parampoly3.normalized_range`` /
+        ``...length_match`` checkers.
+
+        Args:
+            spline: Fitted reference-line spline.
+            t_start: Window start in the spline's normalized parameter.
+            t_end: Window end in the spline's normalized parameter.
+            s_start: Arc-length offset to record in ``geometry@s``.
+            coefficient_epsilon: Small-coefficient rounding threshold.
+        """
+        from ..config import DEFAULT_CONFIG
+
+        if coefficient_epsilon is None:
+            coefficient_epsilon = DEFAULT_CONFIG.parampoly3.coefficient_epsilon
+
+        dt = float(t_end) - float(t_start)
+        origin = spline.evaluate_param(t_start, derivative=0)
+        d1 = spline.evaluate_param(t_start, derivative=1)
+        d2 = spline.evaluate_param(t_start, derivative=2)
+        d3 = spline.evaluate_param(t_start, derivative=3)
+
+        if float(np.hypot(d1[0], d1[1])) <= DEFAULT_CONFIG.geometry.epsilon:
+            # Degenerate tangent: fall back to the chord direction so the
+            # local frame is still well defined.
+            end = spline.evaluate_param(t_end, derivative=0)
+            hdg = float(np.arctan2(end[1] - origin[1], end[0] - origin[0]))
+        else:
+            hdg = float(np.arctan2(d1[1], d1[0]))
+        cos_hdg, sin_hdg = np.cos(hdg), np.sin(hdg)
+
+        scaled = [
+            (float(d1[0]) * dt, float(d1[1]) * dt),
+            (float(d2[0]) * dt * dt / 2.0, float(d2[1]) * dt * dt / 2.0),
+            (float(d3[0]) * dt**3 / 6.0, float(d3[1]) * dt**3 / 6.0),
+        ]
+        local = [
+            (gx * cos_hdg + gy * sin_hdg, -gx * sin_hdg + gy * cos_hdg)
+            for gx, gy in scaled
+        ]
+
+        aU, bU, cU, dU, aV, bV, cV, dV = cls._normalize_coefficients(
+            0.0,
+            local[0][0],
+            local[1][0],
+            local[2][0],
+            0.0,
+            local[0][1],
+            local[1][1],
+            local[2][1],
+            epsilon=coefficient_epsilon,
+        )
+
+        # @length is computed from the *emitted* (already rounded) coefficients
+        # so the XML is self-consistent.
+        length = param_poly3_arc_length((aU, bU, cU, dU, aV, bV, cV, dV), 1.0)
+
+        return cls(
+            s=float(s_start),
+            x=float(origin[0]),
+            y=float(origin[1]),
+            hdg=hdg,
+            length=length,
+            aU=aU,
+            bU=bU,
+            cU=cU,
+            dU=dU,
+            aV=aV,
+            bV=bV,
+            cV=cV,
+            dV=dV,
+            pRange=PARAM_RANGE_NORMALIZED,
+        )
+
+    @classmethod
+    def from_spline_windows(
+        cls,
+        spline: "Splines",
+        s_start: float,
+        s_end: float,
+        config: "ParamPoly3Config",
+    ) -> List["ParamPoly3"]:
+        """Emit the paramPoly3 chain covering arc length ``[s_start, s_end]``.
+
+        With ``DEFAULT_CONFIG.parampoly3.knot_aligned`` (the default) the window
+        is cut at the fitted spline's own breakpoints, so every emitted piece
+        stays inside one knot span and reproduces the fitted curve exactly
+        (:meth:`exact_from_spline_span`).  ``knot_span_max_length`` optionally
+        subdivides a long span further -- still inside the span, so still
+        exact.
+
+        With ``knot_aligned`` disabled the legacy uniform Hermite split is used
+        instead (kept for A/B comparison and for the regression tests that pin
+        the old behaviour).
+        """
+        from ..config import DEFAULT_CONFIG
+
+        if not DEFAULT_CONFIG.parampoly3.knot_aligned:
+            return cls._legacy_uniform_windows(spline, s_start, s_end, config)
+
+        t_start = spline.param_at_arc_length(s_start)
+        t_end = spline.param_at_arc_length(s_end)
+        if t_end <= t_start:
+            return []
+
+        breaks = spline.breakpoints()
+        cuts = [t_start]
+        cuts.extend(float(t) for t in breaks if t_start < t < t_end)
+        cuts.append(t_end)
+
+        cap = DEFAULT_CONFIG.parampoly3.knot_span_max_length
+        if cap is not None and cap > 0.0:
+            refined: List[float] = [cuts[0]]
+            for a, b in zip(cuts, cuts[1:]):
+                span_len = spline.arc_length_at_param(b) - spline.arc_length_at_param(a)
+                n = max(1, int(np.ceil(span_len / cap)))
+                for i in range(1, n):
+                    refined.append(a + (b - a) * i / n)
+                refined.append(b)
+            cuts = refined
+
+        segments: List["ParamPoly3"] = []
+        s_cursor = float(s_start)
+        for a, b in zip(cuts, cuts[1:]):
+            if b <= a:
+                continue
+            segment = cls.exact_from_spline_span(
+                spline,
+                t_start=a,
+                t_end=b,
+                s_start=s_cursor,
+                coefficient_epsilon=config.coefficient_epsilon,
+            )
+            is_valid, error_msg = cls._validate_segment(segment, min_segment_length=0.0)
+            if not is_valid:
+                import warnings
+
+                warnings.warn(
+                    f"Skipping invalid segment at s={s_cursor:.3f}: {error_msg}",
+                    UserWarning,
+                )
+                continue
+            segments.append(segment)
+            s_cursor += segment.length
+        return segments
+
+    @classmethod
+    def _legacy_uniform_windows(
+        cls,
+        spline: "Splines",
+        s_start: float,
+        s_end: float,
+        config: "ParamPoly3Config",
+    ) -> List["ParamPoly3"]:
+        """Uniform-grid cubic-Hermite split (pre-knot-alignment behaviour)."""
+        import warnings
+
+        length = float(s_end - s_start)
+        target = config.default_segment_length if config.enabled else length
+        n = max(1, int(np.ceil(length / max(target, config.min_segment_length))))
+        out: List["ParamPoly3"] = []
+        for i in range(n):
+            s0 = s_start + (i / n) * length
+            s1 = s_start + ((i + 1) / n) * length
+            if s1 - s0 < config.min_segment_length:
+                warnings.warn(
+                    f"Skipping segment with length {s1 - s0:.6f}m "
+                    f"(below minimum {config.min_segment_length}m) at s={s0:.3f}",
+                    UserWarning,
+                )
+                continue
+            out.append(
+                cls.from_spline_window(
+                    spline,
+                    s0,
+                    s1,
+                    coefficient_epsilon=config.coefficient_epsilon,
+                )
+            )
+        return out
+
+    @classmethod
     def from_spline_window(
         cls,
         spline: "Splines",
@@ -532,6 +893,13 @@ class ParamPoly3(GeometryBase):
         Uses cubic Hermite interpolation between spline-derived position
         and tangent at the two endpoints. The caller is responsible for
         upstream length / segment-validity checks.
+
+        Legacy path.  It re-approximates the fitted curve (second derivatives
+        are discarded) and declares ``pRange="arcLength"`` although the Hermite
+        cubic is not unit-speed, so ``@length`` and the integral of
+        ``|(u', v')|`` disagree -- measured at up to 0.98 m on nishishinjuku.
+        Prefer :meth:`exact_from_spline_span`, which reproduces the fitted
+        curve exactly and declares the parameter range it really uses.
         """
         from ..config import DEFAULT_CONFIG
 
@@ -622,8 +990,11 @@ class ParamPoly3(GeometryBase):
             - max_segments: 100 (prevents excessive segmentation)
             - enabled: True (use dynamic calculation)
         """
+        from ..config import DEFAULT_CONFIG
+
         segments = []
         total_length = spline.total_length
+        explicit_num_segments = num_segments
 
         if total_length <= 0:
             # Handle degenerate case
@@ -634,6 +1005,16 @@ class ParamPoly3(GeometryBase):
             from ..conversion_config import ParamPoly3Config
 
             config = ParamPoly3Config()
+
+        # Knot-aligned exact emission (default). The uniform-grid path below is
+        # kept for `num_segments=` callers (its whole point is a fixed count)
+        # and for `knot_aligned = False`.
+        if (
+            DEFAULT_CONFIG.parampoly3.knot_aligned
+            and explicit_num_segments is None
+            and total_length >= config.min_segment_length
+        ):
+            return cls.from_spline_windows(spline, 0.0, total_length, config)
 
         # Calculate optimal num_segments if not provided and dynamic mode is enabled
         if num_segments is None and config.enabled:

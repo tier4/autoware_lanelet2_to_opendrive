@@ -1,6 +1,7 @@
 """Tests for ParamPoly3 geometry class."""
 
 import sys
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -135,7 +136,19 @@ class TestParamPoly3DynamicSegments:
         assert param_polys[0].length == pytest.approx(spline.total_length, rel=1e-3)
 
     def test_dynamic_segments_medium_road(self):
-        """Test that medium roads get appropriate segment count."""
+        """A medium road is emitted as one exact cubic per B-spline knot span.
+
+        ``default_segment_length`` no longer drives the default split: the
+        knot-aligned emitter cuts at the fitted spline's own breakpoints so
+        each piece reproduces the fit exactly (see
+        ``test_param_poly3_knot_aligned.py``).  The uniform grid is still
+        reachable through ``knot_aligned = False`` and is pinned below.
+        """
+        import dataclasses
+
+        from autoware_lanelet2_to_opendrive import config as config_module
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
         # Create a medium-length road (10m)
         points = np.array(
             [
@@ -148,12 +161,22 @@ class TestParamPoly3DynamicSegments:
         spline = Splines(points, num_control_points=6)
         param_polys = ParamPoly3.from_spline(spline)
 
-        # Should create ~10 segments (10m / 1m target = 10)
-        assert 8 <= len(param_polys) <= 12  # Allow some tolerance
+        assert len(param_polys) == len(spline.breakpoints()) - 1
 
         # All segments should be above minimum length
         for poly in param_polys:
             assert poly.length >= 0.5
+
+        # Legacy uniform split: ~10 segments (10m / 1m target = 10).
+        patched = dataclasses.replace(
+            DEFAULT_CONFIG,
+            parampoly3=dataclasses.replace(
+                DEFAULT_CONFIG.parampoly3, knot_aligned=False
+            ),
+        )
+        with mock.patch.object(config_module, "DEFAULT_CONFIG", patched):
+            legacy_polys = ParamPoly3.from_spline(spline)
+        assert 8 <= len(legacy_polys) <= 12  # Allow some tolerance
 
     def test_dynamic_segments_long_road(self):
         """Test that long roads don't create excessive segments."""

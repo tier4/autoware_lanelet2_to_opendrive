@@ -35,6 +35,7 @@ from .geometry import (
     Line,
     ParamPoly3,
     PlanView,
+    end_param,
     evaluate_plan_view_world,
 )
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
@@ -100,27 +101,12 @@ def _emit_paramPoly3_run(
 ) -> List[ParamPoly3]:
     """Emit one or more ParamPoly3 segments covering a ParamPoly3Run.
 
-    Honours ``pp3_cfg.min_segment_length`` by sub-dividing the run if
-    needed (mirrors the per-segment loop in ``ParamPoly3.from_spline``).
+    Delegates to :meth:`ParamPoly3.from_spline_windows` so this run-based path
+    and the plain paramPoly3-only path split the spline the same way: one exact
+    cubic per knot span by default, the legacy uniform Hermite grid when
+    ``DEFAULT_CONFIG.parampoly3.knot_aligned`` is off.
     """
-    length = run.s_end - run.s_start
-    target = pp3_cfg.default_segment_length if pp3_cfg.enabled else length
-    n = max(1, int(np.ceil(length / max(target, pp3_cfg.min_segment_length))))
-    out: List[ParamPoly3] = []
-    for i in range(n):
-        s0 = run.s_start + (i / n) * length
-        s1 = run.s_start + ((i + 1) / n) * length
-        if s1 - s0 < pp3_cfg.min_segment_length:
-            continue
-        out.append(
-            ParamPoly3.from_spline_window(
-                spline,
-                s0,
-                s1,
-                coefficient_epsilon=pp3_cfg.coefficient_epsilon,
-            )
-        )
-    return out
+    return ParamPoly3.from_spline_windows(spline, run.s_start, run.s_end, pp3_cfg)
 
 
 def _resolve_candidate_road_ids(
@@ -288,7 +274,9 @@ def _evaluate_plan_view_world(
         return None
 
     geom = plan_view.geometries[0] if at_start else plan_view.geometries[-1]
-    p = 0.0 if at_start else geom.length
+    # `end_param` honours paramPoly3@pRange: the end of a "normalized"
+    # geometry is p = 1, not p = length.
+    p = 0.0 if at_start else end_param(geom)
 
     coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
         None
@@ -339,7 +327,9 @@ def _evaluate_planview_endpoint_with_heading(
         return None
 
     geom = plan_view.geometries[0] if at_start else plan_view.geometries[-1]
-    p = 0.0 if at_start else geom.length
+    # `end_param` honours paramPoly3@pRange: the end of a "normalized"
+    # geometry is p = 1, not p = length.
+    p = 0.0 if at_start else end_param(geom)
 
     coeffs: Optional[Tuple[float, float, float, float, float, float, float, float]] = (
         None

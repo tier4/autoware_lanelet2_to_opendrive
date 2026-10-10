@@ -12,7 +12,7 @@ import lxml.etree as ET
 import numpy as np
 
 from ..util import extract_points
-from .geometry import Arc, ParamPoly3, evaluate_plan_view_world
+from .geometry import Arc, ParamPoly3, evaluate_plan_view_world, param_for_offset
 
 if TYPE_CHECKING:
     from .road import Road
@@ -223,10 +223,13 @@ def _sample_road_points(road: Road) -> List[tuple]:
         sin_hdg = math.sin(geom.hdg)
 
         for i in range(n_pts):
-            p = seg_length * i / (n_pts - 1)  # arc-length parameter
+            ds = seg_length * i / (n_pts - 1)  # distance travelled into the geometry
+            # `param_for_offset` maps travelled distance to the geometry's own
+            # curve parameter, honouring paramPoly3@pRange.
+            p = param_for_offset(geom, ds)
 
             if isinstance(geom, ParamPoly3):
-                # ParamPoly3 geometry: evaluate polynomial at arc-length p
+                # ParamPoly3 geometry: evaluate polynomial at parameter p
                 local_u = geom.aU + geom.bU * p + geom.cU * p**2 + geom.dU * p**3
                 local_v = geom.aV + geom.bV * p + geom.cV * p**2 + geom.dV * p**3
                 wx = geom.x + local_u * cos_hdg - local_v * sin_hdg
@@ -254,7 +257,9 @@ def _sample_road_points(road: Road) -> List[tuple]:
                 wy = geom.y + p * sin_hdg
                 local_hdg = geom.hdg
 
-            samples.append((wx, wy, geom.s + p, local_hdg))
+            # The road-frame s is travelled distance, not the curve
+            # parameter: they only coincide for pRange="arcLength".
+            samples.append((wx, wy, geom.s + ds, local_hdg))
 
     return samples
 

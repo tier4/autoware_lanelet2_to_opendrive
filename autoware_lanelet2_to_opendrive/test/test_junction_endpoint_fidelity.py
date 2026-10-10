@@ -29,7 +29,10 @@ from typing import Optional, Tuple
 import lxml.etree as ET
 import pytest
 
-from autoware_lanelet2_to_opendrive.opendrive.geometry import evaluate_road_endpoints
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    element_end_param,
+    evaluate_road_endpoints,
+)
 
 
 TOLERANCE_M = 0.05
@@ -59,7 +62,9 @@ def _evaluate_lane_inner_edge(
         return None
     geom = geom_elems[0] if at_start else geom_elems[-1]
     geom_length = float(geom.get("length", "0.0"))
-    p_local = 0.0 if at_start else geom_length
+    # The end of a geometry is p = 1 when paramPoly3@pRange is "normalized",
+    # and p = length otherwise; `geom_length` stays the arc length used for s.
+    p_local = 0.0 if at_start else element_end_param(geom)
 
     geom_x = float(geom.get("x"))
     geom_y = float(geom.get("y"))

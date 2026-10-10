@@ -840,6 +840,52 @@ class Splines:
         """
         return self.spline(t, nu=derivative)
 
+    def breakpoints(self) -> np.ndarray:
+        """Return the spline's distinct breakpoints in ``t`` (including 0 and 1).
+
+        Between two consecutive breakpoints the B-spline is a *single*
+        polynomial of degree ``k`` in ``t``.  Emission that subdivides only
+        inside such a span can therefore reproduce the fitted curve exactly
+        with a cubic paramPoly3 rather than re-approximating it.
+        """
+        k = self.k
+        internal = np.asarray(self.knots)[k + 1 : len(self.knots) - (k + 1)]
+        return np.unique(np.concatenate(([0.0], np.asarray(internal), [1.0])))
+
+    def evaluate_param(self, t: float, derivative: int = 0) -> np.ndarray:
+        """Evaluate the spline (or its ``t``-derivatives) at parameter ``t``.
+
+        Unlike :meth:`evaluate`, the argument is the spline's own normalized
+        parameter, not arc length, and derivatives are taken with respect to
+        ``t`` (no chain rule, no re-normalization).  ``derivative=0`` returns
+        the point in the original world frame.
+
+        Args:
+            t: Normalized parameter value in ``[0, 1]``.
+            derivative: Derivative order with respect to ``t``.
+
+        Returns:
+            3D point (``derivative=0``) or d^n/dt^n vector.
+        """
+        value = self.spline(t, nu=derivative)
+        if derivative == 0:
+            return value + self._origin_offset
+        return value
+
+    def param_at_arc_length(self, s: float) -> float:
+        """Return the normalized parameter ``t`` at arc length ``s``."""
+        self._compute_arc_length_table()
+        if s <= 0.0:
+            return 0.0
+        if s >= self._computed_total_length:
+            return 1.0
+        return float(np.interp(s, self._arc_length_table, self._param_table))
+
+    def arc_length_at_param(self, t: float) -> float:
+        """Return the arc length ``s`` at normalized parameter ``t``."""
+        self._compute_arc_length_table()
+        return float(np.interp(t, self._param_table, self._arc_length_table))
+
     def _compute_arc_length_table(
         self, num_samples: int = DEFAULT_CONFIG.spline.arc_length_table_samples
     ) -> None:
