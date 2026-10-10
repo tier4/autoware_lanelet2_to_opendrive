@@ -195,7 +195,7 @@ each is also overridable from the command line.
 | Section | Key | Default | Effect |
 |---------|-----|---------|--------|
 | `parampoly3` | `enabled` | `true` | Use dynamic ParamPoly3 segment generation |
-| | `min_segment_length` | `0.5` m | CARLA crashes below 0.5 m |
+| | `min_segment_length` | `0.5` m | Floor for splitting roads into segments; a lanelet shorter than this becomes one straight segment (with a warning) |
 | | `default_segment_length` | `1.0` m | Target segment length |
 | | `max_segments` / `min_segments` | 100 / 1 | Caps on segment count per road |
 | | `coefficient_epsilon` | `1e-8` | Round small coefficients to zero |
