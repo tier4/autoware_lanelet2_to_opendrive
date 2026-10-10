@@ -20,10 +20,6 @@ one or more lane widths, but the **lane edges** still coincide.
 """
 
 import math
-import os
-import subprocess
-import tempfile
-from pathlib import Path
 from typing import Optional, Tuple
 
 import lxml.etree as ET
@@ -218,68 +214,6 @@ def _outermost_lane_link_target(
     return None
 
 
-def _nishishinjuku_xodr_path() -> Path:
-    """Per-worker output path for the Nishishinjuku XODR.
-
-    Using a worker-specific filename keeps ``pytest -n`` workers from
-    racing to build / read the same file (the conversion is expensive,
-    so we cache it on disk for the lifetime of the worker, but each
-    worker needs its own copy).
-    """
-    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    return Path(tempfile.gettempdir()) / f"nishishinjuku_carla_{worker_id}.xodr"
-
-
-def _build_nishishinjuku_xodr() -> Path:
-    """Produce the Nishishinjuku XODR if it is not already on disk.
-
-    The fix in P0-2 shifts connecting-road endpoints; only an
-    end-to-end conversion exercises it. We build the file on demand via
-    ``uv run convert`` so the regression test actually runs in CI rather
-    than silently skipping.
-    """
-    xodr_path = _nishishinjuku_xodr_path()
-    if xodr_path.exists():
-        return xodr_path
-
-    fixture = Path(
-        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
-    ).resolve()
-    if not fixture.is_file():
-        pytest.skip(f"{fixture} not available; cannot build XODR")
-
-    # Junction endpoint pinning is on by default since #437 — no flag is
-    # required at the CLI.  The lateral-displacement gate inside
-    # ``Road.construct_connecting_roads_from_junctions`` keeps the override
-    # safe on maps where a connecting road is parallel to a regular road
-    # at the junction boundary (the original #431 root cause).
-    cmd = [
-        "uv",
-        "run",
-        "convert",
-        "map=nishishinjuku",
-        "target=carla",
-        f"input_map_path={fixture}",
-        f"output_map_path={xodr_path}",
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError as exc:
-        # Tooling missing — environmental, not a regression.
-        pytest.skip(f"converter unavailable: {exc}")
-
-    if not xodr_path.is_file():
-        # The converter reported success (exit 0) but the expected file
-        # is missing — fail with a clear, actionable message instead of
-        # leaking out as an opaque XML parse error in the next step.
-        pytest.fail(
-            f"converter exited successfully but {xodr_path} was not "
-            "produced; check that ``output_map_path`` is honoured."
-        )
-
-    return xodr_path
-
-
 def _distance3(a, b) -> float:
     return float(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5)
 
@@ -379,7 +313,7 @@ def test_evaluate_road_endpoints_minimal():
     assert end == pytest.approx((11.0, 2.0, 3.0), abs=1e-9)
 
 
-def test_junction_connection_endpoints_match_linked_roads():
+def test_junction_connection_endpoints_match_linked_roads(nishishinjuku_xodr):
     """Every junction connection must land on the linked lane edge within 5 cm.
 
     The P0-2 fix (made lane-aware in #437) overrides the connecting-road
@@ -399,7 +333,7 @@ def test_junction_connection_endpoints_match_linked_roads():
     pinned to their upstream connector, recognised here by that
     coincidence.
     """
-    xodr_path = _build_nishishinjuku_xodr()
+    xodr_path = nishishinjuku_xodr
 
     tree = ET.parse(str(xodr_path))
     root = tree.getroot()
@@ -568,7 +502,7 @@ def test_junction_connection_endpoints_match_linked_roads():
         )
 
 
-def test_nishishinjuku_emits_junction_priorities() -> None:
+def test_nishishinjuku_emits_junction_priorities(nishishinjuku_xodr) -> None:
     """End-to-end: 85 right_of_way REs in nishishinjuku produce > 0 <priority> nodes.
 
     Also runs qc-framework against the produced .xodr so a malformed
@@ -580,7 +514,7 @@ def test_nishishinjuku_emits_junction_priorities() -> None:
         validate,
     )
 
-    xodr_path = _build_nishishinjuku_xodr()
+    xodr_path = nishishinjuku_xodr
     tree = ET.parse(str(xodr_path))
 
     priorities = tree.findall(".//junction/priority")

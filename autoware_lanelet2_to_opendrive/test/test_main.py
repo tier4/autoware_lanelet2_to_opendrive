@@ -1,12 +1,9 @@
 """Tests for main conversion functionality and RoadLaneletMapping."""
 
-import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 import lxml.etree as ET
-import pytest
 
 from autoware_lanelet2_to_opendrive.util import RoadLaneletMapping
 
@@ -124,45 +121,7 @@ def test_single_road_multiple_lanelets():
         assert mapping.get_road_for_lanelet(lanelet_id) == road_id
 
 
-def _nishishinjuku_xodr_for_issue_291() -> Path:
-    """Build (or reuse) the Nishishinjuku XODR for the Road 185 regression test.
-
-    Mirrors the on-demand build pattern in ``test_junction_endpoint_fidelity``:
-    invoke ``uv run convert`` on the bundled OSM fixture and parse the result.
-    Skips when the converter or fixture isn't available so the test is
-    sandbox-friendly.
-    """
-    fixture = Path(
-        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
-    ).resolve()
-    if not fixture.is_file():
-        pytest.skip(f"{fixture} not available; cannot build XODR")
-
-    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    xodr_path = (
-        Path(tempfile.gettempdir()) / f"nishishinjuku_issue_291_{worker_id}.xodr"
-    )
-
-    cmd = [
-        "uv",
-        "run",
-        "convert",
-        "map=nishishinjuku",
-        "target=carla",
-        f"input_map_path={fixture}",
-        f"output_map_path={xodr_path}",
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError as exc:
-        pytest.skip(f"converter unavailable: {exc}")
-
-    if not xodr_path.is_file():
-        pytest.fail(f"converter exited successfully but {xodr_path} was not produced")
-    return xodr_path
-
-
-def test_issue_291_diverging_roads_have_no_lane_drop():
+def test_issue_291_diverging_roads_have_no_lane_drop(nishishinjuku_xodr):
     """Diverging lanes must not silently drop their road->road successor link.
 
     Originally tracked under #291: a single 1->N divergence (Road 185 ->
@@ -187,7 +146,7 @@ def test_issue_291_diverging_roads_have_no_lane_drop():
       from rid X lid Y -> rid Z" whenever this fails and ego visibly
       snaps lanes.
     """
-    xodr_path = _nishishinjuku_xodr_for_issue_291()
+    xodr_path = nishishinjuku_xodr
     tree = ET.parse(str(xodr_path))
 
     def driving_lane_ids(road: ET._Element) -> set[int]:
