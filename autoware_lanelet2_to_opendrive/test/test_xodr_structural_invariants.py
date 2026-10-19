@@ -83,12 +83,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 #: and chained connectors, coarsely digitised boundaries, non-vehicle lanelets.
 REAL_DERIVED_CLUSTER = DATA / "junction_cluster.osm"
 
-#: Produced by the ``_ensure_nishishinjuku_xodr`` session fixture in
-#: ``autoware_carla_scenario/test/conftest.py``.  Reused when it is already
-#: there; never generated here, because converting Nishi-Shinjuku costs about
-#: two minutes and this file is not worth that on its own.
-NISHISHINJUKU_XODR = DATA / "nishishinjuku_carla.xodr"
-
 
 def _convert(source: Path, out_dir: Path, map_config: str) -> Path:
     """Run the ``convert`` CLI on *source* and return the emitted ``.xodr``."""
@@ -382,16 +376,53 @@ def test_converted_junction_fixture_satisfies_invariants(fanout_xodr: Path) -> N
     assert not violations, format_violations(violations)
 
 
-@pytest.mark.skipif(
-    not NISHISHINJUKU_XODR.exists(),
+#: The one invariant Nishi-Shinjuku still breaks, tracked separately so the
+#: others stay enforced on it.  See
+#: :func:`test_nishishinjuku_linked_endpoints_still_gap`.
+_KNOWN_NISHISHINJUKU_VIOLATION = "linked_endpoints_apart"
+
+
+def test_nishishinjuku_output_satisfies_invariants(nishishinjuku_xodr: Path) -> None:
+    """The project's reference conversion, converted by this invocation.
+
+    Takes the session fixture rather than a path under ``test/data``: that
+    path holds whatever an earlier checkout left behind, so a stale artifact
+    would be checked instead of the current converter, and in a fresh clone
+    the check would simply not run.
+
+    ``linked_endpoints_apart`` is excluded and asserted separately, so that
+    the one invariant this map is known to break does not mask a regression
+    in any of the others.
+    """
+    violations = [
+        v
+        for v in check_invariants(nishishinjuku_xodr)
+        if v.code != _KNOWN_NISHISHINJUKU_VIOLATION
+    ]
+    assert not violations, format_violations(violations)
+
+
+@pytest.mark.xfail(
+    strict=True,
     reason=(
-        "nishishinjuku_carla.xodr has not been generated in this run "
-        "(see autoware_carla_scenario/test/conftest.py)"
+        "linked road endpoints on Nishi-Shinjuku are still up to 0.071 m "
+        "apart against a 0.01 m tolerance (22 links); the junction endpoint "
+        "work is what closes this"
     ),
 )
-def test_nishishinjuku_output_satisfies_invariants() -> None:
-    """The project's reference conversion, when it is already on disk."""
-    violations = check_invariants(NISHISHINJUKU_XODR)
+def test_nishishinjuku_linked_endpoints_still_gap(nishishinjuku_xodr: Path) -> None:
+    """Pin the gap this map has, so closing it is visible as a change.
+
+    Measured on the current converter: 22 links past the 1 cm tolerance, the
+    worst three at 0.071 m. Marked ``strict``, so the day the gaps close this
+    test fails and the marker has to go -- the defect cannot be fixed
+    silently.
+    """
+    violations = [
+        v
+        for v in check_invariants(nishishinjuku_xodr)
+        if v.code == _KNOWN_NISHISHINJUKU_VIOLATION
+    ]
     assert not violations, format_violations(violations)
 
 

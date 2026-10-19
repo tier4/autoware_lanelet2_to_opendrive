@@ -68,13 +68,17 @@ ROAD_LENGTH_TOLERANCE_M = 1e-6
 #: endpoints, applied only where the two sides carry the same driving lanes
 #: (see :func:`_check_road_links`).  One centimetre is ASAM's own contact
 #: tolerance in
-#: ``lane_smoothness.contact_point_no_horizontal_gaps``.  Measured headroom is
-#: thinner than the other tolerances here: the largest gap over 575 such links
-#: on Nishi-Shinjuku is 5 mm, and every one of those is a synthetic
-#: divergence stub sitting at
-#: :attr:`~.config.GeometryConstants.divergence_min_segment_length`, which
-#: that constant's own documentation requires to stay strictly below 1 cm for
-#: exactly this reason.
+#: ``lane_smoothness.contact_point_no_horizontal_gaps``, so it is the standard's
+#: figure rather than one fitted to this converter's output.
+#:
+#: Nishi-Shinjuku does not meet it: 22 links sit past 1 cm, the worst three at
+#: 7.1 cm.  Those are pinned by
+#: ``test_nishishinjuku_linked_endpoints_still_gap`` rather than absorbed by a
+#: looser tolerance, because a tolerance wide enough to pass them would also
+#: pass a genuinely disconnected road.  Synthetic divergence stubs sit at
+#: :attr:`~.config.GeometryConstants.divergence_min_segment_length`, which that
+#: constant's own documentation requires to stay strictly below 1 cm, so they
+#: are not what these violations are.
 LINKED_ENDPOINT_TOLERANCE_M = 0.01
 
 
