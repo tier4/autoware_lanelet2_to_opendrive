@@ -1463,6 +1463,64 @@ class TestBoundaryGridPreFilter:
         )
 
 
+class TestAccuracyReportIsOptIn:
+    """The report must be switchable off without editing the source.
+
+    It adds a section to ``.mapping.json`` on every conversion and can warn
+    about maps that are fine, so a pipeline that does not want it needs a way
+    to say so.
+    """
+
+    DENSE_X = [0.5 * i for i in range(41)]
+
+    def _convert(self, tmp_path: Path, report_accuracy: bool = True) -> dict:
+        """Run the save/validate entry point and return the mapping JSON."""
+        import lanelet2
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            validate_and_save_mapping,
+        )
+
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, self.DENSE_X), _make_linestring(-3.0, self.DENSE_X)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        xodr_path = tmp_path / "test.xodr"
+        xodr_xml = _straight_road_xml(1, 0.0, 20.0, [-1])
+        xodr_path.write_text(xodr_xml, encoding="utf-8")
+        osm_path = tmp_path / "test.osm"
+        osm_path.write_text("<osm/>", encoding="utf-8")
+
+        result = validate_and_save_mapping(
+            lanelet_to_road_and_lane={lanelet.id: (1, -1)},
+            lanelet_map=lanelet_map,
+            roads=_parse_roads(xodr_xml),
+            xodr_path=xodr_path,
+            osm_path=osm_path,
+            mgrs_offset=(0.0, 0.0),
+            strict=False,
+            report_accuracy=report_accuracy,
+        )
+        return json.loads(result.read_text(encoding="utf-8"))
+
+    def test_report_is_written_by_default(self, tmp_path: Path) -> None:
+        data = self._convert(tmp_path)
+        assert "reference_match_distances" in data
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="report is unconditional (awf#14 review, finding 5)",
+    )
+    def test_report_can_be_switched_off(self, tmp_path: Path) -> None:
+        data = self._convert(tmp_path, report_accuracy=False)
+        assert "reference_match_distances" not in data, (
+            "the positional-accuracy report cannot be switched off, so it "
+            "changes .mapping.json on every conversion"
+        )
+
+
 class TestLocalisedSpikeIsNotDiluted:
     """A road that is wrong in one spot must be reported at full size.
 

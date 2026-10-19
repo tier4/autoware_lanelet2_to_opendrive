@@ -2168,6 +2168,7 @@ def validate_and_save_mapping(
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None,
     traffic_light_config: dict | None = None,
     strict: bool = True,
+    report_accuracy: bool = True,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
