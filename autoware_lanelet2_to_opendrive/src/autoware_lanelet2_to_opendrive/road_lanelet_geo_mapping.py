@@ -1874,6 +1874,11 @@ def _preprocessed_osm_path_for(xodr_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def original_lanelet_ids(mapping: GeoRoadLaneletMapping, lanelet_id: int) -> list[int]:
+    """Input-map lanelet ids a reported lanelet id came from."""
+    return [lanelet_id]
+
+
 def summarise_reference_match_accuracy(
     mapping: GeoRoadLaneletMapping,
     *,

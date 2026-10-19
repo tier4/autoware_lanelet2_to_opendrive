@@ -1517,6 +1517,87 @@ class TestAccuracyReportIsOptIn:
         )
 
 
+class TestOriginalLaneletIds:
+    """A reported lanelet id is a preprocessed id, and must be traceable back.
+
+    ``main`` converts the *preprocessed* map, so a lanelet that preprocessing
+    merged carries an id that does not appear in the file the user supplied.
+    Reporting such an id without a way back makes the worst-offender list
+    unusable: there is nothing to look up in the source map.
+    """
+
+    def _mapping_with_merge(self) -> GeoRoadLaneletMapping:
+        """Mapping whose lanelet 99 was merged from input lanelets 1 and 2."""
+        return GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={99: (1, -1)},
+            preprocessing_log={
+                "config_path": None,
+                "entries": [
+                    {
+                        "operation": "merge",
+                        "input_ids": [1, 2],
+                        "output_ids": [99],
+                        "details": "merged 1 and 2",
+                    }
+                ],
+            },
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="preprocessed ids are reported with no way back (awf#14 review, finding 4)",
+    )
+    def test_a_merged_id_resolves_to_the_ids_it_was_made_from(self) -> None:
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            original_lanelet_ids,
+        )
+
+        assert original_lanelet_ids(self._mapping_with_merge(), 99) == [1, 2]
+
+    def test_an_untouched_id_resolves_to_itself(self) -> None:
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            original_lanelet_ids,
+        )
+
+        assert original_lanelet_ids(self._mapping_with_merge(), 7) == [7]
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="preprocessed ids are reported with no way back (awf#14 review, finding 4)",
+    )
+    def test_a_chain_of_operations_is_followed_to_the_input(self) -> None:
+        """A lanelet merged twice must resolve to the original input ids."""
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            original_lanelet_ids,
+        )
+
+        mapping = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={100: (1, -1)},
+            preprocessing_log={
+                "config_path": None,
+                "entries": [
+                    {
+                        "operation": "merge",
+                        "input_ids": [1, 2],
+                        "output_ids": [99],
+                        "details": "",
+                    },
+                    {
+                        "operation": "merge",
+                        "input_ids": [99, 3],
+                        "output_ids": [100],
+                        "details": "",
+                    },
+                ],
+            },
+        )
+        assert original_lanelet_ids(mapping, 100) == [1, 2, 3]
+
+
 class TestLocalisedSpikeIsNotDiluted:
     """A road that is wrong in one spot must be reported at full size.
 
