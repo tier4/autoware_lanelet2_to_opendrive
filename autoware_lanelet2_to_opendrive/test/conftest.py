@@ -97,6 +97,23 @@ def nishishinjuku_xodr(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
         if not staged.is_file():
             pytest.fail(f"converter exited successfully but {staged} was not produced")
+
+        # The converter writes its sidecars next to the .xodr and names them
+        # after it, so staging renames the map but leaves them behind under
+        # the staged name -- `nishishinjuku_carla.xodr.tmp.mapping.json`. The
+        # mapping sidecar is the only record of which connector carries which
+        # source lanelet, so a test that needs it would find nothing and have
+        # no way to tell that from a converter that never wrote one. Move them
+        # with the map.
+        # ``staged.stem`` is the staged name without the pid -- e.g.
+        # ``nishishinjuku_carla.xodr.tmp`` -- which is the prefix the converter
+        # built the sidecar names from.
+        for sidecar in sorted(staged.parent.glob(f"{staged.stem}.*")):
+            if sidecar == staged:
+                continue
+            tail = sidecar.name[len(staged.stem) :]  # ".mapping.json", ...
+            os.replace(sidecar, xodr_path.with_name(xodr_path.stem + tail))
+
         os.replace(staged, xodr_path)
 
     return xodr_path
