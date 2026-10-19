@@ -2203,6 +2203,13 @@ def validate_and_save_mapping(
             logged as a warning and the already-written XODR and
             ``.mapping.json`` are kept — the conversion itself succeeded, and
             the geometric mapping is only a heuristic cross-check.
+        report_accuracy: Whether to measure and report positional accuracy
+            against the Lanelet2 input.  When ``False`` the mapping JSON
+            carries no ``reference_match_distances`` section and no accuracy
+            log line is emitted.  The measurement itself is cheap — the
+            matching already holds both polylines — so this exists to leave
+            the output and the log untouched for callers that have not asked
+            for the report, not to save work.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
@@ -2246,7 +2253,13 @@ def validate_and_save_mapping(
     #    come from the matching above, which already holds both polylines, so
     #    this costs one extra measurement per matched road and no extra
     #    conversion. Re-save the JSON so the figures outlive the log.
-    accuracy = summarise_reference_match_accuracy(geo_mapping)
+    #
+    #    Skipped entirely when the caller does not want the report: it adds a
+    #    section to the mapping JSON and can warn about a map that is fine, so
+    #    a pipeline that has not asked for it should see neither.
+    accuracy = (
+        summarise_reference_match_accuracy(geo_mapping) if report_accuracy else {}
+    )
     if accuracy:
         # The headline is the exceedance counts, not median/p95: those two
         # fall as soon as the map gains well-converted roads, so they are

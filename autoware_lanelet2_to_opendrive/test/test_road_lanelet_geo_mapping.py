@@ -1509,10 +1509,6 @@ class TestAccuracyReportIsOptIn:
         data = self._convert(tmp_path)
         assert "reference_match_distances" in data
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="report is unconditional (awf#14 review, finding 5)",
-    )
     def test_report_can_be_switched_off(self, tmp_path: Path) -> None:
         data = self._convert(tmp_path, report_accuracy=False)
         assert "reference_match_distances" not in data, (
