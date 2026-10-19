@@ -25,3 +25,15 @@ verbose: false    # Enable detailed logging
 # (target.strict_mapping_validation); map takes precedence over target,
 # which takes precedence over this global value.
 strict_mapping_validation: false
+
+# Measure how far each emitted road's reference line sits from the Lanelet2
+# boundary it was generated from, and report the counts past each severity
+# level. The figures are written to .mapping.json as
+# reference_match_distances and summarised in the log; a road past the warn
+# threshold is listed individually as a WARNING. The measurement reuses
+# polylines the matching already holds, so it costs no extra conversion.
+# Set to false to leave .mapping.json and the log untouched.
+# Can be overridden per map (map.report_reference_match_accuracy) or per
+# target (target.report_reference_match_accuracy); map takes precedence over
+# target, which takes precedence over this global value.
+report_reference_match_accuracy: true
