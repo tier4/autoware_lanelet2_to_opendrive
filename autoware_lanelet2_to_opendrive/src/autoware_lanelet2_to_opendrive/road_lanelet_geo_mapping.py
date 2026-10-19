@@ -119,6 +119,63 @@ class SkippedStopLineEntry:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ReferenceMatchDistance:
+    """Positional error of one road's reference line against its source boundary.
+
+    Attributes:
+        max_m: Symmetric Hausdorff-style point-to-segment distance (m) -- the
+            primary figure.  A mean over sample points shrinks as the road
+            gets longer, so a road that is correct everywhere but one spot
+            reports a small error purely because of the correct part; the
+            maximum does not.
+        mean_m: Symmetric mean point-to-segment distance (m), kept as a
+            secondary figure: it says how much of the road is off, where
+            ``max_m`` says how far the worst of it is.
+        boundary_length_m: Length (m) of the lanelet boundary this was
+            measured against, so exceedance counts can be normalised per
+            kilometre and compared across maps of different size.  ``None``
+            for records restored from a mapping written before it existed.
+    """
+
+    max_m: float
+    mean_m: float
+    boundary_length_m: float | None = None
+
+    def to_dict(self, decimals: int) -> dict:
+        """Serialize to a JSON-compatible dictionary, rounded to *decimals*."""
+        result: dict = {
+            "max_m": round(self.max_m, decimals),
+            "mean_m": round(self.mean_m, decimals),
+        }
+        if self.boundary_length_m is not None:
+            result["boundary_length_m"] = round(self.boundary_length_m, decimals)
+        return result
+
+    @classmethod
+    def from_value(cls, value: object) -> "ReferenceMatchDistance":
+        """Deserialize one stored value, accepting the legacy plain float.
+
+        Mappings written before this record existed stored a bare float per
+        lanelet, and that float was the *mean*.  There is no way to recover
+        the maximum from it, so it is reused for both fields: the summary then
+        reports what the old file actually measured rather than dropping the
+        record or inventing a worse figure.
+        """
+        if isinstance(value, dict):
+            return cls(
+                max_m=float(value["max_m"]),
+                mean_m=float(value["mean_m"]),
+                boundary_length_m=(
+                    float(value["boundary_length_m"])
+                    if value.get("boundary_length_m") is not None
+                    else None
+                ),
+            )
+        mean = float(value)  # type: ignore[arg-type]
+        return cls(max_m=mean, mean_m=mean, boundary_length_m=None)
+
+
 @dataclass
 class _RoadCandidates:
     """Per-road candidate list for the 3-phase matching algorithm."""
@@ -166,7 +223,7 @@ class GeoRoadLaneletMapping:
     #: recomputed rather than taken from whichever matching fallback level
     #: happened to win — those levels use two different metrics and mixing
     #: them makes level-3 matches look optimistically small.
-    reference_match_distances: dict[int, float] | None = None
+    reference_match_distances: dict[int, ReferenceMatchDistance] | None = None
     #: Subset of the ``reference_match_distances`` keys whose road was
     #: recovered by the rescue pass. Those roads are matched with a relaxed
     #: threshold (``rescue_threshold_factor`` x ``match_threshold``), so their
@@ -219,7 +276,7 @@ class GeoRoadLaneletMapping:
         if self.reference_match_distances is not None:
             decimals = DEFAULT_CONFIG.geo_mapping.distance_report_decimals
             result["reference_match_distances"] = {
-                str(k): round(v, decimals)
+                str(k): v.to_dict(decimals)
                 for k, v in self.reference_match_distances.items()
             }
         if self.rescued_reference_lanelets is not None:
@@ -245,9 +302,11 @@ class GeoRoadLaneletMapping:
             }
 
         raw_rmd = data.get("reference_match_distances")
-        reference_match_distances: dict[int, float] | None = None
+        reference_match_distances: dict[int, ReferenceMatchDistance] | None = None
         if raw_rmd is not None:
-            reference_match_distances = {int(k): float(v) for k, v in raw_rmd.items()}
+            reference_match_distances = {
+                int(k): ReferenceMatchDistance.from_value(v) for k, v in raw_rmd.items()
+            }
 
         return cls(
             xodr_sha256=data["xodr_sha256"],
@@ -416,10 +475,10 @@ def _symmetric_mean_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
     )
 
 
-def _directed_mean_polyline_distance(
+def _directed_polyline_distances(
     from_points: np.ndarray, to_line: np.ndarray
-) -> float:
-    """Mean distance from each point of *from_points* to the *to_line* polyline.
+) -> np.ndarray:
+    """Point-to-segment distance from every point of *from_points* to *to_line*.
 
     Unlike :func:`_directed_mean_distance`, the nearest point is taken on the
     *segments* of ``to_line``, not on its vertices.  The two agree only when
@@ -432,9 +491,6 @@ def _directed_mean_polyline_distance(
     This is used for *reporting only*.  Matching keeps
     :func:`_directed_mean_distance` so that no match decision changes.
     """
-    if len(to_line) < 2:
-        return _directed_mean_distance(from_points, to_line)
-
     seg_start = to_line[:-1]  # (M-1, 2)
     seg_vec = to_line[1:] - seg_start  # (M-1, 2)
     seg_len_sq = np.sum(seg_vec * seg_vec, axis=1)  # (M-1,)
@@ -451,15 +507,38 @@ def _directed_mean_polyline_distance(
     )
     diffs = from_points[:, np.newaxis, :] - closest
     dists_sq = np.sum(diffs * diffs, axis=2)
-    return float(np.mean(np.sqrt(np.min(dists_sq, axis=1))))
+    return np.sqrt(np.min(dists_sq, axis=1))
+
+
+def _directed_mean_polyline_distance(
+    from_points: np.ndarray, to_line: np.ndarray
+) -> float:
+    """Mean point-to-segment distance from *from_points* to *to_line*."""
+    if len(to_line) < 2:
+        return _directed_mean_distance(from_points, to_line)
+    return float(np.mean(_directed_polyline_distances(from_points, to_line)))
+
+
+def _directed_max_polyline_distance(
+    from_points: np.ndarray, to_line: np.ndarray
+) -> float:
+    """Worst point-to-segment distance from *from_points* to *to_line*."""
+    if len(to_line) < 2:
+        return _directed_mean_distance(from_points, to_line)
+    return float(np.max(_directed_polyline_distances(from_points, to_line)))
 
 
 def _symmetric_mean_polyline_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
     """Symmetric point-to-segment distance: max of both directed means.
 
     The reporting counterpart of :func:`_symmetric_mean_distance`; see
-    :func:`_directed_mean_polyline_distance` for why the vertex-based form is
+    :func:`_directed_polyline_distances` for why the vertex-based form is
     unsuitable for an accuracy figure.
+
+    Averaging over the sample points makes this figure fall as the road gets
+    longer: a single localised excursion is divided by the whole length, so it
+    is kept only as a secondary value.  Use
+    :func:`_symmetric_max_polyline_distance` for the headline figure.
     """
     return max(
         _directed_mean_polyline_distance(line_a, line_b),
@@ -467,13 +546,36 @@ def _symmetric_mean_polyline_distance(line_a: np.ndarray, line_b: np.ndarray) ->
     )
 
 
-#: Name of the metric behind every value in
+def _symmetric_max_polyline_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
+    """Symmetric Hausdorff-style point-to-segment distance.
+
+    The maximum over both directed worst-case distances: the smallest ``d``
+    such that every point of either polyline lies within ``d`` of the other.
+    This is the primary accuracy figure, because it is the only one that
+    survives the road's length — a mean dilutes a localised deviation in
+    proportion to how much correct geometry surrounds it, so a road with one
+    bad metre reports a small error simply for being long.
+    """
+    return max(
+        _directed_max_polyline_distance(line_a, line_b),
+        _directed_max_polyline_distance(line_b, line_a),
+    )
+
+
+def _polyline_length(pts: np.ndarray) -> float:
+    """Total length (m) of a polyline."""
+    if len(pts) < 2:
+        return 0.0
+    return float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)))
+
+
+#: Name of the metric behind every ``max_m`` in
 #: :attr:`GeoRoadLaneletMapping.reference_match_distances`.  The matching
 #: fallback levels use two different metrics (symmetric for levels 1-2,
 #: one-directional for level 3), so the reported figures are *not* taken from
 #: whichever level won — they are all recomputed with this single metric, and
 #: the name is carried in the summary so it cannot be mistaken for another.
-_REPORT_METRIC_NAME: str = "symmetric_point_to_segment"
+_REPORT_METRIC_NAME: str = "symmetric_point_to_segment_max"
 
 
 def _polyline_direction(pts: np.ndarray) -> np.ndarray:
@@ -1445,7 +1547,7 @@ def build_mapping(
     # *vertices*, which charges the boundary's vertex spacing as if it were
     # error; and the Phase-3 pre-walk may move the reference to a lanelet that
     # ``raw_dists`` has no entry for at all.
-    reference_match_distances: dict[int, float] = {}
+    reference_match_distances: dict[int, ReferenceMatchDistance] = {}
     rescued_reference_lanelets: set[int] = set()
 
     def _record_reference_accuracy(
@@ -1456,8 +1558,10 @@ def build_mapping(
         boundary = boundaries.get(lanelet_id)
         if boundary is None:
             return
-        reference_match_distances[lanelet_id] = _symmetric_mean_polyline_distance(
-            rc.ref_line, boundary
+        reference_match_distances[lanelet_id] = ReferenceMatchDistance(
+            max_m=_symmetric_max_polyline_distance(rc.ref_line, boundary),
+            mean_m=_symmetric_mean_polyline_distance(rc.ref_line, boundary),
+            boundary_length_m=_polyline_length(boundary),
         )
         if rescued:
             rescued_reference_lanelets.add(lanelet_id)
@@ -1777,16 +1881,26 @@ def summarise_reference_match_accuracy(
 ) -> dict:
     """Summarise how closely the emitted roads follow their source lanelets.
 
-    :func:`build_mapping` measures, for every road it matches, the symmetric
-    mean point-to-segment distance between that road's reference line and the
-    boundary of the lanelet the reference line was generated from. That figure
-    is the conversion's positional error against its own Lanelet2 input, and
-    this turns it into something reportable.
+    :func:`build_mapping` measures, for every road it matches, the point-to-
+    segment distance between that road's reference line and the boundary of
+    the lanelet the reference line was generated from. That figure is the
+    conversion's positional error against its own Lanelet2 input, and this
+    turns it into something reportable.
 
-    The distinction matters: ``_MATCH_THRESHOLD`` asks "is this the same road?",
-    not "is this road accurate?". A road sitting 3.4 m from its source boundary
-    — most of a lane width — passes the tolerance without comment. Only the
-    distribution shows that.
+    The distinction matters: ``_MATCH_THRESHOLD`` asks "is this the same
+    road?", not "is this road accurate?". A road sitting 3.4 m from its source
+    boundary -- most of a lane width -- passes the tolerance without comment.
+
+    The headline is a **count**, not a distribution statistic: how many roads
+    exceed each level of
+    :attr:`~.config.GeoMappingConstants.exceedance_thresholds_m`, what
+    fraction of all matched roads that is, and how many that is per kilometre
+    of matched boundary. ``median_m`` and ``p95_m`` are kept but are
+    *scale-dependent* -- they are named in ``scale_dependent_keys`` -- because
+    they describe the mix of roads in this particular map: adding
+    well-converted roads improves them without anything being fixed, and two
+    maps cannot be compared by them. ``per_km`` is the figure that survives a
+    change of map size.
 
     Roads recovered by the rescue pass are included, and their distances may
     exceed ``_MATCH_THRESHOLD`` because that pass uses a relaxed threshold;
@@ -1794,57 +1908,96 @@ def summarise_reference_match_accuracy(
     of letting a summary claim every match is within tolerance.
 
     Because the distances are keyed by lanelet id, this works from a single
-    conversion. Comparing two ``.xodr`` outputs instead requires converting the
-    same map twice and cannot be keyed on road ids at all, since those are
+    conversion. Comparing two ``.xodr`` outputs instead requires converting
+    the same map twice and cannot be keyed on road ids at all, since those are
     reassigned whenever preprocessing changes the lanelet grouping.
 
     Args:
         mapping: Mapping carrying ``reference_match_distances``.
         warn_threshold: Distances at or above this many metres are listed
             individually. Defaults to ``warn_threshold_factor`` times
-            ``_MATCH_THRESHOLD``, i.e. the point beyond which a match is closer
-            to the tolerance limit than to its own source geometry.
+            ``_MATCH_THRESHOLD``, i.e. the point beyond which a match is
+            closer to the tolerance limit than to its own source geometry.
 
     Returns:
-        Dictionary with ``count``, ``median_m``, ``p95_m``, ``max_m``,
-        ``match_threshold_m``, ``rescue_threshold_m``, ``warn_threshold_m``,
-        ``metric``, ``rescued_count``, ``above_match_threshold`` and ``worst``
-        — a list of ``{"lanelet_id", "distance_m", "rescued"}`` at or above the
-        warn threshold, worst first. Returns ``{}`` when no distances were
-        recorded.
+        Dictionary with the headline ``exceedances`` (one entry per configured
+        level, each with ``label``, ``threshold_m``, ``count``, ``fraction``
+        and ``per_km``), ``max_m`` with its ``worst_lanelet_id``,
+        ``matched_boundary_length_m``, ``count``, the secondary
+        ``median_m``/``p95_m``/``median_mean_m`` named by
+        ``scale_dependent_keys``, plus ``match_threshold_m``,
+        ``rescue_threshold_m``, ``warn_threshold_m``, ``metric``,
+        ``rescued_count``, ``above_match_threshold`` and ``worst`` -- a list of
+        ``{"lanelet_id", "distance_m", "mean_distance_m", "rescued"}`` at or
+        above the warn threshold, worst first. Returns ``{}`` when no distances
+        were recorded.
     """
     distances = mapping.reference_match_distances
     if not distances:
         return {}
 
+    geo_config = DEFAULT_CONFIG.geo_mapping
     if warn_threshold is None:
-        warn_threshold = (
-            _MATCH_THRESHOLD * DEFAULT_CONFIG.geo_mapping.warn_threshold_factor
+        warn_threshold = _MATCH_THRESHOLD * geo_config.warn_threshold_factor
+
+    rescue_threshold = _MATCH_THRESHOLD * geo_config.rescue_threshold_factor
+    rescued = set(mapping.rescued_reference_lanelets or ())
+    values = np.array([d.max_m for d in distances.values()], dtype=float)
+    mean_values = np.array([d.mean_m for d in distances.values()], dtype=float)
+
+    # Boundary lengths are absent in mappings written before they were
+    # recorded; the density is then unavailable rather than wrong.
+    lengths = [
+        d.boundary_length_m
+        for d in distances.values()
+        if d.boundary_length_m is not None
+    ]
+    total_length = float(sum(lengths)) if lengths else None
+
+    exceedances = []
+    for label, threshold in geo_config.exceedance_thresholds_m:
+        count = int((values > threshold).sum())
+        exceedances.append(
+            {
+                "label": label,
+                "threshold_m": float(threshold),
+                "count": count,
+                "fraction": count / float(values.size),
+                "per_km": (
+                    count * geo_config.exceedance_density_base_m / total_length
+                    if total_length
+                    else None
+                ),
+            }
         )
 
-    rescue_threshold = (
-        _MATCH_THRESHOLD * DEFAULT_CONFIG.geo_mapping.rescue_threshold_factor
-    )
-    rescued = set(mapping.rescued_reference_lanelets or ())
-    values = np.array(list(distances.values()), dtype=float)
+    worst_lanelet_id = max(distances, key=lambda lid: distances[lid].max_m)
     worst = sorted(
         (
             {
                 "lanelet_id": lid,
-                "distance_m": float(d),
+                "distance_m": d.max_m,
+                "mean_distance_m": d.mean_m,
                 "rescued": lid in rescued,
             }
             for lid, d in distances.items()
-            if d >= warn_threshold
+            if d.max_m >= warn_threshold
         ),
         key=lambda item: -item["distance_m"],
     )
 
     return {
         "count": int(values.size),
+        # Headline: size-independent, count-based.
+        "exceedances": exceedances,
+        "max_m": float(values.max()),
+        "worst_lanelet_id": worst_lanelet_id,
+        "matched_boundary_length_m": total_length,
+        # Secondary: these depend on the mix of roads in *this* map.
         "median_m": float(np.median(values)),
         "p95_m": float(np.percentile(values, 95)),
-        "max_m": float(values.max()),
+        "median_mean_m": float(np.median(mean_values)),
+        "scale_dependent_keys": ["median_m", "p95_m", "median_mean_m"],
         "match_threshold_m": _MATCH_THRESHOLD,
         "rescue_threshold_m": rescue_threshold,
         "warn_threshold_m": warn_threshold,
@@ -2094,18 +2247,42 @@ def validate_and_save_mapping(
     #    conversion. Re-save the JSON so the figures outlive the log.
     accuracy = summarise_reference_match_accuracy(geo_mapping)
     if accuracy:
+        # The headline is the exceedance counts, not median/p95: those two
+        # fall as soon as the map gains well-converted roads, so they are
+        # logged after the counts and only as a description of this map.
         logger.info(
-            "Geometric accuracy vs Lanelet2 input (%s): n=%d  median=%.3f m  "
-            "p95=%.3f m  max=%.3f m  (matching tolerance %.1f m; %d of them "
-            "rescued under the relaxed %.2f m threshold)",
+            "Geometric accuracy vs Lanelet2 input (%s): %s over %d matched "
+            "road(s)%s; worst %.3f m at lanelet %d (matching tolerance %.1f m; "
+            "%d rescued under the relaxed %.2f m threshold)",
             accuracy["metric"],
+            "; ".join(
+                "{} > {:.2f} m: {} ({:.1%}{})".format(
+                    e["label"],
+                    e["threshold_m"],
+                    e["count"],
+                    e["fraction"],
+                    "" if e["per_km"] is None else f", {e['per_km']:.2f}/km",
+                )
+                for e in accuracy["exceedances"]
+            ),
             accuracy["count"],
-            accuracy["median_m"],
-            accuracy["p95_m"],
+            (
+                ""
+                if accuracy["matched_boundary_length_m"] is None
+                else f" spanning {accuracy['matched_boundary_length_m'] / 1000.0:.2f} km"
+            ),
             accuracy["max_m"],
+            accuracy["worst_lanelet_id"],
             accuracy["match_threshold_m"],
             accuracy["rescued_count"],
             accuracy["rescue_threshold_m"],
+        )
+        logger.info(
+            "  map-dependent (not comparable between maps): median=%.3f m  "
+            "p95=%.3f m  median of per-road means=%.3f m",
+            accuracy["median_m"],
+            accuracy["p95_m"],
+            accuracy["median_mean_m"],
         )
         worst = accuracy["worst"]
         if worst:

@@ -338,12 +338,41 @@ class GeoMappingConstants:
             reported reference-line distances (m) are serialised into the
             mapping JSON.  Four places is sub-millimetre, far below any
             geometric error the report is meant to surface.
+        exceedance_thresholds_m: Ordered ``(label, threshold)`` levels the
+            positional-accuracy summary counts roads against, from least to
+            most severe.  The summary's headline is a *count* per level, not
+            a distribution statistic, because a median or a percentile over
+            roads improves simply by adding more easy roads to the map and so
+            cannot be compared between maps of different size.
+
+            The two default levels follow the severity distinction drawn by
+            Schwab & Kolbe (ISPRS Annals X-4/W2-2022) for comparing road-space
+            models against a reference: a deviation on the centimetre-to-
+            decimetre scale is *modelling inaccuracy* -- spline fitting,
+            resampling, the geometric idealisation of a hand-digitised
+            boundary -- and is expected in a correct conversion.  A deviation
+            on the metre scale is not an inaccuracy but a different road: at
+            that magnitude the reference line has been matched to the wrong
+            lanelet, or the road was assembled from a wrong
+            predecessor/successor relation, and the geometry is a symptom
+            rather than the defect.  ``0.5`` m sits below a lane width, so it
+            still describes the same lane; ``1.0`` m is far enough that no
+            amount of fitting error explains it.
+        exceedance_density_base_m: Length (m) the exceedance density is
+            expressed per -- 1000 m, i.e. counts per kilometre of matched
+            boundary.  Unlike a raw count, this is independent of map size
+            and can be compared across maps.
     """
 
     match_threshold: float = 3.5
     rescue_threshold_factor: float = 1.5
     warn_threshold_factor: float = 0.5
     distance_report_decimals: int = 4
+    exceedance_thresholds_m: tuple[tuple[str, float], ...] = (
+        ("modelling_inaccuracy", 0.5),
+        ("wrong_match_or_relation", 1.0),
+    )
+    exceedance_density_base_m: float = 1000.0
 
 
 @dataclass(frozen=True)
