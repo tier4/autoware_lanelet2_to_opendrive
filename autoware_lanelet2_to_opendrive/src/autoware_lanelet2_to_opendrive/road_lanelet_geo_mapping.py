@@ -1559,7 +1559,15 @@ def build_mapping(
     def _record_reference_accuracy(
         lanelet_id: int, rc: _RoadCandidates, *, rescued: bool
     ) -> None:
-        """Measure ``rc``'s reference line against the boundary actually used."""
+        """Measure ``rc``'s reference line against the boundary actually used.
+
+        One boundary per road, deliberately: the reference line was generated
+        from this boundary, so this is the error of the thing being reported.
+        The opposite boundary's deviation is lane-width error -- a different
+        quantity, carried by the emitted ``<width>`` rather than by the road's
+        geometry -- and averaging the two would blend them into a figure that
+        means neither.
+        """
         boundaries = lanelet_left if rc.is_rht else lanelet_right
         boundary = boundaries.get(lanelet_id)
         if boundary is None:

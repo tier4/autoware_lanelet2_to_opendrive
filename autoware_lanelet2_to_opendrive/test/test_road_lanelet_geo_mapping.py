@@ -33,6 +33,7 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     _REPORT_METRIC_NAME,
     _resolve_conflicts,
     _sample_reference_line_from_road,
+    _directed_mean_distance,
     _symmetric_max_polyline_distance,
     _symmetric_mean_distance,
     _symmetric_mean_polyline_distance,
@@ -1588,6 +1589,84 @@ class TestOriginalLaneletIds:
             },
         )
         assert original_lanelet_ids(mapping, 100) == [1, 2, 3]
+
+
+class TestLevelThreeFallbackIsReportedHonestly:
+    """A road matched by the last-resort level must not report its own metric.
+
+    The matching search falls back through three levels. Levels 1 and 2 rank
+    candidates by the symmetric distance; level 3 drops to the directed
+    distance, which only asks whether the *boundary* lies on the reference
+    line and says nothing about the rest of the reference line. A road is
+    matched at level 3 precisely when its reference line is far longer than
+    any single lanelet boundary, so the directed figure is small by
+    construction -- which is exactly the road whose accuracy figure must not
+    come from it.
+    """
+
+    def test_a_level_three_match_reports_the_whole_reference_line(self) -> None:
+        import lanelet2
+
+        # 100 m road; the only lanelet covers its first 20 m.
+        short_x = [0.5 * i for i in range(41)]
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, short_x), _make_linestring(-3.0, short_x)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        roads = _parse_roads(_straight_road_xml(1, 0.0, 100.0, [-1]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        # The strict levels reject this pairing on the symmetric distance; it
+        # only matches because level 3 measures boundary -> reference.
+        assert mapping.lanelet_to_road_and_lane == {lanelet.id: (1, -1)}
+        assert mapping.reference_match_distances is not None
+        record = mapping.reference_match_distances[lanelet.id]
+
+        boundary = np.array([[x, 0.0] for x in short_x])
+        reference = np.array([[0.5 * i, 0.0] for i in range(201)])
+
+        # That the match happened at all is what proves level 3 ran: the
+        # symmetric distance is far past the tolerance, so levels 1 and 2
+        # could not have accepted this pairing.
+        assert _symmetric_mean_distance(boundary, reference) > _MATCH_THRESHOLD
+        # What level 3 measured: the boundary sits on the reference line.
+        assert _directed_mean_distance(boundary, reference) == pytest.approx(
+            0.0, abs=1e-6
+        )
+        # What the report measures: 80 m of reference line with no boundary
+        # under it. Reporting the matching figure would have claimed ~0 m.
+        assert record.max_m == pytest.approx(
+            _symmetric_max_polyline_distance(reference, boundary), rel=1e-6
+        )
+        assert record.max_m > _MATCH_THRESHOLD
+        assert record.boundary_length_m == pytest.approx(20.0)
+
+    def test_the_level_three_road_is_listed_as_an_offender(self) -> None:
+        """A match the report cannot vouch for must reach the summary."""
+        import lanelet2
+
+        short_x = [0.5 * i for i in range(41)]
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, short_x), _make_linestring(-3.0, short_x)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        mapping = build_mapping(
+            lanelet_map,
+            _parse_roads(_straight_road_xml(1, 0.0, 100.0, [-1])),
+            (0.0, 0.0),
+            "x",
+            "o",
+        )
+        summary = summarise_reference_match_accuracy(mapping)
+
+        assert [w["lanelet_id"] for w in summary["worst"]] == [lanelet.id]
+        assert summary["above_match_threshold"] == 1
+        # Past every configured severity level, not merely the warn threshold.
+        assert all(e["count"] == 1 for e in summary["exceedances"])
 
 
 class TestLocalisedSpikeIsNotDiluted:
