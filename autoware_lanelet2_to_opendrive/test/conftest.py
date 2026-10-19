@@ -46,6 +46,15 @@ def nishishinjuku_xodr(tmp_path_factory: pytest.TempPathFactory) -> Path:
     cached path, so a regression test always exercises the *current*
     converter rather than an XODR left behind by an earlier checkout.
 
+    Nothing here skips. Both failure modes below -- the source map missing,
+    the converter not runnable -- fail instead, because a test that needs this
+    artifact must run or fail rather than disappear from the count. A run that
+    had deleted ``test/data`` once reported 1361 passed / 7 skipped / 0 failed
+    against a previous 1356 / 5 / 4: strictly better-looking numbers, two of
+    which were tests that had stopped running.
+    ``test_fixture_dependent_tests_never_skip`` holds the other half of that
+    contract, by refusing the ``skipif`` construct that caused it.
+
     Under ``pytest-xdist`` each worker has its own session, so the file is
     written to ``getbasetemp().parent`` -- the one directory shared by every
     worker of the same invocation -- behind a :class:`filelock.FileLock`;
@@ -55,7 +64,9 @@ def nishishinjuku_xodr(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """
     fixture = (Path(__file__).parent / "data" / "nishishinjuku.osm").resolve()
     if not fixture.is_file():
-        pytest.skip(f"{fixture} not available; cannot build XODR")
+        # Not a skip: this map is committed, so its absence is a broken
+        # checkout, and the tests that need it would leave the count silently.
+        pytest.fail(f"{fixture} not available; cannot build XODR")
 
     base = tmp_path_factory.getbasetemp()
     if "PYTEST_XDIST_WORKER" in os.environ:
@@ -80,7 +91,9 @@ def nishishinjuku_xodr(tmp_path_factory: pytest.TempPathFactory) -> Path:
         try:
             subprocess.run(cmd, check=True)
         except FileNotFoundError as exc:
-            pytest.skip(f"converter unavailable: {exc}")
+            # Not a skip either: a converter that cannot be invoked is a
+            # failure of the thing under test.
+            pytest.fail(f"converter unavailable: {exc}")
 
         if not staged.is_file():
             pytest.fail(f"converter exited successfully but {staged} was not produced")
