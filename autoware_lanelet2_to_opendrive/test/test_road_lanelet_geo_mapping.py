@@ -1545,10 +1545,6 @@ class TestOriginalLaneletIds:
             },
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="preprocessed ids are reported with no way back (awf#14 review, finding 4)",
-    )
     def test_a_merged_id_resolves_to_the_ids_it_was_made_from(self) -> None:
         from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
             original_lanelet_ids,
@@ -1563,10 +1559,6 @@ class TestOriginalLaneletIds:
 
         assert original_lanelet_ids(self._mapping_with_merge(), 7) == [7]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="preprocessed ids are reported with no way back (awf#14 review, finding 4)",
-    )
     def test_a_chain_of_operations_is_followed_to_the_input(self) -> None:
         """A lanelet merged twice must resolve to the original input ids."""
         from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (

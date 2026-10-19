@@ -216,8 +216,14 @@ class GeoRoadLaneletMapping:
     #: from, keyed by that lanelet's id. This is the conversion's positional
     #: error measured against its own Lanelet2 input, so accuracy can be
     #: reported without converting the same map twice. Keyed by lanelet id
-    #: because those are input-side and stable, unlike road ids, which are
-    #: reassigned whenever preprocessing changes the lanelet grouping.
+    #: because those survive a change of road grouping, unlike road ids, which
+    #: are reassigned whenever preprocessing changes it.
+    #:
+    #: These are ids in the *preprocessed* map, which is what conversion runs
+    #: on. A lanelet that preprocessing merged therefore carries an id that
+    #: does not appear in the file the user supplied;
+    #: :func:`original_lanelet_ids` walks ``preprocessing_log`` back to the
+    #: ids that do.
     #:
     #: Every value comes from the same metric (``_REPORT_METRIC_NAME``),
     #: recomputed rather than taken from whichever matching fallback level
@@ -1875,8 +1881,71 @@ def _preprocessed_osm_path_for(xodr_path: Path) -> Path:
 
 
 def original_lanelet_ids(mapping: GeoRoadLaneletMapping, lanelet_id: int) -> list[int]:
-    """Input-map lanelet ids a reported lanelet id came from."""
-    return [lanelet_id]
+    """Input-map lanelet ids that *lanelet_id* was built from.
+
+    Conversion runs on the preprocessed map, so an id the accuracy report
+    names may not exist in the file the user supplied: a merge consumes its
+    inputs and emits a new id.  ``preprocessing_log`` records ``input_ids``
+    and ``output_ids`` per operation, and this walks that backwards --
+    transitively, since an output can be the input of a later operation --
+    until every id is one preprocessing did not create.
+
+    An id preprocessing never touched resolves to itself, so a caller can use
+    this unconditionally.  The result is sorted: the order operations ran in
+    is of no use to a reader looking the ids up in the source map.
+
+    Args:
+        mapping: Mapping carrying the ``preprocessing_log``.
+        lanelet_id: Lanelet id as reported, i.e. in the preprocessed map.
+
+    Returns:
+        Sorted input-map lanelet ids.  ``[lanelet_id]`` when there is no log,
+        or when the id appears among no operation's outputs.
+    """
+    log = mapping.preprocessing_log
+    if not log:
+        return [lanelet_id]
+
+    # output id -> the ids that operation consumed
+    produced_by: dict[int, list[int]] = {}
+    for entry in log.get("entries") or []:
+        inputs = [int(i) for i in entry.get("input_ids") or []]
+        if not inputs:
+            continue
+        for out in entry.get("output_ids") or []:
+            produced_by[int(out)] = inputs
+
+    resolved: set[int] = set()
+    pending = [lanelet_id]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:  # a malformed log must not loop forever
+            continue
+        seen.add(current)
+        sources = produced_by.get(current)
+        if sources is None:
+            resolved.add(current)
+        else:
+            pending.extend(sources)
+    return sorted(resolved)
+
+
+def _describe_offender(entry: dict, mapping: GeoRoadLaneletMapping) -> str:
+    """One worst-offender line, naming the input ids behind a merged lanelet.
+
+    The id in the report is a preprocessed-map id. When preprocessing created
+    it, the reader has nothing to look up in the source map, so the ids it was
+    merged from are named alongside it.
+    """
+    lid = entry["lanelet_id"]
+    text = f"lanelet {lid} at {entry['distance_m']:.2f} m"
+    sources = original_lanelet_ids(mapping, lid)
+    if sources != [lid]:
+        text += " (from input " + ", ".join(str(i) for i in sources) + ")"
+    if entry["rescued"]:
+        text += " (rescued)"
+    return text
 
 
 def summarise_reference_match_accuracy(
@@ -2319,11 +2388,7 @@ def validate_and_save_mapping(
                 accuracy["above_match_threshold"],
                 accuracy["match_threshold_m"],
                 accuracy["rescue_threshold_m"],
-                ", ".join(
-                    f"lanelet {w['lanelet_id']} at {w['distance_m']:.2f} m"
-                    + (" (rescued)" if w["rescued"] else "")
-                    for w in worst[:10]
-                ),
+                ", ".join(_describe_offender(w, geo_mapping) for w in worst[:10]),
             )
         conv_mapping.reference_match_distances = geo_mapping.reference_match_distances
         conv_mapping.rescued_reference_lanelets = geo_mapping.rescued_reference_lanelets
