@@ -364,6 +364,39 @@ class TestSummariseReferenceMatchAccuracy:
         assert summary["worst"][0]["rescued"] is False
 
 
+class TestSummaryHeadlineIsScaleIndependent:
+    """The headline figure must not improve when well-converted roads appear.
+
+    ``median_m`` and ``p95_m`` describe the mix of roads in one particular
+    map. Convert a wider area that happens to contain more easy roads and both
+    fall, with nothing having been fixed, so two maps cannot be compared by
+    them and a regression can hide behind growth. The headline therefore has
+    to be a count of roads past each severity level, which does not move when
+    accurate roads are added.
+    """
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="headline is still a distribution statistic (awf#14 review, finding 2)",
+    )
+    def test_adding_accurate_roads_leaves_the_headline_alone(self) -> None:
+        offenders = {1: 0.2, 2: 1.4}
+        small = summarise_reference_match_accuracy(_mapping_with_distances(offenders))
+        large = summarise_reference_match_accuracy(
+            _mapping_with_distances({**offenders, **{i: 0.01 for i in range(10, 60)}})
+        )
+
+        assert "exceedances" in small, (
+            "the summary has no count-based headline: median_m and p95_m alone "
+            "cannot be compared between maps of different size"
+        )
+        assert [e["count"] for e in small["exceedances"]] == [
+            e["count"] for e in large["exceedances"]
+        ]
+        # The statistics this guards against do move, which is the point.
+        assert large["median_m"] < small["median_m"]
+
+
 # ---------------------------------------------------------------------------
 # Reporting distance metric (point-to-segment vs point-to-vertex)
 # ---------------------------------------------------------------------------
