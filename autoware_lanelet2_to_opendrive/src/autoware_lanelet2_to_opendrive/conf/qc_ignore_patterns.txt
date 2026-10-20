@@ -2,19 +2,39 @@
 # One pattern per line. Lines starting with '#' and blank lines are ignored.
 # Patterns are searched (re.search) against issue description + location description.
 #
-# CARLA targets OpenDRIVE 1.4 syntax but supports the 'rule' attribute
-# introduced in 1.7. The ASAM QC checker validates against the declared
-# schema version, so `rule` on <road> triggers a false positive.
-attribute 'rule'
-
-# <positionInertial> was deprecated in 1.8; qc-framework flags it as invalid
-# on our 1.4-declared output. CARLA ue5-dev requires it.
-Element 'positionInertial'
-
-# OpenDRIVE 1.4 XSD restricts <lane><access> @restriction to a small set
-# (simulator, autonomous traffic, pedestrian, none); the richer enumeration
-# (passengerCar, bus, taxi, truck, motorcycle, bicycle) was added in 1.7+
-# but is what CARLA actually accepts. We emit those values from Lanelet2
-# `participant:*` attributes (#468), so the enumeration mismatch is
-# intentional and a false positive against the 1.4-declared schema.
-attribute 'restriction': \[facet 'enumeration'\]
+# The list is intentionally EMPTY.
+#
+# Every entry it used to hold suppressed a real schema violation rather than a
+# false positive, and each has now been fixed at the source instead:
+#
+#   * "attribute 'rule'"  -- was suppressing "Element 'lane', attribute 'rule':
+#     The attribute 'rule' is not allowed." (1015 occurrences on the
+#     Nishi-Shinjuku fixture).  `rule` is not an attribute of
+#     `t_road_lanes_laneSection_lr_lane` in ANY OpenDRIVE XSD; the RHT/LHT
+#     traffic rule belongs on <road> (`e_trafficRule`), where we already emit
+#     it.  <lane> no longer carries it (see opendrive/lane.py).
+#
+#   * "Element 'positionInertial'" and
+#     "attribute 'restriction': \[facet 'enumeration'\]" -- both were genuine
+#     only against the 1.4 XSD we used to declare.  <signal><positionInertial>
+#     and the full `e_accessRestrictionType` enumeration are valid in 1.7,
+#     which is now what <header> declares (see opendrive/header.py).  Neither
+#     pattern matches anything any more.
+#
+# Deliberately NOT added: the CARLA dialect's
+# "Element 'object', attribute 'type': ... '-1' ...".  Under `target=carla`
+# the stop-line stencil is emitted as <object type="-1" name="Stencil_STOP">,
+# which is a real (intentional) divergence from the standard, not a false
+# positive.  Suppressing it would make `qc-validate` print PASS on a file
+# whose schema check is still failing, and therefore on a run where 21 of the
+# 26 checkers never executed -- exactly the vacuous PASS this list is meant to
+# avoid.  `target=default` emits the conforming <object type="roadMark"> form.
+#
+# Do NOT add an entry here for an error the converter actually causes.  The
+# bundle's semantic, geometry, performance and smoothness checkers all declare
+# the schema check as a precondition, and that precondition is evaluated on the
+# RAW issue list (qc_baselib's `all_checkers_completed_without_issue` tests
+# `len(checker.issues) == 0`), so an ignore pattern can never restore a skipped
+# checker -- it only hides the error from the CI gate while leaving 21 of the
+# 26 checkers switched off.  Fix the emitter, or record the finding as a known
+# limitation under docs/limitations/.

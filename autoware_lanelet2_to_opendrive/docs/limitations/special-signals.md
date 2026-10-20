@@ -18,7 +18,7 @@ the ones still missing.
 - **YieldSign signals** (`@type=205`) — emitted for stop lines from a
   `road_marking` regulatory element
 - **StopLine signals** (`@type=294`) — emitted alongside the supported
-  `<object type="stopLine">` and carrying `<dependency>` references back
+  `<object type="roadMark">` and carrying `<dependency>` references back
   to the controlling traffic light, stop sign, or yield sign
 - **Signal-junction association** via `<controller>` and the existing
   `<signalReference>` mechanism (issue #135)

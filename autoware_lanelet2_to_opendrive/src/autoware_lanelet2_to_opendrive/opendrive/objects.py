@@ -25,6 +25,29 @@ _NEAREST_ROAD_THRESHOLD_M = (
 )
 _SAMPLE_POINTS_PER_GEOMETRY = 10  # Number of sample points per geometry segment
 
+# `<object>` @type for a stop line in the STANDARD (schema-conforming) form.
+# `roadMark` is the ASAM `e_objectType` member for objects that are part of
+# the road surface marking, which is exactly what a painted stop line is. The
+# value emitted previously, `stopLine`, is not a member of `e_objectType` in
+# ANY OpenDRIVE XSD (1.4 through 1.8), so every stop line failed the schema
+# check and, through the bundle's `valid_schema` precondition, switched off
+# all 21 semantic/geometry/smoothness checkers.
+_STOP_LINE_OBJECT_TYPE = "roadMark"
+
+# `<object>` @type for a stop line under `target=carla`. This is the same
+# schema-conforming value as the default target: CARLA does not read @type for
+# stop lines. Its ObjectParser compares @type only against the literal
+# "crosswalk" and locates stop-line stencils with `name.find("Stencil_STOP")`
+# (LibCarla/source/carla/opendrive/parser/ObjectParser.cpp at tag 0.10.0, the
+# version pinned in carla_wheels/), so the CARLA dialect lives entirely in
+# @name. Emitting "-1" here -- the value RoadRunner exports and the one this
+# converter used previously -- is not a member of `e_objectType` in any
+# OpenDRIVE XSD, and a single such object fails the bundle's `valid_schema`
+# check, which through its precondition switches off 21 of the 26 checkers.
+# Keeping both targets conforming is what lets the CARLA output be validated
+# too; see docs/limitations/asam-schema-compliance.md.
+_STOP_LINE_OBJECT_TYPE_CARLA = _STOP_LINE_OBJECT_TYPE
+
 
 @dataclass
 class CornerLocal:
@@ -33,12 +56,19 @@ class CornerLocal:
     Represents a vertex in the object-local coordinate system where:
     - u: distance along the object's heading direction
     - v: distance perpendicular to the heading direction
-    - z: vertical offset
+    - z: vertical offset of the corner itself
+    - height: extrusion of the object above the corner, along +z
+
+    ``@height`` is ``use="required"`` on ``cornerLocal`` in every OpenDRIVE
+    XSD from 1.4 onwards (type ``t_grEqZero``), so it must always be
+    written; omitting it makes the whole file fail the ASAM schema check,
+    which in turn skips every semantic checker in the bundle.
     """
 
     u: float
     v: float
     z: float = 0.0
+    height: float = 0.0
 
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
@@ -46,6 +76,7 @@ class CornerLocal:
         elem.set("u", str(self.u))
         elem.set("v", str(self.v))
         elem.set("z", str(self.z))
+        elem.set("height", str(self.height))
         return elem
 
 
@@ -507,7 +538,12 @@ def _compute_corner_locals(
         delta = v - centroid
         u = float(np.dot(delta, cw_dir))
         vv = float(np.dot(delta, perp_dir))
-        corners.append(CornerLocal(u=u, v=vv, z=0.0))
+        # The outline is built from the 2D projection of the crosswalk
+        # lanelet, so every corner lies in the object's own z=0 plane and
+        # the painted marking has no extrusion above it. Both z and
+        # height are therefore 0.0, which is the value CARLA's
+        # ObjectParser already assumes for a flat crosswalk outline.
+        corners.append(CornerLocal(u=u, v=vv, z=0.0, height=0.0))
 
     # Close the polygon by repeating the first corner
     if corners:
@@ -520,9 +556,13 @@ def _compute_corner_locals(
 class StopLineObject:
     """OpenDRIVE object representing a stop line.
 
-    Corresponds to <object type="stopLine"> in OpenDRIVE specification.
-    When carla_format=True, outputs CARLA's Stencil_STOP format instead:
-    <object type="-1" name="Stencil_STOP" orientation="-" zOffset="0.0">.
+    Corresponds to ``<object type="roadMark" name="stop_line_<id>">``, the
+    schema-conforming form emitted by ``target=default``.
+    When carla_format=True (``target=carla``), outputs CARLA's Stencil_STOP
+    dialect instead: ``<object type="-1" name="Stencil_STOP" orientation="-"
+    zOffset="0.0">``. That dialect's ``type="-1"`` is not an ASAM
+    ``e_objectType`` member and is the only reason the CARLA-targeted output
+    does not validate; see ``_STOP_LINE_OBJECT_TYPE_CARLA``.
     """
 
     id: int
@@ -544,15 +584,16 @@ class StopLineObject:
         """Convert to XML element.
 
         Returns:
-            <object type="stopLine"> element (standard), or
-            <object type="-1" name="Stencil_STOP"> element (CARLA format).
+            ``<object type="roadMark" name="stop_line_<id>">`` (standard,
+            schema-conforming), or ``<object type="-1" name="Stencil_STOP">``
+            (CARLA dialect).
         """
         elem = ET.Element("object")
         if self.carla_format:
-            elem.set("type", "-1")
+            elem.set("type", _STOP_LINE_OBJECT_TYPE_CARLA)
             elem.set("name", "Stencil_STOP")
         else:
-            elem.set("type", "stopLine")
+            elem.set("type", _STOP_LINE_OBJECT_TYPE)
             elem.set("name", self.name)
         elem.set("id", str(self.id))
         elem.set("s", str(self.s))

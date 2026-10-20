@@ -73,14 +73,43 @@ def count_errors(
     return errors
 
 
-def validate(
-    xodr_path: Path,
-    ignore_patterns: Iterable[str] | None = None,
-) -> int:
-    """Run the qc-framework OpenDRIVE bundle and return the ERROR count."""
-    patterns = (
-        list(ignore_patterns) if ignore_patterns is not None else load_ignore_patterns()
-    )
+def error_counts_by_checker(
+    result: Result,
+    ignore_patterns: Iterable[str] = (),
+) -> dict[str, int]:
+    """Return ``{checker_id: ERROR count}`` for checkers that raised any.
+
+    Skipped checkers and checkers with no surviving ERROR are omitted, so an
+    all-clean run yields ``{}``.  Useful for pinning a *specific* set of known
+    findings in a test instead of the single aggregate ``count_errors``
+    number: a new failure in a different checker then shows up as a new key
+    rather than as an opaque count change.
+    """
+    compiled = [re.compile(p) for p in ignore_patterns]
+
+    def is_ignored(issue) -> bool:  # type: ignore[no-untyped-def]
+        texts = [issue.description] + [
+            loc.description for loc in issue.locations if loc.description
+        ]
+        return any(c.search(t) for c in compiled for t in texts)
+
+    counts: dict[str, int] = {}
+    for cid in result.get_checker_ids(constants.BUNDLE_NAME):
+        checker = result.get_checker_result(constants.BUNDLE_NAME, cid)
+        if checker.status == StatusType.SKIPPED:
+            continue
+        n = sum(
+            1
+            for issue in checker.issues
+            if issue.level == IssueSeverity.ERROR and not is_ignored(issue)
+        )
+        if n:
+            counts[cid] = n
+    return counts
+
+
+def run_bundle(xodr_path: Path) -> Result:
+    """Run the qc-framework OpenDRIVE bundle and return the populated Result."""
     with tempfile.NamedTemporaryFile(suffix=".xqar", delete=False) as tmp:
         result_path = tmp.name
     try:
@@ -102,14 +131,23 @@ def validate(
         )
         result.set_result_version(version=constants.BUNDLE_VERSION)
         run_checks(config, result)
-
-        errors = count_errors(result, patterns)
-        return errors
+        return result
     finally:
         try:
             os.unlink(result_path)
         except FileNotFoundError:
             pass
+
+
+def validate(
+    xodr_path: Path,
+    ignore_patterns: Iterable[str] | None = None,
+) -> int:
+    """Run the qc-framework OpenDRIVE bundle and return the ERROR count."""
+    patterns = (
+        list(ignore_patterns) if ignore_patterns is not None else load_ignore_patterns()
+    )
+    return count_errors(run_bundle(xodr_path), patterns)
 
 
 def main() -> None:

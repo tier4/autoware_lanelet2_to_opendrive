@@ -1,17 +1,17 @@
 # Autoware Lanelet2 to OpenDRIVE
 
-A Python package and Hydra-based CLI for converting [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) HD maps used by [Autoware](https://www.autoware.org/) into the [OpenDRIVE 1.4](https://www.asam.net/standards/detail/opendrive/) road-network format, with optional Lanelet2 preprocessing, ASAM QC validation, and a [CARLA](https://carla.org/)-specific output overlay.
+A Python package and Hydra-based CLI for converting [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) HD maps used by [Autoware](https://www.autoware.org/) into the [OpenDRIVE 1.7](https://www.asam.net/standards/detail/opendrive/) road-network format, with optional Lanelet2 preprocessing, ASAM QC validation, and a [CARLA](https://carla.org/)-specific output overlay.
 
 This package is a workspace member of the [`autoware_lanelet2_to_opendrive` repository](../README.md). [`autoware_carla_scenario`](https://github.com/hakuturu583/autoware_carla_scenario), a separate repository, consumes the converted `.xodr` to drive Autoware scenarios in CARLA.
 
 ## Features
 
-- Lanelet2 → OpenDRIVE 1.4 conversion targeted at CARLA (with a `target=carla` overlay).
+- Lanelet2 → OpenDRIVE 1.7 conversion. `target=default` output passes the ASAM QC schema check; `target=carla` adds a CARLA-specific overlay (see [ASAM Schema Compliance](docs/limitations/asam-schema-compliance.md)).
 - [Hydra](https://hydra.cc/)-based CLI (`convert`) composed from `config.yaml`, `map/*.yaml`, and `target/*.yaml` under [`src/autoware_lanelet2_to_opendrive/conf/`](src/autoware_lanelet2_to_opendrive/conf/).
 - Optional Lanelet2 preprocessing pipeline (merge / replace / remove / move-point / delete-point / remove-turn-direction / validate) configurable from the same YAML.
 - Reference-line geometry emitted as `<paramPoly3>` chains, optionally classified into `<line>` / `<arc>` / `<paramPoly3>` runs (`arcspiral.enabled`).
 - Crosswalk lanelets emitted as `<object type="crosswalk">` with closed outlines.
-- Stop-line linestrings emitted as `<object type="stopLine">` (or CARLA `Stencil_STOP`) with optional `<signal type="294">` and dependencies on associated traffic-light, stop-sign, and yield-sign signals.
+- Stop-line linestrings emitted as `<object type="roadMark">` (or CARLA `Stencil_STOP`) with optional `<signal type="294">` and dependencies on associated traffic-light, stop-sign, and yield-sign signals.
 - Parking-lot `Area`s emitted as synthetic parking roads with `<lane type="parking">` and `<object type="parkingSpace">` per stall.
 - Traffic-light extraction from Autoware regulatory elements with arrow-bulb subtype encoding.
 - Right-of-way regulatory elements emitted as `<junction><priority>` records.

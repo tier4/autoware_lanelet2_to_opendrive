@@ -125,7 +125,7 @@ def test_stop_line_object_creation():
 
 
 def test_stop_line_object_to_xml():
-    """Test that to_xml() returns an <object type="stopLine"> element."""
+    """Test that to_xml() returns an <object type="roadMark"> element."""
     obj = StopLineObject(
         id=42,
         name="stop_line_42",
@@ -138,7 +138,7 @@ def test_stop_line_object_to_xml():
     )
     elem = obj.to_xml()
     assert elem.tag == "object"
-    assert elem.get("type") == "stopLine"
+    assert elem.get("type") == "roadMark"
 
 
 def test_stop_line_object_xml_attributes():
@@ -590,8 +590,10 @@ def test_to_xml_carla_format():
     )
     elem = obj.to_xml()
 
-    # CARLA-specific attributes
-    assert elem.get("type") == "-1"
+    # The CARLA target emits the same schema-conforming @type as the default
+    # target; CARLA locates the stencil by @name, not @type (see
+    # _STOP_LINE_OBJECT_TYPE_CARLA).
+    assert elem.get("type") == "roadMark"
     assert elem.get("name") == "Stencil_STOP"
     assert elem.get("orientation") == "-"
     assert float(elem.get("zOffset")) == pytest.approx(0.0)
@@ -619,7 +621,7 @@ def test_to_xml_carla_vs_default():
     )
     elem = obj.to_xml()
 
-    assert elem.get("type") == "stopLine"
+    assert elem.get("type") == "roadMark"
     assert elem.get("name") == "stop_line_88"
     assert elem.get("orientation") == "none"
     assert float(elem.get("zOffset")) == pytest.approx(0.05)
@@ -655,7 +657,7 @@ def test_construct_from_linestring_carla_format():
     assert result.carla_format is True
 
     elem = result.to_xml()
-    assert elem.get("type") == "-1"
+    assert elem.get("type") == "roadMark"
     assert elem.get("name") == "Stencil_STOP"
     assert elem.get("orientation") == "-"
     assert float(elem.get("zOffset")) == pytest.approx(0.0)
