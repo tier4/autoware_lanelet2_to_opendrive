@@ -78,8 +78,20 @@ class TestValidateOperationsBasic:
 
         assert result is None
         assert {ll.id for ll in lanelet_map.laneletLayer} == ids_before
-        assert any("CONTINUOUS" in r.message for r in caplog.records)
-        assert not any(r.levelno == logging.WARNING for r in caplog.records)
+        # `"CONTINUOUS" in message` is NOT enough: "DISCONTINUOUS" contains
+        # it, so that assertion holds either way and the whole file passes
+        # against a continuity check stuck at False. Measured -- injecting
+        # `return False` into validate_lanelet_continuity left this file
+        # entirely green, and only the merge/replace tests that happen to use
+        # validate=True went red.
+        assert any(
+            r.message.endswith("CONTINUOUS") and "DISCONTINUOUS" not in r.message
+            for r in caplog.records
+        )
+        # `>=`, not `==`: escalating the result line to error or critical
+        # would satisfy an equality check while breaking the property, which
+        # is "reported at info level, not as an alarm".
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
 
     def test_discontinuous_lanelets_logs_info_not_warning(self, caplog):
         """A discontinuous pair logs DISCONTINUOUS at info level - not a warning."""
@@ -105,7 +117,7 @@ class TestValidateOperationsBasic:
         assert result is None
         assert {ll.id for ll in lanelet_map.laneletLayer} == ids_before
         assert any("DISCONTINUOUS" in r.message for r in caplog.records)
-        assert not any(r.levelno == logging.WARNING for r in caplog.records)
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
 
 
 class TestValidateOperationsInvalidId:

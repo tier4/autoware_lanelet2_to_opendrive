@@ -1,5 +1,7 @@
 """Tests for OpenDRIVE validation functionality."""
 
+from pathlib import Path
+
 from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint, ElementType
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink
@@ -329,14 +331,7 @@ class TestNoDuplicateRoadIds:
         assert "Road ID 5 appears 2 times in the road list" in summary
 
     def test_duplicates_are_reported_not_raised(self):
-        """Test that duplicate IDs are surfaced via ValidationResult, never raised.
-
-        The current caller (main.py) only prints a WARNING built from
-        ``get_error_summary()`` when ``is_valid`` is False; it does not treat a
-        failed result as fatal and does not abort the build. This test pins that
-        report-only contract so that a future switch to fail-fast behavior shows
-        up as an intentional change to this test, not a silent regression.
-        """
+        """Duplicate IDs are surfaced via ValidationResult, never raised."""
         roads = [Road(id=1), Road(id=1), Road(id=1)]
 
         # Should complete normally and return a result, never raise.
@@ -344,3 +339,57 @@ class TestNoDuplicateRoadIds:
 
         assert not result.is_valid
         assert result.error_count == 1
+
+    def test_the_caller_reports_rather_than_aborting(self):
+        """Pin ``main.py``'s report-only handling of a failed result.
+
+        The validator returning a result rather than raising says nothing
+        about what the caller does with it -- and the caller is where
+        "report-only" either holds or does not. An earlier version of this
+        class claimed to pin that contract from
+        ``test_duplicates_are_reported_not_raised``, which only calls the
+        validator: changing ``main.py``'s ``print`` to a ``raise`` failed no
+        test in the repository.
+
+        Read from the source rather than by running a conversion, so the
+        check costs nothing and a switch to fail-fast shows up here as an
+        intentional change.
+        """
+        import ast
+
+        main_py = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "autoware_lanelet2_to_opendrive"
+            / "main.py"
+        )
+        tree = ast.parse(main_py.read_text(encoding="utf-8"))
+
+        branches = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If) and "dup_result" in ast.dump(node.test)
+        ]
+        assert branches, (
+            "no branch on a duplicate-road-id result found in main.py; the "
+            "call site moved and this test needs to follow it"
+        )
+
+        for branch in branches:
+            for statement in branch.body:
+                for inner in ast.walk(statement):
+                    assert not isinstance(inner, ast.Raise), (
+                        f"main.py:{inner.lineno} raises on a duplicate road "
+                        "id. That is a reasonable thing to want, but it is a "
+                        "behaviour change: update this test deliberately."
+                    )
+                    if isinstance(inner, ast.Call):
+                        name = (
+                            inner.func.attr
+                            if isinstance(inner.func, ast.Attribute)
+                            else getattr(inner.func, "id", "")
+                        )
+                        assert name != "exit", (
+                            f"main.py:{inner.lineno} exits on a duplicate "
+                            "road id; see above."
+                        )

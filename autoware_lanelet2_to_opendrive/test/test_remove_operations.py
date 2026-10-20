@@ -156,6 +156,11 @@ class TestRemoveOperationsInvalidId:
 
         # 201 was removed; 999 simply never matched anything - no error either way.
         assert {ll.id for ll in new_map.laneletLayer} == set()
+        # Inside `at_level(WARNING)`, so this pins "nothing at WARNING or
+        # above", not "nothing logged". `execute_remove_operations` logs
+        # unconditionally at info and debug (preprocess_lanelet.py:759-766),
+        # and those records are filtered out here. The useful half is that a
+        # newly added warning fails this test; it does not establish silence.
         assert caplog.records == []
 
     def test_only_invalid_ids_result_in_no_op(self, caplog):
@@ -185,6 +190,7 @@ class TestRemoveOperationsInvalidId:
             new_map, _log = preprocessor.execute_remove_operations(lanelet_map)
 
         assert {ll.id for ll in new_map.laneletLayer} == {201}
+        # "nothing at WARNING or above" -- see the note in the test above.
         assert caplog.records == []
 
 

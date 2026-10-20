@@ -65,10 +65,17 @@ class TestMergeBasic:
     def test_merge_deletes_original_lanelets(self):
         """A successful merge removes the source lanelets from the resulting map.
 
-        Note: nishishinjuku.yaml:15 has a comment claiming merge originals
-        "are kept", but copy_map_excluding is used to build the new map
-        (preprocess_lanelet.py execute_merge_operations, step 2), so the
-        originals are in fact dropped. This test locks in the real behavior.
+        ``copy_map_excluding`` builds the new map
+        (``preprocess_lanelet.py`` ``execute_merge_operations``, step 2), so
+        the originals are dropped rather than kept alongside the merged
+        lanelet. Nothing but this test records that.
+
+        This note used to cite a comment in ``conf/map/nishishinjuku.yaml``
+        claiming the originals "are kept". That comment was corrected
+        upstream and now reads "The merged lanelet replaces the originals: it
+        is added under a new synthetic id and every listed lanelet is removed
+        from the map", so the documentation defect is gone. The behaviour pin
+        is not redundant -- a comment was the only thing that recorded it.
         """
         p1 = lanelet2.core.Point3d(11, 0, 0, 0)
         p2 = lanelet2.core.Point3d(12, 0, 1, 0)

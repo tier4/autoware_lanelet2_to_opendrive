@@ -75,12 +75,19 @@ class TestDeletePointBasic:
 
 
 class TestDeletePointDryRunGating:
-    """Test the (reversed) dry_run gating for the failed-deletion warning.
+    """Test the dry_run gating for the failed-deletion warning.
 
-    Unlike merge/replace (which raise when dry_run=False and suppress the
-    raise when dry_run=True), execute_delete_point_operations never raises -
-    it only *warns* about failed deletions, and only when dry_run=False
-    (preprocess_lanelet.py:950). This is the opposite gating direction.
+    All four operations gate the same way, ``if not self.config.dry_run``:
+    merge (preprocess_lanelet.py:721), replace (:827), move_point (:905) and
+    delete_point (:950). Only the *payload* differs -- the first three
+    re-raise, delete_point warns. An earlier version of this docstring called
+    the direction reversed. It is not.
+
+    What is worth knowing is nearly the opposite: a dry run is exactly when
+    you want the "could not delete these points" diagnostic, and :950 is the
+    one gate that throws it away in dry-run mode. So ``dry_run=True`` on a
+    config naming a point that does not exist is silent, and the tests below
+    pin that silence rather than endorse it.
     """
 
     def _build_map_with_missing_point_op(self, dry_run: bool):
