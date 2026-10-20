@@ -1960,6 +1960,14 @@ class Road:
         instead of checking connecting road links, which may only reference
         one of multiple incoming roads.
 
+        A slot that already names *another* junction is left alone, because
+        there is nothing useful to do about it here: a road end carries one
+        link slot, so overwriting would only move the dead rows from one
+        junction to the other. Two junctions claiming one road end are two
+        descriptions of one place; they are merged afterwards by
+        ``junction_claims.merge_contested_junction_claims``, which is where
+        that conflict is settled.
+
         Args:
             roads: List of all roads (both regular and connecting roads)
             junctions: List of all junctions with their connections
