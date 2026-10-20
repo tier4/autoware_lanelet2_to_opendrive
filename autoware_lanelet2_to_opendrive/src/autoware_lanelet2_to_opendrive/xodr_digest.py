@@ -66,7 +66,7 @@ looks at, and an unchanged digest says nothing about whether they changed.
 
 The file is streamed with ``xml.etree.ElementTree.iterparse`` and each
 ``<road>``/``<junction>`` subtree is ``clear()``-ed once processed, so the
-whole document is never held in memory (the real artifact is 6.1MB and is
+whole document is never held in memory (the reference artifact is 7.2MB and is
 expected to grow).
 
 Usage:
@@ -198,17 +198,43 @@ def _hdg_deltas_deg(hdg_values_rad: list[float]) -> list[float]:
 def _count_sign_changes(deltas_deg: list[float]) -> int:
     """Count direction reversals in a sequence of heading deltas.
 
-    A delta of exactly ``0.0`` (a perfectly straight joint between two
-    geometries) is dropped before comparing signs rather than treated as its
-    own third state. Concretely, a run of ``+, 0.0, -`` counts as a single
-    reversal, the same as ``+, -`` would, instead of two: an exactly-zero
-    delta carries no directional information of its own, so it should not
-    be able to manufacture an extra reversal (or, if it were compared as
-    "different from both", to always contribute exactly one no matter how
-    many zeros are in the run - the drop makes the count depend only on the
-    non-zero segments' directions).
+    Deltas below the reporting resolution (:data:`HDG_DECIMALS`) are dropped
+    rather than only exactly-zero ones. Every other heading field is rounded
+    to that resolution precisely to keep float noise out of a digest diff,
+    and this one was not: each ``<geometry hdg>`` is ``arctan2`` of the
+    fitted spline's tangent evaluated at that segment's own ``s``, so on a
+    nominally straight road consecutive headings can differ in their last
+    bits with arbitrary sign. A road reported that way would show reversals
+    that are not there, and the count could differ between two runs of the
+    same commit.
+
+    Measured on the reference conversion: 4284 reversals before, 3936 after,
+    disagreeing on 90 of 711 roads -- road 17 alone drops from 29 to 21. So
+    this was inflating the count by 8%, not merely risking it.
+
+    The inflation is not where it first looks. Checking only the roads whose
+    *rounded maximum* delta is 0.0 finds nothing, because all 61 of those are
+    single-geometry roads with no delta at all. It happens on roads that
+    genuinely curve and contain near-straight joints among their segments,
+    where a 1e-14 degree delta sits between two real turns and splits one
+    reversal into two.
+
+    A delta that rounds to ``0.0`` at the reported resolution -- a straight
+    joint between two geometries -- is dropped before comparing signs rather
+    than treated as its own third state. Concretely, a run of ``+, 0.0, -``
+    counts as a single reversal, the same as ``+, -`` would, instead of two:
+    such a delta carries no directional information, so it should not be able
+    to manufacture an extra reversal (or, if it were compared as "different
+    from both", to always contribute exactly one no matter how many are in
+    the run - the drop makes the count depend only on the directions that are
+    reported).
+
+    The threshold is half the last reported digit, so a delta is dropped
+    exactly when ``round(delta, HDG_DECIMALS)`` would be ``0.0``: the count
+    agrees with the numbers printed beside it.
     """
-    signs = [1 if delta > 0 else -1 for delta in deltas_deg if delta != 0.0]
+    floor = 0.5 * 10.0**-HDG_DECIMALS
+    signs = [1 if delta > 0 else -1 for delta in deltas_deg if abs(delta) >= floor]
     return sum(1 for prev, curr in itertools.pairwise(signs) if prev != curr)
 
 
@@ -404,7 +430,26 @@ def _process_road(road_elem: ET.Element, state: dict[str, Any]) -> dict[str, Any
     # Kept unrounded, one entry per road, so the map-wide summary in
     # `_hdg_summary` (max + percentiles) can be computed once at the end
     # instead of tracking a running max/threshold-count incrementally.
-    state["road_max_abs_hdg_deltas_raw"].append(raw_max_abs_hdg_delta_deg)
+    #
+    # Only roads that HAVE a delta contribute. `_hdg_deltas_deg` documents
+    # that an empty list means "no data" rather than "no change", and
+    # appending `max(..., default=0.0)` unconditionally broke exactly that
+    # contract: a single-geometry road became indistinguishable from a
+    # perfectly straight one. Measured on the 711-road reference conversion,
+    # 61 roads have fewer than two geometries, and the 61 zeros they injected
+    # pulled the published percentiles down by about a quarter at p50:
+    #
+    #            all roads   roads with a delta
+    #     p50         2.85                 3.94
+    #     p90        18.86                19.70
+    #     p99        66.32                68.37
+    #
+    # The map-wide maximum is unaffected either way; the percentiles are not.
+    # A converter change that merely split single-geometry roads in two added
+    # no heading change at all and still moved all three, which reads as a
+    # map-wide shape regression.
+    if hdg_deltas_deg:
+        state["road_max_abs_hdg_deltas_raw"].append(raw_max_abs_hdg_delta_deg)
 
     lane_count = 0
     lane_entries: list[dict[str, Any]] = []

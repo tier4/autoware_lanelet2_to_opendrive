@@ -13,6 +13,7 @@ import sys
 
 import pytest
 from autoware_lanelet2_to_opendrive.xodr_digest import (
+    _count_sign_changes,
     build_digest,
     format_digest,
     main,
@@ -665,3 +666,89 @@ def test_build_digest_is_reexported_symbol_used_by_module():
     # exercised above (build_digest / format_digest / main).
     assert xodr_digest.build_digest is build_digest
     assert xodr_digest.format_digest is format_digest
+
+
+class TestRoadsWithNoDeltaAreNotCountedAsStraight:
+    """``_hdg_deltas_deg`` says an empty list is "no data", not "no change".
+
+    The map-wide percentiles are the one place that distinction is visible,
+    and the caller used to break it by appending ``max(..., default=0.0)``
+    unconditionally. Measured on the reference conversion: 61 of 711 roads
+    have fewer than two geometries, and their 61 zeros moved p50 from 3.94
+    down to 2.85.
+    """
+
+    def test_a_single_geometry_road_does_not_enter_the_percentiles(self, tmp_path):
+        """One stub road plus one turning road: every percentile is the turn's."""
+        body = _road_with_hdgs(1, _hdgs_from_deg_deltas([20.0])) + _road_with_hdgs(
+            2, [0.3]
+        )
+        digest = build_digest(_write(tmp_path, body))
+
+        by_id = {entry["id"]: entry for entry in digest["roads"]}
+        turning = by_id[1]["max_abs_hdg_delta_deg"]
+        assert turning > 0.0, "the fixture's turning road must actually turn"
+        assert by_id[2]["max_abs_hdg_delta_deg"] == 0.0
+
+        for key in ("hdg_delta_p50_deg", "hdg_delta_p90_deg", "hdg_delta_p99_deg"):
+            assert digest[key] == turning, (
+                f"{key} is {digest[key]}, not {turning}: the single-geometry "
+                "road voted on a statistic it has no measurement for"
+            )
+
+    def test_the_per_road_entry_still_reports_zero(self, tmp_path):
+        """Excluded from the aggregate, still present per road.
+
+        The road is in the document, so it is in ``roads``; what it must not
+        do is vote on a statistic it has no measurement for.
+        """
+        digest = build_digest(_write(tmp_path, _road_with_hdgs(1, [0.3])))
+
+        assert digest["roads"][0]["max_abs_hdg_delta_deg"] == 0.0
+        assert digest["roads"][0]["hdg_sign_changes"] == 0
+
+    def test_a_map_of_nothing_but_stubs_does_not_crash(self, tmp_path):
+        """With the population empty, the summary still has to produce one.
+
+        Excluding no-data roads means the aggregate can now be computed over
+        an empty list, which the previous unconditional append made
+        impossible. The map-wide fields must be present and zero rather than
+        missing or raising.
+        """
+        body = _road_with_hdgs(1, [0.3]) + _road_with_hdgs(2, [0.7])
+        digest = build_digest(_write(tmp_path, body))
+
+        for key in (
+            "max_abs_hdg_delta_deg",
+            "hdg_delta_p50_deg",
+            "hdg_delta_p90_deg",
+            "hdg_delta_p99_deg",
+        ):
+            assert key in digest, f"{key} vanished when no road had a delta"
+            assert digest[key] == 0.0
+
+
+class TestSignChangesIgnoreNoiseBelowTheReportedResolution:
+    """A reversal must not be manufactured by a delta that prints as 0.0.
+
+    Every other heading field is rounded to ``HDG_DECIMALS``; this count was
+    computed on raw deltas with an exact ``!= 0.0`` test, so a delta of 1e-14
+    degrees kept its sign and split one real reversal into two.
+
+    Measured on the reference conversion: 4284 reversals before, 3936 after,
+    disagreeing on 90 of 711 roads. The inflation is on roads that genuinely
+    curve -- not on the straight ones, which have no deltas at all.
+    """
+
+    def test_a_delta_below_the_resolution_does_not_reverse(self):
+        noise = 1e-12
+        assert _count_sign_changes([1.0, noise, 1.0]) == 0
+        assert _count_sign_changes([1.0, -noise, 1.0]) == 0
+        assert _count_sign_changes([noise, -noise, noise, -noise]) == 0
+
+    def test_a_reported_reversal_is_still_counted(self):
+        assert _count_sign_changes([1.0, -1.0]) == 1
+        assert _count_sign_changes([1.0, -1.0, 1.0]) == 2
+        # at the rounding boundary: 0.005 rounds to 0.01, so it still counts
+        assert _count_sign_changes([1.0, -0.005]) == 1
+        assert _count_sign_changes([1.0, -0.004]) == 0
