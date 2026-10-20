@@ -15,73 +15,76 @@ geometry or the junction decomposition leaves them true.  That is the point:
 a golden file would have to be regenerated after such a change, and a
 regenerated golden file asserts nothing.
 
-**Measured against a real defect.**  At ``a2a48501^`` -- the commit before
-"split connecting roads by their incoming and outgoing roads" -- the
-converter bundled laterally adjacent connecting lanelets into one connecting
-road and let its lanes keep successor ids belonging to a *different* outgoing
-road.  CARLA read those against the road the road-level link named, and
-segfaulted.  Running this checker over that commit's output reports it on all
-three inputs tried, e.g.::
+**Measured against a real defect.**  Before "split connecting roads by their
+incoming and outgoing roads" the converter bundled laterally adjacent
+connecting lanelets into one connecting road and let its lanes keep successor
+ids belonging to a *different* outgoing road.  CARLA read those against the
+road the road-level link named, and segfaulted.  Run over that output the
+checker reports it directly::
 
     [lane_link_target_missing] road 3 lane -3/successor:
         names lane -2 of road 2 at its start, which has lanes ['-1']
 
 **What it does not catch.**  Every invariant here is about a reference that
 resolves.  A *lost* maneuver -- a connecting road that should have been
-emitted twice and was emitted once, as fixed in ``226caa11`` -- leaves no
-dangling reference behind, and running this checker over that commit's parent
-reports nothing on any input tried.  Detecting a loss needs the source map to
-compare against, which is the separate semantics measurement, not this.
+emitted twice and was emitted once -- leaves no dangling reference behind,
+and the checker reports nothing on it.  Detecting a loss needs the source map
+to compare against, which is the separate semantics measurement, not this.
+
+A second, narrower blind spot is worth stating because it is the largest
+known population of the defect this module is named for: the lane-link checks
+examine **road-typed ends only**.  Lane ``<link>``s at junction-typed ends --
+which the format says to omit, and which the converter emits in the hundreds
+on Nishi-Shinjuku -- are out of scope by construction, not because they are
+clean.  See ``xodr_invariants``'s module docstring.
 
 **Candidate invariants that were measured and rejected.**  These are all
-*false today on Nishi-Shinjuku as well as on real-map output*, so they are
-findings to look into rather than invariants to assert.  Counts are from
-``target=carla`` at ``31e81c3f`` (Nishi-Shinjuku / a 190-lanelet real-map
-excerpt):
+false on Nishi-Shinjuku, so they are findings to look into rather than
+invariants to assert.
 
-* "a road links only to a road whose endpoint is within 1 cm" -- 317 / 34
-  violations, up to 11.6 m / 6.6 m apart.  A reference line is anchored to
-  its road's outermost lane boundary, so two linked roads with different lane
+* "a road links only to a road whose endpoint is within 1 cm" -- hundreds of
+  violations, the worst over 10 m apart.  A reference line is anchored to its
+  road's outermost lane boundary, so two linked roads with different lane
   counts legitimately start metres apart.  **Kept in weakened form**: where
   the two sides carry the same driving lanes the two reference lines describe
-  the same edge and do meet, so ``linked_endpoints_apart`` asserts it there.
-  That covers 575 of Nishi-Shinjuku's 1097 road-to-road links (max gap 5 mm,
-  all of them synthetic divergence stubs at their 5 mm floor) and 80 of 146
-  on ``junction_cluster`` (max 0). Split by kind on Nishi-Shinjuku:
-  connecting->connecting 0 of 38 over 1 cm, regular->regular with equal lane
-  counts 0 of 205, regular->regular with different lane counts 2 of 2,
-  connecting->regular 315 of 852.
-* "every driving lane with a road-level successor has a lane-level one" --
-  0 / 1.  The single real-map case is a lane *gain*: road 11 has three
-  driving lanes and its predecessor has two, so the third lane correctly has
-  no predecessor.  The rule is wrong, not the output.
-* "every connecting road is named by some ``<connection>``" -- 51 / 28.  The
-  converter logs each one: the connecting lanelet has no routing-graph
-  predecessor in the source map.  That is a property of the input.
+  the same edge and ought to meet, so ``linked_endpoints_apart`` asserts it
+  there.  Even restricted that far it is not yet clean -- 22 violations over
+  15 joins, worst 0.071 m, pinned below -- and the restriction is on the lane
+  sets rather than on connecting-road-ness: measured, 19 of the 22 are
+  regular-to-regular and 3 are connecting-to-regular.
+* "every driving lane with a road-level successor has a lane-level one".  The
+  cases are lane *gains*: a road with three driving lanes whose predecessor
+  has two, so the third lane correctly has no predecessor.  The rule is
+  wrong, not the output.
+* "every connecting road is named by some ``<connection>``".  The converter
+  logs each one: the connecting lanelet has no routing-graph predecessor in
+  the source map.  That is a property of the input.
+
+The per-candidate counts above are deliberately approximate.  They were taken
+on a pre-migration basis whose commits are not reachable from this branch, so
+quoting them to three digits would invite a comparison nobody can make; the
+one figure stated exactly -- the 22 -- is measured on this branch and asserted
+by a test.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
+from typing import List
 
 import lxml.etree as ET
 import pytest
 
 from autoware_lanelet2_to_opendrive.xodr_invariants import (
+    Violation,
     check_invariants,
     format_violations,
 )
 
 DATA = Path(__file__).parent / "data"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-#: A junction cluster rebuilt from a real map: renumbered, moved and stripped
-#: of authoring metadata, but geometrically the original (see
-#: ``data/tools/rebuild_as_synthetic.py`` and ``data/README.md``).  It carries
-#: the structures a hand-drawn fixture cannot: multi-lane junctions, forking
-#: and chained connectors, coarsely digitised boundaries, non-vehicle lanelets.
-REAL_DERIVED_CLUSTER = DATA / "junction_cluster.osm"
 
 
 def _convert(source: Path, out_dir: Path, map_config: str) -> Path:
@@ -173,7 +176,7 @@ def test_link_to_a_junction_that_does_not_exist() -> None:
 
 
 def test_lane_names_a_successor_that_is_not_in_the_linked_road() -> None:
-    """The shape of the defect CARLA segfaulted on at ``a2a48501^``."""
+    """The shape of the defect CARLA segfaulted on."""
     root = _doc(
         _road(
             "1",
@@ -402,66 +405,85 @@ def test_nishishinjuku_output_satisfies_invariants(nishishinjuku_xodr: Path) -> 
     assert not violations, format_violations(violations)
 
 
+#: What ``linked_endpoints_apart`` measures on Nishi-Shinjuku today: 22
+#: violations over 15 distinct joins (a join is reported from both sides when
+#: both ends name each other), the worst three at 0.071 m.  Both figures are
+#: ceilings in :func:`test_nishishinjuku_linked_endpoints_do_not_get_worse`,
+#: not just prose: an ``xfail`` is satisfied by a single violation, so without
+#: them a change that turned 22 sub-decimetre gaps into 300 gaps and one 50 m
+#: disconnection would leave this file entirely green.
+_KNOWN_GAP_VIOLATIONS = 22
+_KNOWN_GAP_WORST_M = 0.071
+
+
+def _endpoint_gaps(xodr: Path) -> List[Violation]:
+    """The ``linked_endpoints_apart`` violations, which this map still has."""
+    return [
+        v for v in check_invariants(xodr) if v.code == _KNOWN_NISHISHINJUKU_VIOLATION
+    ]
+
+
+def _measured_gap_m(violation: Violation) -> float:
+    """The gap in metres, read out of the violation's own message.
+
+    ``Violation`` carries only strings, so the magnitude has to be parsed back
+    out.  A failed parse is raised rather than skipped: if ``detail``'s wording
+    changes, the ceiling below must fail loudly instead of quietly measuring
+    nothing.
+    """
+    match = re.search(r"([0-9.]+) m away", violation.detail)
+    assert match is not None, (
+        "cannot read the gap out of "
+        f"{violation.detail!r} -- the message format changed, so "
+        "_measured_gap_m needs updating with it"
+    )
+    return float(match.group(1))
+
+
+def test_nishishinjuku_linked_endpoints_do_not_get_worse(
+    nishishinjuku_xodr: Path,
+) -> None:
+    """Hold the known gap at its measured size, in count and in magnitude.
+
+    This is the half an ``xfail`` cannot express.  The companion test below
+    fails the day the gaps close; this one fails the day they widen or
+    multiply, which is the direction a regression actually takes.
+
+    Both ceilings are ``<=`` rather than ``==`` so that a partial fix does not
+    fail the suite -- it just makes these numbers stale, and
+    :func:`test_nishishinjuku_linked_endpoints_still_gap` is what forces them
+    to be revisited once the last one goes.
+    """
+    violations = _endpoint_gaps(nishishinjuku_xodr)
+    assert len(violations) <= _KNOWN_GAP_VIOLATIONS, format_violations(violations)
+
+    worst = max((_measured_gap_m(v) for v in violations), default=0.0)
+    assert worst <= _KNOWN_GAP_WORST_M + 1e-9, (
+        f"worst endpoint gap is {worst:.3f} m, above the pinned "
+        f"{_KNOWN_GAP_WORST_M} m: " + format_violations(violations)
+    )
+
+
 @pytest.mark.xfail(
     strict=True,
     reason=(
         "linked road endpoints on Nishi-Shinjuku are still up to 0.071 m "
-        "apart against a 0.01 m tolerance (22 links); the junction endpoint "
-        "work is what closes this"
+        "apart against a 0.01 m tolerance (22 violations over 15 joins); the "
+        "junction endpoint work is what closes this"
     ),
 )
 def test_nishishinjuku_linked_endpoints_still_gap(nishishinjuku_xodr: Path) -> None:
     """Pin the gap this map has, so closing it is visible as a change.
 
-    Measured on the current converter: 22 links past the 1 cm tolerance, the
-    worst three at 0.071 m. Marked ``strict``, so the day the gaps close this
-    test fails and the marker has to go -- the defect cannot be fixed
-    silently.
+    Measured on the current converter: 22 violations over 15 distinct joins
+    past the 1 cm tolerance, the worst three at 0.071 m.  Marked ``strict``,
+    so the day the gaps close this test fails and the marker has to go -- the
+    defect cannot be fixed silently.
+
+    An ``xfail`` is satisfied by *any* violation, so this test alone would not
+    notice the gap getting worse.
+    :func:`test_nishishinjuku_linked_endpoints_do_not_get_worse` is the other
+    half, and it is deliberately not marked ``xfail``.
     """
-    violations = [
-        v
-        for v in check_invariants(nishishinjuku_xodr)
-        if v.code == _KNOWN_NISHISHINJUKU_VIOLATION
-    ]
-    assert not violations, format_violations(violations)
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(
-    not REAL_DERIVED_CLUSTER.exists(),
-    reason=(
-        "junction_cluster.osm is not committed -- its geometry comes from a "
-        "real urban map. Produce it with test/data/tools/crop_lanelet2_map.py "
-        "and test/data/tools/rebuild_as_synthetic.py (see test/data/README.md) "
-        "to enable this check."
-    ),
-)
-def test_real_derived_cluster_satisfies_invariants(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> None:
-    """Geometry taken from a real map, which no hand-drawn fixture reproduces.
-
-    The ``*_mini`` fixtures are drawn on a 20 m grid, and a fixture drawn on a
-    grid cannot exhibit some of what this is here for: where two branches of a
-    fork start at the same shared boundary by construction, a defect in how
-    their start points are reconciled is a provable no-op.  Here they do not,
-    because the source geometry is surveyed rather than drawn.
-
-    Marked ``slow``: converting it costs about 40 s.
-
-    **The fixture is not committed**, so by default this skips and the
-    coverage it describes does not exist.  The two tools that produce it are
-    committed next to it; ``test/data/README.md`` records the exact invocation
-    and what the rebuild guarantees.  The skip names both, so a reader of the
-    run sees which check is absent rather than a silent pass.
-
-    The guard is keyed on the *source map*, not on the generated XODR, so it
-    is outside what ``test_fixture_dependent_tests_never_skip`` forbids -- that
-    module is about a test whose subject is rebuilt by a fixture, which this
-    one is not.
-    """
-    xodr = _convert(
-        REAL_DERIVED_CLUSTER, tmp_path_factory.mktemp("cluster"), "junction_cluster"
-    )
-    violations = check_invariants(xodr)
+    violations = _endpoint_gaps(nishishinjuku_xodr)
     assert not violations, format_violations(violations)
