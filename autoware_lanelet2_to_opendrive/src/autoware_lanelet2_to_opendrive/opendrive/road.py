@@ -1187,8 +1187,13 @@ class Road:
         # This ensures elevation profile segments align with ParamPoly3 segments
         geometry_s_values = [g.s for g in geometries]
 
-        # Get elevation profile from reference line, aligned with geometry boundaries
-        elevation_profile = reference_line.get_elevation_profile(geometry_s_values)
+        # Get elevation profile from reference line, aligned with geometry
+        # boundaries *and* with the road length the geometries just produced.
+        # Passing ``road_length`` is what makes the profile's s-domain the same
+        # interval the <road> declares; see get_elevation_profile's docstring.
+        elevation_profile = reference_line.get_elevation_profile(
+            geometry_s_values, road_length=road_length
+        )
 
         # Extract speed limit and road type from lanelets
         road_types_list = Road._extract_road_types_from_lanelets(lanelet_list)
