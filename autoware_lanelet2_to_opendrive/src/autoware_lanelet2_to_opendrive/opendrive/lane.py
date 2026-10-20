@@ -403,9 +403,18 @@ class Lane:
         elem.set("type", self.lane_type.value)
         elem.set("level", "true" if self.level else "false")
 
-        # Add rule attribute if specified
-        if self.rule:
-            elem.set("rule", self.rule)
+        # `self.rule` (RHT/LHT) is deliberately NOT serialised onto <lane>.
+        # `rule` is not an attribute of `t_road_lanes_laneSection_lr_lane` in
+        # any OpenDRIVE XSD (1.4 through 1.8): the RHT/LHT traffic rule lives
+        # on <road> (`e_trafficRule`, 1.7+), which Road.to_xml already emits,
+        # and within a lane only <access rule="allow|deny"> and
+        # <roadMark rule="..."> carry a `rule`. Emitting it here produced one
+        # "attribute 'rule' is not allowed" schema error per lane (1015 on the
+        # Nishi-Shinjuku fixture), which failed the bundle's valid_schema
+        # precondition and skipped all 21 semantic/geometry checkers. No
+        # consumer reads it — CARLA's LaneParser reads only <lane>@id, @type
+        # and @level. The field itself is kept: it drives lane-id sign
+        # assignment throughout the converter.
 
         # Add predecessor and successor links if available
         if self.predecessor or self.successor:

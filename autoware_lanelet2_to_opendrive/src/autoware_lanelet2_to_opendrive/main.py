@@ -1062,9 +1062,13 @@ class _Lanelet2ToOpenDRIVEConverter:
         min_x, min_y, max_x, max_y = compute_point_layer_bounds(self.lanelet_map)
 
         # Create header
+        # revMinor="7": see Header's docstring for why 1.7 is the version we
+        # declare (it is the one whose XSD admits what we emit, it keeps the
+        # whole asam-qc-opendrive bundle applicable, and CARLA ignores the
+        # declaration entirely).
         header = Header(
             rev_major="1",
-            rev_minor="4",
+            rev_minor="7",
             name="Converted from Lanelet2",
             version="1.0",
             date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1356,6 +1360,33 @@ class _Lanelet2ToOpenDRIVEConverter:
             )
             all_roads.extend(parking_roads)
             print(f"Built {len(parking_roads)} parking roads")
+
+        # Step 6.94: Give every <connection> a connecting road of its own.
+        # A connector the source map feeds from two external roads is
+        # enumerated once per incoming road, and OpenDRIVE has no way to
+        # write that on one connecting road: <connection> carries a single
+        # incomingRoad and the connecting road a single <predecessor>.
+        # Runs after the road and lane links are final -- the stubs are
+        # built from them -- and before the junction-ID shift, so the new
+        # roads count towards the highest road ID.
+        from autoware_lanelet2_to_opendrive.shared_connecting_roads import (
+            split_shared_connecting_roads,
+        )
+
+        shared_start_id = (max(road.id for road in all_roads) + 1) if all_roads else 0
+        shared_roads, _shared_next_id = split_shared_connecting_roads(
+            junctions=junctions,
+            all_roads=all_roads,
+            starting_road_id=shared_start_id,
+            traffic_rule=traffic_rule_value,
+            min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
+        )
+        if shared_roads:
+            all_roads.extend(shared_roads)
+            print(
+                f"\nSplit {len(shared_roads)} shared connecting road(s) so "
+                "every junction connection names one of its own"
+            )
 
         # Step 6.95: Move the junction IDs above the road IDs (CARLA resolves
         # both in one ID space). They were numbered from ``junction_id_offset``

@@ -24,9 +24,31 @@ import lxml.etree as ET
 import pytest
 
 from autoware_lanelet2_to_opendrive.qc_validate import (
+    error_counts_by_checker,
     load_ignore_patterns,
-    validate,
+    run_bundle,
 )
+
+# ERROR counts the qc-framework bundle reports on these two fixtures today,
+# per checker.  Both entries are pre-existing converter findings that the
+# bundle could not report until the output started passing the ASAM schema
+# check (a failing schema check skips all 21 semantic/geometry/smoothness
+# checkers, so `validate()` used to return 0 here vacuously):
+#
+#   * road.geometry.contact_point -- a road reference line that does not start
+#     at its predecessor's/successor's contact point.
+#   * lane_smoothness.contact_point_no_horizontal_gaps -- a >1 cm horizontal
+#     gap between two connected drivable lanes.
+#
+# These two fixtures are the minimal reproducers for the same two findings
+# that dominate the full Nishi-Shinjuku map.  Pinning the exact per-checker
+# counts keeps the test sensitive: a regression in any OTHER checker shows up
+# as a new key, and fixing either finding shows up as a count change that must
+# be reflected here.
+_KNOWN_QC_FINDINGS = {
+    "check_asam_xodr_road_geometry_contact_point": 1,
+    "check_asam_xodr_lane_smoothness_contact_point_no_horizontal_gaps": 2,
+}
 
 DATA = Path(__file__).parent / "data"
 FAN_OUT = (DATA / "junction_fanout_mini.osm").resolve()
@@ -173,9 +195,18 @@ def test_junction_connections_cover_every_incoming_lane(
 
 @BOTH
 def test_fixture_passes_qc_validate(tmp_path: Path, fixture: Path) -> None:
-    """The emitted OpenDRIVE must pass qc-framework with zero ERRORs."""
-    errors = validate(_run_convert(tmp_path, fixture), load_ignore_patterns())
-    assert errors == 0, f"qc-framework reported {errors} ERROR(s)"
+    """qc-framework must report only the two known, pre-existing findings.
+
+    The schema checker in particular must be clean: it is the precondition
+    for every other checker in the bundle.
+    """
+    result = run_bundle(_run_convert(tmp_path, fixture))
+    schema = result.get_checker_result("xodrBundle", "check_asam_xodr_xml_valid_schema")
+    assert schema.issues == [], (
+        "schema check must stay clean, otherwise the other 21 checkers skip: "
+        f"{[loc.description for i in schema.issues for loc in i.locations][:5]}"
+    )
+    assert error_counts_by_checker(result, load_ignore_patterns()) == _KNOWN_QC_FINDINGS
 
 
 @BOTH

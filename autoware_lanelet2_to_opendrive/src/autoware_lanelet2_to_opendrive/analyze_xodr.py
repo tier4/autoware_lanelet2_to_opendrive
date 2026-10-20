@@ -514,6 +514,33 @@ _STOP_LINE_SIGNAL_RE = re.compile(r"^(StopLine|StopSign|YieldSign)_(\d+)$")
 # Signal name pattern for traffic light signals: TrafficLight_{regelem_id}_{linestring_id}
 _TRAFFIC_LIGHT_SIGNAL_RE = re.compile(r"^TrafficLight_(\d+)_(\d+)$")
 
+# Object @name of a stop line: the CARLA stencil, or the standard form's
+# "stop_line_<linestring id>".
+_STOP_LINE_OBJECT_NAME_RE = re.compile(r"^(Stencil_STOP|stop_line_\d+)$")
+
+# Object @type values that denote a stop line. "roadMark" is the standard
+# (schema-conforming) form and the only one of the three that is an ASAM
+# e_objectType member; "-1" is the CARLA dialect emitted under target=carla;
+# "stopLine" is the pre-fix standard form, accepted so this reader stays
+# backwards compatible with .xodr files produced before the change.
+_STOP_LINE_OBJECT_TYPES = frozenset({"roadMark", "stopLine", "-1"})
+
+
+def _is_stop_line_object(obj_type: str, obj_name: str) -> bool:
+    """Return True when an ``<object>`` is one of the converter's stop lines.
+
+    Args:
+        obj_type: The object's ``@type`` attribute.
+        obj_name: The object's ``@name`` attribute.
+
+    Returns:
+        True if the (type, name) pair identifies a stop line emitted by this
+        converter, in either the standard or the CARLA ``Stencil_STOP`` form.
+    """
+    return obj_type in _STOP_LINE_OBJECT_TYPES and bool(
+        _STOP_LINE_OBJECT_NAME_RE.match(obj_name)
+    )
+
 
 def _parse_stop_lines_from_xodr(
     xodr_path: Path,
@@ -565,10 +592,9 @@ def _parse_stop_lines_from_xodr(
             obj_id_str = obj_elem.get("id", "")
             if not obj_id_str:
                 continue
-            # Standard: type="stopLine", CARLA: type="-1" + name="Stencil_STOP"
-            if obj_type == "stopLine" or (
-                obj_type == "-1" and obj_name == "Stencil_STOP"
-            ):
+            # Standard form: type="roadMark" name="stop_line_<id>".
+            # CARLA dialect:  type="-1"       name="Stencil_STOP".
+            if _is_stop_line_object(obj_type, obj_name):
                 obj_id = int(obj_id_str)
                 object_to_road[obj_id] = road_id
                 object_positions[obj_id] = (

@@ -648,8 +648,23 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 3. Build `ConnectingRoad` objects for junction lanes, one per group of adjacent
    lanes that share the same incoming and outgoing roads
 4. Link connecting roads to incoming/outgoing roads
+5. Give every `<connection>` a connecting road of its own (see below)
 
 **Output:** List of `Junction` objects with connections
+
+**One connecting road per connection:** a connector that the source map feeds
+from two *different* external roads — a merge inside the junction mouth — is
+enumerated once per incoming road, so both `<connection>` rows name the same
+`connectingRoad`. OpenDRIVE cannot express that: a connecting road carries one
+road-level `<predecessor>`, so one incoming road is named there and the other
+is not, which breaks
+`junctions.connection.one_connection_element` and
+`junctions.connection.start_along_linkage` at once. Merging the rows is not
+possible — `<connection>` carries exactly one `incomingRoad` and the rows
+differ in exactly that — so the extra rows get a zero-length stub chained into
+the head of the shared connector. Chaining rather than copying the connector
+keeps the vehicle on the connector's own lanelet-backed lane, so the
+`lanelet -> (road, lane)` mapping still describes the branch.
 
 **Code Location:**
 
@@ -657,6 +672,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 - Connecting road construction: [`opendrive/road.py:Road.construct_connecting_roads_from_junctions`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/road.py)
 - Junction objects + connections: [`opendrive/junction.py:Junction.construct_from_lanelet_groups` / `Junction.build_connections_from_roads` / `Junction.build_priorities_from_regulatory_elements`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/opendrive/junction.py)
 - Synthetic divergence/merge junctions (issue #291): [`divergence.py:apply_divergence_synthesis`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/divergence.py)
+- One connecting road per connection: [`shared_connecting_roads.py:split_shared_connecting_roads`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/shared_connecting_roads.py)
 - Orchestration: [`main.py:_Lanelet2ToOpenDRIVEConverter._build_junction_structure` / `convert`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
 
 ---
@@ -709,7 +725,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 
 ### Stage 8.6: Stop Line Object Extraction
 
-**Purpose:** Convert Lanelet2 linestrings with `type="stop_line"` into OpenDRIVE `<object type="stopLine">` elements and assign them to the nearest roads.
+**Purpose:** Convert Lanelet2 linestrings with `type="stop_line"` into OpenDRIVE `<object type="roadMark">` elements and assign them to the nearest roads.
 
 **Tags Used:**
 
@@ -776,7 +792,7 @@ lane = Lane.construct_from_lanelet(lanelet, lanelet_map, lane_id, direction)
 **Processing:**
 1. Compute `north`/`south`/`east`/`west` bounds from the projected `pointLayer` ([`geometry.py:compute_point_layer_bounds`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/geometry.py))
 2. Generate the geoReference PROJ string from the resolved origin (`projection.latlon_to_proj_string` or `projection.mgrs_to_proj_string`)
-3. Build the `Header` (revMajor/revMinor pinned to `1`/`4`) plus `<road>`, `<junction>`, `<controller>` collections inside the `OpenDRIVE` dataclass
+3. Build the `Header` (revMajor/revMinor pinned to `1`/`7`; see [ASAM Schema Compliance](limitations/asam-schema-compliance.md)) plus `<road>`, `<junction>`, `<controller>` collections inside the `OpenDRIVE` dataclass
 4. Serialize to XML using `lxml` (`opendrive.export_to_xml` / `opendrive.save_opendrive_to_file`)
 5. Write the `.xodr` and the persisted lanelet → (road, lane) mapping JSON next to it
 
@@ -1399,7 +1415,7 @@ For developers seeking to understand or modify tag handling:
 | **Signal extraction** | `opendrive/signals_and_controllers.py` | `SignalsAndControllers.construct_from_lanelet_map` | Extracts traffic-light regulatory elements |
 | **Subtype filtering** | `util.py` | `filter_lanelets_by_subtype` | Filters lanelets by `subtype` |
 | **Crosswalk extraction** | `opendrive/objects.py` | `CrosswalkObject.construct_from_crosswalk_lanelet` / `find_nearest_road` | Builds `<object type="crosswalk">` from `subtype="crosswalk"` lanelets |
-| **Stop line extraction** | `opendrive/objects.py` | `StopLineObject.construct_from_linestring` / `find_nearest_road_for_linestring` | Reads `type="stop_line"` from `lineStringLayer`; emits `<object type="stopLine">` (or CARLA `Stencil_STOP`) |
+| **Stop line extraction** | `opendrive/objects.py` | `StopLineObject.construct_from_linestring` / `find_nearest_road_for_linestring` | Reads `type="stop_line"` from `lineStringLayer`; emits `<object type="roadMark">` (or CARLA `Stencil_STOP`) |
 | **Stop line / stop sign / yield sign signals** | `main.py` | `_Lanelet2ToOpenDRIVEConverter._extract_and_assign_stop_lines` | Emits `<signal type="294">` (StopLine), `type="206"` (StopSign), `type="205"` (YieldSign) with dependencies |
 | **Right-of-way priority** | `opendrive/junction.py` | `Junction.build_priorities_from_regulatory_elements` | Emits `<junction><priority>` from `right_of_way` regulatory elements |
 | **Parking lots** | `opendrive/parking.py` | `construct_parking_roads` | Synthetic roads + `<lane type="parking">` + `<object type="parkingSpace">` from `parking_lot` areas |

@@ -192,6 +192,7 @@ class StopLineConfig:
             For CARLA Stencil_STOP, this is the stencil width (recommend ~2.0m).
         carla_stop_line: If True, output stop lines in CARLA's Stencil_STOP format
             (<object type="-1" name="Stencil_STOP">) instead of standard OpenDRIVE
+            (<object type="roadMark" name="stop_line_<id>">)
             format. zOffset is fixed at 0.0 and orientation is set to "-".
     """
 

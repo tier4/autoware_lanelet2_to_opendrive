@@ -76,7 +76,7 @@ uv run convert \
 ```
 
 The `target=carla` overlay sets `exclude_non_junction_signals: true`, switches
-`stopline.carla_stop_line` to `true` (emitting `<object name="Stencil_STOP">`),
+`stopline.carla_stop_line` to `true` (emitting `<object type="-1" name="Stencil_STOP">`),
 and applies traffic-light spawn offsets tuned for CARLA actors.
 
 ### Override Output Path
@@ -240,7 +240,7 @@ each is also overridable from the command line.
 | | `arc_enabled` | `true` | Detect constant-curvature arcs |
 | | `min_line_length` | 5.0 m | Reject shorter line runs |
 | `stopline` | `width` | `0.1` m | Painted stop-line width |
-| | `carla_stop_line` | `false` | Emit `Stencil_STOP` instead of `stopLine` |
+| | `carla_stop_line` | `false` | Emit `<object type="-1" name="Stencil_STOP">` instead of the conforming `<object type="roadMark" name="stop_line_<id>">` |
 | `traffic_light` | `offset_x/y/z`, `hdg_offset` | 0 / 0 / 0 / π/2 | CARLA actor placement |
 | `width_estimation` | `adaptive_sampling` | `true` | Sample width based on road length |
 | | `default_sample_interval` | 5.0 m | Spacing between width samples |
@@ -338,7 +338,7 @@ OpenDRIVE structure:
 
 ```
 <OpenDRIVE>
-  <header revMajor="1" revMinor="4" .../>      # PROJ geoReference + bounding box
+  <header revMajor="1" revMinor="7" .../>      # PROJ geoReference + bounding box
   <road id=... rule="RHT|LHT" .../>            # regular + connecting + parking roads
   <junction id=... .../>                       # intersection + synthetic divergence/merge
   <controller id=... .../>                     # signal groups
