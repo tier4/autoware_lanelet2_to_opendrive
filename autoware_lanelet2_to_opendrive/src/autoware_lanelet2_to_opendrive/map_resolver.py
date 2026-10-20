@@ -154,6 +154,7 @@ def _convert_lanelet2_to_xodr_cached(
     lanelet2_path: Path,
     config: Optional[ConversionConfig] = None,
     mgrs_code: Optional[str] = None,
+    preflight: bool = True,
 ) -> Path:
     """Convert a Lanelet2 map to OpenDRIVE with ``/tmp``-based caching.
 
@@ -163,6 +164,14 @@ def _convert_lanelet2_to_xodr_cached(
                 is used when *None*.
         mgrs_code: MGRS grid code for the coordinate origin.  When provided it
                    takes precedence over ``config.origin.mgrs_code``.
+        preflight: Inspect the map's structure before loading it, and raise
+                   :class:`~.map_preflight.MapPreflightError` with a report
+                   naming what stops the load.  Pass *False* to get the raw
+                   ``lanelet2.io.load`` exception back instead.  This mirrors
+                   the CLI's ``preflight`` config key; it exists so that a
+                   caller on this path has the same off switch, because a
+                   false positive here would otherwise be unrecoverable
+                   without pinning an older version of the package.
 
     Returns:
         Path to the cached ``.xodr`` file.
@@ -242,14 +251,27 @@ def _convert_lanelet2_to_xodr_cached(
     # name the structural problems that stop the load, instead of letting the
     # parser's flat error wall out. Diagnostic only -- every blocking finding
     # is a constraint lanelet2.io.load enforces anyway.
-    if lanelet2_path.suffix == ".osm":
+    #
+    # `inspected` is tested before `ok` on purpose: a file lxml cannot parse
+    # must be reported as uninspected and let through, never refused. The
+    # order makes the guard structural rather than a consequence of
+    # `inspect_lanelet2_osm` happening to return early with no findings.
+    if preflight and lanelet2_path.suffix == ".osm":
         report = inspect_lanelet2_osm(lanelet2_path)
-        if not report.ok:
-            raise MapPreflightError(report)
         if not report.inspected:
             logger.warning("Pre-flight could not parse the map: %s", report.xml_error)
+        elif not report.ok:
+            raise MapPreflightError(report)
+        elif report.findings:
+            # Non-blocking only, or the branch above would have fired. The
+            # CLI prints these; this path logged nothing, which made the same
+            # inspection half as useful depending on how it was reached.
+            logger.warning("Pre-flight found non-fatal problems: %s", report.format())
 
-    lanelet_map = lanelet2.io.load(lanelet2_path, projector)
+    # `str(...)`: the Boost.Python binding's signature takes a std::string
+    # and rejects a PosixPath outright, so this path could not load any .osm
+    # map at all. `main.py` and `analyze_xodr.py` both convert; this did not.
+    lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
 
     # mgrs_code is already in config.origin.mgrs_code (merged above).
     opendrive, _, lanelet_to_road_and_lane, _, _ = convert_lanelet2_to_opendrive(
@@ -288,6 +310,7 @@ def resolve_map_to_xodr(
     map_path: Path | str,
     config: Optional[ConversionConfig] = None,
     mgrs_code: Optional[str] = None,
+    preflight: bool = True,
 ) -> Path:
     """Resolve a map file to an OpenDRIVE (``.xodr``) path.
 
@@ -305,6 +328,9 @@ def resolve_map_to_xodr(
                 Lanelet2 map.
         mgrs_code: MGRS grid code for the coordinate origin.  Overrides the
                    value in ``config.origin`` if provided.
+        preflight: Inspect the map's structure before loading it (default).
+                   Pass *False* to restore the previous behaviour, where
+                   ``lanelet2.io.load``'s own exception comes out unexamined.
 
     Returns:
         Absolute :class:`~pathlib.Path` to a ``.xodr`` file.
@@ -330,4 +356,4 @@ def resolve_map_to_xodr(
     map_path = Path(map_path)
     if map_path.suffix == ".xodr":
         return map_path
-    return _convert_lanelet2_to_xodr_cached(map_path, config, mgrs_code)
+    return _convert_lanelet2_to_xodr_cached(map_path, config, mgrs_code, preflight)

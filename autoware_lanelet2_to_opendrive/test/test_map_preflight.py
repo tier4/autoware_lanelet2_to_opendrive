@@ -365,3 +365,132 @@ def test_error_message_carries_the_report(tmp_path: Path) -> None:
     error = MapPreflightError(report)
     assert "right_of_way_without_yield" in str(error)
     assert error.report is report
+
+
+class TestTheReportSurvivesAMissingId:
+    """A primitive with no ``id`` must not break the report that names it.
+
+    ``element.get("id")`` is ``None`` for such an element, and ``None`` in the
+    id list makes ``format``'s ``", ".join(...)`` raise ``TypeError``. On the
+    blocking path that replaces the report with a less useful error; on the
+    **non-blocking** path it kills a map that converts, from inside the branch
+    written specifically to avoid refusing one.
+    """
+
+    def test_a_way_without_an_id_is_reported_not_raised(self, tmp_path: Path) -> None:
+        path = tmp_path / "no_id.osm"
+        path.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6">\n'
+            '  <node id="1" lat="35.0" lon="139.0"/>\n'
+            '  <node id="2" lat="35.1" lon="139.1"/>\n'
+            "  <way/>\n"  # no id, no <nd>: degenerate and unnameable
+            '  <way id="10">\n    <nd ref="1"/>\n    <nd ref="2"/>\n  </way>\n'
+            "</osm>\n",
+            encoding="utf-8",
+        )
+
+        report = inspect_lanelet2_osm(path)
+
+        assert report.inspected
+        # degenerate, but nothing here stops the load
+        assert report.ok
+        assert report.findings
+        text = report.format()  # must not raise
+        assert "<no id>" in text
+
+    def test_format_is_callable_on_every_finding_class(self, tmp_path: Path) -> None:
+        """Whatever is found, printing it is what the caller does next."""
+        path = tmp_path / "mixed.osm"
+        path.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6">\n'
+            '  <node id="1" lat="35.0" lon="139.0"/>\n'
+            '  <node id="1" lat="35.0" lon="139.0"/>\n'
+            "  <way/>\n"
+            '  <relation id="5">\n'
+            '    <member type="relation" role="refers" ref="404"/>\n'
+            '    <tag k="type" v="regulatory_element"/>\n'
+            "  </relation>\n"
+            "</osm>\n",
+            encoding="utf-8",
+        )
+
+        report = inspect_lanelet2_osm(path)
+
+        assert report.format()
+        assert str(MapPreflightError(report))
+
+
+class TestTheGuardOrderIsStructural:
+    """A file lxml cannot parse is let through, whatever else is true of it.
+
+    ``ok`` is True on that path only because ``inspect_lanelet2_osm`` returns
+    early with no findings. Both integration points test ``inspected`` first
+    so the guard does not depend on that, which a future check appending a
+    finding before the early return would otherwise invert silently.
+    """
+
+    def test_an_unparseable_file_is_uninspected_and_not_refused(self) -> None:
+        report = inspect_lanelet2_osm(DATA / "walkway_mini.osm")
+
+        assert not report.inspected
+        assert report.xml_error
+        assert report.ok, "an unparseable file must never be refused"
+        assert not report.findings
+
+    def test_the_cli_exits_zero_on_an_unparseable_file(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from autoware_lanelet2_to_opendrive.map_preflight import main
+
+        assert main([str(DATA / "walkway_mini.osm")]) == 0
+        assert "not inspected" in capsys.readouterr().out
+
+
+class TestThePreflightCanBeTurnedOffOnEveryPath:
+    """Every entry point that pre-flights must also be able to not.
+
+    The CLI reads a `preflight` config key. `resolve_map_to_xodr` is exported
+    from the package and is the path an external consumer uses, so it needs
+    the same switch: a false positive reached only through that function
+    would otherwise be unrecoverable short of pinning an older version.
+    """
+
+    def test_resolve_map_to_xodr_takes_preflight(self) -> None:
+        import inspect
+
+        from autoware_lanelet2_to_opendrive.map_resolver import (
+            _convert_lanelet2_to_xodr_cached,
+            resolve_map_to_xodr,
+        )
+
+        for function in (resolve_map_to_xodr, _convert_lanelet2_to_xodr_cached):
+            parameter = inspect.signature(function).parameters.get("preflight")
+            assert parameter is not None, (
+                f"{function.__name__} pre-flights the map with no way to "
+                "switch it off"
+            )
+            assert parameter.default is True, "the default must stay on"
+
+    def test_disabling_it_lets_an_unloadable_map_reach_the_loader(
+        self, tmp_path: Path
+    ) -> None:
+        """With it off, the raw loader failure comes back instead of a report.
+
+        Asserted by *not* getting `MapPreflightError`: what replaces it is
+        whatever `lanelet2.io.load` raises, which is the previous behaviour
+        this switch restores.
+        """
+        from autoware_lanelet2_to_opendrive.map_resolver import resolve_map_to_xodr
+
+        path = _write_map(
+            tmp_path, _NODES_AND_WAYS + _LANELETS + _BAD_RIGHT_OF_WAY, "broken.osm"
+        )
+
+        with pytest.raises(MapPreflightError):
+            resolve_map_to_xodr(path, mgrs_code="54SUE")
+
+        with pytest.raises(Exception) as caught:
+            resolve_map_to_xodr(path, mgrs_code="54SUE", preflight=False)
+        assert not isinstance(
+            caught.value, MapPreflightError
+        ), "preflight=False still produced the pre-flight report"

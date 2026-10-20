@@ -198,6 +198,13 @@ class MapPreflightError(Exception):
         self.report = report
 
 
+#: Stands in for a primitive with no ``id`` attribute, so a report naming it
+#: is still printable.  Lanelet2 cannot read such an element either, but
+#: refusing the map over it would be a new rejection rather than a name for
+#: one the parser already makes, which is not what this module is for.
+_NO_ID = "<no id>"
+
+
 def _tags(element: ET._Element) -> Dict[str, str]:
     """Return an OSM element's ``<tag k= v=>`` children as a dict."""
     return {t.get("k"): t.get("v") for t in element.findall("tag")}
@@ -290,7 +297,12 @@ def inspect_lanelet2_osm(path: Path) -> PreflightReport:
 
     try:
         for element in _iter_primitives(path):
-            oid = element.get("id")
+            # An element with no `id` cannot be reported by id, and `None` in
+            # the id lists makes `format`'s `", ".join(...)` raise TypeError
+            # -- which on the *non-blocking* path kills a map that converts,
+            # inside the branch written to avoid refusing one.  A placeholder
+            # keeps the report printable and says what is wrong.
+            oid = element.get("id") or _NO_ID
             if element.tag == "node":
                 if oid in node_ids:
                     duplicate_ids.append(oid)
@@ -354,15 +366,19 @@ def inspect_lanelet2_osm(path: Path) -> PreflightReport:
     candidates = [
         _finding(
             "right_of_way_without_yield",
-            "a right_of_way regulatory element has no member with role 'yield' "
-            "-- every member is tagged 'right_of_way', so the element says who "
-            "has priority but never says who gives way",
+            "a right_of_way regulatory element has no member with role "
+            "'yield', so the element never says who gives way (on the map "
+            "this was first found on every member was tagged 'right_of_way', "
+            "but the check is only the absence of a 'yield' role)",
             "rejected with 'A maneuver must refer to at least one lanelet that "
             "has to yield!'; every lanelet referring to the element then fails "
             "too with 'Failed to get id ... from map'",
-            "give the yielding lanelet the role 'yield' (it is normally the "
-            "element's first member, and the lanelet that owns the element), "
-            "or delete the element if nothing yields there",
+            "give the yielding lanelet the role 'yield' -- normally the "
+            "element's first member, and NOT the lanelet that owns the "
+            "element, which is the one with priority (measured on this "
+            "repository's reference map: 85 of 85 right_of_way elements are "
+            "owned by a lanelet holding the 'right_of_way' role) -- or delete "
+            "the element if nothing yields there",
             row_without_yield,
         ),
         _finding(

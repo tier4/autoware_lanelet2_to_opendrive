@@ -1504,10 +1504,16 @@ def preprocess_and_convert_with_hydra(
     # never rejects a map that would otherwise convert.
     if cfg.get("preflight", True) and lanelet2_file.suffix == ".osm":
         report = inspect_lanelet2_osm(lanelet2_file)
-        if not report.ok:
-            raise MapPreflightError(report)
+        # `inspected` first: a file lxml cannot parse must be reported as
+        # uninspected and let through, never refused. Testing `ok` first works
+        # only because `inspect_lanelet2_osm` returns early with no findings
+        # on that path, which makes the guard incidental rather than
+        # structural -- one future check that appends a finding before
+        # returning would invert it silently.
         if not report.inspected:
             logger.warning(f"Pre-flight could not parse the map: {report.xml_error}")
+        elif not report.ok:
+            raise MapPreflightError(report)
         elif report.findings:
             # Non-blocking only, or the raise above would have fired. Worth
             # saying out loud; not worth refusing a map that converts.
