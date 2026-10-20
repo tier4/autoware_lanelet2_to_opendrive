@@ -8,32 +8,44 @@ nothing.  The ones about lane links are exactly the shape of the defect
 behind CARLA's segfault on a forking connector: a lane named a successor id
 that did not exist in the road the road-level link pointed at.
 
-Every check here was measured at zero on the Nishi-Shinjuku conversion, on
-``junction_cluster`` and on the ``*_mini`` fixtures before being added; a
-check that already fires somewhere is a finding to report, not an invariant
-to assert, and is deliberately absent.  Three such candidates were measured
-and rejected -- see ``test_xodr_structural_invariants`` for what they were
-and what they measure today.
+Every check here but one was measured at zero on the Nishi-Shinjuku
+conversion and on the ``*_mini`` fixtures before being added; a check that
+already fires somewhere is a finding to report, not an invariant to assert,
+and is deliberately absent.  Three such candidates were measured and
+rejected -- see ``test_xodr_structural_invariants`` for what they were and
+what they measure today.
+
+The exception is ``linked_endpoints_apart``, which is **not** at zero: on
+Nishi-Shinjuku it reports 22 violations over 15 distinct joins, the worst at
+0.071 m against a 1 cm tolerance.  It is asserted on its own under
+``xfail(strict=True)`` with a ceiling on both the count and the magnitude, so
+the defect is pinned rather than hidden and cannot quietly get worse.  Every
+other code below is at zero on that map.
 
 One candidate is **not here because it would fail on arrival**: a lane
 ``<link>`` on a regular road at a junction-typed end. The format says to omit
 it -- which lane you continue into is the junction's ``<connection>`` to
 decide, not the road's -- so this is a rule, not a preference, and it would
-belong in this set. At ``ca7c9ca7`` the converter emits 501 of them on
-Nishi-Shinjuku and 56 on ``junction_cluster``: a later pass re-points a road
-link at a junction and nothing clears the lane links the earlier pass wrote.
-Asserting it today would make the whole set fail, and a set that fails on
-arrival gets an exception carved into it or gets ignored. Add it once that is
-fixed; it needs no tolerance and no pinned count.
+belong in this set.  The converter emits hundreds of them on Nishi-Shinjuku:
+a later pass re-points a road link at a junction and nothing clears the lane
+links the earlier pass wrote.  Asserting it today would make the whole set
+fail, and a set that fails on arrival gets an exception carved into it or
+gets ignored.  Add it once that is fixed; it needs no tolerance and no pinned
+count.
+
+Note what that means for the checks below: the lane-link checks examine
+road-typed ends only, so the largest known population of dangling lane links
+-- the ones at junction-typed ends -- is out of scope by construction, not
+because it is clean.
 
 One of the three rejected candidates survives in weakened form.  "Two linked
 roads' reference lines meet" is false in general, because a reference line is
 anchored to its road's outermost lane boundary and two roads with different
 lane counts therefore start metres apart.  Restricted to links whose sides carry the
-*same* driving lanes it is true and worth having: 575 of Nishi-Shinjuku's
-1097 road-to-road links qualify and none exceeds 5 mm, and 80 of 146 on
-``junction_cluster`` with none above zero.  When the anchoring work lands the
-restriction can simply be dropped.
+*same* driving lanes it is worth having, though it is not yet true either:
+on Nishi-Shinjuku the restricted form reports 22 violations over 15 joins,
+the worst at 0.071 m (see ``linked_endpoints_apart`` above).  When the
+anchoring work lands the restriction can simply be dropped.
 
 Usage::
 
@@ -71,14 +83,24 @@ ROAD_LENGTH_TOLERANCE_M = 1e-6
 #: ``lane_smoothness.contact_point_no_horizontal_gaps``, so it is the standard's
 #: figure rather than one fitted to this converter's output.
 #:
-#: Nishi-Shinjuku does not meet it: 22 links sit past 1 cm, the worst three at
-#: 7.1 cm.  Those are pinned by
+#: Nishi-Shinjuku does not meet it: 22 violations over 15 distinct joins sit
+#: past 1 cm, the worst three at 7.1 cm (a join is reported from both sides
+#: when both ends name each other).  Those are pinned by
 #: ``test_nishishinjuku_linked_endpoints_still_gap`` rather than absorbed by a
 #: looser tolerance, because a tolerance wide enough to pass them would also
-#: pass a genuinely disconnected road.  Synthetic divergence stubs sit at
-#: :attr:`~.config.GeometryConstants.divergence_min_segment_length`, which that
-#: constant's own documentation requires to stay strictly below 1 cm, so they
-#: are not what these violations are.
+#: pass a genuinely disconnected road.
+#:
+#: Synthetic divergence stubs are *not* excluded by construction, and the
+#: margin here is zero rather than comfortable:
+#: :attr:`~.config.GeometryConstants.divergence_min_segment_length` is
+#: ``0.01`` -- exactly this tolerance -- and nothing in its documentation
+#: bounds it below 1 cm.  A stub whose raw length is shorter than the floor
+#: ends up to ``0.01 - raw_length`` away from the point it was meant to reach,
+#: i.e. up to exactly 1 cm, and only the strict ``>`` keeps it out.  A stub is
+#: single-lane with id +/-1, so against a single-driving-lane road its lane
+#: set matches and it is in scope.  Measured, none of the 22 is a stub (the
+#: smallest is 0.013 m), but that is a measurement, not a guarantee: raising
+#: that floor above 1 cm would start reporting stubs.
 LINKED_ENDPOINT_TOLERANCE_M = 0.01
 
 
@@ -251,12 +273,20 @@ def _check_road_links(
 
             # Where the two sides present the same driving lanes, their
             # reference lines describe the same edge of the same road and have
-            # to meet. Where they do not -- a lane is gained or lost, or one
-            # side is a connecting road -- the reference line is anchored to
-            # each road's outermost lane boundary, so the two legitimately
-            # start metres apart and no tolerance applies. That is why this is
-            # conditional rather than a blanket statement about every link;
-            # the blanket version is false today, on every map measured.
+            # to meet.  Where they do not -- a lane is gained or lost -- the
+            # reference line is anchored to each road's outermost lane
+            # boundary, so the two legitimately start metres apart and no
+            # tolerance applies.  That is why this is conditional rather than
+            # a blanket statement about every link; the blanket version is
+            # false today, on every map measured.
+            #
+            # The restriction is on the lane sets, NOT on whether either side
+            # is a connecting road: a single-lane connector and a single-lane
+            # regular road both carry driving lanes {1}, so that pair is in
+            # scope.  Measured on Nishi-Shinjuku, 19 of the 22 violations are
+            # regular-to-regular and 3 are connecting-to-regular, so plain
+            # road pairs are the dominant population rather than the
+            # exception.
             if _driving_ids(own_section) == _driving_ids(target_section):
                 gap = math.dist(
                     _reference_endpoint(road, own_end),
