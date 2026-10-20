@@ -6,7 +6,6 @@ import json
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     GeoRoadLaneletMapping,
@@ -303,21 +302,35 @@ class TestParseStopLinesFromXodr:
 # ---------------------------------------------------------------------------
 
 _TEST_DATA = Path(__file__).parent / "data"
-_XODR_PATH = _TEST_DATA / "nishishinjuku_carla.xodr"
 
 
-@pytest.mark.skipif(
-    not _XODR_PATH.exists(),
-    reason="nishishinjuku_carla.xodr test data not available",
-)
 class TestNishishinjukuCarlaStopLines:
-    def test_parse_carla_stop_line_objects(self) -> None:
+    """Assertions against the project's reference conversion.
+
+    This class used to carry
+    ``skipif(not _XODR_PATH.exists(), reason="test data not available")``.
+    That guard is evaluated at collection time, before any fixture has run, so
+    it skipped even when the session fixture standing behind it would have
+    produced the file -- and since the fixture writes to the invocation's temp
+    directory rather than ``test/data``, that path is empty in a fresh clone,
+    so the guard fired unconditionally unless some earlier run happened to
+    leave an artifact behind.
+
+    Requesting ``nishishinjuku_xodr`` instead means the test runs or fails.
+    The fixture raises when the conversion cannot be produced, because a
+    converter that cannot convert its own reference map is a failure of the
+    thing under test, not a reason to report success on fewer tests.
+    """
+
+    def test_parse_carla_stop_line_objects(self, nishishinjuku_xodr: Path) -> None:
         """nishishinjuku_carla.xodr should contain CARLA-format stop line objects."""
         from autoware_lanelet2_to_opendrive.analyze_xodr import (
             _parse_stop_lines_from_xodr,
         )
 
-        obj_to_road, _, _, _, positions = _parse_stop_lines_from_xodr(_XODR_PATH)
+        obj_to_road, _, _, _, positions = _parse_stop_lines_from_xodr(
+            nishishinjuku_xodr
+        )
         assert len(obj_to_road) > 0
         assert len(positions) == len(obj_to_road)
         print(f"Found {len(obj_to_road)} CARLA stop line objects")
