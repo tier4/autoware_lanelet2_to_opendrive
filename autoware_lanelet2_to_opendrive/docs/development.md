@@ -164,7 +164,10 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
     from source against the system Boost. Hosts whose Boost ABI does not
     match (e.g. Ubuntu 24.04 with Boost 1.83) will fail the wheel build
     with `RuntimeError: Command failed: make -jN`. The Docker image
-    pins Ubuntu 22.04 with Boost 1.74, matching CI exactly.
+    pins Ubuntu 22.04 with Boost 1.74, the same OS and Boost versions
+    CI uses. CI itself runs `uv run pytest` on the runner rather than
+    in this image, so the container matches CI's platform, not its
+    execution path.
 
 The repository ships a multi-stage `Dockerfile` and `docker-compose.yml`
 with profiles that mirror each CI job:

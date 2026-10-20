@@ -33,7 +33,7 @@ For other installation methods, see the
 
 ## Installing the Package
 
-### Recommended: Use Docker (matches CI exactly)
+### Recommended: Use Docker (same OS and Boost versions as CI)
 
 The runtime dependency `lanelet2-python-api-for-autoware` is built from source
 against the system `libboost-python`. On hosts whose Boost ABI does not match

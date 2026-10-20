@@ -38,7 +38,9 @@ uv venv
 
 ### Why
 
-The runtime dependency `lanelet2-python-api-for-autoware` is built from source against system Boost. Many host environments (e.g., Ubuntu 24.04 with Boost 1.83) cannot compile it — `uv sync` and `uv run pytest` fail with `RuntimeError: Command failed: make -j24` during the wheel build. The Docker image pins Ubuntu 22.04 with Boost 1.74, matching CI exactly, and avoids this failure.
+The runtime dependency `lanelet2-python-api-for-autoware` is built from source against system Boost. Many host environments (e.g., Ubuntu 24.04 with Boost 1.83) cannot compile it — `uv sync` and `uv run pytest` fail with `RuntimeError: Command failed: make -j24` during the wheel build. The Docker image pins Ubuntu 22.04 with Boost 1.74 — the same OS and Boost versions CI uses — and avoids this failure.
+
+Note that CI does **not** use this image: `.github/workflows/ci.yml` runs `uv run pytest` directly on `ubuntu-22.04` runners. The container reproduces CI's *platform* (Ubuntu 22.04, Boost 1.74, the same lock file), not its execution path, so it is a close approximation rather than an exact replica.
 
 On Apple Silicon there is a second cost: the `carla` extra (`typesafe-carla`) ships only an x86_64 wheel, so every container that installs it is pinned to `linux/amd64` and runs under QEMU emulation. Measured, the same 245-test subset of the suite takes 2095.42s under that emulation versus 108.52s natively on arm64. A CARLA-free native target (`--profile test-native`) exists for this reason — see [Architecture and CARLA](docs/docker.md#architecture-and-carla) in `docs/docker.md` for the full comparison.
 
@@ -50,11 +52,15 @@ The repository ships a multi-stage `Dockerfile` and `docker-compose.yml` with pr
 # Day-to-day test loop: native architecture, no QEMU emulation, no `carla` extra.
 docker compose --profile test-native run --rm pytest-native
 
-# Full pytest suite in the CI-equivalent image with the `carla` extra (matches
-# CI's `test` job). Pinned to linux/amd64, so this runs under emulation on Apple Silicon.
+# Full pytest suite with the `carla` extra, in the image matching CI's OS and
+# Boost versions (same command as CI's `test` job). Pinned to linux/amd64, so
+# this runs under emulation on Apple Silicon.
 docker compose --profile test run --rm pytest
 
-# Run pre-commit on all files (matches CI's `lint-and-format` job)
+# Run pre-commit on all files (same check as CI's `lint-and-format` job, which
+# runs `uv run pre-commit run --all-files` on the runner). This service is
+# CARLA-based and so pinned to linux/amd64: on Apple Silicon it runs under
+# QEMU and is slow. Run ruff/ruff-format on the host for fast iteration.
 docker compose --profile lint run --rm lint
 
 # Open an interactive shell with the workspace bind-mounted
@@ -66,15 +72,15 @@ docker compose --profile dev run --rm dev
 When the user asks to "run the tests", "verify locally", or otherwise validate a change end-to-end:
 
 1. **Do NOT run `uv run pytest` on the host.** It will likely fail on the Boost build step, producing noise unrelated to the change.
-2. **Use `docker compose --profile test-native run --rm pytest-native` for day-to-day test runs.** Claude Code sessions run tests frequently, so the amd64 emulation path must not be the default. Use `docker compose --profile test run --rm pytest` (or the appropriate profile — `lint`, `qc`, `carla`) for a CI-equivalent full check, in particular before opening a PR or after touching the CARLA code path.
+2. **Use `docker compose --profile test-native run --rm pytest-native` for day-to-day test runs.** Claude Code sessions run tests frequently, so the amd64 emulation path must not be the default. Use `docker compose --profile test run --rm pytest` (or the appropriate profile — `lint`, `qc`, `carla`) for the closest available approximation of a full CI check, in particular before opening a PR or after touching the CARLA code path.
 3. The native profile runs the same tests as `--profile test` (no test module imports the CARLA client), but it cannot run the `carla-import-test` entrypoint. If you changed `carla_import_test.py`, verify separately with `--profile carla`.
-4. **Do not set `DOCKER_DEFAULT_PLATFORM`. If it is already set in your shell, unset it.** Leaving it set forces the native profile into emulation too, defeating its purpose.
+4. **Do not set `DOCKER_DEFAULT_PLATFORM`. If it is already set in your shell, unset it.** Leaving it set forces the native profile into emulation too, defeating its purpose. If a native profile was already run with it set, unsetting it is not enough — the `venv-nocarla-cache` volume still holds the amd64 `.venv` and must be deleted as well (see [`docs/docker.md`](docs/docker.md#troubleshooting)).
 5. If the container is unavailable in the current environment (e.g., Docker not installed), say so explicitly rather than running broken host commands. Defer test verification to CI in that case.
 6. Static checks that do **not** import the package (e.g., `ruff`, `ruff-format`, `mypy --ignore-missing-imports` on individual files) **can** still be run on the host and should be used for fast iteration.
 
 ### Rationale
 
-- **Reproducibility**: Container matches CI exactly; host doesn't.
+- **Reproducibility**: Container reproduces CI's OS and Boost versions; the host often cannot.
 - **Avoids false negatives**: Host build failures are an environment quirk, not a code defect.
 - **Fast iteration**: Static checks on the host stay fast; dynamic test verification gets pushed to a known-good environment.
 
