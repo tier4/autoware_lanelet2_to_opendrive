@@ -36,135 +36,287 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import Iterator, List, Tuple
 
 import pytest
 
 #: Repository root, two levels above this test package.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-#: The package's test tree. The original defect was cross-package -- the
-#: guarded tests lived in one package and the fixture that would have
-#: satisfied them in the other -- but the second package has since moved to
-#: its own repository, so one root is now the whole of it. Written as a tuple
-#: so adding a tree back is a one-line change.
-_TEST_ROOTS = (_PROJECT_ROOT / "autoware_lanelet2_to_opendrive" / "test",)
+#: Every tree pytest collects from. ``scripts`` is in ``testpaths``
+#: (``pyproject.toml``) and holds ``test_tdd.py``, so a guard added there
+#: would otherwise be unchecked.
+_TEST_ROOTS = (
+    _PROJECT_ROOT / "autoware_lanelet2_to_opendrive" / "test",
+    _PROJECT_ROOT / "scripts",
+)
 
-#: Names that identify the generated artifact in a guard expression.
-_ARTIFACT_TOKENS = ("nishishinjuku_carla.xodr", "NISHISHINJUKU_XODR", "_XODR_PATH")
+#: Both of pytest's default ``python_files`` patterns. ``rglob("test_*.py")``
+#: alone misses ``*_test.py``, which pytest collects just the same.
+_TEST_FILE_PATTERNS = ("test_*.py", "*_test.py")
+
+#: Methods that ask the filesystem whether something is there. A skip whose
+#: condition calls one of these is conditioned on execution history, whatever
+#: the thing is called.
+#:
+#: Matching on the *condition's shape* rather than on the artifact's name is
+#: the whole design. The previous version substring-matched a list of names
+#: (``"nishishinjuku_carla.xodr"``, ``"NISHISHINJUKU_XODR"``, ``"_XODR_PATH"``)
+#: against ``ast.dump`` of the entire call, and was wrong in both directions,
+#: measured:
+#:
+#: * **it missed the construct it exists to forbid.** Renaming the constant to
+#:   ``_REF_XODR`` and keeping ``skipif(not _REF_XODR.exists(), ...)`` passed;
+#:   so did ``needs = pytest.mark.skipif`` with ``@needs(...)``, because the
+#:   decorator's name no longer read ``skipif``.
+#: * **it flagged a legitimate skip** whose ``reason=`` string merely
+#:   mentioned the filename -- ``skipif(not CARLA_AVAILABLE, reason="needs
+#:   carla to load nishishinjuku_carla.xodr")`` -- because ``ast.dump`` of a
+#:   ``Call`` includes its keywords.
+#:
+#: Both are closed by looking only at positional arguments and only for a
+#: filesystem probe: the receiver's name is irrelevant, and ``reason=`` is
+#: never read.
+_PROBE_METHODS = frozenset({"exists", "is_file", "is_dir", "isfile", "isdir"})
+
+#: Mark and function names that take a test out of the count. ``xfail`` is
+#: here because a *conditional* ``xfail`` reports ``xfailed`` instead of
+#: ``passed`` and is excluded from the failure count just as effectively --
+#: the unconditional ``xfail(strict=True)`` used to pin a known defect has no
+#: condition and so is never matched.
+_SKIPPING_NAMES = frozenset({"skip", "skipif", "xfail", "importorskip"})
+
+#: A skip that is allowed to probe the filesystem, as ``(file name, reason)``.
+#: Empty on purpose: there is no such case in the tree today. An entry here is
+#: a deliberate, reviewed exception -- a fixture that cannot be committed, for
+#: instance -- and adding one should be as visible as the construct it allows.
+_ALLOWED: Tuple[Tuple[str, str], ...] = ()
 
 
-def _skip_guards_mentioning_the_artifact(tree: ast.AST) -> list[str]:
-    """Return a description of every ``skip``/``skipif`` naming the artifact.
+def _probes_the_filesystem(node: ast.AST) -> bool:
+    """True when *node* contains a call asking whether a path exists."""
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        func = inner.func
+        if isinstance(func, ast.Attribute) and func.attr in _PROBE_METHODS:
+            return True
+    return False
 
-    Matches decorators and bare calls alike, so that
-    ``pytest.mark.skipif(not X.exists(), ...)`` and a ``pytest.skip(...)``
-    inside a function body are both caught.
+
+def _call_name(call: ast.Call) -> str:
+    """The last name in a call's target, or ``""`` for anything else."""
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _decorator_offences(tree: ast.AST) -> Iterator[Tuple[int, str]]:
+    """Decorators whose *condition* probes the filesystem.
+
+    Every decorator that is a call is examined, whatever it is named: that is
+    what catches an aliased mark, which no name-based check can. Only
+    positional arguments are read -- a mark's condition is positional and
+    ``reason=`` is a keyword, so naming a file in the prose is not an offence.
     """
-    found: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
-        func = node.func
-        name = (
-            func.attr
-            if isinstance(func, ast.Attribute)
-            else func.id
-            if isinstance(func, ast.Name)
-            else ""
-        )
-        if name not in ("skip", "skipif"):
-            continue
-        source = ast.dump(node)
-        if any(token in source for token in _ARTIFACT_TOKENS):
-            found.append(f"line {node.lineno}: {name}(...)")
-    return found
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            if any(_probes_the_filesystem(arg) for arg in decorator.args):
+                yield decorator.lineno, f"@{_call_name(decorator) or 'decorator'}"
 
 
-@pytest.mark.parametrize("root", _TEST_ROOTS, ids=lambda p: p.parent.name)
-def test_no_test_skips_itself_on_the_generated_xodr(root: Path) -> None:
-    """No ``skip`` or ``skipif`` in either tree is conditioned on the artifact.
+def _guarded_call_offences(tree: ast.AST) -> Iterator[Tuple[int, str]]:
+    """Bare skips reached only when a filesystem probe says so.
+
+    A call like ``pytest.skip("...")`` carries no condition of its own -- the
+    condition is the ``if`` around it:
+
+        if not _XODR_PATH.is_file():
+            pytest.skip("no artifact")
+
+    So the decorator rule above cannot see it, and reading only the call's
+    arguments would report nothing. This walks ``if`` statements whose test
+    probes the filesystem and reports any skipping call inside. Found by the
+    fault-injection case below, which the first version of this rewrite
+    failed.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If) or not _probes_the_filesystem(node.test):
+            continue
+        for branch in (node.body, node.orelse):
+            for statement in branch:
+                for inner in ast.walk(statement):
+                    if (
+                        isinstance(inner, ast.Call)
+                        and _call_name(inner) in _SKIPPING_NAMES
+                    ):
+                        yield inner.lineno, f"{_call_name(inner)}() under an if"
+
+
+def _skips_conditioned_on_the_filesystem(tree: ast.AST) -> List[str]:
+    """Describe every skip whose condition asks the filesystem a question."""
+    offences = {
+        (lineno, label)
+        for lineno, label in list(_decorator_offences(tree))
+        + list(_guarded_call_offences(tree))
+    }
+    # One line can carry only one offence worth reporting; keep the first
+    # label so a decorator is not also listed under its own name.
+    by_line: dict = {}
+    for lineno, label in sorted(offences):
+        by_line.setdefault(lineno, label)
+    return [f"line {lineno}: {label}" for lineno, label in sorted(by_line.items())]
+
+
+def _collected_test_files(root: Path) -> List[Path]:
+    """Every file pytest would collect from *root*."""
+    files: set = set()
+    for pattern in _TEST_FILE_PATTERNS:
+        files.update(root.rglob(pattern))
+    return sorted(files)
+
+
+@pytest.mark.parametrize("root", _TEST_ROOTS, ids=lambda p: p.name)
+def test_no_test_skips_itself_on_whether_a_file_exists(root: Path) -> None:
+    """A skip conditioned on the filesystem makes a pass depend on history.
 
     Request the ``nishishinjuku_xodr`` fixture instead. It converts the map
-    once per invocation and raises if it cannot, which is what makes the
-    test's presence in the count independent of execution history.
+    once per invocation and raises if it cannot, which is what makes a test's
+    presence in the count independent of what was run earlier.
     """
     assert root.is_dir(), f"test root moved: {root}"
 
-    offenders: dict[str, list[str]] = {}
-    for path in sorted(root.rglob("test_*.py")):
-        if path.name == Path(__file__).name:
-            continue  # this module names the tokens in order to forbid them
-        guards = _skip_guards_mentioning_the_artifact(
+    allowed = {name for name, _ in _ALLOWED}
+    offenders: dict = {}
+    for path in _collected_test_files(root):
+        if path.name in allowed:
+            continue
+        guards = _skips_conditioned_on_the_filesystem(
             ast.parse(path.read_text(encoding="utf-8"))
         )
         if guards:
             offenders[str(path.relative_to(_PROJECT_ROOT))] = guards
 
     assert not offenders, (
-        "these tests make themselves conditional on the generated XODR, so "
-        "their presence in the count depends on what was run earlier:\n"
-        + "\n".join(f"  {k}: {', '.join(v)}" for k, v in sorted(offenders.items()))
-        + "\nRequest the `nishishinjuku_xodr` fixture instead."
+        "these tests condition themselves on whether a file is present, so "
+        "their presence in the count depends on what was run earlier:"
+        + "".join(f" [{k}: {', '.join(v)}]" for k, v in sorted(offenders.items()))
+        + " Request the `nishishinjuku_xodr` fixture instead."
     )
 
 
-def test_the_guard_above_would_catch_the_construct_it_forbids() -> None:
-    """Fault injection: the AST check fires on the exact removed pattern.
+class TestTheGuardWorksInBothDirections:
+    """Fault injection, because a check that matches nothing looks identical.
 
-    Without this, ``test_no_test_skips_itself_on_the_generated_xodr`` passing
-    would be indistinguishable from it matching nothing -- which is the same
-    class of defect it exists to prevent.
+    Each case below was measured against the previous implementation: the
+    first three passed it (evasions) and the last one failed it (a false
+    positive). They are the reason this module was rewritten.
     """
-    removed = (
-        "import pytest\n"
-        "@pytest.mark.skipif(not _XODR_PATH.exists(), reason='not available')\n"
-        "class TestX:\n"
-        "    def test_y(self): pass\n"
+
+    @pytest.mark.parametrize(
+        "name, source",
+        [
+            (
+                "the construct that was removed",
+                "import pytest\n"
+                "@pytest.mark.skipif(not _XODR_PATH.exists(), reason='x')\n"
+                "class TestX:\n"
+                "    def test_y(self): pass\n",
+            ),
+            (
+                "the same thing with the constant renamed",
+                "import pytest\n"
+                "@pytest.mark.skipif(not _REF_XODR.exists(), reason='x')\n"
+                "def test_y(): pass\n",
+            ),
+            (
+                "an aliased mark, so the decorator is not named skipif",
+                "import pytest\n"
+                "needs = pytest.mark.skipif\n"
+                "@needs(not _XODR_PATH.exists(), reason='x')\n"
+                "def test_y(): pass\n",
+            ),
+            (
+                "a conditional xfail, which leaves the pass count too",
+                "import pytest\n"
+                "@pytest.mark.xfail(not _XODR_PATH.exists(), reason='x', run=False)\n"
+                "def test_y(): pass\n",
+            ),
+            (
+                "a bare skip in a function body",
+                "import pytest\n"
+                "def test_y():\n"
+                "    if not _XODR_PATH.is_file(): pytest.skip('x')\n",
+            ),
+        ],
     )
-    assert _skip_guards_mentioning_the_artifact(ast.parse(removed))
+    def test_it_catches(self, name: str, source: str) -> None:
+        assert _skips_conditioned_on_the_filesystem(ast.parse(source)), name
 
-    # No-op control: an unrelated skip must not be reported, or the check
-    # would forbid every skip in the repository and get deleted.
-    unrelated = (
-        "import pytest\n"
-        "@pytest.mark.skipif(not CARLA_AVAILABLE, reason='carla missing')\n"
-        "def test_y(): pass\n"
+    @pytest.mark.parametrize(
+        "name, source",
+        [
+            (
+                "a skip on an unrelated condition",
+                "import pytest\n"
+                "@pytest.mark.skipif(not CARLA_AVAILABLE, reason='carla missing')\n"
+                "def test_y(): pass\n",
+            ),
+            (
+                "the same, whose reason merely names the artifact",
+                "import pytest\n"
+                "@pytest.mark.skipif(not CARLA_AVAILABLE,\n"
+                "    reason='needs carla to load nishishinjuku_carla.xodr')\n"
+                "def test_y(): pass\n",
+            ),
+            (
+                "the unconditional xfail used to pin a known defect",
+                "import pytest\n"
+                "@pytest.mark.xfail(strict=True, reason='known gap')\n"
+                "def test_y(): pass\n",
+            ),
+            (
+                "parametrising over files, which is not a skip",
+                "import pytest\n"
+                "@pytest.mark.parametrize('p', sorted(DATA.glob('*.osm')))\n"
+                "def test_y(p): pass\n",
+            ),
+        ],
     )
-    assert not _skip_guards_mentioning_the_artifact(ast.parse(unrelated))
+    def test_it_does_not_catch(self, name: str, source: str) -> None:
+        assert not _skips_conditioned_on_the_filesystem(ast.parse(source)), name
 
 
-def test_the_fixture_itself_never_skips() -> None:
-    """The fixture's own failure modes must fail, which is the whole point.
+def test_the_fixture_module_never_skips() -> None:
+    """Nothing in ``conftest.py`` may skip, not just the fixture's own body.
 
-    ``pytest.skip`` raises ``Skipped``; a fixture that reaches for it takes
-    every dependent test out of the count. Read statically rather than by
-    invoking the fixture, because invoking it converts the map: the property
-    under test is what the source says, and an edit that restores ``skip``
-    here fails this test rather than quietly restoring the defect.
+    Scoped to the whole module rather than to ``nishishinjuku_xodr`` because
+    a fixture can reach a skip through a helper defined beside it, which a
+    walk of the fixture's body cannot see. ``importorskip`` is included: it
+    raises ``Skipped`` too and is the most idiomatic way anyone would
+    reintroduce one.
+
+    Read statically rather than by invoking the fixture, because invoking it
+    converts the map -- the property under test is what the source says.
     """
     conftest = Path(__file__).parent / "conftest.py"
     tree = ast.parse(conftest.read_text(encoding="utf-8"))
 
-    fixture = next(
-        (
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "nishishinjuku_xodr"
-        ),
-        None,
-    )
-    assert fixture is not None, f"nishishinjuku_xodr fixture not found in {conftest}"
-
     skips = [
-        f"line {node.lineno}"
-        for node in ast.walk(fixture)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "skip"
+        f"line {node.lineno}: {_call_name(node)}()"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _call_name(node) in {"skip", "importorskip"}
     ]
     assert not skips, (
-        "the nishishinjuku_xodr fixture skips at "
+        "conftest.py skips at "
         + ", ".join(skips)
-        + "; every test that requests it then leaves the count silently. "
-        "Fail instead."
+        + "; every test that requests a fixture reaching that takes itself "
+        "out of the count. Fail instead."
     )

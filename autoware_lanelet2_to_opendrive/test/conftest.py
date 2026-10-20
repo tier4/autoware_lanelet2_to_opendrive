@@ -108,11 +108,19 @@ def nishishinjuku_xodr(tmp_path_factory: pytest.TempPathFactory) -> Path:
         # ``staged.stem`` is the staged name without the pid -- e.g.
         # ``nishishinjuku_carla.xodr.tmp`` -- which is the prefix the converter
         # built the sidecar names from.
-        for sidecar in sorted(staged.parent.glob(f"{staged.stem}.*")):
-            if sidecar == staged:
-                continue
-            tail = sidecar.name[len(staged.stem) :]  # ".mapping.json", ...
-            os.replace(sidecar, xodr_path.with_name(xodr_path.stem + tail))
+        #
+        # Named suffixes rather than a `.*` glob. That glob also matches
+        # ``nishishinjuku_carla.xodr.tmp.<otherpid>``: if an earlier attempt
+        # in this invocation died between the conversion and the rename
+        # (SIGKILL, or the OOM that `-n auto` on this suite can provoke), its
+        # orphaned multi-megabyte XODR would be renamed to
+        # ``nishishinjuku_carla.<otherpid>`` and left in the temp directory as
+        # silent garbage. An unknown new sidecar is better missed than
+        # mis-moved -- a test that needs one fails visibly.
+        for tail in (".mapping.json", ".preprocessed.osm"):
+            sidecar = staged.with_name(staged.stem + tail)
+            if sidecar.is_file():
+                os.replace(sidecar, xodr_path.with_name(xodr_path.stem + tail))
 
         os.replace(staged, xodr_path)
 
