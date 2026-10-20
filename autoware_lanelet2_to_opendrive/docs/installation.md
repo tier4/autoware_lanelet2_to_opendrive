@@ -33,14 +33,16 @@ For other installation methods, see the
 
 ## Installing the Package
 
-### Recommended: Use Docker (matches CI exactly)
+### Recommended: Use Docker (same OS and Boost versions as CI)
 
 The runtime dependency `lanelet2-python-api-for-autoware` is built from source
 against the system `libboost-python`. On hosts whose Boost ABI does not match
 (e.g. Ubuntu 24.04 with Boost 1.83), `uv sync` fails during the wheel build
 with a `RuntimeError: Command failed: make -j…`. The repository ships a
 multi-stage `Dockerfile` and `docker-compose.yml` that pin Ubuntu 22.04 with
-Boost 1.74 — the same environment used in CI.
+Boost 1.74 — the same OS and Boost versions CI uses. CI itself runs
+`uv run pytest` on the runner rather than in this image, so the container
+reproduces CI's platform, not its execution path.
 
 ```bash
 # Open an interactive shell with the workspace bind-mounted.

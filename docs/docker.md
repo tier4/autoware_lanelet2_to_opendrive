@@ -15,7 +15,7 @@ system libraries directly on their host.
 
 | Target | Image tag (compose) | Purpose |
 | --- | --- | --- |
-| `dev` | `l2o-dev:local` | Full development environment matching CI, including pytest, mypy, pre-commit, and the CARLA 0.10.0 wheel. |
+| `dev` | `l2o-dev:local` | Full development environment on CI's OS and Boost versions, including pytest, mypy, pre-commit, and the CARLA 0.10.0 wheel. |
 | `dev-nocarla` | `l2o-dev-nocarla:local` | CARLA-free. Builds and runs for the host's native architecture, avoiding QEMU emulation on Apple Silicon. |
 | `convert` | `l2o-convert:local` | Slim runtime image whose entrypoint is the `convert` CLI. Reuses the same `.venv` as `dev` and is intended for end users who only need conversion. |
 
@@ -44,7 +44,7 @@ of that remaining 108.52s is one single slow test
 further reductions need separate caching work rather than more native
 throughput. **Apple Silicon developers should default to `--profile
 test-native`** for day-to-day iteration, and fall back to `--profile test`
-(the CI-equivalent, CARLA-inclusive, amd64 path) before opening a PR or after
+(the CARLA-inclusive, amd64 path) before opening a PR or after
 touching the CARLA code path.
 
 No test module imports the CARLA client — only the `carla-import-test`
@@ -52,7 +52,7 @@ entrypoint does — so `pytest-native` collects and runs the same tests as
 `pytest`. What it cannot exercise is `carla-import-test` itself: use
 `--profile carla` to verify any change to that code path.
 
-## CI-equivalent local jobs
+## Local jobs covering CI's checks
 
 Each CI job has a matching compose service with the same command. Profiles
 prevent accidental `docker compose up` from starting anything.
@@ -62,9 +62,11 @@ prevent accidental `docker compose up` from starting anything.
 # extra installed.
 docker compose --profile test-native run --rm pytest-native
 
-# Full pytest suite in the CI-equivalent image (same as CI's `test` job, with
-# the `carla` extra). Pinned to linux/amd64, so this runs under emulation --
-# and is much slower -- on Apple Silicon. Use before opening a PR.
+# Full pytest suite with the `carla` extra, in the image matching CI's OS and
+# Boost versions (the same pytest flags as CI's `test` job, though CI
+# invokes them through `uv run` and this does not -- see docs/docker.md). Pinned to linux/amd64, so
+# this runs under emulation -- and is much slower -- on Apple Silicon. Use
+# before opening a PR.
 docker compose --profile test run --rm pytest
 
 # Run pre-commit on all files (same as CI's `lint-and-format` job)
@@ -77,7 +79,7 @@ docker compose --profile qc run --rm qc-validate
 docker compose --profile carla run --rm carla-import-test
 
 # Open an interactive shell with the workspace bind-mounted (CARLA-enabled,
-# CI-equivalent, linux/amd64)
+# CARLA-enabled, linux/amd64)
 docker compose --profile dev run --rm dev
 
 # Open a native interactive shell (CARLA-free, host architecture)
@@ -91,19 +93,25 @@ than the main checkout, its `.git` is a text file pointing at an absolute
 host path inside the *main* repository's `.git/worktrees/<name>` directory —
 a location outside the `.:/workspace` bind mount, so it's invisible to the
 container. `docker-compose.yml` mounts an extra volume at
-`${GIT_COMMON_DIR}` on both the carla-base and native-base anchors to make
-that path resolve; export it before running any compose command from a
+`${L2O_GIT_COMMON_DIR}` on both the carla-base and native-base anchors to
+make that path resolve; export it before running any compose command from a
 worktree:
 
 ```bash
-export GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir)
+export L2O_GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir)
 docker compose --profile lint run --rm lint
 docker compose --profile test-native run --rm pytest-native
 ```
 
-When `GIT_COMMON_DIR` is unset (the normal, non-worktree case) the volume
-falls back to a harmless empty directory and every command above works
-exactly as documented, with no extra step. The image also bakes in
+When `L2O_GIT_COMMON_DIR` is unset (the normal, non-worktree case) the
+volume falls back to a harmless empty directory and every command above
+works exactly as documented, with no extra step.
+
+The `L2O_` prefix is not decoration. **`GIT_COMMON_DIR` is a name git
+itself reads from the environment**, so exporting it as above would point
+every later git command in that shell at the same directory, whichever
+repository they were run in. The variable was renamed for that reason, and
+the reason is recorded at both mount sites in `docker-compose.yml` as well. The image also bakes in
 `git config --system --add safe.directory '*'` so that the bind-mounted
 `.git` (owned by the host UID) isn't rejected by git's "dubious ownership"
 check inside the container (which runs as root).
@@ -249,6 +257,23 @@ docker compose --profile test-native run --rm pytest-native uname -m   # expect 
 If it is set, `unset DOCKER_DEFAULT_PLATFORM` in the current shell (and check
 your shell's rc files and history for where it came from).
 
+**Unsetting it is not enough on its own if a native profile already ran with
+it set.** That run installed an amd64 `.venv` into the `venv-nocarla-cache`
+named volume, which is mounted over `/workspace/.venv` on every subsequent
+run — so the rebuilt arm64 image still starts against the stale amd64
+virtualenv. Delete the volume too:
+
+```bash
+unset DOCKER_DEFAULT_PLATFORM
+docker volume rm "$(basename "$PWD")_venv-nocarla-cache"
+docker compose --profile test-native run --rm pytest-native
+```
+
+The same applies in reverse to `venv-cache` if a CARLA-enabled service was
+ever run with the wrong architecture. `docker compose --profile <name> down
+-v` removes all of the project's named volumes at once and is simpler when a
+full reinstall is acceptable.
+
 ### `uv sync --extra carla` fails building `typesafe-carla` on arm64
 
 `typesafe-carla` publishes only an x86_64 wheel, so on an arm64 host `uv`
@@ -267,8 +292,8 @@ and CARLA" above).
 
 ### Pre-commit fails with `Is it installed, and are you in a Git repository directory?`
 
-You are running from a `git worktree` without exporting `GIT_COMMON_DIR`
-first. See [Running from a git worktree](#running-from-a-git-worktree)
+You are running from a `git worktree` without exporting
+`L2O_GIT_COMMON_DIR` first. See [Running from a git worktree](#running-from-a-git-worktree)
 above.
 
 ### `docker compose ... config` reports a YAML error
