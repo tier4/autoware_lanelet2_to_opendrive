@@ -46,14 +46,15 @@ On Apple Silicon there is a second cost: the `carla` extra (`typesafe-carla`) sh
 
 ### How
 
-The repository ships a multi-stage `Dockerfile` and `docker-compose.yml` with profiles that mirror each CI job. See [`docs/docker.md`](docs/docker.md) for the full reference. The most common commands:
+The repository ships a multi-stage `Dockerfile` and `docker-compose.yml` with profiles covering CI's `test` and `lint-and-format` jobs (there is none for `docs`, `auto-format` or `check-src-changes`). See [`docs/docker.md`](docs/docker.md) for the full reference. The most common commands:
 
 ```bash
 # Day-to-day test loop: native architecture, no QEMU emulation, no `carla` extra.
 docker compose --profile test-native run --rm pytest-native
 
 # Full pytest suite with the `carla` extra, in the image matching CI's OS and
-# Boost versions (same command as CI's `test` job). Pinned to linux/amd64, so
+# Boost versions (the same pytest flags as CI's `test` job, though CI
+# invokes them through `uv run` and this does not -- see docs/docker.md). Pinned to linux/amd64, so
 # this runs under emulation on Apple Silicon.
 docker compose --profile test run --rm pytest
 

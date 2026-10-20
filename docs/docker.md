@@ -15,7 +15,7 @@ system libraries directly on their host.
 
 | Target | Image tag (compose) | Purpose |
 | --- | --- | --- |
-| `dev` | `l2o-dev:local` | Full development environment matching CI, including pytest, mypy, pre-commit, and the CARLA 0.10.0 wheel. |
+| `dev` | `l2o-dev:local` | Full development environment on CI's OS and Boost versions, including pytest, mypy, pre-commit, and the CARLA 0.10.0 wheel. |
 | `dev-nocarla` | `l2o-dev-nocarla:local` | CARLA-free. Builds and runs for the host's native architecture, avoiding QEMU emulation on Apple Silicon. |
 | `convert` | `l2o-convert:local` | Slim runtime image whose entrypoint is the `convert` CLI. Reuses the same `.venv` as `dev` and is intended for end users who only need conversion. |
 
@@ -44,7 +44,7 @@ of that remaining 108.52s is one single slow test
 further reductions need separate caching work rather than more native
 throughput. **Apple Silicon developers should default to `--profile
 test-native`** for day-to-day iteration, and fall back to `--profile test`
-(the CI-equivalent, CARLA-inclusive, amd64 path) before opening a PR or after
+(the CARLA-inclusive, amd64 path) before opening a PR or after
 touching the CARLA code path.
 
 No test module imports the CARLA client — only the `carla-import-test`
@@ -52,7 +52,7 @@ entrypoint does — so `pytest-native` collects and runs the same tests as
 `pytest`. What it cannot exercise is `carla-import-test` itself: use
 `--profile carla` to verify any change to that code path.
 
-## CI-equivalent local jobs
+## Local jobs covering CI's checks
 
 Each CI job has a matching compose service with the same command. Profiles
 prevent accidental `docker compose up` from starting anything.
@@ -63,7 +63,8 @@ prevent accidental `docker compose up` from starting anything.
 docker compose --profile test-native run --rm pytest-native
 
 # Full pytest suite with the `carla` extra, in the image matching CI's OS and
-# Boost versions (same command as CI's `test` job). Pinned to linux/amd64, so
+# Boost versions (the same pytest flags as CI's `test` job, though CI
+# invokes them through `uv run` and this does not -- see docs/docker.md). Pinned to linux/amd64, so
 # this runs under emulation -- and is much slower -- on Apple Silicon. Use
 # before opening a PR.
 docker compose --profile test run --rm pytest
@@ -78,7 +79,7 @@ docker compose --profile qc run --rm qc-validate
 docker compose --profile carla run --rm carla-import-test
 
 # Open an interactive shell with the workspace bind-mounted (CARLA-enabled,
-# CI-equivalent, linux/amd64)
+# CARLA-enabled, linux/amd64)
 docker compose --profile dev run --rm dev
 
 # Open a native interactive shell (CARLA-free, host architecture)

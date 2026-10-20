@@ -170,13 +170,15 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
     execution path.
 
 The repository ships a multi-stage `Dockerfile` and `docker-compose.yml`
-with profiles that mirror each CI job:
+with profiles covering CI's `test` and `lint-and-format` jobs (there is
+none for `docs`, `auto-format` or `check-src-changes`):
 
 ```bash
-# Full pytest suite (matches CI's `test` job)
+# Full pytest suite (the same pytest flags as CI's `test` job; CI invokes
+# them through `uv run` and this does not)
 docker compose --profile test run --rm pytest
 
-# Pre-commit on all files (matches CI's `lint-and-format` job)
+# Pre-commit on all files (the same check as CI's `lint-and-format` job)
 docker compose --profile lint run --rm lint
 
 # QC: convert nishishinjuku and run qc-validate on the result

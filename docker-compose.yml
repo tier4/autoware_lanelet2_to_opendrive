@@ -60,7 +60,7 @@ services:
     command: bash
     profiles: ["dev-native"]
 
-  # CI-equivalent jobs invoke entrypoints directly from the venv (PATH already
+  # These services invoke entrypoints directly from the venv (PATH already
   # contains /workspace/.venv/bin via the image ENV). We deliberately avoid
   # `uv run` here: it triggers an implicit sync against the bind-mounted
   # source on every invocation, which can rebuild workspace packages and
