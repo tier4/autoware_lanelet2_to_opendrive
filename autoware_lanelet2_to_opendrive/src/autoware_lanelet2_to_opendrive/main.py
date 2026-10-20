@@ -32,6 +32,10 @@ from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.config import CoordinateOffset
+from autoware_lanelet2_to_opendrive.map_preflight import (
+    MapPreflightError,
+    inspect_lanelet2_osm,
+)
 from autoware_lanelet2_to_opendrive.geometry import compute_point_layer_bounds
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
@@ -1484,8 +1488,41 @@ def preprocess_and_convert_with_hydra(
         cfg: Hydra configuration object
         lanelet2_file: Path to input Lanelet2 OSM file
         output_file: Path to output OpenDRIVE file
+
+    Raises:
+        MapPreflightError: If the pre-flight inspection found structural
+            problems that make the map unloadable.  Disable with
+            ``preflight=false`` to get the raw ``lanelet2.io.load`` failure
+            back instead.
     """
     input_map_path = lanelet2_file
+
+    # Pre-flight the *original* file, before preprocessing: the preprocessor
+    # loads the map itself, so a structural problem would otherwise surface
+    # there as the same unhelpful parser exception. This only names problems
+    # that already stop lanelet2 loading the map -- it never repairs one and
+    # never rejects a map that would otherwise convert.
+    if cfg.get("preflight", True) and lanelet2_file.suffix == ".osm":
+        report = inspect_lanelet2_osm(lanelet2_file)
+        # `inspected` first: a file lxml cannot parse must be reported as
+        # uninspected and let through, never refused. Testing `ok` first works
+        # only because `inspect_lanelet2_osm` returns early with no findings
+        # on that path, which makes the guard incidental rather than
+        # structural -- one future check that appends a finding before
+        # returning would invert it silently.
+        if not report.inspected:
+            logger.warning(f"Pre-flight could not parse the map: {report.xml_error}")
+        elif not report.ok:
+            raise MapPreflightError(report)
+        elif report.findings:
+            # Non-blocking only, or the raise above would have fired. Worth
+            # saying out loud; not worth refusing a map that converts.
+            logger.warning(f"Pre-flight found non-fatal problems:\n{report.format()}")
+        else:
+            logger.info(
+                f"Pre-flight: no structural problems in {lanelet2_file} "
+                f"({report.counts.get('relations', 0)} relations)"
+            )
 
     # Resolve the coordinate frame (origin, projector, geoReference, offset)
     # through the single projector-resolution layer. Prefers a
@@ -1842,6 +1879,12 @@ def main(cfg: DictConfig) -> None:
             output_file=output_path,
         )
 
+    except MapPreflightError as e:
+        # The message is the formatted report: problem classes, counts and
+        # element ids. Print it as-is rather than folding it into a log line.
+        logger.error("Input map cannot be loaded. Pre-flight report follows.")
+        print(e, file=sys.stderr)
+        sys.exit(1)
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
         sys.exit(1)
