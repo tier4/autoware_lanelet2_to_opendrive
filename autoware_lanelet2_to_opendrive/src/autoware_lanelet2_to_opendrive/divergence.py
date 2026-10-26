@@ -138,16 +138,78 @@ class SanityGateInputs:
             successor (or predecessor) lanelet of the source road resolves
             to. Must be a subset of ``set(candidate_road_ids)`` for the
             "group exhaustiveness" check to pass.
+        lane_pair_endpoint_distances: optional ``lane_pair -> distance`` map
+            holding the gap between the rendered source and candidate lane
+            anchors of each entry in ``lane_pairs``. When supplied for every
+            lane pair, endpoint coincidence is validated at lane level
+            instead of against the road reference endpoints.
     """
 
     endpoint_road: Tuple[float, float, float]
     endpoints_candidates: Dict[int, Tuple[float, float, float]]
     lane_pairs: List[Tuple[int, int, int]]
     all_successor_lanelet_road_ids: Set[int]
+    lane_pair_endpoint_distances: Dict[Tuple[int, int, int], float] | None = None
 
 
 def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
     return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+
+
+def _complete_lane_pair_distances(
+    inputs: SanityGateInputs,
+) -> Dict[Tuple[int, int, int], float] | None:
+    """Return the lane-pair distance map only when it covers every lane pair.
+
+    A partially populated map cannot be used for gating because the entries
+    it lacks would silently escape the endpoint check; the caller then falls
+    back to the road-reference comparison.
+    """
+    distances = inputs.lane_pair_endpoint_distances
+    if distances is None or not inputs.lane_pairs:
+        return None
+    if any(lane_pair not in distances for lane_pair in inputs.lane_pairs):
+        return None
+    return distances
+
+
+def _nearest_candidate_within_tolerance(
+    site: DivergenceSite,
+    inputs: SanityGateInputs,
+    endpoint_tolerance: float,
+) -> Tuple[int | None, float]:
+    """Pick the geometrically closest candidate for the single-link fallback.
+
+    Returns ``(candidate_road_id, distance)``; ``candidate_road_id`` is
+    ``None`` when no candidate is within ``endpoint_tolerance``. Distances
+    come from the rendered lane anchors when available (the closest lane pair
+    of that candidate) and from the road reference endpoints otherwise.
+    Linking to an arbitrary candidate would emit a connector whose heading can
+    be almost reversed, so an out-of-tolerance site emits nothing instead.
+    """
+    distances = inputs.lane_pair_endpoint_distances or {}
+    best_id: int | None = None
+    best_distance = math.inf
+    for cand_id in site.candidate_road_ids:
+        candidate_distance = min(
+            (
+                distances[lane_pair]
+                for lane_pair in inputs.lane_pairs
+                if lane_pair[1] == cand_id and lane_pair in distances
+            ),
+            default=math.inf,
+        )
+        if candidate_distance == math.inf:
+            cand_endpoint = inputs.endpoints_candidates.get(cand_id)
+            if cand_endpoint is None:
+                continue
+            candidate_distance = _distance(inputs.endpoint_road, cand_endpoint)
+        if candidate_distance < best_distance:
+            best_distance = candidate_distance
+            best_id = cand_id
+    if best_id is None or best_distance > endpoint_tolerance:
+        return None, best_distance
+    return best_id, best_distance
 
 
 def sanity_gate_passes(
@@ -164,16 +226,36 @@ def sanity_gate_passes(
     candidate_set = set(site.candidate_road_ids)
 
     # 1. Endpoint coincidence.
+    #
+    # Prefer the rendered per-lane anchors when the caller supplied one for
+    # every recovered lane pair. In a multi-lane split or merge a candidate
+    # attached to a non-reference lane is legitimately offset from the source
+    # road's reference endpoint by one or more lane widths, so comparing
+    # reference endpoints would reject a perfectly valid site and drop the
+    # branch. Reference-endpoint coincidence stays as the fallback for
+    # callers without lane-anchor metadata.
     for cand_id in site.candidate_road_ids:
-        cand_endpoint = inputs.endpoints_candidates.get(cand_id)
-        if cand_endpoint is None:
+        if inputs.endpoints_candidates.get(cand_id) is None:
             return False, f"missing endpoint for candidate road {cand_id}"
-        if _distance(inputs.endpoint_road, cand_endpoint) > endpoint_tolerance:
-            return (
-                False,
-                f"endpoint distance for candidate {cand_id} exceeds "
-                f"{endpoint_tolerance:.3f} m",
-            )
+
+    lane_pair_distances = _complete_lane_pair_distances(inputs)
+    if lane_pair_distances is not None:
+        for lane_pair in inputs.lane_pairs:
+            if lane_pair_distances[lane_pair] > endpoint_tolerance:
+                return (
+                    False,
+                    f"lane-aware endpoint distance for lane pair {lane_pair} "
+                    f"exceeds {endpoint_tolerance:.3f} m",
+                )
+    else:
+        for cand_id in site.candidate_road_ids:
+            cand_endpoint = inputs.endpoints_candidates[cand_id]
+            if _distance(inputs.endpoint_road, cand_endpoint) > endpoint_tolerance:
+                return (
+                    False,
+                    f"endpoint distance for candidate {cand_id} exceeds "
+                    f"{endpoint_tolerance:.3f} m",
+                )
 
     # 2. Lane uniqueness: each (candidate_road, candidate_lane) appears at most once.
     seen_targets: Set[Tuple[int, int]] = set()
@@ -222,6 +304,59 @@ class SynthesisOutput:
     junction: Junction
     connecting_roads: List[Road]
     deferred_link_patch: Tuple[str, int, int]
+
+
+@dataclass(frozen=True)
+class _DirectedLaneEdge:
+    """One canonical directed lane connection across a split/merge boundary.
+
+    Both a predecessor-side merge site and a successor-side split site of the
+    same N->M boundary describe the very same set of lane connections; the
+    directed edge is the representation they agree on, so the two sites can
+    be recognised as one junction instead of two conflicting ones.
+    """
+
+    incoming_road_id: int
+    incoming_lane_id: int
+    outgoing_road_id: int
+    outgoing_lane_id: int
+    start_xyz: Tuple[float, float, float]
+    end_xyz: Tuple[float, float, float]
+    fallback_heading: float
+
+    @property
+    def key(self) -> Tuple[int, int, int, int]:
+        """Identity of the edge, ignoring the rendered geometry."""
+        return (
+            self.incoming_road_id,
+            self.incoming_lane_id,
+            self.outgoing_road_id,
+            self.outgoing_lane_id,
+        )
+
+
+@dataclass(frozen=True)
+class _ReadyDivergenceSite:
+    """A site that cleared the sanity gate, normalised to directed lane edges."""
+
+    site: DivergenceSite
+    edges: List[_DirectedLaneEdge]
+
+
+@dataclass(frozen=True)
+class _ReadyDivergenceGroup:
+    """One canonical split/merge boundary ready for junction synthesis."""
+
+    name: str
+    edges: List[_DirectedLaneEdge]
+
+
+@dataclass(frozen=True)
+class _BoundarySynthesisOutput:
+    """Synthetic junction plus connecting roads for one canonical boundary."""
+
+    junction: Junction
+    connecting_roads: List[Road]
 
 
 def _make_zero_length_connecting_road(
@@ -362,6 +497,184 @@ def _make_zero_length_connecting_road(
         link=link,
         reference_start_xyz=start_xyz,
         reference_end_xyz=end_xyz,
+    )
+
+
+def _directed_edges_for_site(
+    site: DivergenceSite,
+    inputs: SanityGateInputs,
+    traffic_rule: TrafficRule,
+    fallback_heading: float,
+    lane_pair_endpoints: (
+        Dict[
+            Tuple[int, int, int],
+            Tuple[
+                Tuple[float, float, float] | None,
+                Tuple[float, float, float] | None,
+            ],
+        ]
+        | None
+    ) = None,
+) -> List[_DirectedLaneEdge]:
+    """Normalise a predecessor/successor site into directed lane edges.
+
+    Lane pairs are visited in source-lane order (descending for RHT,
+    ascending for LHT) so the connecting-road IDs derived from them stay
+    deterministic. ``lane_pair_endpoints`` overrides the road reference
+    endpoints with the rendered per-lane anchors when the caller has them.
+    """
+    is_lht = traffic_rule == TrafficRule.LHT
+    sorted_pairs = sorted(inputs.lane_pairs, key=lambda t: (t[0] if is_lht else -t[0]))
+
+    edges: List[_DirectedLaneEdge] = []
+    for src_lane, cand_road_id, cand_lane in sorted_pairs:
+        if site.is_divergence:
+            incoming_road_id, incoming_lane_id = site.road_id, src_lane
+            outgoing_road_id, outgoing_lane_id = cand_road_id, cand_lane
+            start_xyz = inputs.endpoint_road
+            end_xyz = inputs.endpoints_candidates[cand_road_id]
+        else:
+            incoming_road_id, incoming_lane_id = cand_road_id, cand_lane
+            outgoing_road_id, outgoing_lane_id = site.road_id, src_lane
+            start_xyz = inputs.endpoints_candidates[cand_road_id]
+            end_xyz = inputs.endpoint_road
+
+        if lane_pair_endpoints is not None:
+            anchored = lane_pair_endpoints.get((src_lane, cand_road_id, cand_lane))
+            if anchored is not None:
+                anchored_start, anchored_end = anchored
+                if anchored_start is not None:
+                    start_xyz = anchored_start
+                if anchored_end is not None:
+                    end_xyz = anchored_end
+
+        edges.append(
+            _DirectedLaneEdge(
+                incoming_road_id=incoming_road_id,
+                incoming_lane_id=incoming_lane_id,
+                outgoing_road_id=outgoing_road_id,
+                outgoing_lane_id=outgoing_lane_id,
+                start_xyz=start_xyz,
+                end_xyz=end_xyz,
+                fallback_heading=fallback_heading,
+            )
+        )
+    return edges
+
+
+def _group_overlapping_ready_sites(
+    ready_sites: List[_ReadyDivergenceSite],
+) -> List[_ReadyDivergenceGroup]:
+    """Merge sites that describe the same physical boundary into one group.
+
+    An N->M boundary is discovered twice: once as a predecessor-side merge on
+    the downstream road and once as a successor-side split on an upstream
+    road. Emitting two junctions for it would make the two road-level links
+    disagree, so sites sharing at least one directed lane edge are unioned
+    and synthesised as a single junction.
+    """
+    if not ready_sites:
+        return []
+
+    parent = list(range(len(ready_sites)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    edge_owner: Dict[Tuple[int, int, int, int], int] = {}
+    for index, ready in enumerate(ready_sites):
+        for edge in ready.edges:
+            union(index, edge_owner.setdefault(edge.key, index))
+
+    grouped_indices: Dict[int, List[int]] = {}
+    for index in range(len(ready_sites)):
+        grouped_indices.setdefault(find(index), []).append(index)
+
+    groups: List[_ReadyDivergenceGroup] = []
+    for indices in grouped_indices.values():
+        # Deduplicate shared edges, keeping the shortest rendered connector.
+        edges_by_key: Dict[Tuple[int, int, int, int], _DirectedLaneEdge] = {}
+        for index in indices:
+            for edge in ready_sites[index].edges:
+                previous = edges_by_key.get(edge.key)
+                if previous is None or _distance(
+                    edge.start_xyz, edge.end_xyz
+                ) < _distance(previous.start_xyz, previous.end_xyz):
+                    edges_by_key[edge.key] = edge
+        groups.append(
+            _ReadyDivergenceGroup(
+                name=f"divergence_{ready_sites[indices[0]].site.road_id}",
+                edges=list(edges_by_key.values()),
+            )
+        )
+    return groups
+
+
+def _synthesise_junction_for_edges(
+    junction_name: str,
+    edges: List[_DirectedLaneEdge],
+    starting_connecting_road_id: int,
+    junction_id: int,
+    traffic_rule: TrafficRule,
+    min_segment_length: float,
+    lane_width: float,
+) -> _BoundarySynthesisOutput:
+    """Emit one zero-length connecting road per directed lane edge.
+
+    One ``<lane><link><successor>`` per lane is an OpenDRIVE invariant, so a
+    fork can only keep all of its branches when every branch owns its own
+    connector inside the junction.
+    """
+    junction = Junction(id=junction_id, name=junction_name, connections=[])
+    connecting_roads: List[Road] = []
+    connecting_lane_id = 1 if traffic_rule == TrafficRule.LHT else -1
+    next_road_id = starting_connecting_road_id
+
+    for edge in edges:
+        connecting_roads.append(
+            _make_zero_length_connecting_road(
+                road_id=next_road_id,
+                junction_id=junction.id,
+                incoming_road_id=edge.incoming_road_id,
+                outgoing_road_id=edge.outgoing_road_id,
+                incoming_contact=ContactPoint.END,
+                outgoing_contact=ContactPoint.START,
+                start_xyz=edge.start_xyz,
+                end_xyz=edge.end_xyz,
+                min_segment_length=min_segment_length,
+                traffic_rule=traffic_rule,
+                from_lane=edge.incoming_lane_id,
+                to_lane=edge.outgoing_lane_id,
+                fallback_heading=edge.fallback_heading,
+                lane_width=lane_width,
+            )
+        )
+        junction.connections.append(
+            Connection(
+                id=len(junction.connections),
+                incoming_road=edge.incoming_road_id,
+                connecting_road=next_road_id,
+                contact_point=ContactPoint.START,
+                lane_links=[
+                    JunctionLaneLink(
+                        from_lane=edge.incoming_lane_id,
+                        to_lane=connecting_lane_id,
+                    )
+                ],
+            )
+        )
+        next_road_id += 1
+
+    return _BoundarySynthesisOutput(
+        junction=junction, connecting_roads=connecting_roads
     )
 
 
@@ -619,16 +932,21 @@ def apply_divergence_synthesis(
 ) -> DivergenceSynthesisResult:
     """Run detection -> sanity gate -> synthesis for every site.
 
-    Sites that fail the gate fall back to the existing "first candidate
-    wins" road-level link (logged as a WARNING). Sites that pass are
-    synthesised; the returned ``DivergenceSynthesisResult`` is fed into
-    the caller's ``junctions`` and ``connecting_roads`` lists.
+    Sites that pass the gate are normalised to directed lane edges; sites
+    describing the same N->M boundary are unioned so they share one junction,
+    which then carries one zero-length connector per directed lane edge and
+    therefore keeps every branch of a fork. Sites that fail the gate fall
+    back to a road-level link towards the geometrically nearest candidate,
+    and emit nothing at all when no candidate is within ``endpoint_tolerance``
+    (both logged as a WARNING). The returned ``DivergenceSynthesisResult`` is
+    fed into the caller's ``junctions`` and ``connecting_roads`` lists.
     """
     next_road_id = starting_connecting_road_id
     next_junction_id = starting_junction_id
 
     out_junctions: List[Junction] = []
     out_connecting_roads: List[Road] = []
+    ready_sites: List[_ReadyDivergenceSite] = []
 
     for site in sites:
         source_road = roads_by_id.get(site.road_id)
@@ -666,49 +984,6 @@ def apply_divergence_synthesis(
         lane_pairs, neighbour_road_ids = _lane_pairs_for_site(
             site, roads_by_id, lanelet_map, routing_graph, lanelet_to_road
         )
-
-        gate_inputs = SanityGateInputs(
-            endpoint_road=endpoint_road,
-            endpoints_candidates=endpoints_candidates,
-            lane_pairs=lane_pairs,
-            all_successor_lanelet_road_ids=neighbour_road_ids,
-        )
-        ok, reason = sanity_gate_passes(site, gate_inputs, endpoint_tolerance)
-        if not ok:
-            log.warning(
-                "divergence: sanity gate failed for road %d (%s side): %s; "
-                "falling back to first-candidate link",
-                site.road_id,
-                site.side.value,
-                reason,
-            )
-            first_candidate = site.candidate_road_ids[0]
-            if site.is_divergence:
-                source_road.add_successor(
-                    element_id=first_candidate,
-                    element_type=ElementType.ROAD,
-                    contact_point=ContactPoint.START,
-                )
-            else:
-                source_road.add_predecessor(
-                    element_id=first_candidate,
-                    element_type=ElementType.ROAD,
-                    contact_point=ContactPoint.END,
-                )
-            continue
-
-        # Source road tangent at the divergence/merge endpoint becomes the
-        # heading fallback when start_xyz and end_xyz coincide (#291 review).
-        source_plan_view = getattr(source_road, "plan_view", None)
-        fallback_heading = 0.0
-        if source_plan_view is not None:
-            endpoint_with_heading = _evaluate_planview_endpoint_with_heading(
-                source_plan_view,
-                at_start=not site.is_divergence,
-            )
-            if endpoint_with_heading is not None:
-                fallback_heading = endpoint_with_heading[2]
-
         # Per-pair lane-aware anchor endpoints. For divergence the source
         # side uses ``Road.evaluate_lane_anchor_xyz(lane_index, at_start=
         # False)`` so each connector terminates on the lane edge of the
@@ -719,6 +994,9 @@ def apply_divergence_synthesis(
         # lanes, plan_view), we fall back to the road's reference
         # endpoint by leaving the entry as ``None`` — the synthesiser
         # then uses ``inputs.endpoint_road`` / ``endpoints_candidates``.
+        # The distance between the two rendered anchors is what the sanity
+        # gate validates, so a candidate attached to a non-reference lane is
+        # judged on its own lane rather than on the reference line.
         lane_pair_endpoints: Dict[
             Tuple[int, int, int],
             Tuple[
@@ -726,6 +1004,7 @@ def apply_divergence_synthesis(
                 Tuple[float, float, float] | None,
             ],
         ] = {}
+        lane_pair_endpoint_distances: Dict[Tuple[int, int, int], float] = {}
         for src_lane, cand_road_id, cand_lane in lane_pairs:
             cand_road = roads_by_id.get(cand_road_id)
             if site.is_divergence:
@@ -748,17 +1027,91 @@ def apply_divergence_synthesis(
                 start_anchor,
                 end_anchor,
             )
+            if start_anchor is not None and end_anchor is not None:
+                lane_pair_endpoint_distances[(src_lane, cand_road_id, cand_lane)] = (
+                    _distance(start_anchor, end_anchor)
+                )
 
-        synthesis = synthesise_junction_for_site(
-            site=site,
-            inputs=gate_inputs,
+        gate_inputs = SanityGateInputs(
+            endpoint_road=endpoint_road,
+            endpoints_candidates=endpoints_candidates,
+            lane_pairs=lane_pairs,
+            all_successor_lanelet_road_ids=neighbour_road_ids,
+            lane_pair_endpoint_distances=lane_pair_endpoint_distances or None,
+        )
+        ok, reason = sanity_gate_passes(site, gate_inputs, endpoint_tolerance)
+        if not ok:
+            nearest_id, nearest_distance = _nearest_candidate_within_tolerance(
+                site, gate_inputs, endpoint_tolerance
+            )
+            if nearest_id is None:
+                log.warning(
+                    "divergence: sanity gate failed for road %d (%s side): %s; "
+                    "no candidate within %.3f m (nearest %.3f m), emitting no link",
+                    site.road_id,
+                    site.side.value,
+                    reason,
+                    endpoint_tolerance,
+                    nearest_distance,
+                )
+                continue
+            log.warning(
+                "divergence: sanity gate failed for road %d (%s side): %s; "
+                "falling back to nearest-candidate link %d (%.3f m)",
+                site.road_id,
+                site.side.value,
+                reason,
+                nearest_id,
+                nearest_distance,
+            )
+            if site.is_divergence:
+                source_road.add_successor(
+                    element_id=nearest_id,
+                    element_type=ElementType.ROAD,
+                    contact_point=ContactPoint.START,
+                )
+            else:
+                source_road.add_predecessor(
+                    element_id=nearest_id,
+                    element_type=ElementType.ROAD,
+                    contact_point=ContactPoint.END,
+                )
+            continue
+
+        # Source road tangent at the divergence/merge endpoint becomes the
+        # heading fallback when start_xyz and end_xyz coincide (#291 review).
+        source_plan_view = getattr(source_road, "plan_view", None)
+        fallback_heading = 0.0
+        if source_plan_view is not None:
+            endpoint_with_heading = _evaluate_planview_endpoint_with_heading(
+                source_plan_view,
+                at_start=not site.is_divergence,
+            )
+            if endpoint_with_heading is not None:
+                fallback_heading = endpoint_with_heading[2]
+
+        ready_sites.append(
+            _ReadyDivergenceSite(
+                site=site,
+                edges=_directed_edges_for_site(
+                    site=site,
+                    inputs=gate_inputs,
+                    traffic_rule=traffic_rule,
+                    fallback_heading=fallback_heading,
+                    lane_pair_endpoints=lane_pair_endpoints,
+                ),
+            )
+        )
+
+    for group in _group_overlapping_ready_sites(ready_sites):
+        synthesis = _synthesise_junction_for_edges(
+            junction_name=group.name,
+            edges=group.edges,
             starting_connecting_road_id=next_road_id,
             junction_id=next_junction_id,
             traffic_rule=traffic_rule,
             min_segment_length=min_segment_length,
-            fallback_heading=fallback_heading,
             lane_width=DEFAULT_CONFIG.geometry.divergence_default_lane_width,
-            lane_pair_endpoints=lane_pair_endpoints,
         )
 
         out_junctions.append(synthesis.junction)
@@ -766,36 +1119,23 @@ def apply_divergence_synthesis(
         next_road_id += len(synthesis.connecting_roads)
         next_junction_id += 1
 
-        side, _src, jid = synthesis.deferred_link_patch
-        if side == "successor":
-            source_road.add_successor(
-                element_id=jid,
-                element_type=ElementType.JUNCTION,
-                contact_point=None,
-            )
-        else:
-            source_road.add_predecessor(
-                element_id=jid,
-                element_type=ElementType.JUNCTION,
-                contact_point=None,
-            )
-
-        # Mirror-side patch on each candidate so both sides agree on the
-        # junction link (#291 review). Without this the candidates retain
-        # their direct road->road links from construct_from_lanelet_map and
-        # the topology becomes inconsistent.
-        for cand_id in site.candidate_road_ids:
-            cand_road = roads_by_id.get(cand_id)
-            if cand_road is None:
-                continue
-            if site.is_divergence:
-                cand_road.add_predecessor(
+        # Both sides of the boundary must name the junction, otherwise the
+        # roads keep the direct road->road links that
+        # ``construct_from_lanelet_map`` left behind and the topology becomes
+        # inconsistent (#291 review).
+        jid = synthesis.junction.id
+        for road_id in sorted({edge.incoming_road_id for edge in group.edges}):
+            incoming_road = roads_by_id.get(road_id)
+            if incoming_road is not None:
+                incoming_road.add_successor(
                     element_id=jid,
                     element_type=ElementType.JUNCTION,
                     contact_point=None,
                 )
-            else:
-                cand_road.add_successor(
+        for road_id in sorted({edge.outgoing_road_id for edge in group.edges}):
+            outgoing_road = roads_by_id.get(road_id)
+            if outgoing_road is not None:
+                outgoing_road.add_predecessor(
                     element_id=jid,
                     element_type=ElementType.JUNCTION,
                     contact_point=None,
