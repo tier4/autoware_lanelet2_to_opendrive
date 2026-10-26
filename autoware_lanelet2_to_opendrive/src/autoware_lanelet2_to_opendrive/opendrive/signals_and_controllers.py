@@ -444,6 +444,22 @@ class SignalsAndControllers:
             else None
         )
 
+        # A chain-merged connecting road owns *longitudinally* consecutive
+        # lanelets, so fitting a reference line through them as if they were
+        # a lateral group raises "non-adjacent lanelets" and falls back to a
+        # meaningless (0, -4).  The road already carries the fitted geometry
+        # of the whole maneuver, so project onto it directly.
+        if road is not None and getattr(road, "chain_source_lanelet_ids", None):
+            import numpy as np
+
+            from .objects import _project_point_onto_road
+
+            projection = _project_point_onto_road(np.array([x, y]), road)
+            if projection is None:
+                return (0.0, -4.0)
+            s = projection[0]
+            return (s, road.get_half_width_at_s(s))
+
         lanelets: List = []
         if reference_line is None:
             # Get lanelet objects from IDs
