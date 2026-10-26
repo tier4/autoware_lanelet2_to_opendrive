@@ -518,11 +518,21 @@ def test_pinned_junction_contacts_agree_on_heading(nishishinjuku_xodr):
 
     assert checked > 0, "no pinned junction contacts found; the scope is wrong"
 
-    # (connecting road, incoming road, contactPoint) of every contact whose
-    # heading pin the guard is expected to decline; see the docstring.
-    EXPECTED_DECLINED = {(644, 300, "start")}
-    declined_keys = {(c, i, p) for c, i, p, _ in declined}
-    assert declined_keys == EXPECTED_DECLINED, (
+    # (incoming road, contactPoint) of every contact whose heading pin the
+    # guard is expected to decline, and the angle it was declined for; see
+    # the docstring.
+    #
+    # The *connecting* road's id is deliberately not part of this identity.
+    # Connecting roads are numbered in emission order, so any change to how
+    # many of them a junction emits renumbers every later one while naming
+    # exactly the same contact -- the set would have to be rewritten for a
+    # change that did not touch this behaviour at all. What identifies a
+    # declined contact is the incoming road and which of its ends the
+    # connection meets; what the guard acts on is the angle. Both are
+    # pinned.
+    EXPECTED_DECLINED_DPSI_DEG = {(300, "start"): 40.25}
+    declined_keys = {(i, p) for _, i, p, _ in declined}
+    assert declined_keys == set(EXPECTED_DECLINED_DPSI_DEG), (
         "the set of contacts beyond the "
         f"{math.degrees(heading_pin_limit):.1f} deg guard limit changed: "
         + ", ".join(
@@ -530,6 +540,14 @@ def test_pinned_junction_contacts_agree_on_heading(nishishinjuku_xodr):
             for c, i, p, d in sorted(declined)
         )
     )
+    for conn_road, incoming, contact, dpsi_deg in declined:
+        assert dpsi_deg == pytest.approx(
+            EXPECTED_DECLINED_DPSI_DEG[(incoming, contact)], abs=0.01
+        ), (
+            f"the angle the guard declined changed: conn_road={conn_road} "
+            f"incoming={incoming} contact={contact} dpsi={dpsi_deg:.2f} deg, "
+            f"expected {EXPECTED_DECLINED_DPSI_DEG[(incoming, contact)]:.2f} deg"
+        )
 
     if offenders:
         offenders.sort(key=lambda o: -o[3])
