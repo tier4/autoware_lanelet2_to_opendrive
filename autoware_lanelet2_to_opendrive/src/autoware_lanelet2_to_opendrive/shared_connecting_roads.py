@@ -294,13 +294,22 @@ def _make_stub(
         )
         return None
 
-    fallback_heading = 0.0
+    # Both neighbour tangents: the stub is a curve meeting each of them.
+    start_heading = None
     if incoming.plan_view is not None:
         endpoint = _evaluate_planview_endpoint_with_heading(
             incoming.plan_view, at_start=False
         )
         if endpoint is not None:
-            fallback_heading = endpoint[2]
+            start_heading = endpoint[2]
+
+    end_heading = None
+    if connector.plan_view is not None:
+        endpoint = _evaluate_planview_endpoint_with_heading(
+            connector.plan_view, at_start=at_start
+        )
+        if endpoint is not None:
+            end_heading = endpoint[2]
 
     incoming_width = _lane_width_at_end(incoming, lane_link.from_lane)
     connector_width = _lane_width_at(connector, lane_link.to_lane, at_start=at_start)
@@ -324,7 +333,8 @@ def _make_stub(
         traffic_rule=traffic_rule,
         from_lane=lane_link.from_lane,
         to_lane=lane_link.to_lane,
-        fallback_heading=fallback_heading,
+        start_heading=start_heading,
+        end_heading=end_heading,
         lane_width=incoming_width if incoming_width is not None else 3.5,
     )
     _taper_stub_width(stub, incoming_width, connector_width)
