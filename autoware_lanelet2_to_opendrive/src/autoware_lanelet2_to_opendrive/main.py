@@ -1199,7 +1199,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             complete_direct_junction_lanelinks,
         )
 
-        junction_lanelet_id_set: Set[int] = {ll.id for ll in junction_lanelets}
         existing_road_ids = [r.id for r in (regular_roads + connecting_roads)]
         completion_start_id = (max(existing_road_ids) + 1) if existing_road_ids else 0
 
@@ -1209,7 +1208,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             all_roads=regular_roads + connecting_roads,
             junctions=junctions,
             lanelet_to_road_id=lanelet_to_road_id,
-            junction_lanelet_ids=junction_lanelet_id_set,
             starting_road_id=completion_start_id,
             traffic_rule=traffic_rule_value,
             min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
