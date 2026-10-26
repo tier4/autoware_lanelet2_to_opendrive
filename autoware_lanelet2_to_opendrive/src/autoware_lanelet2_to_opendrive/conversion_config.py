@@ -352,6 +352,11 @@ class LaneLinksContext:
             for validation
         road_id_to_road: Optional mapping from road_id to Road objects for
             checking if target roads are connecting roads
+        non_vehicle_succession: Optional ``(previous_of, following_of)``
+            longitudinal succession for the lanelets the vehicle routing
+            graph has no vertex for, derived from shared boundary geometry
+            by ``build_boundary_longitudinal_adjacency``. ``None`` keeps the
+            routing graph as the sole source for every lane.
     """
 
     lanelet_map: Any  # lanelet2.core.LaneletMap
@@ -359,3 +364,6 @@ class LaneLinksContext:
     routing_graph: Optional[RoutingGraph] = None
     road_lane_ids: Optional[Dict[int, Set[int]]] = None
     road_id_to_road: Optional[Dict[int, Any]] = None  # Dict[int, Road]
+    non_vehicle_succession: Optional[
+        Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]
+    ] = None

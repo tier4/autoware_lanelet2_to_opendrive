@@ -28,13 +28,20 @@ from ..conversion_config import (
     WidthEstimationConfig,
 )
 from ..util import (
+    BOUNDARY_ATTACHED_LANELET_SUBTYPES,
     CONVERTIBLE_LANELET_SUBTYPES,
+    ConnectionDirection,
     LaneletInput,
+    attach_boundary_adjacent_lanelets,
+    build_boundary_longitudinal_adjacency,
     filter_lanelets_by_subtype,
+    is_boundary_attached_lanelet,
+    lanelet_subtype,
+    resolve_lane_link_neighbours,
     to_lanelet_list,
 )
 from .elevation import ElevationProfile
-from .enums import ContactPoint, ElementType, RoadType, TrafficRule
+from .enums import ContactPoint, ElementType, LaneType, RoadType, TrafficRule
 from .geometry import (
     Arc,
     GeometryBase,
@@ -420,6 +427,7 @@ def _evaluate_lane_width(lane: "Lane", s: float) -> Optional[float]:
 
 
 if TYPE_CHECKING:
+    from ..util import BoundaryAttachmentResult
     from .signal import Signal
     from .lane import Lane
     from .junction import Junction
@@ -794,6 +802,7 @@ class Road:
                     context.lanelet_to_road_and_lane,
                     context.road_lane_ids,
                     context.road_id_to_road,
+                    context.non_vehicle_succession,
                 )
 
             # Process right lanes
@@ -805,6 +814,7 @@ class Road:
                     context.lanelet_to_road_and_lane,
                     context.road_lane_ids,
                     context.road_id_to_road,
+                    context.non_vehicle_succession,
                 )
 
     @staticmethod
@@ -843,6 +853,9 @@ class Road:
         lanelet_to_road_and_lane: Dict[int, Tuple[int, int]],
         road_lane_ids: Optional[Dict[int, Set[int]]] = None,
         road_id_to_road: Optional[Dict[int, "Road"]] = None,
+        non_vehicle_succession: Optional[
+            Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]
+        ] = None,
     ) -> None:
         """Set predecessor and successor for a single lane.
 
@@ -855,6 +868,9 @@ class Road:
                           Used to validate that lane links reference existing lanes.
             road_id_to_road: Optional mapping from road_id to Road objects.
                             Used to check if target roads are connecting roads in junctions.
+            non_vehicle_succession: Optional geometric succession used for the
+                            lanelets the vehicle routing graph has no vertex
+                            for. See ``resolve_lane_link_neighbours``.
         """
 
         if lane.lanelet_id is None:
@@ -876,7 +892,13 @@ class Road:
         is_connecting_road = self.junction is not None and self.junction >= 0
 
         # Find predecessor lanelets
-        previous_lanelets = routing_graph.previous(lanelet)
+        previous_lanelets = resolve_lane_link_neighbours(
+            lanelet,
+            routing_graph.previous,
+            non_vehicle_succession,
+            ConnectionDirection.PREVIOUS,
+            lanelet_map,
+        )
         if previous_lanelets:
             # Take the first predecessor that maps to the road link's predecessor road
             for prev_ll in previous_lanelets:
@@ -944,7 +966,13 @@ class Road:
                         break
 
         # Find successor lanelets
-        following_lanelets = routing_graph.following(lanelet)
+        following_lanelets = resolve_lane_link_neighbours(
+            lanelet,
+            routing_graph.following,
+            non_vehicle_succession,
+            ConnectionDirection.FOLLOWING,
+            lanelet_map,
+        )
         if following_lanelets:
             # Take the first successor that maps to the road link's successor road
             for next_ll in following_lanelets:
@@ -1008,6 +1036,63 @@ class Road:
                         break
 
     @staticmethod
+    def _log_boundary_attachment_summary(
+        all_lanelets: List[lanelet2.core.Lanelet],
+        attachable_lanelets: Set[lanelet2.core.Lanelet],
+        attachment: "BoundaryAttachmentResult",
+    ) -> None:
+        """Emit one aggregated line about non-vehicle lanelet handling.
+
+        Deliberately aggregated: on a real map this covers thousands of
+        lanelets (odaiba has 4,225 non-vehicle ones), and a per-lanelet
+        message would bury every other diagnostic.
+        """
+        attached_by_subtype: Dict[str, int] = {}
+        standalone_by_subtype: Dict[str, int] = {}
+        unattached_ids = {lanelet.id for lanelet in attachment.unattached}
+        for lanelet in attachable_lanelets:
+            subtype = lanelet_subtype(lanelet)
+            bucket = (
+                standalone_by_subtype
+                if lanelet.id in unattached_ids
+                else attached_by_subtype
+            )
+            bucket[subtype] = bucket.get(subtype, 0) + 1
+
+        def _fmt(counts: Dict[str, int]) -> str:
+            if not counts:
+                return "none"
+            return ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+
+        logger.info(
+            "Non-vehicle lanelets (%s): attached as lanes of the adjacent "
+            "road [%s]; kept as standalone roads because no road shares a "
+            "boundary linestring [%s]; %d bordered more than one road group "
+            "and joined the one with the smallest lanelet id",
+            ", ".join(BOUNDARY_ATTACHED_LANELET_SUBTYPES),
+            _fmt(attached_by_subtype),
+            _fmt(standalone_by_subtype),
+            len(attachment.ambiguous_ids),
+        )
+
+        # Subtypes that are not converted at all.  Previously silent; a
+        # single aggregated line makes the loss visible without one message
+        # per lanelet.
+        skipped: Dict[str, int] = {}
+        for lanelet in all_lanelets:
+            subtype = lanelet_subtype(lanelet)
+            if subtype in CONVERTIBLE_LANELET_SUBTYPES or subtype == "crosswalk":
+                continue
+            skipped[subtype or "<none>"] = skipped.get(subtype or "<none>", 0) + 1
+        if skipped:
+            logger.warning(
+                "Skipped %d lanelet(s) whose subtype has no OpenDRIVE lane "
+                "mapping: %s",
+                sum(skipped.values()),
+                _fmt(skipped),
+            )
+
+    @staticmethod
     def _extract_road_types_from_lanelets(
         lanelet_list: List[lanelet2.core.Lanelet],
     ) -> Optional[List[RoadTypeDefinition]]:
@@ -1022,8 +1107,19 @@ class Road:
         if not lanelet_list:
             return None
 
-        # Get the first lanelet to extract attributes
-        first_lanelet = lanelet_list[0]
+        # Take the attributes from a driving lanelet when the group has one.
+        # A group can now also contain shoulders / sidewalks / bicycle lanes,
+        # whose speed_limit and location describe the non-vehicle lane, not
+        # the road; letting one of those land in position 0 would change the
+        # whole road's <type> and speed limit.
+        first_lanelet = next(
+            (
+                lanelet
+                for lanelet in lanelet_list
+                if not is_boundary_attached_lanelet(lanelet)
+            ),
+            lanelet_list[0],
+        )
 
         # Extract speed limit
         speed_limit = None
@@ -1302,15 +1398,28 @@ class Road:
         # Include non-road subtypes so they can be emitted with the correct
         # OpenDRIVE lane type
         # (see Lane.construct_from_lanelet for the subtype -> LaneType mapping).
-        # Different subtypes form separate adjacent groups because the routing
-        # graph treats them as different participant classes, so e.g. walkways
-        # will not be grouped together with road lanelets here.
         road_lanelets = _filter_lanelets_outside_junction(
             filter_lanelets_by_subtype(all_lanelets, CONVERTIBLE_LANELET_SUBTYPES)
         )
 
         if not road_lanelets:
             raise ValueError("No lanelets found outside junctions")
+
+        # Split the candidates into the ones the vehicle routing graph can
+        # group (road / highway, plus walkway which is genuinely detached)
+        # and the ones it structurally cannot: the non-vehicle subtypes are
+        # not vertices of a ``Participants.Vehicle`` graph, so every
+        # left/right query on them returns None and they would each become
+        # their own link-less one-lane road overlapping the driving road
+        # they belong to.  They are folded into the driving road's lateral
+        # group after the vehicle grouping is final — see
+        # ``attach_boundary_adjacent_lanelets``.
+        attachable_lanelets = {
+            lanelet
+            for lanelet in road_lanelets
+            if is_boundary_attached_lanelet(lanelet)
+        }
+        primary_lanelets = set(road_lanelets) - attachable_lanelets
 
         # Create routing graph once and reuse for all operations
         traffic_rules = lanelet2.traffic_rules.create(
@@ -1324,9 +1433,11 @@ class Road:
         # Find adjacent groups of lanelets
         from ..util import find_adjacent_groups, split_groups_by_divergent_connections
 
-        # Pass the road_lanelets set to find_adjacent_groups so it only groups these
-        adjacent_groups = find_adjacent_groups(
-            lanelet_map, set(road_lanelets), routing_graph
+        # Pass the primary set to find_adjacent_groups so it only groups these
+        adjacent_groups = (
+            find_adjacent_groups(lanelet_map, primary_lanelets, routing_graph)
+            if primary_lanelets
+            else []
         )
 
         # Split groups whose lanelets fan out to more than one downstream
@@ -1335,8 +1446,33 @@ class Road:
         # that can only carry a road-level link to one of them, silently
         # dropping the other lane's link.
         # See specs/2026-05-22-road-successor-mis-merge-design.md.
+        #
+        # This runs BEFORE the non-vehicle attachment below on purpose: the
+        # splitter's signature is the set of downstream groups reached
+        # through the vehicle routing graph, which is empty for every
+        # non-vehicle lanelet.  Attaching first would give those lanelets a
+        # signature that differs from their road's and split them straight
+        # back out into their own road.
         adjacent_groups = split_groups_by_divergent_connections(
             lanelet_map, adjacent_groups, routing_graph
+        )
+
+        # Fold shoulders / pedestrian lanes / bicycle lanes into the lateral
+        # group of the driving road whose boundary linestring they share, so
+        # they become extra lanes of that road instead of overlapping
+        # standalone roads (issue: non-vehicle lanelets never grouped).
+        attachment = attach_boundary_adjacent_lanelets(
+            adjacent_groups, attachable_lanelets
+        )
+        adjacent_groups = attachment.groups
+        # Lanelets that reached no driving road keep their previous
+        # behaviour (one standalone road each); nothing is dropped.
+        if attachment.unattached:
+            adjacent_groups = adjacent_groups + find_adjacent_groups(
+                lanelet_map, attachment.unattached, routing_graph
+            )
+        Road._log_boundary_attachment_summary(
+            all_lanelets, attachable_lanelets, attachment
         )
 
         # Create roads from adjacent groups
@@ -1781,6 +1917,15 @@ class Road:
                 lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
             )
 
+        # The non-vehicle subtypes are not vertices of the vehicle routing
+        # graph, so its previous/following lookups return nothing for them
+        # and their lanes were emitted with no <link> at all.  Their
+        # succession comes from shared boundary geometry instead; built once
+        # for the whole map rather than per road.
+        non_vehicle_succession = build_boundary_longitudinal_adjacency(
+            lanelet_map.laneletLayer
+        )
+
         # Set lane links for each road
         print(f"Building lane links for {len(roads)} roads...")
         for road in tqdm(roads, desc="Building lane links"):
@@ -1791,12 +1936,152 @@ class Road:
                     routing_graph=routing_graph,
                     road_lane_ids=road_lane_ids,
                     road_id_to_road=road_id_to_road,
+                    non_vehicle_succession=non_vehicle_succession,
                 )
                 road.set_lane_links(context)
             except Exception as e:
                 tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
 
+        Road._drop_asymmetric_non_vehicle_lane_links(roads, road_id_to_road)
+
         return lanelet_to_road_and_lane
+
+    #: Lane types emitted for the non-vehicle subtypes whose succession comes
+    #: from geometry rather than the routing graph.  Only these are subject to
+    #: the symmetry pass below; driving lanes are left exactly as they were.
+    _NON_VEHICLE_LANE_TYPES = frozenset(
+        {LaneType.SIDEWALK, LaneType.SHOULDER, LaneType.BIKING}
+    )
+
+    @staticmethod
+    def _drop_asymmetric_non_vehicle_lane_links(
+        roads: List["Road"],
+        road_id_to_road: Dict[int, "Road"],
+    ) -> None:
+        """Remove non-vehicle lane links whose reciprocal does not exist.
+
+        ``road.lane.link.lanes_across_lane_sections`` requires a lane
+        continuing into another lane to be named from *both* sides, and it
+        examines a road boundary from both directions -- so a one-sided link
+        is a finding no matter which side wrote it.
+
+        The road-link consistency guard of issue #202 is applied per lane as
+        each road is processed, and it can pass on one side of a boundary and
+        refuse on the other: measured on nishishinjuku, road 261's
+        predecessor is road-typed toward road 259 while road 259's successor
+        is a junction, so 261's shoulder gets a predecessor link and 259's
+        shoulder gets no successor. That asymmetry is invisible while a road
+        is being processed, because the other road may not have been
+        processed yet, so it can only be resolved once every road has its
+        links.
+
+        It also removes a non-vehicle lane link at a junction-typed road
+        end, where OpenDRIVE says the ``<link>`` shall be omitted. **That
+        removal is invisible to the ASAM totals**: the checker deliberately
+        skips junction-boundary lanes, which is the very case the standard
+        excludes, so the error count is identical with and without this pass
+        (measured on nishishinjuku: 87 either way, while the number of
+        non-vehicle links at a junction end goes from 1 to 0). The totals
+        would hide a regression here in both directions, which is why
+        ``test_no_non_vehicle_lane_link_survives_at_a_junction_end`` asserts
+        the property directly rather than watching the count.
+
+        This pass is strictly subtractive and touches only the lane types in
+        :data:`_NON_VEHICLE_LANE_TYPES`. It can never add a link, never
+        change a driving lane, and never alter a road-level link.
+
+        Args:
+            roads: All roads, already linked.
+            road_id_to_road: ``road_id -> Road`` for resolving link targets.
+        """
+
+        def _lanes(road: "Road"):
+            if road.lanes is None:
+                return
+            for lane_section in road.lanes.lane_sections:
+                for lane in lane_section.left_lanes.values():
+                    yield lane
+                for lane in lane_section.right_lanes.values():
+                    yield lane
+
+        def _lane_by_id(road: Optional["Road"], lane_id: int) -> Optional["Lane"]:
+            if road is None:
+                return None
+            for lane in _lanes(road):
+                if lane.lane_id == lane_id:
+                    return lane
+            return None
+
+        dropped = 0
+        dropped_junction_end = 0
+        dropped_no_reciprocal = 0
+        for road in roads:
+            road_link = road.link
+            if road_link is None:
+                continue
+            for lane in _lanes(road):
+                if lane.lane_type not in Road._NON_VEHICLE_LANE_TYPES:
+                    continue
+                for own_side, road_side in (
+                    ("predecessor", road_link.predecessor),
+                    ("successor", road_link.successor),
+                ):
+                    own_link = getattr(lane, own_side, None)
+                    if own_link is None:
+                        continue
+                    # A junction-typed end resolves through the junction's
+                    # <connection> table, not a reciprocal lane link.
+                    if road_side is None or road_side.element_type != ElementType.ROAD:
+                        setattr(lane, own_side, None)
+                        dropped += 1
+                        dropped_junction_end += 1
+                        continue
+                    # Joining the target at its start means ITS predecessor
+                    # points back at us; at its end, its successor does.
+                    peer_side = (
+                        "predecessor"
+                        if road_side.contact_point == ContactPoint.START
+                        else "successor"
+                    )
+                    peer_lane = _lane_by_id(
+                        road_id_to_road.get(road_side.element_id), own_link.id
+                    )
+                    peer_link = (
+                        getattr(peer_lane, peer_side, None)
+                        if peer_lane is not None
+                        else None
+                    )
+                    if peer_link is None or peer_link.id != lane.lane_id:
+                        setattr(lane, own_side, None)
+                        dropped += 1
+                        dropped_no_reciprocal += 1
+
+        if dropped:
+            # Split by cause, because they are different defects.
+            #
+            # "already at a junction end" is the stale-link class caught in
+            # the act: the standard says to omit a lane <link> there at all.
+            #
+            # "no reciprocal" covers two situations that look identical
+            # here.  One is the road-link guard passing on one side of a
+            # boundary and refusing on the other, which is an ASAM finding
+            # from whichever side the checker reaches.  The other is a link
+            # that is *about to become* stale: measured on nishishinjuku,
+            # road 261's predecessor is still road-typed toward road 259
+            # when this pass runs and is re-pointed at a junction
+            # afterwards, so the link never looks like a junction-end case
+            # to this code but is one by the time the file is written.
+            # Do not read this counter as "the junction-end case did not
+            # occur" -- it means this pass did not *see* it as one.
+            logger.info(
+                "Dropped %d non-vehicle lane link(s): %d already at a "
+                "junction-typed road end, %d with no reciprocal (the "
+                "road-link guard refused the other side, or the end is "
+                "re-pointed at a junction after this pass)",
+                dropped,
+                dropped_junction_end,
+                dropped_no_reciprocal,
+            )
 
     @staticmethod
     def _find_connected_road(

@@ -87,6 +87,7 @@ nav:
     - Geometric Approximation: limitations/geometric-approximation.md
     - Coordinate System: limitations/coordinate-system.md
     - ASAM Schema Compliance: limitations/asam-schema-compliance.md
+    - Pedestrian Network Connectivity: limitations/pedestrian-network-connectivity.md
   - Signals: signals.md
   - Crosswalk Objects: crosswalk_objects.md
   - Stop Line Objects: stop_line_objects.md
