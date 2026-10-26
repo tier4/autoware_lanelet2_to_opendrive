@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Dict,
+    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -272,6 +273,38 @@ def _junction_chain_paths(
     # Those lanelets keep the legacy lateral treatment, which is what the
     # caller does with anything not covered by a returned path.
     return paths
+
+
+def _external_exit_roads(
+    lanelets: Iterable[lanelet2.core.Lanelet],
+    routing_graph: RoutingGraph,
+    junction_lanelet_ids: Set[int],
+    lanelet_to_regular_road: Dict[int, int],
+) -> List[int]:
+    """Roads *outside* the junction that ``lanelets`` hand over to, ascending.
+
+    The mirror of the in-junction fork that :func:`_junction_chain_paths`
+    resolves: a connecting road owns one road-level ``<successor>``, so a
+    connector whose lane leaves the junction into several outside roads can
+    name only one of them and every other maneuver is lost.  The caller
+    emits one connecting road per returned id.
+
+    A successor still inside the same junction is skipped: that is the
+    in-junction fork, and duplicating for it here would double-count what the
+    chain merge already handles.  A successor in no known regular road — a
+    neighbouring junction's connector, say — is skipped too, because the
+    link would not be to a road this function can name; such a connector
+    keeps its existing single-``<successor>`` behaviour.
+    """
+    exits: Set[int] = set()
+    for lanelet in lanelets:
+        for successor in routing_graph.following(lanelet, False):
+            if successor.id == lanelet.id or successor.id in junction_lanelet_ids:
+                continue
+            road_id = lanelet_to_regular_road.get(successor.id)
+            if road_id is not None:
+                exits.add(road_id)
+    return sorted(exits)
 
 
 def _build_planview_geometries(
@@ -691,6 +724,21 @@ class Road:
     # covers, which is what the lanelet <-> lane mapping may claim.
     chain_source_lanelet_ids: Optional[List[int]] = None
     chain_owned_lanelet_ids: Optional[List[int]] = None
+    # The exit-side mirror of the fork above.  A connecting road whose lanes
+    # leave the junction into several roads *outside* it is emitted once per
+    # outside road, because the single road-level <successor> would otherwise
+    # name one of them and lose the rest.  Every copy carries the id of the
+    # outside road it serves; ``exit_fork_lanelet_ids`` are the source
+    # lanelets the copies share (a duplicate is absent from
+    # ``road_to_lanelet_ids``, which is keyed by the *claiming* road, so it
+    # needs its own record to resolve links from).  ``None`` / ``False`` for
+    # every road that does not fork on its exit side.
+    exit_fork_successor_road_id: Optional[int] = None
+    exit_fork_lanelet_ids: Optional[List[int]] = None
+    # True on every copy but the first.  A lanelet may name only one
+    # ``(road, lane)`` pair, so the duplicates claim none of them — the same
+    # rule ``chain_owned_lanelet_ids`` applies to a fork's shared stage.
+    exit_fork_duplicate: bool = False
 
     def evaluate_lane_anchor_pose(
         self,
@@ -1920,6 +1968,7 @@ class Road:
         ):
             # Issue #132 fix: Apply offset to junction ID
             junction_id = junction_index + junction_id_offset
+            junction_group_ids = {lanelet.id for lanelet in junction_group}
             # Find adjacent groups within this junction.  Hand over the
             # routing graph built above: without it ``find_adjacent_groups``
             # rebuilds a whole-map graph on every iteration, which dominates
@@ -2007,10 +2056,31 @@ class Road:
                 chain_paths = []
                 chain_member_ids = set()
 
+            # A merged path whose last stage leaves the junction into several
+            # outside roads has the same single-<successor> problem at its
+            # exit that the fork above has inside the junction, so it is
+            # emitted once per outside road too.
+            chain_paths_with_exit: List[
+                Tuple[List[lanelet2.core.Lanelet], Optional[int]]
+            ] = []
+            for path in chain_paths:
+                path_exits = _external_exit_roads(
+                    [path[-1]],
+                    routing_graph,
+                    junction_group_ids,
+                    ll_to_regular_road,
+                )
+                if len(path_exits) > 1:
+                    chain_paths_with_exit.extend(
+                        (path, exit_id) for exit_id in path_exits
+                    )
+                else:
+                    chain_paths_with_exit.append((path, None))
+
             if chain_paths:
                 current_road_id = Road._build_chain_connecting_roads(
                     lanelet_map=lanelet_map,
-                    chain_paths=chain_paths,
+                    chain_paths=chain_paths_with_exit,
                     junction_id=junction_id,
                     starting_road_id=current_road_id,
                     traffic_rule=traffic_rule,
@@ -2031,7 +2101,16 @@ class Road:
                     if not ({ll.id for ll in group} & chain_member_ids)
                 ]
 
-            # Create one road per adjacent group within the junction
+            # Create one road per adjacent group within the junction -- or,
+            # when the group's lanes leave the junction into several roads
+            # outside it, one road per outside road.  A connecting road owns
+            # a single road-level <successor>, so a single road here would
+            # name one exit and silently drop the other maneuvers; this is
+            # the exit-side mirror of the in-junction fork the chain merge
+            # above resolves.  ``split_junction_groups_by_connections`` has
+            # already split the group so that every lanelet in it reaches the
+            # same set of outside roads, which is why one copy per outside
+            # road covers every lane.
             for adjacent_group in adjacent_groups_in_junction:
                 # Resolve endpoint overrides from linked regular roads using
                 # lane-aware pinning: the pin target is the rendered lane
@@ -2046,41 +2125,71 @@ class Road:
                     _lane_aware_endpoint(adjacent_group, "following")
                 )
 
-                try:
-                    road = Road.construct_from_lanelet_groups(
-                        lanelet_map=lanelet_map,
-                        lanelet_group=adjacent_group,
-                        road_id=current_road_id,
-                        s_offset=0.0,
-                        traffic_rule=traffic_rule,
-                        parampoly3_config=parampoly3_config,
-                        arcspiral_config=arcspiral_config,
-                        width_config=width_config,
-                        routing_graph=routing_graph,
-                        start_xyz_override=start_override,
-                        end_xyz_override=end_override,
-                        offset=offset,
-                        start_hdg_override=start_hdg_override,
-                        end_hdg_override=end_hdg_override,
-                    )
+                exit_roads = _external_exit_roads(
+                    adjacent_group,
+                    routing_graph,
+                    junction_group_ids,
+                    ll_to_regular_road,
+                )
+                # A single exit (or none this function can name) keeps the
+                # legacy single road, unchanged down to the endpoint pins.
+                exit_fork = len(exit_roads) > 1
+                copy_exit_roads: List[Optional[int]] = (
+                    list(exit_roads) if exit_fork else [None]
+                )
 
-                    # Set the junction field to mark this as a connecting road
-                    road.junction = junction_id
+                # Ownership follows the first copy that was actually built,
+                # not the first one attempted: a failed copy must not leave
+                # the group unclaimed.
+                group_claimed = False
+                for exit_road_id in copy_exit_roads:
+                    try:
+                        road = Road.construct_from_lanelet_groups(
+                            lanelet_map=lanelet_map,
+                            lanelet_group=adjacent_group,
+                            road_id=current_road_id,
+                            s_offset=0.0,
+                            traffic_rule=traffic_rule,
+                            parampoly3_config=parampoly3_config,
+                            arcspiral_config=arcspiral_config,
+                            width_config=width_config,
+                            routing_graph=routing_graph,
+                            start_xyz_override=start_override,
+                            end_xyz_override=end_override,
+                            offset=offset,
+                            start_hdg_override=start_hdg_override,
+                            end_hdg_override=end_hdg_override,
+                        )
 
-                    connecting_roads.append(road)
-                    junction_road_ids.append(current_road_id)
+                        # Set the junction field to mark this as a connecting road
+                        road.junction = junction_id
 
-                    # Store lanelet ID to road ID mapping
-                    for lanelet in adjacent_group:
-                        lanelet_to_road[lanelet.id] = current_road_id
+                        if exit_road_id is not None:
+                            road.exit_fork_successor_road_id = exit_road_id
+                            road.exit_fork_lanelet_ids = sorted(
+                                lanelet.id for lanelet in adjacent_group
+                            )
+                            road.exit_fork_duplicate = group_claimed
 
-                    current_road_id += 1
+                        connecting_roads.append(road)
+                        junction_road_ids.append(current_road_id)
 
-                except Exception as e:
-                    tqdm.write(
-                        f"Warning: Failed to create connecting road in junction {junction_id}: {e}"
-                    )
-                    continue
+                        # Store lanelet ID to road ID mapping.  Only the first
+                        # copy claims the group's lanelets: a lanelet may name
+                        # one (road, lane) pair, and the junction's
+                        # <connection> table is what enumerates the copies.
+                        if not group_claimed:
+                            for lanelet in adjacent_group:
+                                lanelet_to_road[lanelet.id] = current_road_id
+                            group_claimed = True
+
+                        current_road_id += 1
+
+                    except Exception as e:
+                        tqdm.write(
+                            f"Warning: Failed to create connecting road in junction {junction_id}: {e}"
+                        )
+                        continue
 
             # Store the mapping from junction ID to its road IDs
             junction_to_roads[junction_id] = junction_road_ids
@@ -2095,7 +2204,7 @@ class Road:
     def _build_chain_connecting_roads(
         *,
         lanelet_map: lanelet2.core.LaneletMap,
-        chain_paths: List[List[lanelet2.core.Lanelet]],
+        chain_paths: List[Tuple[List[lanelet2.core.Lanelet], Optional[int]]],
         junction_id: int,
         starting_road_id: int,
         traffic_rule: Optional[str],
@@ -2121,11 +2230,18 @@ class Road:
         traverses it claims it, so every source lanelet keeps exactly one
         entry in the lanelet-to-lane mapping and none is dropped.
 
+        ``chain_paths`` pairs each path with the road outside the junction
+        the resulting connector must link to, or ``None`` to resolve it from
+        the routing graph as before.  A path whose last stage leaves the
+        junction into several outside roads appears once per outside road:
+        the exit-side mirror of the in-junction fork, and the same
+        duplication answers it.
+
         Returns the next free road id.
         """
         road_id = starting_road_id
         claimed: Set[int] = set()
-        for path in chain_paths:
+        for path, exit_road_id in chain_paths:
             head_group = {path[0]}
             tail_group = {path[-1]}
             start_override, start_hdg_override = _split_anchor_pose(
@@ -2169,6 +2285,7 @@ class Road:
                 continue
 
             road.junction = junction_id
+            road.exit_fork_successor_road_id = exit_road_id
             road.chain_source_lanelet_ids = [lanelet.id for lanelet in path]
             road.chain_owned_lanelet_ids = [
                 lanelet.id for lanelet in path if lanelet.id not in claimed
@@ -2219,6 +2336,13 @@ class Road:
         # Build global mapping from lanelet_id to (road_id, lane_id)
         lanelet_to_road_and_lane: Dict[int, Tuple[int, int]] = {}
         for road in roads:
+            if road.exit_fork_duplicate:
+                # A second copy of an exit-forking lateral group: its lanes
+                # carry the same source lanelets as the copy that claimed
+                # them, and a lanelet may name only one ``(road, lane)``
+                # pair.  The junction's <connection> table is what makes the
+                # other copies reachable.
+                continue
             lane_mapping = road.get_lanelet_to_lane_mapping()
             for lanelet_id, lane_id in lane_mapping.items():
                 lanelet_to_road_and_lane[lanelet_id] = (road.id, lane_id)
@@ -2360,10 +2484,33 @@ class Road:
             return
 
         sides = (
-            (head, routing_graph.previous, road.add_predecessor, ContactPoint.END),
-            (tail, routing_graph.following, road.add_successor, ContactPoint.START),
+            (
+                head,
+                routing_graph.previous,
+                road.add_predecessor,
+                ContactPoint.END,
+                False,
+            ),
+            (
+                tail,
+                routing_graph.following,
+                road.add_successor,
+                ContactPoint.START,
+                True,
+            ),
         )
-        for lanelet, get_connected, add_link, contact in sides:
+        for lanelet, get_connected, add_link, contact, is_exit in sides:
+            if is_exit and road.exit_fork_successor_road_id is not None:
+                # This road is one of several copies of the same path, each
+                # carrying one of the outside roads the path's last stage
+                # leads to.  Resolving from the routing graph would give
+                # every copy the first of them and lose the rest.
+                add_link(
+                    element_id=road.exit_fork_successor_road_id,
+                    element_type=ElementType.ROAD,
+                    contact_point=contact,
+                )
+                continue
             primary: Optional[int] = None
             fallback: Optional[int] = None
             for neighbour in get_connected(lanelet):
@@ -2459,10 +2606,13 @@ class Road:
                 )
                 continue
 
-            if road.id not in road_to_lanelet_ids:
-                continue
-
-            road_lanelet_ids = road_to_lanelet_ids[road.id]
+            # A duplicate of an exit-forking lateral group claims none of the
+            # group's lanelets, so ``road_to_lanelet_ids`` -- which is keyed
+            # by the claiming road -- does not list it.  Its own record of
+            # the group it stands for is what the links are resolved from.
+            road_lanelet_ids = road_to_lanelet_ids.get(road.id) or (
+                road.exit_fork_lanelet_ids or []
+            )
             if not road_lanelet_ids:
                 continue
 
@@ -2504,13 +2654,20 @@ class Road:
                     contact_point=ContactPoint.END,
                 )
 
-            succ_id = Road._find_connected_road(
-                road_lanelets,
-                routing_graph.following,
-                own_lanelet_ids,
-                junction_lanelet_ids,
-                lanelet_to_road_id,
-            )
+            # An exit-forking group is emitted once per road outside the
+            # junction it leads to, and each copy carries its own.
+            # ``_find_connected_road`` returns whichever comes first, so
+            # every copy would otherwise name the same one and the fork
+            # would be lost again.
+            succ_id: Optional[int] = road.exit_fork_successor_road_id
+            if succ_id is None:
+                succ_id = Road._find_connected_road(
+                    road_lanelets,
+                    routing_graph.following,
+                    own_lanelet_ids,
+                    junction_lanelet_ids,
+                    lanelet_to_road_id,
+                )
             if succ_id is not None:
                 road.add_successor(
                     element_id=succ_id,

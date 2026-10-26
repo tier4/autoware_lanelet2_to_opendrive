@@ -495,6 +495,10 @@ def run_mapping_validation(
         # chain-merged, so the roads parsed back from it cannot tell the
         # geometric pass; the conversion sidecar records it.
         chain_roads=ctx.conv_mapping.chain_merged_roads,
+        # Same reason for the copies of an exit-forking junction group: the
+        # XODR shows two identical connecting roads with no record of which
+        # one claimed the source lanelets.
+        duplicate_roads=ctx.conv_mapping.exit_fork_duplicate_roads,
     )
 
     try:
