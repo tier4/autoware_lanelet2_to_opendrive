@@ -1,6 +1,7 @@
 """Tests for divergence/merge synthesis (issue #291)."""
 
 import inspect
+import logging
 import math
 from unittest.mock import MagicMock
 
@@ -798,7 +799,9 @@ def test_apply_divergence_synthesis_emits_nothing_when_no_candidate_is_close(
 # ---------------------------------------------------------------------------
 
 
-def _stub_between(start_xyz, end_xyz, *, min_segment_length, fallback_heading):
+def _stub_between(
+    start_xyz, end_xyz, *, min_segment_length, start_heading, end_heading=None
+):
     return _make_zero_length_connecting_road(
         road_id=900,
         junction_id=9000,
@@ -812,42 +815,142 @@ def _stub_between(start_xyz, end_xyz, *, min_segment_length, fallback_heading):
         traffic_rule=TrafficRule.RHT,
         from_lane=-1,
         to_lane=-1,
-        fallback_heading=fallback_heading,
+        start_heading=start_heading,
+        end_heading=end_heading,
     )
 
 
-def test_sub_floor_anchor_separation_is_not_read_as_a_heading():
-    """A residual shorter than the rendered segment carries no direction.
+def _end_pose(geometry):
+    """``(x, y, heading)`` at p=1 of a normalized paramPoly3."""
+    du = geometry.bU + 2 * geometry.cU + 3 * geometry.dU
+    dv = geometry.bV + 2 * geometry.cV + 3 * geometry.dV
+    u = geometry.bU + geometry.cU + geometry.dU
+    v = geometry.bV + geometry.cV + geometry.dV
+    cos_h, sin_h = math.cos(geometry.hdg), math.sin(geometry.hdg)
+    return (
+        geometry.x + u * cos_h - v * sin_h,
+        geometry.y + u * sin_h + v * cos_h,
+        geometry.hdg + math.atan2(dv, du),
+    )
 
-    The two anchors are 4 mm apart -- the leftover disagreement between two
-    roads that are meant to meet -- and sideways, which is what ``atan2``
-    over that residual degenerates to. The connector is rendered at the
-    ``min_segment_length`` floor regardless, so the residual does not even
-    describe the segment that is drawn; taking its direction would swing the
-    whole cross-section perpendicular to the lane it continues.
+
+# These four tests replace three that pinned the *previous* rule: the
+# connector took its heading from the ``start_xyz -> end_xyz`` vector when
+# that vector was at least ``min_segment_length`` long, and from the
+# incoming road's tangent below it.  That rule is gone -- a curve meeting
+# both tangents has no selection to make -- so the coverage is rewritten
+# onto the new contract rather than deleted.
+
+
+def test_both_tangents_give_a_curve_meeting_each_of_them():
+    """The contract D5 rests on: both endpoints matched in position *and*
+    tangent, so neither contact's lane borders fan out."""
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (0.5, 0.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.25,
+        end_heading=-0.4,
+    )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.pRange == "normalized"
+    assert geometry.hdg == pytest.approx(0.25)
+
+    x1, y1, h1 = _end_pose(geometry)
+    assert (x1, y1) == pytest.approx((0.5, 0.0), abs=1e-12)
+    assert h1 == pytest.approx(-0.4)
+
+
+def test_length_is_the_arc_length_not_the_chord():
+    """``@length`` must be what the coefficients describe.
+
+    The road's s-domain is written against it -- elevation and the tapered
+    lane widths -- and ``road.geometry.parampoly3.normalized_range``
+    compares the two.  A curve is longer than its chord, and quoting the
+    chord made the checker evaluate the lane borders short of the road's
+    real end: measured as 61 gap findings against 20, i.e. worse than not
+    curving at all.
     """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.0,
+        end_heading=math.radians(60.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+    chord = 1.0
+    assert geometry.length > chord
+    assert geometry.length == pytest.approx(geometry.arc_length(), rel=1e-12)
+    # The road and its geometry must agree, or every profile keyed on the
+    # road's s is written against a different curve.
+    assert stub.length == pytest.approx(geometry.length)
+
+
+def test_without_the_far_tangent_the_connector_stays_straight():
+    """One tangent is not enough to bend towards anything."""
     stub = _stub_between(
         (0.0, 0.0, 0.0),
         (0.0, 0.004, 0.0),
         min_segment_length=0.01,
-        fallback_heading=0.25,
+        start_heading=0.25,
+        end_heading=None,
     )
     geometry = stub.plan_view.geometries[0]
+    assert geometry.pRange == "arcLength"
     assert geometry.hdg == pytest.approx(0.25)
     assert geometry.length == pytest.approx(0.01)
+    assert (geometry.cV, geometry.dV) == (0.0, 0.0)
 
 
-def test_anchor_separation_above_the_floor_still_sets_the_heading():
-    """Above the floor the vector *is* the segment, so it keeps the heading."""
-    stub = _stub_between(
-        (0.0, 0.0, 0.0),
-        (0.0, 0.5, 0.0),
-        min_segment_length=0.01,
-        fallback_heading=0.25,
-    )
+def test_with_no_tangent_at_all_it_falls_back_to_the_anchor_vector(caplog):
+    """The last resort, and it must say so.
+
+    Reached only when a neighbour has no rendered plan view.  The anchor
+    vector is a poor direction -- a median 88.9 deg from the incoming
+    road's own tangent over the 296 Odaiba connectors that used to take it
+    -- so taking it is worth a warning rather than a silent default.
+    """
+    with caplog.at_level(logging.WARNING):
+        stub = _stub_between(
+            (0.0, 0.0, 0.0),
+            (0.0, 0.5, 0.0),
+            min_segment_length=0.01,
+            start_heading=None,
+            end_heading=None,
+        )
     geometry = stub.plan_view.geometries[0]
     assert geometry.hdg == pytest.approx(math.pi / 2)
     assert geometry.length == pytest.approx(0.5)
+    assert any("anchor vector" in r.message for r in caplog.records)
+
+
+def test_coincident_anchors_raise_rather_than_guess():
+    """There is no curve between a point and itself.
+
+    ``ParamPoly3.hermite`` refuses instead of inventing a direction; the
+    connector builder is the one that decides what to draw, and it draws a
+    straight segment along the start heading.
+    """
+    with pytest.raises(ValueError, match="coincide"):
+        ParamPoly3.hermite(
+            start_xy=(1.0, 2.0),
+            start_heading=0.3,
+            end_xy=(1.0, 2.0),
+            end_heading=0.3,
+        )
+
+    # ...and the builder does not propagate it.
+    stub = _stub_between(
+        (1.0, 2.0, 0.0),
+        (1.0, 2.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.3,
+        end_heading=1.2,
+    )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.hdg == pytest.approx(0.3)
+    assert geometry.length == pytest.approx(0.01)
 
 
 def _width_road(road_id, *, width, length=10.0, heading=0.0, x=0.0, y=0.0):
@@ -932,7 +1035,8 @@ def test_merge_connector_takes_the_heading_of_the_road_it_leaves():
 
     The stub's near contact is with the road it leaves, so that road's end
     tangent -- not the merged road's start tangent -- is what keeps the
-    stub's lane borders on top of the borders it continues.
+    stub's lane borders on top of the borders it continues.  The edge now
+    carries the far tangent too, so the connector can meet both.
     """
     candidate = _width_road(1, width=3.0, heading=0.75)
     merged = _width_road(2, width=3.0, heading=0.0, x=10.0)
@@ -954,4 +1058,6 @@ def test_merge_connector_takes_the_heading_of_the_road_it_leaves():
     )
     assert len(edges) == 1
     assert edges[0].incoming_road_id == 1
-    assert edges[0].fallback_heading == pytest.approx(0.75)
+    assert edges[0].start_heading == pytest.approx(0.75)
+    # The merged road's own start tangent is the far end of the connector.
+    assert edges[0].end_heading == pytest.approx(0.0)

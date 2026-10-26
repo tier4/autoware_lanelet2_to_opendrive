@@ -172,13 +172,24 @@ def _materialise_direct_connector(
         )
         return None
 
-    fallback_heading = 0.0
+    # Both neighbour tangents: the connector is a curve meeting each of
+    # them, not a straight segment carrying one heading.  ``None`` where a
+    # neighbour has no rendered plan view, which degrades to a straight.
+    start_heading = None
     if in_road.plan_view is not None:
         endpoint_with_h = _evaluate_planview_endpoint_with_heading(
             in_road.plan_view, at_start=False
         )
         if endpoint_with_h is not None:
-            fallback_heading = endpoint_with_h[2]
+            start_heading = endpoint_with_h[2]
+
+    end_heading = None
+    if out_road.plan_view is not None:
+        endpoint_with_h = _evaluate_planview_endpoint_with_heading(
+            out_road.plan_view, at_start=True
+        )
+        if endpoint_with_h is not None:
+            end_heading = endpoint_with_h[2]
 
     in_width = _lane_width_at_end(in_road, in_lane)
     out_width = _lane_width_at(out_road, out_lane, at_start=True)
@@ -196,7 +207,8 @@ def _materialise_direct_connector(
         traffic_rule=traffic_rule,
         from_lane=in_lane,
         to_lane=out_lane,
-        fallback_heading=fallback_heading,
+        start_heading=start_heading,
+        end_heading=end_heading,
         lane_width=(
             in_width
             if in_width is not None

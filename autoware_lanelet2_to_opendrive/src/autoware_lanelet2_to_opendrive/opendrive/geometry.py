@@ -499,6 +499,107 @@ class ParamPoly3(GeometryBase):
         """Return the true arc length of this segment over its ``pRange``."""
         return param_poly3_arc_length(self.coefficients(), end_param(self))
 
+    @classmethod
+    def hermite(
+        cls,
+        start_xy: Tuple[float, float],
+        start_heading: float,
+        end_xy: Tuple[float, float],
+        end_heading: float,
+        s: float = 0.0,
+        tangent_scale: Optional[float] = None,
+    ) -> "ParamPoly3":
+        """Cubic through both endpoints, matching the tangent at each.
+
+        A straight segment carries one heading and therefore satisfies one
+        endpoint tangent.  Where the two roads a connector bridges leave and
+        arrive on different bearings -- a junction turn, a divergence branch
+        -- one heading against two constraints cannot be met, and the lane
+        borders reconstructed from the reference line miss by
+        ``2 * w * sin(dpsi / 2)`` at whichever end loses.  A cubic has the
+        second degree of freedom that resolves it.
+
+        In the local frame (origin ``start_xy``, +u along ``start_heading``)
+        the Hermite basis with ``P0 = 0`` gives::
+
+            P(p) = h10(p) m0 + h01(p) P1 + h11(p) m1,      p in [0, 1]
+            h10 = p^3 - 2p^2 + p,  h01 = -2p^3 + 3p^2,  h11 = p^3 - p^2
+
+        so ``b = m0``, ``c = -2 m0 + 3 P1 - m1``, ``d = m0 - 2 P1 + m1`` in
+        each of u and v.  Tangent magnitudes are the chord length, which
+        keeps the curve inside the hull of its control polygon.
+
+        ``@length`` is the **true arc length**, integrated -- not the chord.
+        The two differ once the curve actually bends, and
+        ``road.geometry.parampoly3.normalized_range`` compares them.
+
+        Args:
+            start_xy: World-frame ``(x, y)`` of the s=0 endpoint.
+            start_heading: World-frame tangent angle there, in radians.
+            end_xy: World-frame ``(x, y)`` of the far endpoint.
+            end_heading: World-frame tangent angle there, in radians.
+            s: The road-frame ``s`` this segment starts at.
+
+        Returns:
+            A ``pRange="normalized"`` segment spanning p in [0, 1].
+        """
+        from ..config import DEFAULT_CONFIG
+
+        dx = end_xy[0] - start_xy[0]
+        dy = end_xy[1] - start_xy[1]
+        cos_h, sin_h = np.cos(start_heading), np.sin(start_heading)
+
+        # End point and end tangent expressed in the start frame.
+        u1 = dx * cos_h + dy * sin_h
+        v1 = -dx * sin_h + dy * cos_h
+        # Wrapped to (-pi, pi] so the cubic takes the short way round.
+        d_psi = float(
+            np.arctan2(
+                np.sin(end_heading - start_heading),
+                np.cos(end_heading - start_heading),
+            )
+        )
+
+        chord = float(np.hypot(dx, dy))
+        if chord <= DEFAULT_CONFIG.geometry.epsilon:
+            raise ValueError(
+                "ParamPoly3.hermite: start and end coincide, so there is no "
+                "curve to fit; the caller must emit a straight segment along "
+                "start_heading instead"
+            )
+
+        # Tangent magnitude.  The chord is the natural choice, but a caller
+        # drawing a connector to a length floor passes that floor instead:
+        # the curve still interpolates both anchors and both tangents, and
+        # the larger magnitude is what lets a sub-floor chord turn through a
+        # large angle without the cubic doubling back on itself.
+        scale = chord if tangent_scale is None else max(float(tangent_scale), chord)
+
+        m0u, m0v = scale, 0.0
+        m1u, m1v = scale * np.cos(d_psi), scale * np.sin(d_psi)
+
+        b_u, b_v = m0u, m0v
+        c_u, c_v = -2.0 * m0u + 3.0 * u1 - m1u, -2.0 * m0v + 3.0 * v1 - m1v
+        d_u, d_v = m0u - 2.0 * u1 + m1u, m0v - 2.0 * v1 + m1v
+
+        coeffs = (0.0, b_u, c_u, d_u, 0.0, b_v, c_v, d_v)
+        return cls(
+            s=float(s),
+            x=float(start_xy[0]),
+            y=float(start_xy[1]),
+            hdg=float(start_heading),
+            length=float(param_poly3_arc_length(coeffs, 1.0)),
+            aU=0.0,
+            bU=float(b_u),
+            cU=float(c_u),
+            dU=float(d_u),
+            aV=0.0,
+            bV=float(b_v),
+            cV=float(c_v),
+            dV=float(d_v),
+            pRange=PARAM_RANGE_NORMALIZED,
+        )
+
     @staticmethod
     def _calculate_optimal_num_segments(
         total_length: float,

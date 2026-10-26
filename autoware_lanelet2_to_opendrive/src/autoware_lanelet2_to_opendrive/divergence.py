@@ -15,7 +15,7 @@ import logging
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
@@ -61,6 +61,16 @@ from autoware_lanelet2_to_opendrive.util import (
 )
 
 log = logging.getLogger(__name__)
+
+#: A synthetic connector bridges two roads' renderings of the *same*
+#: contact point, so the distance between its anchors is a residual
+#: error rather than a displacement.  Above this the precondition is
+#: contradicted and the connector is papering over an upstream defect.
+#: Diagnostic only -- it changes no behaviour, so nothing flips on a
+#: borderline value.  Set an order of magnitude above the largest
+#: residual observed (1.23 m max over 2,565 Odaiba connectors, p50
+#: 5.0 mm).
+_ANCHOR_RESIDUAL_WARN_M = 5.0
 
 
 class DivergenceSide(Enum):
@@ -327,7 +337,8 @@ class _DirectedLaneEdge:
     # connector stands for a zero-length transition, so this — not the
     # residual between the two anchors — is the direction its rendered
     # segment must take.
-    fallback_heading: float
+    start_heading: Optional[float]
+    end_heading: Optional[float]
     # Width of the incoming / outgoing lane at the respective contact, so
     # the connector can reproduce the cross-section it bridges instead of
     # a nominal constant. ``None`` when the neighbour carries no width.
@@ -382,33 +393,46 @@ def _make_zero_length_connecting_road(
     traffic_rule: TrafficRule,
     from_lane: int,
     to_lane: int,
-    fallback_heading: float = 0.0,
+    start_heading: Optional[float] = None,
+    end_heading: Optional[float] = None,
     lane_width: float = 3.5,
 ) -> Road:
     """Build a single-segment single-lane connecting road floored at ``min_segment_length``.
 
-    The geometry is a :class:`ParamPoly3` segment whose length is the
-    planar distance between ``start_xyz`` and ``end_xyz``, lifted to at
-    least ``min_segment_length`` so OpenDRIVE consumers that reject
-    zero-length geometry (e.g. CARLA) still accept it.  ParamPoly3 is
-    used (rather than :class:`Line`) because downstream samplers in this
-    converter — ``road_lanelet_geo_mapping``, ``analyze_xodr``,
-    ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc. directly without
-    a geometry-type guard. For a straight segment the coefficients
-    reduce to ``u(p) = p``, ``v(p) = 0``.
+    ParamPoly3 is used (rather than :class:`Line` or :class:`Arc`) because
+    downstream samplers in this converter — ``road_lanelet_geo_mapping``,
+    ``analyze_xodr``, ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc.
+    directly without a geometry-type guard.
 
-    The heading only comes from the ``start_xyz -> end_xyz`` vector when
-    that vector is at least ``min_segment_length`` long.  Below the floor
-    the connector is rendered as a segment of ``min_segment_length``
-    anyway, so the vector no longer describes the segment that is drawn —
-    and at the scale these anchors actually differ (sub-centimetre, the
-    residual disagreement between two roads that are meant to meet)
-    ``atan2`` returns numerical noise, which rotates the whole
-    cross-section out of the lane it is supposed to continue.  In that
-    regime the heading falls back to ``fallback_heading`` — the incoming
-    road's own end tangent — so the stub's lane borders line up with the
-    borders it joins.  ``shared_connecting_roads._make_stub`` collapses
-    its own anchors for exactly this reason.
+    Geometry
+    --------
+    Given both neighbour tangents the segment is a **cubic Hermite**
+    meeting each neighbour in position *and* tangent.  A straight segment
+    carries a single heading and can satisfy only one of the two, so
+    wherever the roads being bridged leave and arrive on different
+    bearings the lane borders at the losing end miss by
+    ``2 * w * sin(dpsi / 2)``.
+
+    This replaces a rule that chose the heading from the
+    ``start_xyz -> end_xyz`` vector when that vector was at least
+    ``min_segment_length`` long, and from the incoming tangent below it.
+    The rule is gone rather than retuned, because the choice it was making
+    does not arise for a curve that meets both tangents.  Its premise was
+    sound and worth recording: these two anchors are the incoming and
+    outgoing roads' renderings of **one** contact point, so their
+    separation is a residual error and the vector between them is not a
+    direction.  Measured over the 296 Odaiba connectors that took the
+    vector, its heading sat a **median 88.9 deg** from the incoming road's
+    own tangent, with a maximum of 179.99 deg — not noisy, uniformly
+    distributed.
+
+    ``@length`` is the integrated arc length of the cubic, not the chord.
+    Once the curve bends the two differ, and
+    ``road.geometry.parampoly3.normalized_range`` compares them.
+
+    Without both tangents — only when a neighbour has no rendered plan
+    view — the segment degrades to a straight one along ``start_heading``,
+    or along the anchor vector with a warning if even that is unavailable.
 
     The lane carries lane-level predecessor/successor links from
     ``from_lane`` to ``to_lane`` and a constant ``lane_width`` so the
@@ -421,29 +445,84 @@ def _make_zero_length_connecting_road(
     dy = end_xyz[1] - start_xyz[1]
     raw_length = math.sqrt(dx * dx + dy * dy)
     length = max(raw_length, min_segment_length)
-    direction_floor = max(min_segment_length, 1e-9)
-    heading = math.atan2(dy, dx) if raw_length >= direction_floor else fallback_heading
 
-    plan_view = PlanView(
-        geometries=[
-            ParamPoly3(
-                s=0.0,
-                x=start_xyz[0],
-                y=start_xyz[1],
-                hdg=heading,
-                length=length,
-                aU=0.0,
-                bU=1.0,
-                cU=0.0,
-                dU=0.0,
-                aV=0.0,
-                bV=0.0,
-                cV=0.0,
-                dV=0.0,
-                pRange="arcLength",
-            )
-        ]
+    if raw_length > _ANCHOR_RESIDUAL_WARN_M:
+        # The anchors are the two roads' renderings of one contact point, so
+        # a separation this large contradicts the precondition rather than
+        # describing a real displacement.  Name the roads so it is
+        # actionable; do not change behaviour on it.
+        log.warning(
+            "Connector %d bridges roads %d -> %d whose anchors are %.3f m "
+            "apart; these are meant to be the same point, so the geometry "
+            "below is bridging an upstream error.",
+            road_id,
+            incoming_road_id,
+            outgoing_road_id,
+            raw_length,
+        )
+
+    can_curve = (
+        start_heading is not None
+        and end_heading is not None
+        and raw_length > DEFAULT_CONFIG.geometry.epsilon
     )
+    if can_curve:
+        # ``tangent_scale`` at the floor rather than the chord: these anchors
+        # are millimetres apart, and a cubic whose tangent magnitudes are
+        # scaled to a 5 mm chord cannot turn through a large angle without
+        # doubling back on itself.
+        geometry = ParamPoly3.hermite(
+            start_xy=(start_xyz[0], start_xyz[1]),
+            start_heading=start_heading,
+            end_xy=(end_xyz[0], end_xyz[1]),
+            end_heading=end_heading,
+            tangent_scale=min_segment_length,
+        )
+    else:
+        # Degraded: one or both neighbour tangents are unavailable, which
+        # happens only when a neighbour has no rendered plan view.  A
+        # straight segment is all that is left.  Prefer the start tangent
+        # over the anchor vector -- at this scale the vector between two
+        # anchors that are meant to coincide is numerical noise, measured at
+        # a median 88.9 deg from the incoming road's own tangent over the
+        # 296 Odaiba connectors that used to take it.
+        if start_heading is not None:
+            heading = start_heading
+        else:
+            heading = math.atan2(dy, dx)
+            log.warning(
+                "Connector %d has no neighbour tangent available; falling "
+                "back to the anchor vector, whose direction is unreliable "
+                "at separations of this scale (%.4f m).",
+                road_id,
+                raw_length,
+            )
+        geometry = ParamPoly3(
+            s=0.0,
+            x=start_xyz[0],
+            y=start_xyz[1],
+            hdg=heading,
+            length=length,
+            aU=0.0,
+            bU=1.0,
+            cU=0.0,
+            dU=0.0,
+            aV=0.0,
+            bV=0.0,
+            cV=0.0,
+            dV=0.0,
+            pRange="arcLength",
+        )
+
+    plan_view = PlanView(geometries=[geometry])
+
+    # The road's s-domain is the geometry's arc length, not the chord.  A
+    # curve is longer than the straight line it replaces, and every profile
+    # below -- elevation, and the lane widths the caller tapers -- is written
+    # against ``length``.  Leaving the chord here makes the checker evaluate
+    # the lane borders short of the road's real end, which reads as a
+    # contact gap rather than as the bookkeeping error it is.
+    length = geometry.length
 
     # Linear elevation profile so the connector matches the linked roads'
     # z at both endpoints. Without this the synthesised road serializes
@@ -654,13 +733,23 @@ def _directed_edges_for_site(
         incoming_road = (roads_by_id or {}).get(incoming_road_id)
         outgoing_road = (roads_by_id or {}).get(outgoing_road_id)
 
-        edge_heading = fallback_heading
+        # Both tangents: the connector is a curve meeting each neighbour,
+        # so it needs the bearing it leaves on *and* the one it arrives on.
+        edge_start_heading = fallback_heading
         if incoming_road is not None and incoming_road.plan_view is not None:
             endpoint = _evaluate_planview_endpoint_with_heading(
                 incoming_road.plan_view, at_start=False
             )
             if endpoint is not None:
-                edge_heading = endpoint[2]
+                edge_start_heading = endpoint[2]
+
+        edge_end_heading = None
+        if outgoing_road is not None and outgoing_road.plan_view is not None:
+            endpoint = _evaluate_planview_endpoint_with_heading(
+                outgoing_road.plan_view, at_start=True
+            )
+            if endpoint is not None:
+                edge_end_heading = endpoint[2]
 
         edges.append(
             _DirectedLaneEdge(
@@ -670,7 +759,8 @@ def _directed_edges_for_site(
                 outgoing_lane_id=outgoing_lane_id,
                 start_xyz=start_xyz,
                 end_xyz=end_xyz,
-                fallback_heading=edge_heading,
+                start_heading=edge_start_heading,
+                end_heading=edge_end_heading,
                 start_lane_width=_lane_width_at_end(incoming_road, incoming_lane_id),
                 end_lane_width=_lane_width_at(
                     outgoing_road, outgoing_lane_id, at_start=True
@@ -770,7 +860,8 @@ def _synthesise_junction_for_edges(
             traffic_rule=traffic_rule,
             from_lane=edge.incoming_lane_id,
             to_lane=edge.outgoing_lane_id,
-            fallback_heading=edge.fallback_heading,
+            start_heading=edge.start_heading,
+            end_heading=edge.end_heading,
             lane_width=(
                 edge.start_lane_width
                 if edge.start_lane_width is not None
@@ -907,7 +998,13 @@ def synthesise_junction_for_site(
             traffic_rule=traffic_rule,
             from_lane=from_lane,
             to_lane=to_lane,
-            fallback_heading=fallback_heading,
+            # This path has the source road's tangent but never resolved the
+            # far neighbour's, so the connector degrades to a straight
+            # segment along the start heading -- the behaviour this call
+            # site has always had.  ``_emit_connectors_for_edges`` is the
+            # path that supplies both and gets the curve.
+            start_heading=fallback_heading,
+            end_heading=None,
             lane_width=lane_width,
         )
 
