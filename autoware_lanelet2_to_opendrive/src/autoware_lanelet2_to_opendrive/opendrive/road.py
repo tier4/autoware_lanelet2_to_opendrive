@@ -66,12 +66,18 @@ logger = logging.getLogger(__name__)
 # either, because an ``incomingRoad`` that is itself a connecting road
 # crashes CARLA's parser (deliberately removed in 090be208).
 #
-# The representable form is to stop chaining connectors altogether: each
-# end-to-end path through the junction becomes its own connecting road, so
-# every connector runs from an outside road to an outside road and each
-# fork branch is a separate ``<connection>`` row of the external incoming
-# road. The shared prefix of a fork is duplicated, which is the only way
-# OpenDRIVE can express it.
+# The representable form is to duplicate the shared stage: each end-to-end
+# path *that shares a stage with another path* becomes its own connecting
+# road, running from an outside road to an outside road, and each fork
+# branch is a separate ``<connection>`` row of the external incoming road.
+# Duplicating the shared stage is the only way OpenDRIVE can express the
+# fork at all.
+#
+# Chains that nothing branches off are left alone: their single
+# ``<successor>`` slot already carries the one maneuver they have, and
+# merging them would replace roads that stand for one lanelet each with
+# roads that stand for several -- which the lanelet-to-lane mapping and the
+# geometric cross-check both model as one-to-one.
 #
 # ``lanelet2.core.getId()`` draws from the same counter a loaded map uses,
 # so a synthetic primitive can silently alias a real one. The merged
@@ -192,6 +198,10 @@ def _junction_chain_paths(
     follows in-junction longitudinal successors until it leaves the group.
     Lane changes are excluded: they are lateral, not a maneuver stage.
 
+    A stage that hands over both to another in-junction stage and to a road
+    outside the junction ends one path there and continues another, because
+    a connecting road links to a single outside road at each end.
+
     Lanelets that take part in no in-junction longitudinal edge are *not*
     returned — they are single-stage connectors and keep the ordinary
     lateral grouping.
@@ -208,12 +218,20 @@ def _junction_chain_paths(
     group_ids = {lanelet.id for lanelet in junction_group}
     in_group_succ: Dict[int, List[lanelet2.core.Lanelet]] = {}
     in_group_pred_ids: Dict[int, List[int]] = {}
+    # Chain members that *also* hand over to a road outside the junction.
+    # The maneuver that leaves there is a path of its own: a connecting road
+    # ends at one outside road, so folding it into the longer path would
+    # drop it exactly the way the in-junction fork used to be dropped.
+    leaves_junction: Set[int] = set()
     for lanelet in junction_group:
-        successors = [
-            successor
-            for successor in routing_graph.following(lanelet, False)
-            if successor.id in group_ids and successor.id != lanelet.id
-        ]
+        successors = []
+        for successor in routing_graph.following(lanelet, False):
+            if successor.id == lanelet.id:
+                continue
+            if successor.id in group_ids:
+                successors.append(successor)
+            else:
+                leaves_junction.add(lanelet.id)
         if successors:
             in_group_succ[lanelet.id] = successors
             for successor in successors:
@@ -236,6 +254,10 @@ def _junction_chain_paths(
         if not successors:
             paths.append(path)
             return
+        if path[-1].id in leaves_junction:
+            # This stage both continues inside the junction and hands over
+            # to a road outside it; the second maneuver ends here.
+            paths.append(list(path))
         for successor in successors:
             if any(existing.id == successor.id for existing in path):
                 # Cycle in the source map: stop here rather than looping.
@@ -870,10 +892,11 @@ class Road:
 
         A chain-merged connecting road carries one synthetic lane built from
         several source lanelets, so its lane holds no ``lanelet_id`` of its
-        own.  The lanelets it covers *exclusively* are attributed to that
-        lane here; a fork's shared prefix is left out, because a lanelet may
-        name only one ``(road, lane)`` pair and claiming one of the branches
-        would assert a maneuver the other branches do not make.
+        own.  The lanelets it claimed during construction are attributed to
+        that lane here.  A fork's shared stage is claimed by the first of the
+        merged roads that traverses it: a lanelet may name only one
+        ``(road, lane)`` pair, and leaving it unnamed would drop it from the
+        mapping altogether.
 
         Returns:
             Dictionary mapping lanelet_id -> lane_id
@@ -1941,6 +1964,22 @@ class Road:
                     "in-junction forks will lose branches"
                 )
 
+            # Merge only where the representation forces it. A stage that
+            # belongs to exactly one end-to-end path is already expressible
+            # as its own connecting road chained to the next one: its single
+            # <successor> slot is enough. Merging those too would duplicate
+            # nothing, but it would replace roads that stand for one lanelet
+            # each with roads that stand for several -- which the lanelet
+            # <-> lane mapping and the geometric cross-check both model as
+            # one-to-one. Only the paths that *share* a stage need merging,
+            # because only they need the same lanelet in several roads.
+            traversals = Counter(lanelet.id for path in chain_paths for lanelet in path)
+            chain_paths = [
+                path
+                for path in chain_paths
+                if any(traversals[lanelet.id] > 1 for lanelet in path)
+            ]
+
             chain_member_ids: Set[int] = {
                 lanelet.id for path in chain_paths for lanelet in path
             }
@@ -1969,16 +2008,9 @@ class Road:
                 chain_member_ids = set()
 
             if chain_paths:
-                # Count how many merged roads each lanelet ends up in: a
-                # fork's shared prefix appears in several and therefore
-                # belongs to none of them for mapping purposes.
-                path_count = Counter(
-                    lanelet.id for path in chain_paths for lanelet in path
-                )
                 current_road_id = Road._build_chain_connecting_roads(
                     lanelet_map=lanelet_map,
                     chain_paths=chain_paths,
-                    path_count=path_count,
                     junction_id=junction_id,
                     starting_road_id=current_road_id,
                     traffic_rule=traffic_rule,
@@ -2064,7 +2096,6 @@ class Road:
         *,
         lanelet_map: lanelet2.core.LaneletMap,
         chain_paths: List[List[lanelet2.core.Lanelet]],
-        path_count: "Counter[int]",
         junction_id: int,
         starting_road_id: int,
         traffic_rule: Optional[str],
@@ -2085,14 +2116,15 @@ class Road:
         pinned to the linked regular roads exactly as the single-stage path
         does, using the path's first and last lanelet.
 
-        ``path_count`` maps a lanelet id to the number of paths that traverse
-        it; a lanelet on more than one path (a fork's shared prefix) is not
-        attributed to any merged road's lane, because a lanelet may name only
-        one ``(road, lane)`` pair.
+        A fork's shared stage is traversed by several of these roads, but a
+        lanelet may name only one ``(road, lane)`` pair: the first road that
+        traverses it claims it, so every source lanelet keeps exactly one
+        entry in the lanelet-to-lane mapping and none is dropped.
 
         Returns the next free road id.
         """
         road_id = starting_road_id
+        claimed: Set[int] = set()
         for path in chain_paths:
             head_group = {path[0]}
             tail_group = {path[-1]}
@@ -2139,8 +2171,9 @@ class Road:
             road.junction = junction_id
             road.chain_source_lanelet_ids = [lanelet.id for lanelet in path]
             road.chain_owned_lanelet_ids = [
-                lanelet.id for lanelet in path if path_count[lanelet.id] == 1
+                lanelet.id for lanelet in path if lanelet.id not in claimed
             ]
+            claimed.update(road.chain_owned_lanelet_ids)
             # The merged lane stands for several source lanelets, so it may
             # not claim any single one: ``_set_single_lane_links`` reads the
             # path's head/tail from ``chain_source_lanelet_ids`` instead, and

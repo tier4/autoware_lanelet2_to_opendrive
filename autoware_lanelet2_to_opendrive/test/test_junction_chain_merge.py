@@ -8,14 +8,13 @@ slot) nor through a ``<connection>`` (an ``incomingRoad`` that is itself a
 connecting road crashes CARLA's parser and was deliberately removed in
 090be208).
 
-The representable form is to stop chaining connectors: every end-to-end
+The representable form is to duplicate the shared stage: every end-to-end
 longitudinal path through the junction becomes its own connecting road, so
 each connector runs from an outside road to an outside road and each fork
 branch is a separate ``<connection>`` row of the external incoming road.
 """
 
 import lanelet2
-import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
@@ -183,8 +182,13 @@ def _chain_fixture(branches: int):
     )
 
 
-def test_connector_chain_becomes_one_end_to_end_road() -> None:
-    """A two-stage chain merges into a single incoming->outgoing connector."""
+def test_unshared_chain_keeps_its_per_stage_roads() -> None:
+    """A chain nothing else branches off is already expressible as a chain.
+
+    Merging it would buy no reachability and would cost the one-lanelet-per-
+    lane relation that the lanelet-to-lane mapping and the geometric
+    cross-check both rely on, so the legacy decomposition is kept.
+    """
     (
         lanelet_map,
         junction_group,
@@ -200,18 +204,16 @@ def test_connector_chain_becomes_one_end_to_end_road() -> None:
         lanelet_map, [junction_group], regular_roads, lanelet_to_road_id
     )
 
-    assert len(connecting) == 1, "the chain must merge into one connecting road"
-    chain_road = connecting[0]
-    assert chain_road.chain_source_lanelet_ids == [stage_one.id, stage_two[0].id]
-    # Nothing is shared with another path, so the merged lane owns both.
-    assert sorted(chain_road.chain_owned_lanelet_ids) == sorted(
-        [stage_one.id, stage_two[0].id]
-    )
-    assert chain_road.length == pytest.approx(20.0, abs=0.5)
+    assert len(connecting) == 2, "an unshared chain keeps one road per stage"
+    assert all(road.chain_source_lanelet_ids is None for road in connecting)
+    assert ll_to_road.keys() == {stage_one.id, stage_two[0].id}
 
     _wire_links(lanelet_map, connecting, lanelet_to_road_id, ll_to_road)
-    assert chain_road.link.predecessor.element_id == 1
-    assert chain_road.link.successor.element_id == 2
+    first = next(r for r in connecting if r.id == ll_to_road[stage_one.id])
+    second = next(r for r in connecting if r.id == ll_to_road[stage_two[0].id])
+    assert first.link.predecessor.element_id == 1
+    assert first.link.successor.element_id == second.id
+    assert second.link.successor.element_id == 2
 
 
 def test_in_junction_fork_keeps_every_branch() -> None:
@@ -239,11 +241,20 @@ def test_in_junction_fork_keeps_every_branch() -> None:
     assert {tuple(road.chain_source_lanelet_ids) for road in connecting} == {
         (stage_one.id, branch.id) for branch in stage_two
     }
-    # The shared prefix belongs to no single road's lane: a lanelet may name
-    # only one (road, lane) pair, and claiming one branch would assert a
-    # maneuver the other two do not make.
-    for road in connecting:
-        assert stage_one.id not in (road.chain_owned_lanelet_ids or [])
+    # The shared stage is traversed by all three roads but claimed by exactly
+    # one, so it keeps a single entry in the lanelet-to-lane mapping instead
+    # of being dropped from it.
+    owners = [
+        road
+        for road in connecting
+        if stage_one.id in (road.chain_owned_lanelet_ids or [])
+    ]
+    assert len(owners) == 1
+    assert {
+        lanelet_id
+        for road in connecting
+        for lanelet_id in (road.chain_owned_lanelet_ids or [])
+    } == {stage_one.id} | {branch.id for branch in stage_two}
 
     merged = _wire_links(lanelet_map, connecting, lanelet_to_road_id, ll_to_road)
 
@@ -311,3 +322,72 @@ def test_junction_without_a_chain_is_unchanged() -> None:
     assert len(connecting) == 1
     assert connecting[0].chain_source_lanelet_ids is None
     assert ll_to_road == {connector.id: connecting[0].id}
+
+
+def test_stage_that_also_leaves_the_junction_gets_its_own_road() -> None:
+    """A stage can both continue inside the junction and exit it.
+
+    ``incoming -> A -> B -> out_far`` and ``A -> out_near``. A connecting
+    road links to one outside road at each end, so folding the ``A ->
+    out_near`` maneuver into the ``A -> B`` path would drop it exactly the
+    way the in-junction fork used to be dropped.
+    """
+    lanelet_map = lanelet2.core.LaneletMap()
+    point = _point_factory()
+    incoming = _add_lanelet(
+        lanelet_map,
+        _straight_line(point, 3.0, 0.0, 20.0),
+        _straight_line(point, 0.0, 0.0, 20.0),
+    )
+    stage_a = _add_lanelet(
+        lanelet_map,
+        _straight_line(point, 3.0, 20.0, 30.0),
+        _straight_line(point, 0.0, 20.0, 30.0),
+        turn="straight",
+    )
+    stage_b = _add_lanelet(
+        lanelet_map,
+        _straight_line(point, 3.0, 30.0, 40.0),
+        _straight_line(point, 0.0, 30.0, 40.0),
+        turn="straight",
+    )
+    out_far = _add_lanelet(
+        lanelet_map,
+        _straight_line(point, 3.0, 40.0, 60.0),
+        _straight_line(point, 0.0, 40.0, 60.0),
+    )
+    # Leaves the junction at the end of stage A, off to the side.
+    out_near = _add_lanelet(
+        lanelet_map,
+        lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [point(30.0, 3.0), point(40.0, 13.0), point(50.0, 23.0)],
+        ),
+        lanelet2.core.LineString3d(
+            lanelet2.core.getId(),
+            [point(30.0, 0.0), point(40.0, 10.0), point(50.0, 20.0)],
+        ),
+    )
+    regular_roads = [
+        _build_road(lanelet_map, [incoming], 1),
+        _build_road(lanelet_map, [out_far], 2),
+        _build_road(lanelet_map, [out_near], 3),
+    ]
+    lanelet_to_road_id = {incoming.id: 1, out_far.id: 2, out_near.id: 3}
+
+    connecting, _to_roads, ll_to_road = _construct(
+        lanelet_map, [[stage_a, stage_b]], regular_roads, lanelet_to_road_id
+    )
+
+    paths = {tuple(road.chain_source_lanelet_ids) for road in connecting}
+    assert paths == {(stage_a.id, stage_b.id), (stage_a.id,)}, (
+        "the maneuver that leaves the junction at the end of stage A needs "
+        "its own connecting road"
+    )
+
+    _wire_links(lanelet_map, connecting, lanelet_to_road_id, ll_to_road)
+    by_path = {tuple(road.chain_source_lanelet_ids): road for road in connecting}
+    assert by_path[(stage_a.id, stage_b.id)].link.successor.element_id == 2
+    assert by_path[(stage_a.id,)].link.successor.element_id == 3
+    for road in connecting:
+        assert road.link.predecessor.element_id == 1

@@ -153,6 +153,13 @@ class GeoRoadLaneletMapping:
     #: they have no source lanelet. Recorded so consumers can tell them
     #: apart from genuine mapping failures (#493).
     skipped_synthetic_roads: list[int] | None = None
+    #: ``road id -> source lanelet ids`` for chain-merged connecting roads:
+    #: one road that spans a whole in-junction maneuver so an in-junction
+    #: fork can be expressed at all (see
+    #: ``Road._build_chain_connecting_roads``). Recorded because the XODR
+    #: carries no trace of the merge, and shape matching, which models one
+    #: lanelet per ``(road, lane)``, needs to be told about it.
+    chain_merged_roads: dict[int, list[int]] | None = None
     traffic_light_config: dict | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
@@ -197,6 +204,10 @@ class GeoRoadLaneletMapping:
             result["preprocessing_log"] = self.preprocessing_log
         if self.traffic_light_config is not None:
             result["traffic_light_config"] = self.traffic_light_config
+        if self.chain_merged_roads:
+            result["chain_merged_roads"] = {
+                str(k): list(v) for k, v in self.chain_merged_roads.items()
+            }
         return result
 
     @classmethod
@@ -228,6 +239,11 @@ class GeoRoadLaneletMapping:
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
             skipped_synthetic_roads=data.get("skipped_synthetic_roads"),
+            chain_merged_roads=(
+                {int(k): list(v) for k, v in raw_chain.items()}
+                if (raw_chain := data.get("chain_merged_roads")) is not None
+                else None
+            ),
             traffic_light_config=data.get("traffic_light_config"),
         )
 
@@ -705,12 +721,36 @@ def _synthetic_connector_road_ids(roads: list["ConverterRoad"]) -> set[int]:
     return skipped
 
 
+def _chain_merged_road_lanelets(
+    roads: list["ConverterRoad"],
+) -> dict[int, list[int]]:
+    """``road id -> source lanelet ids`` for chain-merged connecting roads.
+
+    A chain-merged connecting road spans several longitudinally consecutive
+    junction lanelets so that an in-junction fork can be expressed at all
+    (see ``Road._build_chain_connecting_roads``). Shape matching is written
+    around one lanelet per ``(road, lane)``, so such a road would be matched
+    to whichever single lanelet its reference line starts or ends on and
+    then charged, as positional error, the length of everything else it
+    covers. The mapping is taken from the road instead.
+
+    Empty when the roads were parsed back from an XODR, which carries no
+    record of the merge; callers that have the sidecar pass it explicitly.
+    """
+    return {
+        road.id: list(ids)
+        for road in roads
+        if (ids := getattr(road, "chain_source_lanelet_ids", None))
+    }
+
+
 def _compute_all_candidates(
     roads: list["ConverterRoad"],
     lanelet_left: dict[int, np.ndarray],
     lanelet_right: dict[int, np.ndarray],
     lanelet_left_bbox: dict[int, tuple[float, float, float, float]],
     lanelet_right_bbox: dict[int, tuple[float, float, float, float]],
+    excluded_road_ids: Optional[set[int]] = None,
 ) -> tuple[list[_RoadCandidates], dict[int, dict], set[int]]:
     """Phase 1: compute candidate lanelet lists for every road.
 
@@ -732,13 +772,14 @@ def _compute_all_candidates(
     # poisoning Phase 2 conflict resolution and the Phase 3 adjacency walk.
     # Exclude them up front and report them separately (#493).
     skipped_synthetic = _synthetic_connector_road_ids(roads)
+    excluded = skipped_synthetic | (excluded_road_ids or set())
 
     # Uniform grids over the two boundary populations, built on first use so
     # that a map with a single traffic rule never pays for the unused side.
     grids: dict[bool, Optional[_BoundaryGrid]] = {True: None, False: None}
 
     for road in tqdm(roads, desc="Computing road candidates", unit="road"):
-        if road.id in skipped_synthetic:
+        if road.id in excluded:
             continue
 
         ref_line = _sample_reference_line_from_road(road)
@@ -1151,6 +1192,7 @@ def build_mapping(
     mgrs_offset: tuple[float, float],
     xodr_sha256: str,
     osm_sha256: str,
+    chain_roads: Optional[dict[int, list[int]]] = None,
 ) -> GeoRoadLaneletMapping:
     """Build lanelet -> (road_id, lane_id) mapping by boundary shape comparison.
 
@@ -1181,11 +1223,19 @@ def build_mapping(
         mgrs_offset: ``(offset_x, offset_y)`` subtracted from lanelet coords.
         xodr_sha256: SHA256 of the XODR file.
         osm_sha256: SHA256 of the OSM file.
+        chain_roads: ``road id -> source lanelet ids`` for chain-merged
+            connecting roads, which cover several lanelets per lane and so
+            fall outside the one-lanelet-per-lane shape matching below.
+            Derived from the roads themselves when omitted; pass the value
+            from the conversion sidecar when the roads were parsed back from
+            an XODR, which carries no record of the merge.
 
     Returns:
         :class:`GeoRoadLaneletMapping` built by geometric comparison.
     """
     offset_x, offset_y = mgrs_offset
+    if chain_roads is None:
+        chain_roads = _chain_merged_road_lanelets(roads)
 
     # -- Pre-compute lanelet boundary data --------------------------------
 
@@ -1337,6 +1387,7 @@ def build_mapping(
         lanelet_right,
         lanelet_left_bbox,
         lanelet_right_bbox,
+        excluded_road_ids=set(chain_roads),
     )
 
     # Phase 2: resolve conflicts iteratively
@@ -1515,6 +1566,50 @@ def build_mapping(
                 len(walk_result_rescue),
                 len(rc.walk_lane_ids),
             )
+
+    # -- Chain-merged connecting roads -------------------------------------
+    #
+    # These were held out of the shape matching above: their single lane
+    # stands for a whole in-junction maneuver, i.e. for several lanelets in
+    # travel order, which the candidate/assignment machinery cannot express.
+    # Every source lanelet is attributed to that lane here, so the mapping
+    # stays complete.  Measuring such a road's reference line needs the
+    # concatenation of those boundaries rather than any single one of them;
+    # that measurement lives with the accuracy report (#610), which is not
+    # an ancestor of this branch.
+    if chain_roads:
+        road_by_id = {road.id: road for road in roads}
+        # A fork's shared stage is traversed by several merged roads but may
+        # name only one ``(road, lane)`` pair. The conversion gives it to the
+        # first road that traverses it; ascending road id reproduces that
+        # order, so the two mappings agree instead of disagreeing over which
+        # branch owns the shared stage.
+        chain_claimed: set[int] = set()
+        for road_id in sorted(chain_roads):
+            road = road_by_id.get(road_id)
+            if road is None:
+                continue
+            lane_ids = _get_driving_lane_ids_from_road(road)
+            if not lane_ids:
+                continue
+            lane_id = lane_ids[0]
+            is_rht = (
+                road.rule == TrafficRule.RHT
+                if road.rule is not None
+                else all(lid < 0 for lid in lane_ids)
+            )
+            boundaries = lanelet_left if is_rht else lanelet_right
+            path = [lid for lid in chain_roads[road_id] if lid in boundaries]
+            if not path:
+                continue
+            _commit(
+                [
+                    (lid, int(road_id), lane_id)
+                    for lid in path
+                    if lid not in chain_claimed
+                ]
+            )
+            chain_claimed.update(path)
 
     # -- Diagnostic summary ------------------------------------------------
     all_road_ids = {road.id for road in roads if road.plan_view and road.lanes}
@@ -1851,6 +1946,7 @@ def validate_and_save_mapping(
         stop_line_mapping=stop_line_mapping,
         skipped_stop_lines=skipped_stop_lines,
         skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
+        chain_merged_roads=_chain_merged_road_lanelets(roads) or None,
         traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
