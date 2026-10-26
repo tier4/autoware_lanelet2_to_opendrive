@@ -47,13 +47,15 @@ stubs carry geometry and links only.
 from __future__ import annotations
 
 import logging
-import math
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
 from autoware_lanelet2_to_opendrive.divergence import (
     _lane_anchor_xyz,
+    _lane_width_at,
+    _lane_width_at_end,
     _make_zero_length_connecting_road,
+    _taper_stub_width,
 )
 from autoware_lanelet2_to_opendrive.opendrive.enums import (
     ContactPoint,
@@ -64,10 +66,8 @@ from autoware_lanelet2_to_opendrive.opendrive.junction import Connection, Juncti
 from autoware_lanelet2_to_opendrive.opendrive.junction import (
     LaneLink as JunctionLaneLink,
 )
-from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
-    _evaluate_lane_width,
     _evaluate_planview_endpoint_with_heading,
 )
 
@@ -305,16 +305,12 @@ def _make_stub(
     incoming_width = _lane_width_at_end(incoming, lane_link.from_lane)
     connector_width = _lane_width_at(connector, lane_link.to_lane, at_start=at_start)
 
-    # The two anchors are typically within a centimetre of each other, and
-    # ``_make_zero_length_connecting_road`` reads the stub's heading off
-    # the vector between them -- which at that scale is numerical noise
-    # pointing nowhere in particular, leaving the stub across the incoming
-    # lane rather than along it. Below the length floor the vector carries
-    # no direction, so collapse it and let the incoming road's own
-    # end tangent set the heading.
-    if _planar_distance(incoming_xyz, connector_xyz) < min_segment_length:
-        connector_xyz = incoming_xyz
-
+    # The two anchors are typically within a centimetre of each other, at
+    # which scale the vector between them is numerical noise rather than a
+    # direction. ``_make_zero_length_connecting_road`` owns that decision:
+    # below ``min_segment_length`` it ignores the vector and takes
+    # ``fallback_heading`` -- the incoming road's own end tangent -- so the
+    # stub runs along the lane it continues instead of across it.
     stub = _make_zero_length_connecting_road(
         road_id=road_id,
         junction_id=junction_id,
@@ -333,54 +329,3 @@ def _make_stub(
     )
     _taper_stub_width(stub, incoming_width, connector_width)
     return stub
-
-
-def _planar_distance(a: XYZ, b: XYZ) -> float:
-    """Distance between two anchors in the xy plane."""
-    return math.hypot(b[0] - a[0], b[1] - a[1])
-
-
-def _lane_width_at(road: Road, lane_id: int, *, at_start: bool) -> Optional[float]:
-    """Width of ``lane_id`` at the start or end of ``road``."""
-    if road.lanes is None or not road.lanes.lane_sections:
-        return None
-    lane_section = road.lanes.lane_sections[0 if at_start else -1]
-    lane = lane_section.left_lanes.get(lane_id) or lane_section.right_lanes.get(lane_id)
-    if lane is None:
-        return None
-    return _evaluate_lane_width(lane, 0.0 if at_start else road.length)
-
-
-def _lane_width_at_end(road: Road, lane_id: int) -> Optional[float]:
-    return _lane_width_at(road, lane_id, at_start=False)
-
-
-def _taper_stub_width(
-    stub: Road, start_width: Optional[float], end_width: Optional[float]
-) -> None:
-    """Interpolate the stub's lane width between the lanes it joins.
-
-    The default constant 3.5 m leaves the stub's *outer* lane border a
-    metre or more away from the border of the road on either side, which
-    ``lane_smoothness.contact_point_no_horizontal_gaps`` reads as a gap
-    even where the reference lines meet exactly. A linear taper reproduces
-    both neighbours' widths at the respective contact points.
-    """
-    if start_width is None or end_width is None or stub.lanes is None:
-        return
-    if stub.length <= 0.0:
-        return
-    lane_section = stub.lanes.lane_sections[0]
-    lanes = list(lane_section.left_lanes.values()) + list(
-        lane_section.right_lanes.values()
-    )
-    for lane in lanes:
-        lane.widths = [
-            LaneWidth(
-                s_offset=0.0,
-                a=start_width,
-                b=(end_width - start_width) / stub.length,
-                c=0.0,
-                d=0.0,
-            )
-        ]

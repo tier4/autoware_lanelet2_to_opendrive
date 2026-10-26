@@ -47,6 +47,7 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
+    _evaluate_lane_width,
     _evaluate_planview_endpoint_with_heading,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road_links import (
@@ -322,7 +323,16 @@ class _DirectedLaneEdge:
     outgoing_lane_id: int
     start_xyz: Tuple[float, float, float]
     end_xyz: Tuple[float, float, float]
+    # Tangent of the *incoming* road where the connector leaves it. The
+    # connector stands for a zero-length transition, so this — not the
+    # residual between the two anchors — is the direction its rendered
+    # segment must take.
     fallback_heading: float
+    # Width of the incoming / outgoing lane at the respective contact, so
+    # the connector can reproduce the cross-section it bridges instead of
+    # a nominal constant. ``None`` when the neighbour carries no width.
+    start_lane_width: float | None = None
+    end_lane_width: float | None = None
 
     @property
     def key(self) -> Tuple[int, int, int, int]:
@@ -385,19 +395,34 @@ def _make_zero_length_connecting_road(
     converter — ``road_lanelet_geo_mapping``, ``analyze_xodr``,
     ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc. directly without
     a geometry-type guard. For a straight segment the coefficients
-    reduce to ``u(p) = p``, ``v(p) = 0``.  When ``start_xyz`` and
-    ``end_xyz`` coincide the heading falls back to ``fallback_heading``
-    (typically the source road's reference-line tangent) so the
-    connector aligns with the linked roads instead of pointing along
-    the world X axis.  The lane carries lane-level predecessor/successor
-    links from ``from_lane`` to ``to_lane`` and a constant ``lane_width``
-    so the eventual XML always emits a ``<width>`` element.
+    reduce to ``u(p) = p``, ``v(p) = 0``.
+
+    The heading only comes from the ``start_xyz -> end_xyz`` vector when
+    that vector is at least ``min_segment_length`` long.  Below the floor
+    the connector is rendered as a segment of ``min_segment_length``
+    anyway, so the vector no longer describes the segment that is drawn —
+    and at the scale these anchors actually differ (sub-centimetre, the
+    residual disagreement between two roads that are meant to meet)
+    ``atan2`` returns numerical noise, which rotates the whole
+    cross-section out of the lane it is supposed to continue.  In that
+    regime the heading falls back to ``fallback_heading`` — the incoming
+    road's own end tangent — so the stub's lane borders line up with the
+    borders it joins.  ``shared_connecting_roads._make_stub`` collapses
+    its own anchors for exactly this reason.
+
+    The lane carries lane-level predecessor/successor links from
+    ``from_lane`` to ``to_lane`` and a constant ``lane_width`` so the
+    eventual XML always emits a ``<width>`` element.  Callers that know
+    the widths of the lanes being bridged should follow up with
+    :func:`_taper_stub_width` so the stub reproduces the neighbours'
+    cross-section rather than a nominal one.
     """
     dx = end_xyz[0] - start_xyz[0]
     dy = end_xyz[1] - start_xyz[1]
     raw_length = math.sqrt(dx * dx + dy * dy)
     length = max(raw_length, min_segment_length)
-    heading = math.atan2(dy, dx) if raw_length > 1e-9 else fallback_heading
+    direction_floor = max(min_segment_length, 1e-9)
+    heading = math.atan2(dy, dx) if raw_length >= direction_floor else fallback_heading
 
     plan_view = PlanView(
         geometries=[
@@ -500,6 +525,76 @@ def _make_zero_length_connecting_road(
     )
 
 
+def _lane_width_at(road: Road | None, lane_id: int, *, at_start: bool) -> float | None:
+    """Width of ``lane_id`` at the start or end of ``road``.
+
+    ``None`` whenever the road carries no usable lane geometry, mirroring
+    ``_evaluate_lane_width``'s own ``None`` semantics so callers fall back
+    to a nominal width instead of silently collapsing a lane to zero.
+    Attributes are read through ``getattr`` for the same reason
+    :func:`_lane_anchor_xyz` does: mock road stubs in the unit tests omit
+    them from their ``spec``.
+    """
+    if road is None:
+        return None
+    lanes = getattr(road, "lanes", None)
+    if lanes is None or not lanes.lane_sections:
+        return None
+    lane_section = lanes.lane_sections[0 if at_start else -1]
+    lane = lane_section.left_lanes.get(lane_id) or lane_section.right_lanes.get(lane_id)
+    if lane is None:
+        return None
+    length = getattr(road, "length", None)
+    if not at_start and not isinstance(length, (int, float)):
+        return None
+    return _evaluate_lane_width(lane, 0.0 if at_start else float(length))
+
+
+def _lane_width_at_end(road: Road | None, lane_id: int) -> float | None:
+    """Width of ``lane_id`` where ``road`` ends."""
+    return _lane_width_at(road, lane_id, at_start=False)
+
+
+def _taper_stub_width(
+    stub: Road, start_width: float | None, end_width: float | None
+) -> None:
+    """Interpolate the stub's lane width between the lanes it joins.
+
+    A nominal constant width (``divergence_default_lane_width``, 3.5 m)
+    leaves the stub's *outer* lane border up to a metre away from the
+    border of the road on either side, which
+    ``lane_smoothness.contact_point_no_horizontal_gaps`` reads as a gap
+    even where the reference lines meet exactly: that checker compares
+    both the inner and the outer border of the two lanes at the contact
+    and wants at least two of the four pairings inside 1 cm.  A linear
+    taper reproduces both neighbours' widths at the respective contact
+    points, so together with the anchored start point and the incoming
+    road's end tangent the whole cross-section is reproduced, not just
+    the reference line.
+
+    No-op when either width is unknown, so the caller's nominal constant
+    survives rather than being replaced by a worse guess.
+    """
+    if start_width is None or end_width is None or stub.lanes is None:
+        return
+    if stub.length <= 0.0:
+        return
+    lane_section = stub.lanes.lane_sections[0]
+    lanes = list(lane_section.left_lanes.values()) + list(
+        lane_section.right_lanes.values()
+    )
+    for lane in lanes:
+        lane.widths = [
+            LaneWidth(
+                s_offset=0.0,
+                a=start_width,
+                b=(end_width - start_width) / stub.length,
+                c=0.0,
+                d=0.0,
+            )
+        ]
+
+
 def _directed_edges_for_site(
     site: DivergenceSite,
     inputs: SanityGateInputs,
@@ -515,6 +610,7 @@ def _directed_edges_for_site(
         ]
         | None
     ) = None,
+    roads_by_id: Dict[int, Road] | None = None,
 ) -> List[_DirectedLaneEdge]:
     """Normalise a predecessor/successor site into directed lane edges.
 
@@ -522,6 +618,13 @@ def _directed_edges_for_site(
     ascending for LHT) so the connecting-road IDs derived from them stay
     deterministic. ``lane_pair_endpoints`` overrides the road reference
     endpoints with the rendered per-lane anchors when the caller has them.
+
+    ``roads_by_id`` lets each edge carry the cross-section of the pair it
+    bridges: the *incoming* road's end tangent (rather than the site's
+    source road, which on a merge site is the outgoing one) and the two
+    lane widths at the contacts. Omitted by callers that hold mock roads,
+    which then keep the site-level ``fallback_heading`` and a nominal
+    width.
     """
     is_lht = traffic_rule == TrafficRule.LHT
     sorted_pairs = sorted(inputs.lane_pairs, key=lambda t: (t[0] if is_lht else -t[0]))
@@ -548,6 +651,17 @@ def _directed_edges_for_site(
                 if anchored_end is not None:
                     end_xyz = anchored_end
 
+        incoming_road = (roads_by_id or {}).get(incoming_road_id)
+        outgoing_road = (roads_by_id or {}).get(outgoing_road_id)
+
+        edge_heading = fallback_heading
+        if incoming_road is not None and incoming_road.plan_view is not None:
+            endpoint = _evaluate_planview_endpoint_with_heading(
+                incoming_road.plan_view, at_start=False
+            )
+            if endpoint is not None:
+                edge_heading = endpoint[2]
+
         edges.append(
             _DirectedLaneEdge(
                 incoming_road_id=incoming_road_id,
@@ -556,7 +670,11 @@ def _directed_edges_for_site(
                 outgoing_lane_id=outgoing_lane_id,
                 start_xyz=start_xyz,
                 end_xyz=end_xyz,
-                fallback_heading=fallback_heading,
+                fallback_heading=edge_heading,
+                start_lane_width=_lane_width_at_end(incoming_road, incoming_lane_id),
+                end_lane_width=_lane_width_at(
+                    outgoing_road, outgoing_lane_id, at_start=True
+                ),
             )
         )
     return edges
@@ -639,24 +757,34 @@ def _synthesise_junction_for_edges(
     next_road_id = starting_connecting_road_id
 
     for edge in edges:
-        connecting_roads.append(
-            _make_zero_length_connecting_road(
-                road_id=next_road_id,
-                junction_id=junction.id,
-                incoming_road_id=edge.incoming_road_id,
-                outgoing_road_id=edge.outgoing_road_id,
-                incoming_contact=ContactPoint.END,
-                outgoing_contact=ContactPoint.START,
-                start_xyz=edge.start_xyz,
-                end_xyz=edge.end_xyz,
-                min_segment_length=min_segment_length,
-                traffic_rule=traffic_rule,
-                from_lane=edge.incoming_lane_id,
-                to_lane=edge.outgoing_lane_id,
-                fallback_heading=edge.fallback_heading,
-                lane_width=lane_width,
-            )
+        connector = _make_zero_length_connecting_road(
+            road_id=next_road_id,
+            junction_id=junction.id,
+            incoming_road_id=edge.incoming_road_id,
+            outgoing_road_id=edge.outgoing_road_id,
+            incoming_contact=ContactPoint.END,
+            outgoing_contact=ContactPoint.START,
+            start_xyz=edge.start_xyz,
+            end_xyz=edge.end_xyz,
+            min_segment_length=min_segment_length,
+            traffic_rule=traffic_rule,
+            from_lane=edge.incoming_lane_id,
+            to_lane=edge.outgoing_lane_id,
+            fallback_heading=edge.fallback_heading,
+            lane_width=(
+                edge.start_lane_width
+                if edge.start_lane_width is not None
+                else lane_width
+            ),
         )
+        # ``start_xyz`` anchors the connector on the incoming lane's inner
+        # border and ``fallback_heading`` orients its normal at that lane's
+        # outer border; the taper puts the outer border at the right
+        # distance, at this end and at the other one. Together they
+        # reproduce the cross-section the connector bridges, which is what
+        # ``contact_point_no_horizontal_gaps`` compares.
+        _taper_stub_width(connector, edge.start_lane_width, edge.end_lane_width)
+        connecting_roads.append(connector)
         junction.connections.append(
             Connection(
                 id=len(junction.connections),
@@ -1099,6 +1227,7 @@ def apply_divergence_synthesis(
                     traffic_rule=traffic_rule,
                     fallback_heading=fallback_heading,
                     lane_pair_endpoints=lane_pair_endpoints,
+                    roads_by_id=roads_by_id,
                 ),
             )
         )
