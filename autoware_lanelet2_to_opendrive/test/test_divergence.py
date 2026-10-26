@@ -1,7 +1,10 @@
 """Tests for divergence/merge synthesis (issue #291)."""
 
 import inspect
+import math
 from unittest.mock import MagicMock
+
+import pytest
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
@@ -10,6 +13,9 @@ from autoware_lanelet2_to_opendrive.divergence import (
     DivergenceSynthesisResult,
     SanityGateInputs,
     SynthesisOutput,
+    _directed_edges_for_site,
+    _make_zero_length_connecting_road,
+    _synthesise_junction_for_edges,
     apply_divergence_synthesis,
     collect_divergence_sites,
     sanity_gate_passes,
@@ -18,8 +24,14 @@ from autoware_lanelet2_to_opendrive.divergence import (
 from autoware_lanelet2_to_opendrive.opendrive.enums import (
     ContactPoint,
     ElementType,
+    LaneType,
     TrafficRule,
 )
+from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3, PlanView
+from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
+from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
     _resolve_candidate_road_ids,
@@ -773,3 +785,173 @@ def test_apply_divergence_synthesis_emits_nothing_when_no_candidate_is_close(
     assert result.junctions == []
     assert result.connecting_roads == []
     roads_by_id[42].add_predecessor.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Synthetic zero-length connectors must reproduce the cross-section they
+# bridge, not a nominal one. The checker that cares is
+# ``lane_smoothness.contact_point_no_horizontal_gaps``: at every contact it
+# compares *both* lane borders of the two lanes and wants at least two of the
+# four pairings inside 1 cm. Getting the reference line right is therefore
+# only half of it -- the heading (which orients the lane normal) and the lane
+# width (which places the outer border) decide the other half.
+# ---------------------------------------------------------------------------
+
+
+def _stub_between(start_xyz, end_xyz, *, min_segment_length, fallback_heading):
+    return _make_zero_length_connecting_road(
+        road_id=900,
+        junction_id=9000,
+        incoming_road_id=1,
+        outgoing_road_id=2,
+        incoming_contact=ContactPoint.END,
+        outgoing_contact=ContactPoint.START,
+        start_xyz=start_xyz,
+        end_xyz=end_xyz,
+        min_segment_length=min_segment_length,
+        traffic_rule=TrafficRule.RHT,
+        from_lane=-1,
+        to_lane=-1,
+        fallback_heading=fallback_heading,
+    )
+
+
+def test_sub_floor_anchor_separation_is_not_read_as_a_heading():
+    """A residual shorter than the rendered segment carries no direction.
+
+    The two anchors are 4 mm apart -- the leftover disagreement between two
+    roads that are meant to meet -- and sideways, which is what ``atan2``
+    over that residual degenerates to. The connector is rendered at the
+    ``min_segment_length`` floor regardless, so the residual does not even
+    describe the segment that is drawn; taking its direction would swing the
+    whole cross-section perpendicular to the lane it continues.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (0.0, 0.004, 0.0),
+        min_segment_length=0.01,
+        fallback_heading=0.25,
+    )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.hdg == pytest.approx(0.25)
+    assert geometry.length == pytest.approx(0.01)
+
+
+def test_anchor_separation_above_the_floor_still_sets_the_heading():
+    """Above the floor the vector *is* the segment, so it keeps the heading."""
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (0.0, 0.5, 0.0),
+        min_segment_length=0.01,
+        fallback_heading=0.25,
+    )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.hdg == pytest.approx(math.pi / 2)
+    assert geometry.length == pytest.approx(0.5)
+
+
+def _width_road(road_id, *, width, length=10.0, heading=0.0, x=0.0, y=0.0):
+    """A one-lane RHT road whose lane has a known constant width."""
+    lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    lane.widths.append(LaneWidth(s_offset=0.0, a=width, b=0.0, c=0.0, d=0.0))
+    lane_section = LaneSection(s_offset=0.0)
+    lane_section.right_lanes[-1] = lane
+    return Road(
+        id=road_id,
+        length=length,
+        rule=TrafficRule.RHT,
+        lanes=Lanes(lane_sections=[lane_section]),
+        plan_view=PlanView(
+            geometries=[
+                ParamPoly3(
+                    s=0.0,
+                    x=x,
+                    y=y,
+                    hdg=heading,
+                    length=length,
+                    aU=0.0,
+                    bU=1.0,
+                    cU=0.0,
+                    dU=0.0,
+                    aV=0.0,
+                    bV=0.0,
+                    cV=0.0,
+                    dV=0.0,
+                    pRange="arcLength",
+                )
+            ]
+        ),
+        sorted_lanelet_ids=[1],
+    )
+
+
+def test_synthesised_connector_tapers_between_the_widths_it_bridges():
+    """The stub reproduces both neighbours' widths, not the nominal 3.5 m.
+
+    A constant nominal width leaves the stub's outer border up to a metre
+    from the border of the road on either side, which the horizontal-gap
+    checker reads as a gap even when the reference lines meet exactly.
+    """
+    incoming = _width_road(1, width=3.0)
+    outgoing = _width_road(2, width=4.25, x=10.0)
+    edges = _directed_edges_for_site(
+        site=DivergenceSite(
+            road_id=1,
+            side=DivergenceSide.SUCCESSOR,
+            candidate_road_ids=(2,),
+        ),
+        inputs=SanityGateInputs(
+            endpoint_road=(10.0, 0.0, 0.0),
+            endpoints_candidates={2: (10.0, 0.0, 0.0)},
+            lane_pairs=[(-1, 2, -1)],
+            all_successor_lanelet_road_ids={2},
+        ),
+        traffic_rule=TrafficRule.RHT,
+        fallback_heading=0.0,
+        roads_by_id={1: incoming, 2: outgoing},
+    )
+    assert [(e.start_lane_width, e.end_lane_width) for e in edges] == [(3.0, 4.25)]
+
+    out = _synthesise_junction_for_edges(
+        junction_name="divergence_1",
+        edges=edges,
+        starting_connecting_road_id=300,
+        junction_id=3000,
+        traffic_rule=TrafficRule.RHT,
+        min_segment_length=0.005,
+        lane_width=DEFAULT_CONFIG.geometry.divergence_default_lane_width,
+    )
+    stub = out.connecting_roads[0]
+    width = stub.lanes.lane_sections[0].right_lanes[-1].widths[0]
+    assert width.a == pytest.approx(3.0)
+    assert width.a + width.b * stub.length == pytest.approx(4.25)
+
+
+def test_merge_connector_takes_the_heading_of_the_road_it_leaves():
+    """On a merge the incoming road is the *candidate*, not the site's road.
+
+    The stub's near contact is with the road it leaves, so that road's end
+    tangent -- not the merged road's start tangent -- is what keeps the
+    stub's lane borders on top of the borders it continues.
+    """
+    candidate = _width_road(1, width=3.0, heading=0.75)
+    merged = _width_road(2, width=3.0, heading=0.0, x=10.0)
+    edges = _directed_edges_for_site(
+        site=DivergenceSite(
+            road_id=2,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=(1,),
+        ),
+        inputs=SanityGateInputs(
+            endpoint_road=(10.0, 0.0, 0.0),
+            endpoints_candidates={1: (10.0, 0.0, 0.0)},
+            lane_pairs=[(-1, 1, -1)],
+            all_successor_lanelet_road_ids={1},
+        ),
+        traffic_rule=TrafficRule.RHT,
+        fallback_heading=0.0,
+        roads_by_id={1: candidate, 2: merged},
+    )
+    assert len(edges) == 1
+    assert edges[0].incoming_road_id == 1
+    assert edges[0].fallback_heading == pytest.approx(0.75)
