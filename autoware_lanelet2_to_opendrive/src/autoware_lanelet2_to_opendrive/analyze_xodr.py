@@ -491,6 +491,10 @@ def run_mapping_validation(
         (ctx.offset_x, ctx.offset_y),
         ctx.conv_mapping.xodr_sha256,
         ctx.conv_mapping.osm_sha256,
+        # The XODR carries no trace of which connecting roads are
+        # chain-merged, so the roads parsed back from it cannot tell the
+        # geometric pass; the conversion sidecar records it.
+        chain_roads=ctx.conv_mapping.chain_merged_roads,
     )
 
     try:
