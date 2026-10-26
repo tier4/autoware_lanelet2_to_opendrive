@@ -714,6 +714,23 @@ class Junction:
                 continue
             chain_entry_roads[path[0]].append((road.id, lane_id))
             chain_interior_lanelet_ids.update(path[1:])
+        # The exit-side mirror: a lateral group whose lanes leave the
+        # junction into several outside roads is emitted once per outside
+        # road.  Those copies share every source lanelet, so the
+        # lanelet-to-road map names one of them and the rest would get no
+        # <connection> at all -- and a connecting road reachable through
+        # neither a connection nor a road link is dead. Register every copy
+        # explicitly, the claiming one included, so the entry's target list
+        # is the complete set rather than a mix of the two sources.
+        for road in roads or ():
+            if road.id not in connecting_road_id_set:
+                continue
+            if getattr(road, "exit_fork_successor_road_id", None) is None:
+                continue
+            if getattr(road, "chain_source_lanelet_ids", None):
+                continue  # already registered above, by its path's entry
+            for lanelet_id, lane_id in road.get_lanelet_to_lane_mapping().items():
+                chain_entry_roads[lanelet_id].append((road.id, lane_id))
         # A lanelet that is the entry of one merged road and an interior
         # stage of another cannot exist: the enumeration starts a path only
         # at a lanelet with no in-junction predecessor.

@@ -160,6 +160,18 @@ class GeoRoadLaneletMapping:
     #: carries no trace of the merge, and shape matching, which models one
     #: lanelet per ``(road, lane)``, needs to be told about it.
     chain_merged_roads: dict[int, list[int]] | None = None
+    #: ``road id -> source lanelet ids`` for the extra copies of an
+    #: exit-forking junction group: one connecting road per road outside the
+    #: junction the group leads to, so the single road-level ``<successor>``
+    #: stops losing every exit but one (see
+    #: ``Road.exit_fork_successor_road_id``). Recorded for the same reason as
+    #: ``chain_merged_roads``: the XODR carries no trace of the duplication,
+    #: and shape matching, which models one lanelet per ``(road, lane)``, has
+    #: to be told to leave the copies alone. The lanelet ids are carried too
+    #: because ``lanelet_to_road_and_lane`` can name only the copy that
+    #: claimed them; without this a consumer would read a duplicate's lanes
+    #: as synthetic rather than as the same maneuver stage.
+    exit_fork_duplicate_roads: dict[int, list[int]] | None = None
     traffic_light_config: dict | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
@@ -208,6 +220,10 @@ class GeoRoadLaneletMapping:
             result["chain_merged_roads"] = {
                 str(k): list(v) for k, v in self.chain_merged_roads.items()
             }
+        if self.exit_fork_duplicate_roads:
+            result["exit_fork_duplicate_roads"] = {
+                str(k): list(v) for k, v in self.exit_fork_duplicate_roads.items()
+            }
         return result
 
     @classmethod
@@ -242,6 +258,11 @@ class GeoRoadLaneletMapping:
             chain_merged_roads=(
                 {int(k): list(v) for k, v in raw_chain.items()}
                 if (raw_chain := data.get("chain_merged_roads")) is not None
+                else None
+            ),
+            exit_fork_duplicate_roads=(
+                {int(k): list(v) for k, v in raw_dup.items()}
+                if (raw_dup := data.get("exit_fork_duplicate_roads")) is not None
                 else None
             ),
             traffic_light_config=data.get("traffic_light_config"),
@@ -744,6 +765,36 @@ def _chain_merged_road_lanelets(
     }
 
 
+def _exit_fork_duplicate_roads(
+    roads: list["ConverterRoad"],
+) -> dict[int, list[int]]:
+    """``road id -> source lanelet ids`` for exit-fork duplicate roads.
+
+    A connecting road whose lanes leave the junction into several roads
+    outside it is emitted once per outside road, because the road-level
+    ``<successor>`` holds one (see ``Road.exit_fork_successor_road_id``).
+    The copies are geometrically identical and only the first claims the
+    group's lanelets, so the rest have nothing to match: shape matching
+    would let a duplicate win a lanelet the conversion gave to the claiming
+    copy, and the cross-check would then report a mismatch that is only a
+    disagreement about which identical road to name.
+
+    The source lanelets are recorded alongside the ids, not just the ids,
+    because the ``lanelet -> (road, lane)`` mapping can name one road per
+    lanelet: without this, a consumer reading the sidecar has no way to
+    learn that a duplicate realises the same maneuver stage as the road
+    that claimed it, and would read the duplicate's lanes as synthetic.
+
+    Empty when the roads were parsed back from an XODR, which carries no
+    trace of the duplication; callers that have the sidecar pass it.
+    """
+    return {
+        road.id: list(getattr(road, "exit_fork_lanelet_ids", None) or ())
+        for road in sorted(roads, key=lambda r: r.id)
+        if getattr(road, "exit_fork_duplicate", False)
+    }
+
+
 def _compute_all_candidates(
     roads: list["ConverterRoad"],
     lanelet_left: dict[int, np.ndarray],
@@ -1193,6 +1244,7 @@ def build_mapping(
     xodr_sha256: str,
     osm_sha256: str,
     chain_roads: Optional[dict[int, list[int]]] = None,
+    duplicate_roads: Optional[dict[int, list[int]]] = None,
 ) -> GeoRoadLaneletMapping:
     """Build lanelet -> (road_id, lane_id) mapping by boundary shape comparison.
 
@@ -1229,6 +1281,15 @@ def build_mapping(
             Derived from the roads themselves when omitted; pass the value
             from the conversion sidecar when the roads were parsed back from
             an XODR, which carries no record of the merge.
+        duplicate_roads: ``road id -> source lanelet ids`` for the extra
+            copies of an exit-forking
+            junction group (see ``Road.exit_fork_duplicate``). They are
+            geometrically identical to the copy that claims the group's
+            lanelets and claim none themselves, so they are held out of the
+            shape matching exactly like the chain-merged roads; the claiming
+            copy's record covers their geometry. Derived from the roads
+            themselves when omitted, and likewise unavailable to roads parsed
+            back from an XODR, which carries no trace of the duplication.
 
     Returns:
         :class:`GeoRoadLaneletMapping` built by geometric comparison.
@@ -1236,6 +1297,8 @@ def build_mapping(
     offset_x, offset_y = mgrs_offset
     if chain_roads is None:
         chain_roads = _chain_merged_road_lanelets(roads)
+    if duplicate_roads is None:
+        duplicate_roads = _exit_fork_duplicate_roads(roads)
 
     # -- Pre-compute lanelet boundary data --------------------------------
 
@@ -1387,7 +1450,7 @@ def build_mapping(
         lanelet_right,
         lanelet_left_bbox,
         lanelet_right_bbox,
-        excluded_road_ids=set(chain_roads),
+        excluded_road_ids=set(chain_roads) | set(duplicate_roads),
     )
 
     # Phase 2: resolve conflicts iteratively
@@ -1947,6 +2010,7 @@ def validate_and_save_mapping(
         skipped_stop_lines=skipped_stop_lines,
         skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
         chain_merged_roads=_chain_merged_road_lanelets(roads) or None,
+        exit_fork_duplicate_roads=_exit_fork_duplicate_roads(roads) or None,
         traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
