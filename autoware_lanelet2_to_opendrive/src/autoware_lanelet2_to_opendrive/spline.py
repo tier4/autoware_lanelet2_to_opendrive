@@ -145,6 +145,7 @@ class Splines:
         num_control_points: Optional[int] = None,
         k: int = 3,
         hard_constraint_weight: Optional[float] = None,
+        exact_endpoints: bool = False,
     ):
         """
         Initialize a B-spline with constrained fitting.
@@ -170,6 +171,15 @@ class Splines:
                 corridor of the source lanelets and confuse the
                 lanelet-to-road geometric matcher.  If ``None``, the
                 configured default is used.
+            exact_endpoints: When True the fit reproduces ``points[0]`` and
+                ``points[-1]`` to machine precision instead of weighing them
+                against the interior data term.  The knot vector is clamped,
+                so this is achieved by pinning the first and last control
+                point and solving for the interior ones under that
+                constraint -- the least-distorting way to impose it.  Use it
+                wherever the curve's endpoints are a contract with something
+                else (e.g. a road reference line that has to meet its
+                neighbour's), rather than merely a data point to fit.
 
         Raises:
             ValueError: If too few control points or invalid input
@@ -264,6 +274,7 @@ class Splines:
         # hard-constraint weight so boundary conditions are honoured to
         # near machine precision.
         self._hard_constraint_weight: Optional[float] = hard_constraint_weight
+        self._exact_endpoints = bool(exact_endpoints)
 
         # Perform constrained spline fitting
         self._fit_constrained_spline()
@@ -517,12 +528,66 @@ class Splines:
             ]
         )
 
+        if self._exact_endpoints:
+            return self._solve_with_pinned_endpoints(
+                A_combined, b_combined, start_pos[0], end_pos[0]
+            )
+
         # Solve for control points (Least Squares)
         coeffs_x, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 0], rcond=None)
         coeffs_y, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 1], rcond=None)
         coeffs_z, _, _, _ = np.linalg.lstsq(A_combined, b_combined[:, 2], rcond=None)
 
         coeffs = np.column_stack([coeffs_x, coeffs_y, coeffs_z])
+
+        return coeffs
+
+    def _solve_with_pinned_endpoints(
+        self,
+        a_combined: np.ndarray,
+        b_combined: np.ndarray,
+        start_pos: np.ndarray,
+        end_pos: np.ndarray,
+    ) -> np.ndarray:
+        """Least squares with the two endpoint control points held fixed.
+
+        The knot vector built by :meth:`_create_knot_vector` is clamped --
+        it carries multiplicity ``k + 1`` at both ends -- so the first and
+        last control points *are* the curve's endpoints: ``S(0) == P[0]``
+        and ``S(1) == P[-1]`` identically. Fixing those two rows to the
+        first and last input point therefore reproduces them to machine
+        precision, instead of letting the weighted solve trade them off
+        against the interior data term (which costs 1-3 cm at the default
+        80/20 weight mix and leaves consecutive roads' reference lines
+        failing to meet).
+
+        Pinning by *elimination* rather than by overwriting the solved
+        coefficients keeps the remaining control points optimal given the
+        constraint, so the interior fit degrades by the least amount the
+        constraint allows.
+        """
+        p_start = np.asarray(start_pos, dtype=float)
+        p_end = np.asarray(end_pos, dtype=float)
+
+        # Move the two fixed columns to the right-hand side.
+        interior = a_combined[:, 1:-1]
+        residual = (
+            b_combined
+            - np.outer(a_combined[:, 0], p_start)
+            - np.outer(a_combined[:, -1], p_end)
+        )
+
+        coeffs = np.empty((a_combined.shape[1], 3), dtype=float)
+        coeffs[0] = p_start
+        coeffs[-1] = p_end
+        if interior.shape[1] > 0:
+            solved = np.column_stack(
+                [
+                    np.linalg.lstsq(interior, residual[:, axis], rcond=None)[0]
+                    for axis in range(3)
+                ]
+            )
+            coeffs[1:-1] = solved
 
         return coeffs
 
