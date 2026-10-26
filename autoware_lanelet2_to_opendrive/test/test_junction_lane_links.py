@@ -90,16 +90,17 @@ def test_one_into_two_split_emits_two_lane_links():
     assert pairs == {(10, 20): [(-1, -2), (-1, -1)]}
 
 
-def test_chained_connector_resolves_to_external_incoming_road():
-    """A connector fed only by another in-junction connector still links (#492).
+def test_chained_connector_is_not_advertised_from_the_external_road():
+    """Only the head of an in-junction chain is reachable from outside.
 
-    Regression for #492 and #500: regular road 10 -> connecting road 20
-    (lanelet 201 -> 101) -> connecting road 21 (lanelet 101 -> 102).
-    The chained connector 21 has no predecessor outside the junction.
-    Its ``<connection>`` must resolve ``incomingRoad`` transitively to the
-    external road 10 — not the upstream connecting road 20, which crashes
-    CARLA's OpenDRIVE parser (#500).  Previously the 101 -> 102 edge was
-    dropped entirely, leaving road 21 absent from every ``<connection>``.
+    Regular road 10 -> connecting road 20 (lanelet 201 -> 101) ->
+    connecting road 21 (lanelet 101 -> 102).  Road 21 is entered from road
+    20, never straight from road 10, so it must not appear in the
+    ``<connection>`` table: a consumer that took ``10 -> 21`` would skip
+    the whole length of connector 20.  Resolving ``incomingRoad``
+    transitively to road 10 (the earlier #492/#500 behaviour) advertised
+    exactly that jump; road 21 stays reachable through its own
+    ``<link><predecessor>``, which points at road 20.
     """
     junction_to_predecessors = {101: [201], 102: [101]}
     lanelet_to_road_id = {101: 20, 102: 21, 201: 10}
@@ -115,21 +116,44 @@ def test_chained_connector_resolves_to_external_incoming_road():
         road_id_to_lanelet_to_lane,
     )
 
-    assert pairs == {
-        (10, 20): [(-1, -1)],
-        (10, 21): [(-1, -1)],
-    }
+    assert pairs == {(10, 20): [(-1, -1)]}
 
 
-def test_deep_chained_connector_resolves_transitively():
-    """A multi-hop connector chain still resolves to the external road (#500).
+def test_deep_chain_advertises_only_its_head():
+    """No stage of a multi-hop chain but the first is advertised.
 
     Chain: regular road 10 (lanelet 201) -> connecting road 20 (101)
-    -> connecting road 21 (102) -> connecting road 22 (103).  Every
-    connecting road's ``incomingRoad`` must resolve to road 10, the only
-    non-junction road in the chain.
+    -> connecting road 21 (102) -> connecting road 22 (103).  Roads 21
+    and 22 are reached by traversing the chain, so the junction table
+    holds the single entry for its head.
     """
     junction_to_predecessors = {101: [201], 102: [101], 103: [102]}
+    lanelet_to_road_id = {101: 20, 102: 21, 103: 22, 201: 10}
+    road_id_to_lanelet_to_lane = {
+        20: {101: -1},
+        21: {102: -1},
+        22: {103: -1},
+        10: {201: -1},
+    }
+
+    pairs = _enumerate_lane_pairs(
+        junction_to_predecessors,
+        lanelet_to_road_id,
+        road_id_to_lanelet_to_lane,
+    )
+
+    assert pairs == {(10, 20): [(-1, -1)]}
+
+
+def test_chain_does_not_suppress_the_other_branches_of_its_head():
+    """A connector fed both directly and through a chain keeps both roles.
+
+    Road 10 feeds connectors 20 (lanelet 101) and 21 (lanelet 102)
+    directly, and 20 continues into 22 (lanelet 103).  Dropping the
+    chained stage must not disturb the two direct entries — a junction
+    without chains is emitted exactly as before.
+    """
+    junction_to_predecessors = {101: [201], 102: [201], 103: [101]}
     lanelet_to_road_id = {101: 20, 102: 21, 103: 22, 201: 10}
     road_id_to_lanelet_to_lane = {
         20: {101: -1},
@@ -147,7 +171,34 @@ def test_deep_chained_connector_resolves_transitively():
     assert pairs == {
         (10, 20): [(-1, -1)],
         (10, 21): [(-1, -1)],
-        (10, 22): [(-1, -1)],
+    }
+
+
+def test_connector_with_both_external_and_chained_predecessors_keeps_external():
+    """Only the chained predecessor edge is dropped, not the whole connection.
+
+    Connecting lanelet 102 is reached from external lanelet 202 *and*
+    from in-junction lanelet 101.  The external edge must survive; the
+    in-junction one must not add a second, earlier ``incomingRoad``.
+    """
+    junction_to_predecessors = {101: [201], 102: [101, 202]}
+    lanelet_to_road_id = {101: 20, 102: 21, 201: 10, 202: 11}
+    road_id_to_lanelet_to_lane = {
+        20: {101: -1},
+        21: {102: -1},
+        10: {201: -1},
+        11: {202: -1},
+    }
+
+    pairs = _enumerate_lane_pairs(
+        junction_to_predecessors,
+        lanelet_to_road_id,
+        road_id_to_lanelet_to_lane,
+    )
+
+    assert pairs == {
+        (10, 20): [(-1, -1)],
+        (11, 21): [(-1, -1)],
     }
 
 
