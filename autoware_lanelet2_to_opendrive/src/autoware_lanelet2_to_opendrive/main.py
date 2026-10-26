@@ -48,6 +48,7 @@ from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
 )
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
 from autoware_lanelet2_to_opendrive.opendrive.objects import (
     RoadSamplePointIndex,
 )
@@ -360,17 +361,26 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_to_lanelet_ids: Dict[int, List[int]],
         lanelet_to_road_id: Dict[int, int],
         junctions: List[Junction],
+        traffic_rule: TrafficRule,
+        min_segment_length: float,
         routing_graph: Optional[RoutingGraph] = None,
     ) -> Dict[int, Tuple[int, int]]:
         """
         Set up predecessor/successor connections for roads and lanes.
 
+        ``all_roads`` is extended in place with the connecting roads the
+        junction-peer reconciliation pass has to synthesise: they have to
+        exist before ``set_all_lane_links`` runs here, and the caller needs
+        them in the same list for the rest of the pipeline.
+
         Args:
-            all_roads: All roads (regular + connecting)
+            all_roads: All roads (regular + connecting); extended in place.
             connecting_roads: Connecting roads only
             road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
             lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
             junctions: All junctions
+            traffic_rule: RHT / LHT, for the synthetic connectors' lane ids.
+            min_segment_length: Minimum planView length for synthetic stubs.
             routing_graph: Pre-built vehicle routing graph reused for every
                 pass below; built on demand when omitted.
 
@@ -405,6 +415,36 @@ class _Lanelet2ToOpenDRIVEConverter:
             roads=all_roads,
             road_to_lanelet_ids=road_to_lanelet_ids,
             routing_graph=routing_graph,
+        )
+
+        # Reconcile the road links the two passes above left one-sided: the
+        # junction link takes priority on the road they touched, but the
+        # road on the other side still names it back with elementType="road"
+        # (issue: road.lane.link.lanes_across_lane_sections). Must run after
+        # both of them and before set_all_lane_links, which reads the final
+        # road links.
+        print("\n=== Reconciling one-sided junction road links ===")
+        from autoware_lanelet2_to_opendrive.direct_junction_completion import (
+            reconcile_junction_peer_links,
+        )
+
+        reconcile_start_id = (
+            (max(road.id for road in all_roads) + 1) if all_roads else 0
+        )
+        reconcile_roads, _reconcile_next_id = reconcile_junction_peer_links(
+            lanelet_map=self.lanelet_map,
+            routing_graph=routing_graph,
+            all_roads=all_roads,
+            junctions=junctions,
+            starting_road_id=reconcile_start_id,
+            traffic_rule=traffic_rule,
+            min_segment_length=min_segment_length,
+        )
+        if reconcile_roads:
+            all_roads.extend(reconcile_roads)
+        print(
+            f"Synthesised {len(reconcile_roads)} connecting road(s) while "
+            f"reconciling one-sided junction road links"
         )
 
         # Set lane links for all roads
@@ -1123,7 +1163,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             apply_divergence_synthesis,
             collect_divergence_sites,
         )
-        from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
         traffic_rule_value = (
@@ -1233,6 +1272,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             mapping.road_to_lanelets,
             lanelet_to_road_id,
             junctions,
+            traffic_rule_value,
+            DEFAULT_CONFIG.geometry.divergence_min_segment_length,
             routing_graph=regular_result.routing_graph,
         )
 

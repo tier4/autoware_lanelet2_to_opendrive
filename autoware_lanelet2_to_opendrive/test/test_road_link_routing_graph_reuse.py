@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
+from autoware_lanelet2_to_opendrive import direct_junction_completion as djc
 from autoware_lanelet2_to_opendrive.main import _Lanelet2ToOpenDRIVEConverter
 from autoware_lanelet2_to_opendrive.opendrive import road as road_mod
+from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 
 
@@ -60,6 +62,9 @@ def test_setup_connections_forwards_routing_graph_to_every_pass():
         patch.object(Road, "set_connecting_road_links") as connecting,
         patch.object(Road, "set_incoming_road_junction_links"),
         patch.object(Road, "set_outgoing_road_junction_links") as outgoing,
+        patch.object(
+            djc, "reconcile_junction_peer_links", return_value=([], 0)
+        ) as reconcile,
         patch.object(Road, "set_all_lane_links") as lane_links,
     ):
         converter._setup_connections(
@@ -68,10 +73,13 @@ def test_setup_connections_forwards_routing_graph_to_every_pass():
             road_to_lanelet_ids={},
             lanelet_to_road_id={},
             junctions=[],
+            traffic_rule=TrafficRule.RHT,
+            min_segment_length=0.005,
             routing_graph=sentinel_graph,
         )
 
     assert connecting.call_args.kwargs.get("routing_graph") is sentinel_graph
     assert outgoing.call_args.kwargs.get("routing_graph") is sentinel_graph
+    assert reconcile.call_args.kwargs.get("routing_graph") is sentinel_graph
     # set_all_lane_links takes the graph positionally: (lanelet_map, roads, graph)
     assert lane_links.call_args.args[2] is sentinel_graph
