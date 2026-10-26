@@ -34,9 +34,13 @@ from typing import Dict, List, Set, Tuple
 
 import lanelet2
 
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
     _lane_anchor_xyz,
+    _lane_width_at,
+    _lane_width_at_end,
     _make_zero_length_connecting_road,
+    _taper_stub_width,
 )
 from autoware_lanelet2_to_opendrive.opendrive.enums import (
     ContactPoint,
@@ -252,6 +256,9 @@ def complete_direct_junction_lanelinks(
                         if endpoint_with_h is not None:
                             fallback_heading = endpoint_with_h[2]
 
+                    in_width = _lane_width_at_end(in_road, lane_id)
+                    out_width = _lane_width_at(out_road, out_lane, at_start=True)
+
                     new_road = _make_zero_length_connecting_road(
                         road_id=next_id,
                         junction_id=junction.id,
@@ -266,7 +273,18 @@ def complete_direct_junction_lanelinks(
                         from_lane=lane_id,
                         to_lane=out_lane,
                         fallback_heading=fallback_heading,
+                        lane_width=(
+                            in_width
+                            if in_width is not None
+                            else DEFAULT_CONFIG.geometry.divergence_default_lane_width
+                        ),
                     )
+                    # The connector is anchored on the incoming lane's inner
+                    # border and oriented by that road's end tangent, so the
+                    # taper is what puts its *outer* border on the neighbours'
+                    # outer borders at both contacts -- the second of the two
+                    # matches ``contact_point_no_horizontal_gaps`` requires.
+                    _taper_stub_width(new_road, in_width, out_width)
                     new_roads.append(new_road)
 
                     junction.connections.append(
