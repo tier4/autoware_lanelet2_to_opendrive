@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .opendrive.road import Road as ConverterRoad
+    from .projection_resolver import ResolvedProjection
 
 from qc_baselib import Configuration, IssueSeverity, Result
 from qc_opendrive import constants
@@ -285,10 +286,10 @@ class ValidationContext:
     """Loaded Lanelet2 map (``lanelet2.LaneletMap``)."""
 
     offset_x: float
-    """MGRS projection X offset."""
+    """Projection X offset of the map origin in the exported frame."""
 
     offset_y: float
-    """MGRS projection Y offset."""
+    """Projection Y offset of the map origin in the exported frame."""
 
     conv_mapping: object
     """``GeoRoadLaneletMapping`` loaded from ``.mapping.json``."""
@@ -318,6 +319,14 @@ class GeoReferenceFrame:
 
     offset_y: float
     """Offset (m) subtracted from projected OSM y to get XODR y."""
+
+    offset_is_exact: bool = False
+    """True when the offset was read out of the PROJ string itself.
+
+    ``False`` means it was probed by projecting the frame origin with an
+    ``MGRSProjector``, so the probe has to be redone with the projector that
+    actually loads the map -- see :func:`_load_validation_context`.
+    """
 
 
 def _frame_from_geo_reference(proj_string: str) -> GeoReferenceFrame | None:
@@ -349,6 +358,7 @@ def _frame_from_geo_reference(proj_string: str) -> GeoReferenceFrame | None:
             mgrs_frame.longitude,
             mgrs_frame.offset_x,
             mgrs_frame.offset_y,
+            offset_is_exact=True,
         )
 
     lat_match = re.search(r"\+lat_0=([\d.eE+-]+)", proj_string)
@@ -360,6 +370,52 @@ def _frame_from_geo_reference(proj_string: str) -> GeoReferenceFrame | None:
     projector = MGRSProjector(latlon_to_lanelet2_origin(origin_lat, origin_lon))
     fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
     return GeoReferenceFrame(origin_lat, origin_lon, fwd.x, fwd.y)
+
+
+def _resolve_analysis_projection(
+    effective_osm: Path, origin_lat: float, origin_lon: float
+) -> "ResolvedProjection":
+    """Resolve the projector used to reload the OSM for cross-validation.
+
+    The reloaded lanelets have to land in the frame the converter put them
+    in, so the projector comes from the same projector-resolution layer the
+    converter uses instead of being assumed to be MGRS. Assuming MGRS for a
+    TransverseMercator map rotates and rescales the reloaded geometry -- at
+    lon 139.78 in UTM zone 54 that is about 0.7 deg of meridian convergence
+    plus a scale mismatch -- which makes the mapping cross-validation compare
+    mismatched frames.
+
+    Falls back to an MGRS frame built from the geoReference's
+    ``+lat_0``/``+lon_0`` when the map ships no (supported)
+    ``map_projector_info.yaml``: the historical behaviour, which stays
+    correct for MGRS maps because ``MGRSProjector`` ignores its origin and
+    always emits coordinates relative to each point's own 100 km grid square.
+
+    Args:
+        effective_osm: OSM path actually used (may be a preprocessed variant).
+        origin_lat: Frame-origin latitude recovered from the geoReference.
+        origin_lon: Frame-origin longitude recovered from the geoReference.
+
+    Returns:
+        The resolved projection whose :meth:`make_projector` reproduces the
+        converter's frame.
+    """
+    from .projection import latlon_to_lanelet2_origin
+    from .projection_resolver import (
+        ResolvedProjection,
+        resolve_projection_from_map_info,
+    )
+
+    resolved = resolve_projection_from_map_info(effective_osm)
+    if resolved is not None:
+        return resolved
+
+    return ResolvedProjection(
+        origin=latlon_to_lanelet2_origin(origin_lat, origin_lon),
+        mgrs_code=None,
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
+    )
 
 
 def _load_validation_context(
@@ -377,9 +433,7 @@ def _load_validation_context(
 
     import lanelet2
     import lxml.etree as ET
-    from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
 
-    from .projection import latlon_to_lanelet2_origin
     from .road_lanelet_geo_mapping import (
         GeoRoadLaneletMapping,
         _cache_path_for,
@@ -420,9 +474,25 @@ def _load_validation_context(
         print("  WARNING: Cannot parse lat_0/lon_0 from geoReference; skipping.")
         return None
 
-    origin = latlon_to_lanelet2_origin(frame.origin_lat, frame.origin_lon)
-    projector = MGRSProjector(origin)
+    # Resolve the projector the same way the converter does. Importing
+    # .projection_resolver also registers the autoware extension types, which
+    # has to happen before the map is loaded.
+    resolved = _resolve_analysis_projection(
+        effective_osm, frame.origin_lat, frame.origin_lon
+    )
+    projector = resolved.make_projector()
     lanelet_map = lanelet2.io.load(str(effective_osm), projector)
+
+    offset_x, offset_y = frame.offset_x, frame.offset_y
+    if not frame.offset_is_exact:
+        # The offset was probed by projecting the frame origin, and that probe
+        # belongs to whichever projector actually loaded the map: a
+        # TransverseMercator origin is the projection centre and lands on
+        # (0, 0), where an MGRSProjector reports its grid-square offset.
+        fwd = projector.forward(
+            lanelet2.core.GPSPoint(frame.origin_lat, frame.origin_lon, 0.0)
+        )
+        offset_x, offset_y = fwd.x, fwd.y
 
     # Restore TrafficLightConfig from the mapping sidecar (if saved)
     tl_config = None
@@ -439,8 +509,8 @@ def _load_validation_context(
 
     return ValidationContext(
         lanelet_map=lanelet_map,
-        offset_x=frame.offset_x,
-        offset_y=frame.offset_y,
+        offset_x=offset_x,
+        offset_y=offset_y,
         conv_mapping=conv_mapping,
         effective_osm=effective_osm,
         xodr_root=tree.getroot(),

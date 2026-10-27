@@ -25,6 +25,7 @@ from autoware_lanelet2_to_opendrive.projection_resolver import (
     geo_reference_for_origin,
     resolve_projection,
     resolve_projection_from_hydra,
+    resolve_projection_from_map_info,
 )
 
 
@@ -341,3 +342,43 @@ def test_map_projector_info_malformed_field_raises(tmp_path):
     osm = _write_map(tmp_path, projector_info="projector_type: MGRS\nmgrs_grid: 54\n")
     with pytest.raises(ValueError, match="'mgrs_grid' must be a string"):
         resolve_projection(_cfg({}), osm)
+
+
+# ---------------------------------------------------------------------------
+# resolve_projection_from_map_info -- resolution without a Hydra config
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_from_map_info_returns_none_without_file(tmp_path):
+    """No projector-info file means "nothing declared", not an error.
+
+    Callers that have no Hydra config to fall back on use the ``None`` to
+    keep whatever origin they already had.
+    """
+    assert resolve_projection_from_map_info(_write_map(tmp_path)) is None
+
+
+def test_resolve_from_map_info_returns_none_for_unsupported_type(tmp_path):
+    """An unsupported projector_type is also "nothing this layer can do"."""
+    osm = _write_map(tmp_path, projector_info="projector_type: LocalCartesian\n")
+    assert resolve_projection_from_map_info(osm) is None
+
+
+def test_resolve_from_map_info_matches_resolve_projection(tmp_path):
+    """The config-free helper and the Hydra entry point resolve one frame.
+
+    This is the property that makes the helper usable by the cached
+    map-resolution path and the post-conversion analysis step: what they
+    resolve has to be what the converter itself resolved.
+    """
+    osm = _write_map(
+        tmp_path, projector_info="projector_type: MGRS\nmgrs_grid: 54SUE\n"
+    )
+    from_map_info = resolve_projection_from_map_info(osm)
+    from_hydra_entry_point = resolve_projection(_cfg({}), osm)
+
+    assert from_map_info is not None
+    assert from_map_info.mgrs_code == from_hydra_entry_point.mgrs_code
+    assert from_map_info.origin_lat == from_hydra_entry_point.origin_lat
+    assert from_map_info.origin_lon == from_hydra_entry_point.origin_lon
+    assert from_map_info.geo_reference == from_hydra_entry_point.geo_reference
