@@ -361,7 +361,6 @@ def _capture_cached_conversion_config(tmp_path, monkeypatch, osm, **kwargs):
     return captured["config"]
 
 
-@pytest.mark.xfail(strict=True, reason="#547: the cached path rejects TM instead")
 def test_map_resolver_uses_tm_projector_info(tmp_path, monkeypatch):
     """The cached path must resolve the frame like the Hydra path does.
 
@@ -369,7 +368,7 @@ def test_map_resolver_uses_tm_projector_info(tmp_path, monkeypatch):
     read ``map_projector_info.yaml`` (issue #547), so a TransverseMercator
     map had to be rejected outright rather than silently mis-projected as
     MGRS. The origin, scale factor and geoReference handed to the converter
-    must come from the projector-info file instead.
+    now come from the projector-info file instead.
     """
     origin = _capture_cached_conversion_config(
         tmp_path, monkeypatch, TMERC_MINI_OSM
@@ -382,19 +381,16 @@ def test_map_resolver_uses_tm_projector_info(tmp_path, monkeypatch):
     assert origin.mgrs_code is None
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the cached path hands lanelet2.io.load a Path, not a str"
-)
 def test_map_resolver_without_projector_info_keeps_legacy_origin(tmp_path, monkeypatch):
     """Without a projector-info file the legacy mgrs_code origin still wins.
 
     Reaching the converter at all is part of what this pins: the cached path
-    calls ``lanelet2.io.load(lanelet2_path, projector)`` with a
+    used to call ``lanelet2.io.load(lanelet2_path, projector)`` with a
     :class:`pathlib.Path`, and the Boost.Python binding only accepts a
-    ``std::string``, so every cached conversion raises
-    ``Boost.Python.ArgumentError`` before the config is ever used. Nothing
-    exercised it until now, because the TransverseMercator rejection fired
-    first for the only map the suite sent down this path.
+    ``std::string``, so every cached conversion raised
+    ``Boost.Python.ArgumentError`` before the config was ever used. Nothing
+    exercised it, because the TransverseMercator rejection fired first for
+    the only map the suite sent down this path.
     """
     osm = tmp_path / "lanelet2_map.osm"
     osm.write_bytes(TMERC_MINI_OSM.read_bytes())  # no sibling projector info
@@ -427,7 +423,6 @@ def test_map_resolver_non_mapping_yaml_raises_value_error(tmp_path, contents):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="#547: the analysis step assumes MGRS")
 def test_analysis_projection_resolved_from_projector_info():
     """``analyze`` must not assume MGRS when reloading the OSM.
 
@@ -436,7 +431,7 @@ def test_analysis_projection_resolved_from_projector_info():
     TransverseMercator map with an ``MGRSProjector`` puts the lanelets in a
     rotated, rescaled frame -- at lon 139.78 in UTM zone 54 that is about
     0.7 deg of meridian convergence plus a scale mismatch -- so the
-    comparison would be between mismatched frames.
+    comparison was between mismatched frames.
     """
     from autoware_lanelet2_to_opendrive.analyze_xodr import (
         _resolve_analysis_projection,
@@ -457,3 +452,25 @@ def test_analysis_projection_resolved_from_projector_info():
     )
     assert fwd.x == pytest.approx(0.0, abs=1e-6)
     assert fwd.y == pytest.approx(0.0, abs=1e-6)
+
+
+def test_analysis_projection_falls_back_to_mgrs(tmp_path):
+    """Without a projector-info file the historical MGRS frame is kept.
+
+    That fallback stays correct for MGRS maps because ``MGRSProjector``
+    ignores its origin and emits coordinates relative to each point's own
+    100 km grid square.
+    """
+    from autoware_lanelet2_to_opendrive.analyze_xodr import (
+        _resolve_analysis_projection,
+    )
+
+    osm = tmp_path / "lanelet2_map.osm"
+    osm.write_text("", encoding="utf-8")
+
+    # lat_0/lon_0 of an MGRS geoReference (see test_mgrs_georeference.py).
+    resolved = _resolve_analysis_projection(osm, 0.0, 141.0)
+
+    assert resolved.projector_type == "MGRS"
+    assert resolved.origin_lat == 0.0
+    assert resolved.origin_lon == 141.0
