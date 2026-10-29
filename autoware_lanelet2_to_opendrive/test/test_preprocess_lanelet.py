@@ -106,7 +106,6 @@ class TestPreprocessOperationOriginValidation:
         assert _points(mgrs_code="53SPU") == expected
         assert _points(origin=LatLonOrigin(lat=-33.123456, lon=151.234567)) == expected
 
-    @pytest.mark.xfail(strict=True, reason="preprocessing assumes MGRS")
     def test_load_map_honours_a_declared_transverse_mercator_projector(self, tmp_path):
         """A TransverseMercator map must not be preprocessed as MGRS.
 
