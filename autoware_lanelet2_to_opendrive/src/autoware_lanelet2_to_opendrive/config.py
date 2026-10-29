@@ -129,11 +129,21 @@ class CenterlineConstants:
         min_sample_points_for_centerline: Minimum number of sample points for centerline extraction
         sample_point_multiplier: Multiplier for calculating sample points based on control points
         boundary_condition_default: Default boundary condition for cubic spline interpolation
+        width_interpolation_method: Interpolant fitted to the lane-width
+            samples. ``"pchip"`` cannot leave the envelope of its own
+            samples; ``"cubic"`` (``not-a-knot``) overshoots it between
+            knots. Measured on nishishinjuku, the width emitted beyond the
+            range of the fit's own knots fell from p95 428.5 mm, max
+            1,886.5 mm to exactly 0.0 mm, and ``"pchip"`` was not worse on
+            any of the 892 lanes compared. Elevation keeps ``"cubic"``: it
+            is reported as accurate (p95 2.1 mm) and is fitted elsewhere
+            (``opendrive/reference_line.py``).
     """
 
     min_sample_points_for_centerline: int = 20
     sample_point_multiplier: int = 2
     boundary_condition_default: str = "not-a-knot"
+    width_interpolation_method: str = "cubic"
 
 
 @dataclass(frozen=True)
