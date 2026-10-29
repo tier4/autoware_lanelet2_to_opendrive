@@ -26,6 +26,7 @@ from autoware_lanelet2_to_opendrive.projection_resolver import (
     geo_reference_for_origin,
     resolve_projection,
     resolve_projection_from_hydra,
+    resolve_projection_from_osm,
 )
 
 
@@ -263,6 +264,34 @@ def test_resolve_projection_derives_the_grid_from_the_osm_nodes(tmp_path, recwar
     assert resolved.mgrs_code == "54SUE"
     assert resolved.geo_reference == mgrs_to_proj_string("54SUE")
     assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
+
+
+@pytest.mark.xfail(strict=True, reason="derivation parser stricter than the loader")
+def test_osm_derivation_tolerates_a_double_hyphen_comment(tmp_path):
+    """The derivation parser must not be stricter than the map loader.
+
+    ``walkway_mini.osm`` carries a ``--`` inside an XML comment: lanelet2's
+    loader accepts it and strict lxml rejects it as "Double hyphen within
+    comment". A map the converter can convert must have a derivable frame,
+    so the parser recovers instead of giving up.
+    """
+    osm = tmp_path / "lanelet2_map.osm"
+    osm.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic fixture -- note the double hyphen
+-->
+<osm version="0.6">
+  <node id="1" lat="35.68856" lon="139.69260"/>
+</osm>
+""",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_projection_from_osm(osm)
+
+    assert resolved is not None, "a loadable map must have a derivable frame"
+    assert resolved.mgrs_code == "54SUE"
 
 
 def test_osm_derivation_wins_over_the_legacy_origin_keys(tmp_path):
