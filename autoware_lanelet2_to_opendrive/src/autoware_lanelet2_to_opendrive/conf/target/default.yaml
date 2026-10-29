@@ -49,4 +49,6 @@ width_estimation:
   max_samples: 50
 
   # Target interval between width samples (meters)
-  default_sample_interval: 5.0  # 5m intervals
+  # 2 m keeps the emitted <width> envelope within a few mm of the source
+  # boundary; 5 m leaves a p95 of ~74 mm and 10 m ~153 mm on Nishishinjuku.
+  default_sample_interval: 2.0  # 2m intervals
