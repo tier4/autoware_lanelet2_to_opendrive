@@ -10,7 +10,7 @@ from enum import Enum
 
 # Import autoware extensions before lanelet2 to ensure proper registration
 import lanelet2
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from .config import DEFAULT_CONFIG
 from .lanelet import (
@@ -291,13 +291,16 @@ class PreprocessOperation:
     A ``TransverseMercator`` origin is *not* inert, but it comes from the
     projector-info file, never from the keys below.
 
-    The keys are therefore optional. They may still be given, for configs
-    that carry one, in either of two mutually exclusive ways:
+    The keys are therefore **ignored**, with a warning, and kept only so
+    that an existing preprocessing config and the ``--mgrs`` / ``--origin``
+    CLI flags still load. They may be given in either of two mutually
+    exclusive ways:
 
     1. ``mgrs_code``: a valid MGRS grid reference
     2. ``origin``: an exact lat/lon :class:`LatLonOrigin`
 
-    Specifying both raises a ValueError.
+    Specifying both raises a ValueError. A map config never carries them:
+    there they are removed and rejected (#564).
     """
 
     # Input/Output paths
@@ -462,13 +465,12 @@ class PreprocessOperation:
         if origin_config is not None:
             origin = LatLonOrigin(lat=origin_config["lat"], lon=origin_config["lon"])
 
-        # Support both mgrs_code (legacy) and mgrs_grid (current)
-        mgrs_code = config.get("mgrs_code") or config.get("mgrs_grid") or None
-
+        # No origin is read from a map config: the `mgrs_grid`/`mgrs_code`
+        # keys are removed and rejected (#564), and the frame comes from the
+        # map itself.
         return cls(
             input_map_path=config.get("input_map_path") or "",
             output_map_path=config.get("output_map_path") or "",
-            mgrs_code=mgrs_code,
             origin=origin,
             merge_operations=operations["merge_operations"],
             remove_operations=operations["remove_operations"],
@@ -598,9 +600,9 @@ class LaneletPreprocessor:
         """Load the input Lanelet2 map using MGRS projection.
 
         The frame comes from :func:`~.projection_resolver.resolve_projection`,
-        so the projector is the one the map declares. The config's own origin
-        keys are passed in as the last resort that function falls back to
-        (see :class:`PreprocessOperation`).
+        so the projector is the one the map declares. This config's own
+        ``mgrs_code``/``origin`` are not consulted -- see
+        :class:`PreprocessOperation` for why they never mattered.
 
         Returns:
             Loaded LaneletMap
@@ -617,7 +619,14 @@ class LaneletPreprocessor:
 
         logger.info(f"Loading map from: {input_path}")
 
-        resolved = resolve_projection(self._origin_fallback_cfg(), input_path)
+        if self.config.mgrs_code or self.config.origin is not None:
+            logger.warning(
+                "This preprocessing config declares a projection origin "
+                "(mgrs_code/origin). It is ignored: the frame comes from the "
+                "map's own map_projector_info.yaml or node coordinates, and "
+                "MGRSProjector never read the origin anyway (#564)."
+            )
+        resolved = resolve_projection(OmegaConf.create({"map": {}}), input_path)
         logger.info(
             "Preprocessing in the %s frame (origin lat=%s lon=%s)",
             resolved.projector_type,
@@ -630,24 +639,6 @@ class LaneletPreprocessor:
 
         logger.info(f"Loaded map with {len(self.lanelet_map.laneletLayer)} lanelets")
         return self.lanelet_map
-
-    def _origin_fallback_cfg(self) -> DictConfig:
-        """Shape this config's own origin keys for the resolution layer.
-
-        They are the last resort :func:`resolve_projection` falls back to,
-        after a ``map_projector_info.yaml`` and after the map's own node
-        coordinates -- the same precedence a conversion applies. An empty
-        ``map`` section means "nothing declared here".
-        """
-        map_cfg: dict[str, Any] = {}
-        if self.config.mgrs_code:
-            map_cfg["mgrs_grid"] = self.config.mgrs_code
-        elif self.config.origin is not None:
-            map_cfg["lat_lon"] = {
-                "latitude": self.config.origin.lat,
-                "longitude": self.config.origin.lon,
-            }
-        return OmegaConf.create({"map": map_cfg})
 
     def save_map(self, lanelet_map: lanelet2.core.LaneletMap) -> None:
         """Save the processed Lanelet2 map.

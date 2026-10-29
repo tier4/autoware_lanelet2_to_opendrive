@@ -23,7 +23,6 @@ from pyproj import Transformer
 from autoware_lanelet2_to_opendrive import projection_resolver
 from autoware_lanelet2_to_opendrive.projection_resolver import (
     resolve_projection,
-    resolve_projection_from_hydra,
 )
 
 TEST_DATA_DIR = Path(__file__).parent / "data"
@@ -296,10 +295,22 @@ def test_tm_invalid_scale_factor_raises(tmp_path, scale_factor_yaml):
 # ---------------------------------------------------------------------------
 
 
-def test_no_mgrs_regression():
+def test_no_mgrs_regression(tmp_path):
     """The existing MGRS resolution path is unaffected by TM support."""
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        resolved = resolve_projection_from_hydra(_cfg({"mgrs_grid": "54SUE"}))
+    osm = tmp_path / "lanelet2_map.osm"
+    osm.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="35.68856" lon="139.69260"/>
+</osm>
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "map_projector_info.yaml").write_text(
+        "projector_type: MGRS\nmgrs_grid: 54SUE\n", encoding="utf-8"
+    )
+
+    resolved = resolve_projection(_cfg(), osm)
 
     assert resolved.projector_type == "MGRS"
     assert resolved.scale_factor is None
@@ -311,11 +322,12 @@ def test_no_mgrs_regression():
 def test_tm_yaml_emits_no_deprecation_or_unsupported_warning(recwarn, caplog):
     """A TransverseMercator yaml is a supported, canonical origin source.
 
-    It must neither trigger the legacy-origin-key deprecation nor the
-    "not supported yet" fallback warning, even when explicit keys are set.
+    It must trigger neither a deprecation warning nor the "not supported"
+    error, and it must win over deriving an MGRS frame from the map's own
+    coordinates -- which for this fixture would be ``54SUE``.
     """
     with caplog.at_level(logging.WARNING, logger=projection_resolver.__name__):
-        resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), TMERC_MINI_OSM)
+        resolved = resolve_projection(_cfg(), TMERC_MINI_OSM)
 
     assert resolved.projector_type == "TransverseMercator"
     assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)

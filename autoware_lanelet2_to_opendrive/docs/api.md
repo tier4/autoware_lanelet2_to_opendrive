@@ -36,9 +36,6 @@ module below; the highlighted symbols are re-exported from the top-level
       show_root_heading: true
       heading_level: 4
 
-### `parse_origin_from_config`
-
-::: autoware_lanelet2_to_opendrive.main.parse_origin_from_config
     options:
       show_root_heading: true
       heading_level: 4

@@ -1,27 +1,24 @@
 """Single projector-resolution layer for Lanelet2 -> OpenDRIVE conversion.
 
-Resolves the map's coordinate frame in one place: origin parsing (from a
-``map_projector_info.yaml``, the map's own node coordinates, a Hydra config or
-an :class:`OriginSpec`), projector construction and geoReference PROJ-string
-generation.
+Resolves the map's coordinate frame in one place: the origin (from a
+``map_projector_info.yaml``, the map's own node coordinates, or an
+:class:`OriginSpec` built by a library caller), projector construction and
+geoReference PROJ-string generation.
 
-Exported coordinates are always expressed in the frame the projector itself
-defines; the ``offset`` map config key that used to shift them is gone and is
-rejected if still present (:func:`_reject_offset_key`). The
-``offset_x``/``offset_y``/``offset_z`` fields of :class:`ResolvedProjection`
-remain, at zero, for library callers that build an :class:`OriginSpec`
-directly and for reading back the geoReference of previously exported files.
+A map config declares no frame at all. The ``mgrs_grid`` / ``mgrs_code`` /
+``lat_lon`` / ``offset`` keys that used to are removed, and are rejected if
+still present (:func:`reject_removed_map_keys`, #564). Exported coordinates
+are always expressed in the frame the projector itself defines.
 
-The MGRS / explicit-key paths are a behavior-preserving extraction of logic
-that previously lived inline in ``main.py`` (issue #540): their outputs remain
-byte-identical. TransverseMercator support and the soft deprecation of the
-explicit origin keys were added on top.
+The ``offset_x``/``offset_y``/``offset_z`` fields of
+:class:`ResolvedProjection` remain, at zero, for library callers that build
+an :class:`OriginSpec` directly and for reading back the geoReference of
+previously exported files.
 """
 
 import logging
 import math
 import re
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -39,7 +36,6 @@ from .config import DEFAULT_CONFIG
 from .conversion_config import OriginSpec
 from .map_projector_info import MAP_PROJECTOR_INFO_FILENAME, MapProjectorInfo
 from .projection import (
-    latlon_to_lanelet2_origin,
     latlon_to_proj_string,
     latlon_to_tmerc_proj_string,
     mgrs_grid_with_offset_to_latlon,
@@ -54,43 +50,6 @@ logger = logging.getLogger(__name__)
 #: Autoware's ``map_projection_loader`` writes and compares them.
 _MGRS = "MGRS"
 _TRANSVERSE_MERCATOR = "TransverseMercator"
-
-# Once-per-process guard for the legacy-origin-key logger.warning (the
-# DeprecationWarning is already de-duplicated per call site by the warnings
-# module's default filters).
-_legacy_origin_keys_logged = False
-
-
-def _warn_legacy_origin_keys(stacklevel: int) -> None:
-    """Emit the soft-deprecation notice for the explicit origin keys.
-
-    Soft-deprecation (issue #539): map_projector_info.yaml is the canonical
-    origin source (see :func:`resolve_projection`). Emits a
-    DeprecationWarning (suppressed by default per PEP 565 outside
-    ``__main__``) and, once per process, a logger.warning so CLI users
-    actually see it. Removal is tracked in a future major version (#564).
-
-    Args:
-        stacklevel: Passed to :func:`warnings.warn`, counted from this
-            helper; callers pass ``3`` so the warning points at the code that
-            called the public resolver function.
-    """
-    global _legacy_origin_keys_logged
-    warnings.warn(
-        "Specifying the map origin via 'mgrs_grid'/'lat_lon' config keys is "
-        "deprecated; provide a map_projector_info.yaml next to the .osm map "
-        "instead. This fallback will be removed in a future major version "
-        "(see #564).",
-        DeprecationWarning,
-        stacklevel=stacklevel,
-    )
-    if not _legacy_origin_keys_logged:
-        _legacy_origin_keys_logged = True
-        logger.warning(
-            "Origin resolved via legacy 'mgrs_grid'/'lat_lon' config keys "
-            "(deprecated). Prefer map_projector_info.yaml. See #564."
-        )
-
 
 #: An MGRS code's leading 100 km grid square designator, e.g. ``"54SUE"``.
 _GRID_SQUARE_RE = re.compile(r"^(\d+[A-Z]{3})")
@@ -107,36 +66,49 @@ def _grid_square(mgrs_code: str) -> str:
     return match.group(1) if match else mgrs_code[:5]
 
 
-#: Message for a map config that still declares the removed ``offset`` key.
-#: The key was *subtracted from every exported coordinate*, so quietly
-#: ignoring a declared one would relocate the map by its own magnitude -- and
-#: the ``map_projector_info.yaml`` path did exactly that, because it never
-#: consulted the key at all.
-_OFFSET_REMOVED_MESSAGE = (
-    "The map config key 'offset' is no longer supported: exported coordinates "
-    "are always expressed in the frame the projector itself defines. Remove "
-    "the 'offset' block from the map config -- the exported coordinates will "
-    "move by exactly the offset you removed (see #564)."
-)
+#: The map config keys that used to declare the coordinate frame, and what
+#: replaced each one. They are rejected rather than ignored: a config naming
+#: a grid square the map is not in would otherwise keep converting while the
+#: geoReference it names no longer had any effect, and ``offset`` was
+#: *subtracted from every exported coordinate*, so ignoring it relocated the
+#: map by its own magnitude.
+_REMOVED_MAP_KEYS: dict[str, str] = {
+    "mgrs_grid": (
+        "the coordinate frame now comes from a map_projector_info.yaml next "
+        "to the .osm map, or from the map's own node coordinates"
+    ),
+    "mgrs_code": (
+        "the coordinate frame now comes from a map_projector_info.yaml next "
+        "to the .osm map, or from the map's own node coordinates"
+    ),
+    "lat_lon": (
+        "the coordinate frame now comes from a map_projector_info.yaml next "
+        "to the .osm map, or from the map's own node coordinates"
+    ),
+    "offset": (
+        "exported coordinates are always expressed in the frame the "
+        "projector itself defines; removing the block moves them by exactly "
+        "the offset it declared"
+    ),
+}
 
 
 def reject_removed_map_keys(map_cfg: DictConfig) -> None:
-    """Reject map config keys that no longer exist."""
-    return None
+    """Reject map config keys that no longer declare anything.
 
-
-def _reject_offset_key(map_cfg: DictConfig) -> None:
-    """Reject a map config that still declares the removed ``offset`` key.
-
-    Called from every resolution entry point, including the
-    ``map_projector_info.yaml`` path, so the key cannot be silently dropped
-    on any of them.
+    Args:
+        map_cfg: The ``map`` section of a Hydra config.
 
     Raises:
-        ValueError: If ``map_cfg`` declares a non-null ``offset``.
+        ValueError: If any key in :data:`_REMOVED_MAP_KEYS` is present and
+            not null, naming the key and what replaced it (see #564).
     """
-    if "offset" in map_cfg and map_cfg.offset is not None:
-        raise ValueError(_OFFSET_REMOVED_MESSAGE)
+    for key, replacement in _REMOVED_MAP_KEYS.items():
+        if key in map_cfg and map_cfg[key] is not None:
+            raise ValueError(
+                f"The map config key {key!r} is no longer supported: "
+                f"{replacement}. Remove it from the map config (see #564)."
+            )
 
 
 def _mgrs_geo_reference(mgrs_code: str, offset_x: float, offset_y: float) -> str:
@@ -233,108 +205,6 @@ class ResolvedProjection:
         if self.mgrs_code is not None:
             return _mgrs_geo_reference(self.mgrs_code, self.offset_x, self.offset_y)
         return geo_reference_for_origin(self.to_origin_spec())
-
-
-def resolve_projection_from_hydra(cfg: DictConfig) -> ResolvedProjection:
-    """Resolve the coordinate frame from the explicit Hydra origin keys.
-
-    Deprecated entry point: emits the legacy-origin-key deprecation notice
-    (see :func:`_warn_legacy_origin_keys`). Prefer :func:`resolve_projection`
-    with a ``map_projector_info.yaml`` next to the map. See
-    :func:`_resolve_from_explicit_keys` for the accepted keys and errors.
-    """
-    resolved = _resolve_from_explicit_keys(cfg)
-    _warn_legacy_origin_keys(stacklevel=3)
-    return resolved
-
-
-def _resolve_from_explicit_keys(cfg: DictConfig) -> ResolvedProjection:
-    """Resolve the coordinate frame from a Hydra config (no deprecation notice).
-
-    Supports three mutually exclusive origin specifications (identical to the
-    previous ``parse_origin_from_config`` behavior):
-
-    1. ``mgrs_grid``: MGRS grid code (e.g. ``"54SUE"``).
-    2. ``lat_lon``: ``{latitude, longitude, altitude}``.
-
-    The legacy ``mgrs_code`` map field is accepted as an alias for
-    ``mgrs_grid``. The removed ``offset`` key is rejected (see
-    :func:`_reject_offset_key`).
-
-    Args:
-        cfg: Hydra configuration object with a ``map`` section.
-
-    Returns:
-        A :class:`ResolvedProjection`, always with a zero offset.
-
-    Raises:
-        ValueError: If the origin specification is missing, ambiguous, or
-            invalid, or if ``offset`` is declared.
-    """
-    map_cfg = cfg.map
-    _reject_offset_key(map_cfg)
-
-    has_mgrs_grid = "mgrs_grid" in map_cfg and map_cfg.mgrs_grid is not None
-    has_mgrs_code = (
-        "mgrs_code" in map_cfg and map_cfg.mgrs_code is not None
-    )  # Legacy support
-    has_lat_lon = "lat_lon" in map_cfg and map_cfg.lat_lon is not None
-
-    # Support legacy mgrs_code field
-    if has_mgrs_code and not has_mgrs_grid:
-        has_mgrs_grid = True
-        map_cfg.mgrs_grid = map_cfg.mgrs_code
-
-    # Count how many base methods are specified.
-    specified_methods = sum([has_mgrs_grid, has_lat_lon])
-
-    if specified_methods == 0:
-        raise ValueError("Origin must be specified using one of: mgrs_grid, or lat_lon")
-
-    if specified_methods > 1:
-        raise ValueError(
-            "Multiple origin specification methods detected. "
-            "Please specify only one of: mgrs_grid, or lat_lon"
-        )
-
-    if has_mgrs_grid:
-        mgrs_grid = map_cfg.mgrs_grid
-
-        logger.info(f"Using MGRS grid origin: {mgrs_grid}")
-        origin = mgrs_to_lanelet2_origin(mgrs_grid)
-        origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(mgrs_grid, 0.0, 0.0)
-        logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-        return ResolvedProjection(
-            origin=origin,
-            mgrs_code=mgrs_grid,
-            origin_lat=origin_lat,
-            origin_lon=origin_lon,
-        )
-
-    # has_lat_lon
-    latlon_cfg = map_cfg.lat_lon
-    latitude = latlon_cfg.latitude
-    longitude = latlon_cfg.longitude
-    altitude = latlon_cfg.get("altitude", 0.0)
-
-    logger.info(
-        f"Using lat/lon origin: latitude={latitude}, longitude={longitude}, "
-        f"altitude={altitude}"
-    )
-    origin = latlon_to_lanelet2_origin(latitude, longitude, altitude)
-
-    # For a lat/lon origin, derive an approximate MGRS grid for the PROJ
-    # string by converting lat/lon back to MGRS and keeping the grid zone.
-    m = mgrs_lib.MGRS()
-    mgrs_grid = _grid_square(m.toMGRS(latitude, longitude))
-
-    logger.info(f"Derived MGRS grid for PROJ string: {mgrs_grid}")
-    return ResolvedProjection(
-        origin=origin,
-        mgrs_code=mgrs_grid,
-        origin_lat=latitude,
-        origin_lon=longitude,
-    )
 
 
 def _resolve_transverse_mercator(
@@ -544,25 +414,19 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
     Resolution order:
 
     1. a ``map_projector_info.yaml`` next to ``input_map_path`` declaring a
-       supported projector: it drives the frame and any explicit ``cfg.map``
-       origin keys are ignored;
+       supported projector;
     2. no such file: the frame is derived from the map's own node
-       coordinates (:func:`resolve_projection_from_osm`). This is also a
-       non-deprecated route, so no deprecation notice is emitted, and it
-       takes precedence over the explicit keys -- ``MGRSProjector`` emits
-       coordinates relative to each point's own grid square whatever origin
-       it is given, so a key naming a different square only ever mislabelled
-       the geoReference;
-    3. neither available: the explicit origin keys, with the soft
-       deprecation notice.
+       coordinates (:func:`resolve_projection_from_osm`).
 
-    One case skips step 2 deliberately: a ``map_projector_info.yaml`` with a
-    not-yet-supported ``projector_type``. The map declares a projection this
-    layer cannot build, and deriving an MGRS frame instead would silently
-    export in a different projection from the one declared. The explicit
-    keys are used there *without* the deprecation notice, since the user
-    already provided the yaml and has no non-deprecated way to resolve the
-    origin; a warning says the keys remain required.
+    There is no third step. The ``mgrs_grid`` / ``mgrs_code`` / ``lat_lon``
+    config keys that used to be one are gone, and ``cfg`` is now inspected
+    only to reject them (:func:`reject_removed_map_keys`) rather than to
+    resolve anything.
+
+    A ``map_projector_info.yaml`` whose ``projector_type`` this layer cannot
+    build does **not** fall through to step 2: the map declares a projection,
+    and deriving an MGRS frame instead would export it in a different one.
+    That raises, naming the type.
 
     Args:
         cfg: Hydra configuration object with a ``map`` section.
@@ -573,44 +437,40 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
         A :class:`ResolvedProjection`.
 
     Raises:
-        ValueError: If the projector-info file is malformed, if the removed
-            ``offset`` key is declared, or the frame can be derived from
-            neither the map nor the explicit origin keys.
+        ValueError: If the map config declares a removed key, if the
+            projector-info file is malformed or declares an unsupported
+            ``projector_type``, or if the frame cannot be derived from the
+            map itself.
     """
-    # Before the branch, not inside it: the projector-info path never read
-    # this key, so a map that declared one used to be converted by its own
-    # magnitude away from where the config said.
-    _reject_offset_key(cfg.map)
+    reject_removed_map_keys(cfg.map)
 
     info_path = Path(input_map_path).parent / MAP_PROJECTOR_INFO_FILENAME
     if info_path.is_file():
         info = MapProjectorInfo.from_yaml(info_path)
         resolved = _resolve_from_map_projector_info(info, info_path)
         if resolved is not None:
-            logger.info(
-                "Using %s as the canonical origin source (explicit origin keys, "
-                "if any, are ignored)",
-                info_path,
-            )
+            logger.info("Using %s as the origin source", info_path)
             return resolved
-        logger.warning(
-            "projector_type %r in %s is not supported yet; the explicit origin "
-            "keys ('mgrs_grid'/'lat_lon') remain required for this map",
-            info.projector_type,
-            info_path,
+        raise ValueError(
+            f"{info_path}: projector_type {info.projector_type!r} is not "
+            "supported. Supported types are "
+            f"{_MGRS!r} and {_TRANSVERSE_MERCATOR!r}. The frame is not "
+            "derived from the map instead, because that would export it in a "
+            "projection it does not declare."
         )
-        return _resolve_from_explicit_keys(cfg)
 
     resolved = resolve_projection_from_osm(input_map_path)
     if resolved is not None:
         logger.info(
             "Derived the coordinate frame from %s's own node coordinates "
-            "(MGRS grid square %s); explicit origin keys, if any, are ignored",
+            "(MGRS grid square %s)",
             input_map_path,
             resolved.mgrs_code,
         )
         return resolved
 
-    resolved = _resolve_from_explicit_keys(cfg)
-    _warn_legacy_origin_keys(stacklevel=3)
-    return resolved
+    raise ValueError(
+        f"Cannot determine the coordinate frame of {input_map_path}: it has "
+        f"no sibling {MAP_PROJECTOR_INFO_FILENAME} and no usable node "
+        "coordinates. See the log above for why derivation declined."
+    )

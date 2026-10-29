@@ -26,7 +26,6 @@ from lanelet2.routing import RoutingGraph
 from autoware_lanelet2_to_opendrive.projection_resolver import (
     geo_reference_for_origin,
     resolve_projection,
-    resolve_projection_from_hydra,
 )
 from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
@@ -1429,47 +1428,6 @@ def convert_lanelet2_to_opendrive(
 
     converter = _Lanelet2ToOpenDRIVEConverter(lanelet_map, config)
     return converter.convert()
-
-
-def parse_origin_from_config(
-    cfg: DictConfig,
-) -> Tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
-    """
-    Parse origin specification from Hydra config with mutual exclusion validation.
-
-    Thin wrapper around
-    :func:`autoware_lanelet2_to_opendrive.projection_resolver.resolve_projection_from_hydra`
-    kept for backward compatibility. New code should use the projector-resolution
-    layer directly.
-
-    Supports two methods of origin specification (mutually exclusive):
-    1. mgrs_grid: Simple MGRS grid code (e.g., "54SUE")
-    2. lat_lon: Latitude/longitude {latitude, longitude, altitude}
-
-    Args:
-        cfg: Hydra configuration object with map settings
-
-    Returns:
-        Tuple of (lanelet2.io.Origin, mgrs_code_for_proj_string, origin_lat, origin_lon,
-                  offset_x, offset_y, offset_z)
-        The mgrs_code_for_proj_string is used for generating the OpenDRIVE geoReference
-        The origin_lat and origin_lon are the actual origin coordinates (with offset applied)
-        The offset values are always zero: the 'offset' map config key was
-        removed and exported coordinates are in the projector's own frame.
-
-    Raises:
-        ValueError: If origin specification is invalid or multiple methods are specified
-    """
-    resolved = resolve_projection_from_hydra(cfg)
-    return (
-        resolved.origin,
-        resolved.mgrs_code,
-        resolved.origin_lat,
-        resolved.origin_lon,
-        resolved.offset_x,
-        resolved.offset_y,
-        resolved.offset_z,
-    )
 
 
 def preprocess_and_convert_with_hydra(
