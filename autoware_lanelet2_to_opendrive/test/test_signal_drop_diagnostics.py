@@ -30,8 +30,6 @@ import logging
 from typing import List, Optional
 from unittest.mock import MagicMock, Mock, patch
 
-import pytest
-
 from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
 from autoware_lanelet2_to_opendrive.opendrive import (
     signals_and_controllers as sac_module,
@@ -124,7 +122,6 @@ def _warnings(caplog) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="signal drops are silent; 2026-10-23 report")
 def test_a_map_with_no_traffic_light_elements_says_so(caplog):
     """Condition 1: the map carries no trafficLights regulatory element."""
     with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
@@ -134,11 +131,10 @@ def test_a_map_with_no_traffic_light_elements_says_so(caplog):
     messages = _warnings(caplog)
     assert messages, "a map that can emit no signal at all said nothing"
     assert any(
-        "no trafficLights regulatory element" in m.lower() for m in messages
+        "no trafficlights regulatory element" in m.lower() for m in messages
     ), f"the reason is not named: {messages}"
 
 
-@pytest.mark.xfail(strict=True, reason="signal drops are silent; 2026-10-23 report")
 def test_a_traffic_light_with_no_mapped_road_is_reported(caplog):
     """Condition 3: none of the light's lanelets belongs to a road."""
     with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
@@ -152,7 +148,6 @@ def test_a_traffic_light_with_no_mapped_road_is_reported(caplog):
     assert any("1" in m for m in messages), f"the count is not named: {messages}"
 
 
-@pytest.mark.xfail(strict=True, reason="signal drops are silent; 2026-10-23 report")
 def test_a_traffic_light_with_only_empty_linestrings_is_reported(caplog):
     """Condition 4: every linestring of the light is empty."""
     light_map = {9000: (_traffic_light(empty_linestrings=True), [100])}
@@ -163,7 +158,6 @@ def test_a_traffic_light_with_only_empty_linestrings_is_reported(caplog):
     assert _warnings(caplog), "a light with no geometry was dropped silently"
 
 
-@pytest.mark.xfail(strict=True, reason="signal drops are silent; 2026-10-23 report")
 def test_the_carla_junction_filter_reports_what_it_removed(caplog):
     """Condition 2: ``exclude_non_junction_signals`` removed the light."""
     with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
@@ -179,7 +173,6 @@ def test_the_carla_junction_filter_reports_what_it_removed(caplog):
     ), f"the filter is not named as the reason: {messages}"
 
 
-@pytest.mark.xfail(strict=True, reason="signal drops are silent; 2026-10-23 report")
 def test_the_default_position_fallback_is_reported(caplog):
     """The ``(s=0, t=-4)`` fallback is the reported 'all signals in one spot'."""
     light = _traffic_light()
