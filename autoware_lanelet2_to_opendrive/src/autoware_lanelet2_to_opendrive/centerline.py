@@ -550,7 +550,11 @@ def estimate_lanelet_width_with_reference_line(
         )
 
     # Create 1D cubic spline from (s_road, width) pairs
-    spline = CubicSpline1D(arc_lengths_array, widths_array, bc_type="not-a-knot")
+    spline = CubicSpline1D(
+        arc_lengths_array,
+        widths_array,
+        method=DEFAULT_CONFIG.centerline.width_interpolation_method,
+    )
 
     return Width1DSplineAdapter(spline)
 
@@ -621,6 +625,7 @@ def estimate_lanelet_width_as_spline(
         arc_lengths_array,
         widths_array,
         bc_type=DEFAULT_CONFIG.centerline.boundary_condition_default,
+        method=DEFAULT_CONFIG.centerline.width_interpolation_method,
     )
 
     return Width1DSplineAdapter(width_spline_1d)
