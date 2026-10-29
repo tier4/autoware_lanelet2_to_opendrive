@@ -1,5 +1,6 @@
 """OpenDRIVE signals and controllers management."""
 
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import List, Dict, Set, Optional, TYPE_CHECKING
@@ -20,6 +21,46 @@ from ..conversion_config import SignalConfig, TrafficLightConfig
 if TYPE_CHECKING:
     from .road import Road
     from .reference_line import ReferenceLine
+
+logger = logging.getLogger(__name__)
+
+# A traffic light that reaches none of the OpenDRIVE output leaves no
+# trace in the map, so each way of losing one is counted and named.
+# The 2026-10-23 report described exactly this symptom on two maps and
+# the log could not distinguish the causes.
+_DROP_REASONS = {
+    "no_junction_lanelet": (
+        "excluded by exclude_non_junction_signals: none of their lanelets is "
+        "in a junction"
+    ),
+    "no_road": "none of their lanelets belongs to an OpenDRIVE road",
+    "no_geometry": "every one of their light-bulb linestrings is empty",
+}
+
+
+def _warn_default_position(traffic_light, road_id: int, reason: str) -> None:
+    """Report a signal placed at the default ``(s=0, t=-4)`` position.
+
+    Every signal that takes this path lands on the same spot, which is
+    the 'all signals in one place' symptom of the 2026-10-23 report. The
+    fallback itself is deliberate -- a signal at the wrong ``s`` is
+    better than a failed conversion -- but it was silent, so a map where
+    it fired for every signal looked like a successful run.
+
+    Args:
+        traffic_light: The Lanelet2 regulatory element being positioned.
+        road_id: OpenDRIVE road the signal is being placed on.
+        reason: Why the real position could not be computed.
+    """
+    light_id = getattr(traffic_light, "id", "?")
+    logger.warning(
+        "Traffic light %s on road %s falls back to the default position (s=0, "
+        "t=-4) because %s; every signal that takes this path lands on the same "
+        "spot",
+        light_id,
+        road_id,
+        reason,
+    )
 
 
 @dataclass
@@ -161,10 +202,18 @@ class SignalsAndControllers:
         traffic_light_map = filter_regulatory_element_by_type(
             lanelet_map, element_type="trafficLights"
         )
+        if not traffic_light_map:
+            logger.warning(
+                "The map carries no trafficLights regulatory element, so no "
+                "<signal> and no <controller> will be emitted. Check that the "
+                "map's traffic lights are modelled as regulatory elements of "
+                "subtype 'traffic_light'."
+            )
 
         # Step 2: Process each traffic light and determine affected roads
         signal_id_counter = 0
         controller_id_counter = 0
+        dropped: Dict[str, List[int]] = {key: [] for key in _DROP_REASONS}
 
         # Pre-build a dict for O(1) road lookup inside the signal loop.
         road_id_to_road: Dict[int, "Road"] = (
@@ -183,6 +232,7 @@ class SignalsAndControllers:
                 )
                 if not has_junction_lanelet:
                     # This signal is not associated with any junction lanelet, skip it
+                    dropped["no_junction_lanelet"].append(lanelet2_traffic_light_id)
                     continue
 
             # Determine which roads are affected by this traffic light
@@ -194,6 +244,7 @@ class SignalsAndControllers:
 
             if not affected_roads:
                 # No roads found for this traffic light, skip
+                dropped["no_road"].append(lanelet2_traffic_light_id)
                 continue
 
             # Create signals for each LineString × road combination
@@ -230,7 +281,9 @@ class SignalsAndControllers:
                     break
 
             if representative_linestring is None:
-                continue  # All linestrings empty, skip this traffic light
+                # All linestrings empty, skip this traffic light
+                dropped["no_geometry"].append(lanelet2_traffic_light_id)
+                continue
 
             for road_id, (
                 road_lanelets_with_signal,
@@ -313,7 +366,42 @@ class SignalsAndControllers:
                 result.add_controller(controller)
                 controller_id_counter += 1
 
+        SignalsAndControllers._report_dropped_traffic_lights(
+            dropped, total=len(traffic_light_map)
+        )
         return result
+
+    @staticmethod
+    def _report_dropped_traffic_lights(
+        dropped: Dict[str, List[int]], total: int
+    ) -> None:
+        """Name every traffic light that produced no ``<signal>``.
+
+        A drop is invisible in the output -- the map simply has fewer
+        signals than the author put in it -- so the count and the reason
+        are logged at ``WARNING`` whenever anything was lost, and at
+        ``DEBUG`` otherwise so that a clean conversion stays quiet.
+
+        Args:
+            dropped: Lanelet2 traffic-light ids per reason key.
+            total: Traffic lights found in the map before filtering.
+        """
+        lost = sum(len(ids) for ids in dropped.values())
+        if lost == 0:
+            logger.debug("All %d traffic lights produced at least one <signal>", total)
+            return
+
+        parts = [
+            f"{len(ids)} because {_DROP_REASONS[key]} (ids: {sorted(ids)})"
+            for key, ids in dropped.items()
+            if ids
+        ]
+        logger.warning(
+            "Dropped %d of %d traffic lights, which emit no <signal>: %s",
+            lost,
+            total,
+            "; ".join(parts),
+        )
 
     def __len__(self) -> int:
         """Return total number of signals and controllers."""
@@ -410,6 +498,7 @@ class SignalsAndControllers:
                 t: half of total lane width at s (signed by lane side)
         """
         if len(light_linestring) == 0:
+            _warn_default_position(traffic_light, road_id, "its linestring is empty")
             return (0.0, -4.0)
 
         # Determine the projection point: prefer stop line centroid, fallback to linestring centroid
@@ -433,6 +522,7 @@ class SignalsAndControllers:
         # Get lanelet IDs for this road
         lanelet_ids = road_lanelet_mapping.get_lanelets_for_road(road_id)
         if not lanelet_ids:
+            _warn_default_position(traffic_light, road_id, "the road has no lanelets")
             return (0.0, -4.0)
 
         # Reuse the reference line already fitted for this road, if the caller
@@ -455,6 +545,11 @@ class SignalsAndControllers:
                     continue
 
             if not lanelets:
+                _warn_default_position(
+                    traffic_light,
+                    road_id,
+                    "none of the road's lanelets could be loaded",
+                )
                 return (0.0, -4.0)
 
         try:
@@ -479,8 +574,8 @@ class SignalsAndControllers:
 
             return (s, t)
         except Exception as e:
-            print(
-                f"Warning: Failed to calculate signal position for traffic light {traffic_light.id}: {e}"
+            _warn_default_position(
+                traffic_light, road_id, f"the reference-line fit raised {e!r}"
             )
             return (0.0, -4.0)
 
