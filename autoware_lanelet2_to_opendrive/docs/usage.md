@@ -159,20 +159,7 @@ mgrs_grid: 54SUE815501
 
 The legacy field name `mgrs_code` is also accepted.
 
-#### Method 2 — MGRS grid + offset
-
-```yaml
-mgrs_grid: 54SUE
-offset:
-  x: 81655.73
-  y: 50137.43
-  z: 42.49998
-```
-
-The offset is **subtracted** from every coordinate during export, so the
-resulting `.xodr` lives in a local frame anchored at the offset point.
-
-#### Method 3 — Latitude / Longitude
+#### Method 2 — Latitude / Longitude
 
 ```yaml
 lat_lon:
@@ -186,8 +173,17 @@ automatically.
 
 The validator in
 [`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
-rejects combinations that mix `mgrs_grid` and `lat_lon`, or use `offset`
-without `mgrs_grid`.
+rejects combinations that mix `mgrs_grid` and `lat_lon`.
+
+#### Removed: the `offset` key
+
+A map config used to be able to declare an `offset` that was **subtracted
+from every exported coordinate**, so the `.xodr` lived in a local frame
+anchored at the offset point. That key is gone: exported coordinates are
+always in the frame the projector itself defines, which is what
+`<header><geoReference>` describes. A config that still declares one is
+rejected — it is not ignored, because ignoring it would move the output by
+exactly the offset (82 km, for the Nishishinjuku config). Delete the block.
 
 ## Preprocessing Operations
 
@@ -404,8 +400,13 @@ it on the command line: `convert input_map_path=/path/to/map.osm`.
 
 ### `Multiple origin specification methods detected`
 
-Set exactly one of `mgrs_grid` or `lat_lon` in the map config. `offset`
-applies only with `mgrs_grid`.
+Set exactly one of `mgrs_grid` or `lat_lon` in the map config.
+
+### `The map config key 'offset' is no longer supported`
+
+Delete the `offset` block from the map config. Exported coordinates move by
+exactly the offset that was removed; see
+[Removed: the `offset` key](#removed-the-offset-key).
 
 ### `Failed to load Lanelet2 map`
 

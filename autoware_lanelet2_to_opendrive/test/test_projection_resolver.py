@@ -7,6 +7,7 @@ previously emitted values.
 """
 
 import logging
+from pathlib import Path
 
 import pytest
 from omegaconf import OmegaConf
@@ -46,10 +47,15 @@ def _cfg(map_dict):
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_mgrs_grid_with_offset():
-    """MGRS grid + offset resolves origin, offset, and lat/lon geoReference."""
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        resolved = resolve_projection_from_hydra(
+def test_resolve_rejects_the_offset_key():
+    """Declaring ``offset`` must fail loudly rather than relocate the map.
+
+    The export offset is gone (#564 follow-up). Ignoring a declared offset
+    would move the exported coordinates by its own magnitude -- 82 km for
+    ``nishishinjuku.yaml`` -- so the key is rejected instead.
+    """
+    with pytest.raises(ValueError, match="'offset' is no longer supported"):
+        resolve_projection_from_hydra(
             _cfg(
                 {
                     "mgrs_grid": "54SUE",
@@ -58,26 +64,18 @@ def test_resolve_mgrs_grid_with_offset():
             )
         )
 
-    assert resolved.mgrs_code == "54SUE"
-    assert resolved.offset == (81655.73, 50137.43, 42.5)
-    assert resolved.mgrs_offset == (81655.73, 50137.43)
 
-    # origin_lat/origin_lon go through mgrs_grid_with_offset_to_latlon, which
-    # truncates the offset to whole meters when round-tripping through a
-    # 10-digit MGRS string; they are unaffected by this fix and are only
-    # used to build the lanelet2 Origin (which MGRSProjector ignores when
-    # computing exported coordinates).
-    expected_lat, expected_lon = mgrs_grid_with_offset_to_latlon(
-        "54SUE", 81655.73, 50137.43
-    )
-    assert resolved.origin_lat == expected_lat
-    assert resolved.origin_lon == expected_lon
-
-    # geoReference bypasses that truncation: it folds the full-precision
-    # offset directly into the grid square's UTM corner (issue #550).
-    assert resolved.geo_reference == mgrs_grid_with_offset_to_proj_string(
-        "54SUE", 81655.73, 50137.43
-    )
+def test_no_shipped_map_config_declares_an_offset():
+    """Guard: the key must not creep back into the bundled map configs."""
+    conf_map = Path(projection_resolver.__file__).parent / "conf" / "map"
+    # Loaded the way Hydra loads them, so this sees exactly what the resolver
+    # would see.
+    offenders = []
+    for path in sorted(conf_map.glob("*.yaml")):
+        map_cfg = OmegaConf.load(path)
+        if "offset" in map_cfg and map_cfg.offset is not None:
+            offenders.append(path.name)
+    assert offenders == [], f"map configs still declaring an offset: {offenders}"
 
 
 def test_resolve_mgrs_grid_without_offset():
@@ -142,8 +140,9 @@ def test_resolve_rejects_multiple_methods():
         )
 
 
-def test_resolve_rejects_offset_without_mgrs_grid():
-    with pytest.raises(ValueError, match="only be used together with 'mgrs_grid'"):
+def test_resolve_rejects_the_offset_key_with_a_lat_lon_origin():
+    """The rejection does not depend on which origin key accompanies it."""
+    with pytest.raises(ValueError, match="'offset' is no longer supported"):
         resolve_projection_from_hydra(
             _cfg(
                 {
@@ -251,6 +250,20 @@ def test_resolve_projection_uses_map_projector_info_mgrs(tmp_path, recwarn):
     assert resolved.offset == explicit.offset == (0.0, 0.0, 0.0)
     # Equal geoReference => byte-identical .xodr for this origin.
     assert resolved.geo_reference == explicit.geo_reference
+
+
+def test_resolve_rejects_the_offset_key_with_projector_info(tmp_path):
+    """The rejection fires on the ``map_projector_info.yaml`` path as well.
+
+    That path never consulted ``offset``, so a map declaring one used to be
+    converted 82 km from where its own config said, announced by nothing but
+    "explicit origin keys, if any, are ignored".
+    """
+    osm = _write_map(
+        tmp_path, projector_info="projector_type: MGRS\nmgrs_grid: 54SUE\n"
+    )
+    with pytest.raises(ValueError, match="'offset' is no longer supported"):
+        resolve_projection(_cfg({"offset": {"x": 81655.73, "y": 50137.43}}), osm)
 
 
 def test_resolve_projection_falls_back_without_info(tmp_path):

@@ -1,23 +1,20 @@
-# Example map configuration using MGRS grid with offset
-# This format specifies a MGRS grid zone and then provides offset coordinates
+# Example map configuration using a bare MGRS grid square
+#
+# Named for the `offset` key it used to carry. That key is gone: exported
+# coordinates are always in the frame the projector defines, so a grid square
+# is the whole origin specification. The name is kept because several test
+# modules and a CI step pass `map=example_mgrs_offset` on the command line.
 
-# DEPRECATED (#539): the origin keys below ('mgrs_grid' [+ 'offset'] /
-# 'lat_lon') are a legacy fallback. The canonical origin source is a
-# map_projector_info.yaml placed next to the .osm map; when it declares a
-# supported projector_type (currently MGRS or TransverseMercator), these keys are ignored. They are
+# DEPRECATED (#539): the origin keys below ('mgrs_grid' / 'lat_lon') are a
+# legacy fallback. The canonical origin source is a map_projector_info.yaml
+# placed next to the .osm map; when it declares a supported projector_type
+# (currently MGRS or TransverseMercator), these keys are ignored. They are
 # still required when no map_projector_info.yaml exists, or when its
 # projector_type is not supported yet, and will be removed in a future major
 # version (see #564).
 
 # MGRS grid code (legacy, deprecated)
 mgrs_grid: 54SUE
-
-# Offset from grid origin (OPTIONAL)
-# Specifies the exact position within the MGRS grid zone
-offset:
-  x: 81655.73       # Easting offset in meters from grid origin
-  y: 50137.43       # Northing offset in meters from grid origin
-  z: 42.49998       # Altitude offset in meters (optional, defaults to 0.0)
 
 # Merge operations - merge multiple lanelets into one
 merge_operations:
