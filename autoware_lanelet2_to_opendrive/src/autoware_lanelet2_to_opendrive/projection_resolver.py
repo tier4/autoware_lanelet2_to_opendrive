@@ -444,6 +444,10 @@ def _mgrs_grid_squares_in_osm(input_map_path: Path) -> Optional[set[str]]:
     to say", not "the map is wrong".
 
     Entity resolution and network access are off: the map is input data.
+    Recovery is on, because this parser must not be stricter than the one
+    that loads the map: ``walkway_mini.osm`` carries a ``--`` inside an XML
+    comment, which lanelet2's loader accepts and strict lxml rejects, and a
+    map the converter can convert must have a derivable frame.
     """
     squares: set[str] = set()
     projector = mgrs_lib.MGRS()
@@ -454,6 +458,7 @@ def _mgrs_grid_squares_in_osm(input_map_path: Path) -> Optional[set[str]]:
             tag="node",
             resolve_entities=False,
             no_network=True,
+            recover=True,
         ):
             latitude = element.get("lat")
             longitude = element.get("lon")
