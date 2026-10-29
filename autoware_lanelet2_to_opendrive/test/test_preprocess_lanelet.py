@@ -106,6 +106,40 @@ class TestPreprocessOperationOriginValidation:
         assert _points(mgrs_code="53SPU") == expected
         assert _points(origin=LatLonOrigin(lat=-33.123456, lon=151.234567)) == expected
 
+    def test_load_map_honours_a_declared_transverse_mercator_projector(self, tmp_path):
+        """A TransverseMercator map must not be preprocessed as MGRS.
+
+        ``tmerc_mini`` ships a ``map_projector_info.yaml`` declaring
+        ``projector_type: TransverseMercator`` with its origin at the map's
+        own first point, so that point is at (0, 0) in the declared frame.
+        Loaded through an ``MGRSProjector`` instead it lands 98,941 m away,
+        at its offset from the grid square corner.
+
+        The round trip is unaffected -- load-then-write is byte-identical
+        either way -- but every operation that reads a metric coordinate is
+        not: ``move_point_operations`` name absolute ``new_x``/``new_y``, and
+        the merge/replace/validate tolerances default to 1 mm while the two
+        frames disagree on the distance between two points of this fixture
+        by up to 3.05 mm.
+        """
+        source = str(FIXTURE_DIR / "tmerc_mini" / "lanelet2_map.osm")
+        config = PreprocessOperation(
+            input_map_path=source,
+            output_map_path=str(tmp_path / "out.osm"),
+        )
+        preprocessor = LaneletPreprocessor(config)
+
+        lanelet_map = preprocessor.load_map()
+
+        assert type(preprocessor.projector).__name__ == (
+            "TransverseMercatorProjector"
+        ), "preprocessing ignored the projector_type the map declares"
+        first = min(lanelet_map.pointLayer, key=lambda p: p.id)
+        assert abs(first.x) < 1e-6 and abs(first.y) < 1e-6, (
+            f"point {first.id} is at ({first.x}, {first.y}); the declared "
+            "TransverseMercator origin puts it at (0, 0)"
+        )
+
     def test_both_mgrs_and_origin_raises_error(self):
         """Test that specifying both mgrs_code and origin raises ValueError."""
         origin = LatLonOrigin(lat=35.6762, lon=139.6503)
