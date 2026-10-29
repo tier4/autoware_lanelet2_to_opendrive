@@ -1442,9 +1442,8 @@ def parse_origin_from_config(
     kept for backward compatibility. New code should use the projector-resolution
     layer directly.
 
-    Supports three methods of origin specification (mutually exclusive):
+    Supports two methods of origin specification (mutually exclusive):
     1. mgrs_grid: Simple MGRS grid code (e.g., "54SUE")
-       - With optional offset: mgrs_grid + offset {x, y, z}
     2. lat_lon: Latitude/longitude {latitude, longitude, altitude}
 
     Args:
@@ -1455,7 +1454,8 @@ def parse_origin_from_config(
                   offset_x, offset_y, offset_z)
         The mgrs_code_for_proj_string is used for generating the OpenDRIVE geoReference
         The origin_lat and origin_lon are the actual origin coordinates (with offset applied)
-        The offset values are used to convert coordinates to local coordinate system
+        The offset values are always zero: the 'offset' map config key was
+        removed and exported coordinates are in the projector's own frame.
 
     Raises:
         ValueError: If origin specification is invalid or multiple methods are specified

@@ -47,7 +47,6 @@ def _cfg(map_dict):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="export offset removal, #564 follow-up")
 def test_resolve_rejects_the_offset_key():
     """Declaring ``offset`` must fail loudly rather than relocate the map.
 
@@ -66,7 +65,6 @@ def test_resolve_rejects_the_offset_key():
         )
 
 
-@pytest.mark.xfail(strict=True, reason="export offset removal, #564 follow-up")
 def test_no_shipped_map_config_declares_an_offset():
     """Guard: the key must not creep back into the bundled map configs."""
     conf_map = Path(projection_resolver.__file__).parent / "conf" / "map"
@@ -142,7 +140,6 @@ def test_resolve_rejects_multiple_methods():
         )
 
 
-@pytest.mark.xfail(strict=True, reason="export offset removal, #564 follow-up")
 def test_resolve_rejects_the_offset_key_with_a_lat_lon_origin():
     """The rejection does not depend on which origin key accompanies it."""
     with pytest.raises(ValueError, match="'offset' is no longer supported"):
@@ -255,7 +252,6 @@ def test_resolve_projection_uses_map_projector_info_mgrs(tmp_path, recwarn):
     assert resolved.geo_reference == explicit.geo_reference
 
 
-@pytest.mark.xfail(strict=True, reason="export offset removal, #564 follow-up")
 def test_resolve_rejects_the_offset_key_with_projector_info(tmp_path):
     """The rejection fires on the ``map_projector_info.yaml`` path as well.
 

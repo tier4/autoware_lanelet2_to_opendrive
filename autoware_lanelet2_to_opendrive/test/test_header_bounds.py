@@ -12,7 +12,6 @@ import subprocess
 from pathlib import Path
 
 import lxml.etree as ET
-import pytest
 
 FIXTURE = (Path(__file__).parent / "data" / "walkway_mini.osm").resolve()
 
@@ -63,7 +62,6 @@ def test_header_bounding_box_reflects_map_extent(tmp_path: Path) -> None:
     assert west < east, f"west ({west}) must be < east ({east})"
 
 
-@pytest.mark.xfail(strict=True, reason="header bbox frame, #465 follow-up")
 def test_header_bounding_box_shares_the_geometry_frame(tmp_path: Path) -> None:
     """The bbox and ``<geometry>`` must be expressed in the same frame.
 

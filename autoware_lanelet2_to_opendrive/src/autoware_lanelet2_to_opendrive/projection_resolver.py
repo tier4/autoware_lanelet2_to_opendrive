@@ -1,8 +1,15 @@
 """Single projector-resolution layer for Lanelet2 -> OpenDRIVE conversion.
 
 Resolves the map's coordinate frame in one place: origin parsing (from a Hydra
-config or an :class:`OriginSpec`), projector construction, geoReference
-PROJ-string generation, and the coordinate offset applied during export.
+config or an :class:`OriginSpec`), projector construction and geoReference
+PROJ-string generation.
+
+Exported coordinates are always expressed in the frame the projector itself
+defines; the ``offset`` map config key that used to shift them is gone and is
+rejected if still present (:func:`_reject_offset_key`). The
+``offset_x``/``offset_y``/``offset_z`` fields of :class:`ResolvedProjection`
+remain, at zero, for library callers that build an :class:`OriginSpec`
+directly and for reading back the geoReference of previously exported files.
 
 The MGRS / explicit-key paths are a behavior-preserving extraction of logic
 that previously lived inline in ``main.py`` (issue #540): their outputs remain
@@ -33,7 +40,6 @@ from .projection import (
     latlon_to_lanelet2_origin,
     latlon_to_proj_string,
     latlon_to_tmerc_proj_string,
-    mgrs_grid_with_offset_to_lanelet2_origin,
     mgrs_grid_with_offset_to_latlon,
     mgrs_grid_with_offset_to_proj_string,
     mgrs_to_lanelet2_origin,
@@ -82,6 +88,33 @@ def _warn_legacy_origin_keys(stacklevel: int) -> None:
             "Origin resolved via legacy 'mgrs_grid'/'lat_lon' config keys "
             "(deprecated). Prefer map_projector_info.yaml. See #564."
         )
+
+
+#: Message for a map config that still declares the removed ``offset`` key.
+#: The key was *subtracted from every exported coordinate*, so quietly
+#: ignoring a declared one would relocate the map by its own magnitude -- and
+#: the ``map_projector_info.yaml`` path did exactly that, because it never
+#: consulted the key at all.
+_OFFSET_REMOVED_MESSAGE = (
+    "The map config key 'offset' is no longer supported: exported coordinates "
+    "are always expressed in the frame the projector itself defines. Remove "
+    "the 'offset' block from the map config -- the exported coordinates will "
+    "move by exactly the offset you removed (see #564)."
+)
+
+
+def _reject_offset_key(map_cfg: DictConfig) -> None:
+    """Reject a map config that still declares the removed ``offset`` key.
+
+    Called from every resolution entry point, including the
+    ``map_projector_info.yaml`` path, so the key cannot be silently dropped
+    on any of them.
+
+    Raises:
+        ValueError: If ``map_cfg`` declares a non-null ``offset``.
+    """
+    if "offset" in map_cfg and map_cfg.offset is not None:
+        raise ValueError(_OFFSET_REMOVED_MESSAGE)
 
 
 def _mgrs_geo_reference(mgrs_code: str, offset_x: float, offset_y: float) -> str:
@@ -199,30 +232,30 @@ def _resolve_from_explicit_keys(cfg: DictConfig) -> ResolvedProjection:
     Supports three mutually exclusive origin specifications (identical to the
     previous ``parse_origin_from_config`` behavior):
 
-    1. ``mgrs_grid``: MGRS grid code (e.g. ``"54SUE"``), optionally combined
-       with ``offset`` ``{x, y, z}``.
+    1. ``mgrs_grid``: MGRS grid code (e.g. ``"54SUE"``).
     2. ``lat_lon``: ``{latitude, longitude, altitude}``.
 
     The legacy ``mgrs_code`` map field is accepted as an alias for
-    ``mgrs_grid``.
+    ``mgrs_grid``. The removed ``offset`` key is rejected (see
+    :func:`_reject_offset_key`).
 
     Args:
         cfg: Hydra configuration object with a ``map`` section.
 
     Returns:
-        A :class:`ResolvedProjection`.
+        A :class:`ResolvedProjection`, always with a zero offset.
 
     Raises:
         ValueError: If the origin specification is missing, ambiguous, or
-            invalid.
+            invalid, or if ``offset`` is declared.
     """
     map_cfg = cfg.map
+    _reject_offset_key(map_cfg)
 
     has_mgrs_grid = "mgrs_grid" in map_cfg and map_cfg.mgrs_grid is not None
     has_mgrs_code = (
         "mgrs_code" in map_cfg and map_cfg.mgrs_code is not None
     )  # Legacy support
-    has_offset = "offset" in map_cfg and map_cfg.offset is not None
     has_lat_lon = "lat_lon" in map_cfg and map_cfg.lat_lon is not None
 
     # Support legacy mgrs_code field
@@ -230,58 +263,20 @@ def _resolve_from_explicit_keys(cfg: DictConfig) -> ResolvedProjection:
         has_mgrs_grid = True
         map_cfg.mgrs_grid = map_cfg.mgrs_code
 
-    # Count how many base methods are specified (offset is an optional
-    # modifier for mgrs_grid).
+    # Count how many base methods are specified.
     specified_methods = sum([has_mgrs_grid, has_lat_lon])
 
     if specified_methods == 0:
-        raise ValueError(
-            "Origin must be specified using one of: mgrs_grid (with optional "
-            "offset), or lat_lon"
-        )
+        raise ValueError("Origin must be specified using one of: mgrs_grid, or lat_lon")
 
     if specified_methods > 1:
         raise ValueError(
             "Multiple origin specification methods detected. "
-            "Please specify only one of: mgrs_grid (with optional offset), or "
-            "lat_lon"
-        )
-
-    # Offset can only be used with mgrs_grid
-    if has_offset and not has_mgrs_grid:
-        raise ValueError(
-            "The 'offset' field can only be used together with 'mgrs_grid'"
+            "Please specify only one of: mgrs_grid, or lat_lon"
         )
 
     if has_mgrs_grid:
         mgrs_grid = map_cfg.mgrs_grid
-
-        if has_offset:
-            offset_cfg = map_cfg.offset
-            offset_x = offset_cfg.x
-            offset_y = offset_cfg.y
-            offset_z = offset_cfg.get("z", 0.0)
-
-            logger.info(
-                f"Using MGRS grid with offset: {mgrs_grid}, "
-                f"offset x={offset_x} y={offset_y} z={offset_z}"
-            )
-            origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(
-                mgrs_grid, offset_x, offset_y
-            )
-            origin = mgrs_grid_with_offset_to_lanelet2_origin(
-                mgrs_grid, offset_x, offset_y, offset_z
-            )
-            logger.info(f"Origin coordinates: lat={origin_lat}, lon={origin_lon}")
-            return ResolvedProjection(
-                origin=origin,
-                mgrs_code=mgrs_grid,
-                origin_lat=origin_lat,
-                origin_lon=origin_lon,
-                offset_x=offset_x,
-                offset_y=offset_y,
-                offset_z=offset_z,
-            )
 
         logger.info(f"Using MGRS grid origin: {mgrs_grid}")
         origin = mgrs_to_lanelet2_origin(mgrs_grid)
@@ -451,9 +446,15 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
         A :class:`ResolvedProjection`.
 
     Raises:
-        ValueError: If the projector-info file is malformed, or the explicit
-            origin keys are missing/invalid on the fallback path.
+        ValueError: If the projector-info file is malformed, if the removed
+            ``offset`` key is declared, or the explicit origin keys are
+            missing/invalid on the fallback path.
     """
+    # Before the branch, not inside it: the projector-info path never read
+    # this key, so a map that declared one used to be converted by its own
+    # magnitude away from where the config said.
+    _reject_offset_key(cfg.map)
+
     info_path = Path(input_map_path).parent / MAP_PROJECTOR_INFO_FILENAME
     if info_path.is_file():
         info = MapProjectorInfo.from_yaml(info_path)

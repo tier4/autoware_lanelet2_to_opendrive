@@ -81,7 +81,6 @@ flowchart TD
 
 - Lanelet2 OSM file path
 - Origin specification (MGRS grid code OR lat/lon coordinates)
-- Optional coordinate offset (x, y, z)
 - Optional preprocessing operations (8 types available)
 
 ---
@@ -101,7 +100,7 @@ mgrs_grid: "54SUE"
 
 **Legacy: explicit config keys**
 
-If no `map_projector_info.yaml` is found, the converter falls back to three
+If no `map_projector_info.yaml` is found, the converter falls back to two
 explicit-key methods in the map config. This fallback still works unchanged
 but is deprecated (`DeprecationWarning` + log warning on use); see
 [#539](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/539)
@@ -116,21 +115,7 @@ mgrs_grid: "54SUE815501"   # legacy field name `mgrs_code` is also accepted
 - The Lanelet2 origin is the south-west corner of the MGRS grid square
 - Used when the input map is already aligned to that grid
 
-**Method 2: MGRS Grid Code + Offset**
-```yaml
-mgrs_grid: "54SUE"
-offset:
-  x: 81655.73    # Easting offset in meters
-  y: 50137.43    # Northing offset in meters
-  z: 42.49998    # Altitude offset in meters (optional)
-```
-- Shifts the origin by the offset; the lat/lon used for the geoReference is
-  derived from `(mgrs_grid + offset)`
-- During OpenDRIVE export, the same offset is **subtracted** from every
-  coordinate so the resulting `.xodr` lives in a local frame anchored at
-  the offset point: `output = coordinate − offset`
-
-**Method 3: Latitude/Longitude**
+**Method 2: Latitude/Longitude**
 ```yaml
 lat_lon:
   latitude: 35.6762    # Decimal degrees [-90, 90]
@@ -142,9 +127,19 @@ lat_lon:
   automatically from the lat/lon
 
 !!! note "Mutual Exclusivity"
-    Exactly one of `mgrs_grid` (with optional `offset`) or `lat_lon` may
-    be specified. Combining them, or using `offset` without `mgrs_grid`,
+    Exactly one of `mgrs_grid` or `lat_lon` may be specified. Combining them
     raises `ValueError` from `parse_origin_from_config`.
+
+!!! warning "The removed `offset` key"
+    A map config used to be able to declare an `offset` that was
+    **subtracted from every exported coordinate**, so the `.xodr` lived in a
+    local frame anchored at the offset point. Exported coordinates are now
+    always in the frame the projector itself defines — the frame
+    `<header><geoReference>` describes. A config that still declares an
+    `offset` raises `ValueError`; it is deliberately not ignored, because
+    ignoring it would move the output by exactly the offset (82 km, for the
+    Nishishinjuku config). The `map_projector_info.yaml` path did ignore it,
+    which is the defect this closes.
 
 ---
 
@@ -161,11 +156,15 @@ During map loading (`load_lanelet2_map()` in [`main.py`](https://github.com/tier
 **B. Coordinate Offset Application**
 
 Coordinate offset (immutable [`config.py:CoordinateOffset`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/config.py) value, threaded explicitly):
-- Resolved once (from `map_projector_info.yaml` / Hydra config) into `ConversionConfig.origin.offset_x/y/z`, then carried by the converter as `self.offset` and passed as an explicit parameter through the extraction pipeline
-- Applied during OpenDRIVE export when extracting geometry (no mutable global)
+- **Always zero for a Hydra conversion.** No map config can declare an
+  offset any more, so `output_coordinate == lanelet2_coordinate` and the
+  export frame is the projector's own
+- The plumbing remains for library callers that build a
+  `ConversionConfig.origin` (`OriginSpec.offset_x/y/z`) themselves, and so
+  that the geoReference of a previously exported file can still be read
+  back: the converter carries it as `self.offset` and passes it as an
+  explicit parameter through the extraction pipeline (no mutable global)
 - **Subtraction operation**: `output_coordinate = lanelet2_coordinate - offset`
-- Makes output coordinates relative to offset point
-- Used when map has large coordinate values that need normalization
 
 **C. PROJ String Generation**
 
@@ -464,8 +463,9 @@ remove_turn_direction_operations:
   legacy [`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
   wrapper) is deprecated: it emits a `DeprecationWarning` and a log warning
   (see #539 / #564)
-- Ensures exactly one of: `mgrs_grid` (with optional `offset`) or `lat_lon`
-- Validates `offset` only used with `mgrs_grid`
+- Ensures exactly one of: `mgrs_grid` or `lat_lon`
+- Rejects the removed `offset` key, on every resolution path including the
+  `map_projector_info.yaml` one
 - Accepts the legacy `mgrs_code` field as a synonym for `mgrs_grid`
 - Raises `ValueError` for invalid combinations
 
@@ -494,7 +494,7 @@ remove_turn_direction_operations:
 1. **Parse Hydra Config**: Load YAML configuration
 2. **Resolve Origin**: Prefer `map_projector_info.yaml`; otherwise fall back
    to the (deprecated) explicit `mgrs_grid`/`lat_lon` config keys
-3. **Resolve Coordinate Offset**: If offset specified, fold it into `ConversionConfig.origin`, from which the converter threads it explicitly through the extraction pipeline
+3. **Resolve Coordinate Offset**: Zero for a Hydra conversion; still folded into `ConversionConfig.origin`, from which the converter threads it explicitly through the extraction pipeline
 4. **Run Preprocessing**: If operations configured, execute preprocessing
 5. **Load Map**: Load preprocessed (or original) Lanelet2 map
 6. **Convert to OpenDRIVE**: Execute conversion pipeline
@@ -511,7 +511,6 @@ remove_turn_direction_operations:
 
 **Output:** Preprocessed Lanelet2 map with:
 - Coordinate system aligned to specified origin
-- Optional coordinate offset applied
 - Structural modifications from preprocessing operations
 - Validated geometry and topology
 
@@ -862,24 +861,13 @@ remove_lanelet_operations:
 
 | Setting | Effect | Default |
 |---------|--------|---------|
-| `mgrs_grid` | Sets coordinate system origin | Required (one of 3 methods) |
+| `mgrs_grid` | Sets coordinate system origin | Required (one of 2 methods) |
 | `merge_operations` | Combines lanelets before conversion | Empty (no merging) |
 | `remove_lanelet_operations` | Removes lanelets from map | Empty (no removal) |
 
 **Alternative Origin Methods:**
 
-**Method A: MGRS Grid + Offset**
-```yaml
-# conf/map/example_mgrs_offset.yaml
-mgrs_grid: "54SUE"
-offset:
-  x: 81655.73      # Easting in meters
-  y: 50137.43      # Northing in meters
-  z: 42.49998      # Altitude in meters
-```
-**Behavior:** Output coordinates = Lanelet2 coordinates - offset
-
-**Method B: Latitude/Longitude**
+**Method A: Latitude/Longitude**
 ```yaml
 # conf/map/example_latlon.yaml
 lat_lon:
@@ -1046,10 +1034,10 @@ verbose=true dry_run=false traffic_rule=LHT
 **3. Override Nested Values:**
 
 Use the same dotted path that exists in the resolved config (e.g.
-`map.offset`, `parampoly3.coefficient_epsilon`, `stopline.width`):
+`map.mgrs_grid`, `parampoly3.coefficient_epsilon`, `stopline.width`):
 
 ```bash
-map.offset.x=100.5 map.offset.y=200.3 map.offset.z=10.0
+map.mgrs_grid=54SUE
 parampoly3.default_segment_length=2.0 stopline.width=0.2
 ```
 
@@ -1130,24 +1118,19 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
     map=example \
     input_map_path=input.osm \
     map.mgrs_grid=54SUE \
-    map.offset.x=81655.73 \
-    map.offset.y=50137.43 \
-    map.offset.z=42.5 \
     '+map.merge_operations=[{lanelet_ids: [100,101,102], validate: true}]'
 ```
 
 **Configuration Result:**
 
-- Origin: MGRS `54SUE` with offset
+- Origin: MGRS `54SUE`
 - Merge operations: Combine lanelets 100, 101, 102
-- Coordinate offset applied: x=81655.73, y=50137.43, z=42.5
 
 **Behavior:**
-1. Load map with MGRS+offset origin
+1. Load map with the MGRS grid-square origin
 2. **Preprocess:** Merge lanelets 100, 101, 102 (validates continuity first)
 3. Convert to OpenDRIVE
-4. **Apply offset:** Output coords = Lanelet2 coords - offset
-5. Write to auto-generated path
+4. Write to auto-generated path
 
 ---
 
@@ -1181,7 +1164,7 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 
 1. **Origin Mutual Exclusivity** ([`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py))
    - Error if both `mgrs_grid` and `lat_lon` specified
-   - Error if `offset` used without `mgrs_grid`
+   - Error if the removed `offset` key is declared at all
 
 2. **Required Fields** ([`main.py:main`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py))
    - Error if `input_map_path` not specified (marked with `???` in `config.yaml`)
@@ -1285,7 +1268,6 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
 **Output Shows:**
 
 - Origin parsing details
-- Coordinate offset activation
 - Preprocessing operation execution
 - Lanelet classification counts
 - Road/junction construction progress
