@@ -72,7 +72,6 @@ _LEGACY_ORIGIN_KEY_EXAMPLES = {"example_latlon.yaml"}
 _ORIGIN_KEYS = ("mgrs_grid", "mgrs_code", "lat_lon")
 
 
-@pytest.mark.xfail(strict=True, reason="preprocessing needs no origin, #564")
 def test_no_shipped_map_config_needs_an_origin_key():
     """The frame comes from the map, so a map config declares no origin."""
     conf_map = Path(projection_resolver.__file__).parent / "conf" / "map"

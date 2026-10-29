@@ -9,10 +9,13 @@
 # projector_type is not supported yet, and will be removed in a future major
 # version (see #564).
 #
-# Legacy origin specification (choose ONE of the following methods):
+# A map config needs no origin at all: with no map_projector_info.yaml the
+# frame is derived from the map's own node coordinates. The legacy keys below
+# are shown commented out, and only take effect when neither a projector-info
+# file nor the map itself can supply the frame.
 #
 # Method 1: Simple MGRS grid code
-mgrs_grid: 54SUE815501
+# mgrs_grid: 54SUE815501
 #
 # Method 2: Latitude/longitude (see example_latlon.yaml)
 # lat_lon:
@@ -20,7 +23,7 @@ mgrs_grid: 54SUE815501
 #   longitude: 151.234567
 #   altitude: 42.5
 #
-# NOTE: Exactly ONE method (mgrs_grid or lat_lon) must be specified.
+# NOTE: At most ONE method (mgrs_grid or lat_lon) may be specified.
 
 # Merge operations - merge multiple lanelets into one
 # First creates all merged lanelets, then removes the original lanelets

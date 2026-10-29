@@ -77,7 +77,6 @@ class TestPreprocessOperationOriginValidation:
         assert config.mgrs_code is None
         assert config.origin == origin
 
-    @pytest.mark.xfail(strict=True, reason="preprocessing needs no origin, #564")
     def test_load_map_ignores_the_projection_origin(self, tmp_path):
         """Every origin -- including none -- loads the same coordinates.
 
@@ -121,7 +120,6 @@ class TestPreprocessOperationOriginValidation:
                 origin=origin,
             )
 
-    @pytest.mark.xfail(strict=True, reason="preprocessing needs no origin, #564")
     def test_neither_mgrs_nor_origin_is_valid(self):
         """Preprocessing needs no projection origin.
 
@@ -137,7 +135,6 @@ class TestPreprocessOperationOriginValidation:
         assert config.mgrs_code is None
         assert config.origin is None
 
-    @pytest.mark.xfail(strict=True, reason="preprocessing needs no origin, #564")
     def test_empty_mgrs_code_without_origin_is_valid(self):
         """An empty mgrs_code is the same as none at all."""
         config = PreprocessOperation(

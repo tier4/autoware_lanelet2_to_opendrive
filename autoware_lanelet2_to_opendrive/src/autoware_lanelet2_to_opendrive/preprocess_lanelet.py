@@ -276,11 +276,21 @@ class PreprocessOperation:
     This dataclass defines all preprocessing operations to be performed
     on a Lanelet2 map. It can be loaded from a YAML configuration file.
 
-    The projection origin can be specified in two ways (mutually exclusive):
-    1. Using MGRS code: Set mgrs_code to a valid MGRS grid reference
-    2. Using exact lat/lon: Set both origin_lat and origin_lon
+    The projection origin is **optional and inert**. Preprocessing loads and
+    writes through ``MGRSProjector``, whose ``forward()`` returns each point's
+    offset from the south-west corner of that point's own 100 km grid square
+    regardless of the origin it was built with. Measured on
+    ``walkway_mini.osm`` with four origins -- ``54SUE``, ``53SPU``, a Sydney
+    lat/lon and none at all -- the loaded point coordinates are identical and
+    the re-written ``.osm`` is byte-identical.
 
-    Specifying both methods will raise a ValueError.
+    It may still be given, for configs that carry one, in either of two
+    mutually exclusive ways:
+
+    1. ``mgrs_code``: a valid MGRS grid reference
+    2. ``origin``: an exact lat/lon :class:`LatLonOrigin`
+
+    Specifying both raises a ValueError.
     """
 
     # Input/Output paths
@@ -319,10 +329,13 @@ class PreprocessOperation:
         self._validate_origin()
 
     def _validate_origin(self) -> None:
-        """Validate that exactly one origin specification method is used.
+        """Validate the origin specification, which is optional.
+
+        Only the ambiguous case is rejected. Declaring neither is fine: the
+        origin never reaches the coordinates (see the class docstring).
 
         Raises:
-            ValueError: If both mgrs_code and origin are specified, or if neither is specified
+            ValueError: If both mgrs_code and origin are specified.
         """
         has_mgrs = self.mgrs_code is not None and self.mgrs_code != ""
         has_origin = self.origin is not None
@@ -331,11 +344,6 @@ class PreprocessOperation:
             raise ValueError(
                 "Cannot specify both mgrs_code and origin. "
                 "Use either MGRS code or exact lat/lon coordinates, not both."
-            )
-
-        if not has_mgrs and not has_origin:
-            raise ValueError(
-                "Must specify projection origin using either mgrs_code or origin."
             )
 
     @classmethod
@@ -582,8 +590,11 @@ class LaneletPreprocessor:
     def load_map(self) -> lanelet2.core.LaneletMap:
         """Load the input Lanelet2 map using MGRS projection.
 
-        The projection origin can be specified either via MGRS code or
-        exact lat/lon coordinates (mutually exclusive).
+        The projection origin is optional, and whichever one is given does
+        not affect the result: ``MGRSProjector`` emits coordinates relative
+        to each point's own grid square (see
+        :class:`PreprocessOperation`). It is honoured only so that a config
+        carrying one still logs what it declared.
 
         Returns:
             Loaded LaneletMap
@@ -609,8 +620,13 @@ class LaneletPreprocessor:
             )
             origin = lanelet2.io.Origin(self.config.origin.lat, self.config.origin.lon)
         else:
-            # This should never happen due to __post_init__ validation
-            raise RuntimeError("No projection origin specified")
+            # No origin declared, and none is needed: MGRSProjector ignores
+            # it and emits grid-square-relative coordinates either way.
+            logger.info(
+                "No projection origin declared; MGRSProjector ignores it and "
+                "emits coordinates relative to each point's own grid square"
+            )
+            origin = lanelet2.io.Origin(0.0, 0.0)
 
         self.projector = MGRSProjector(origin)
         self.lanelet_map = lanelet2.io.load(str(input_path), self.projector)
