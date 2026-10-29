@@ -1,8 +1,9 @@
 """Single projector-resolution layer for Lanelet2 -> OpenDRIVE conversion.
 
-Resolves the map's coordinate frame in one place: origin parsing (from a Hydra
-config or an :class:`OriginSpec`), projector construction and geoReference
-PROJ-string generation.
+Resolves the map's coordinate frame in one place: origin parsing (from a
+``map_projector_info.yaml``, the map's own node coordinates, a Hydra config or
+an :class:`OriginSpec`), projector construction and geoReference PROJ-string
+generation.
 
 Exported coordinates are always expressed in the frame the projector itself
 defines; the ``offset`` map config key that used to shift them is gone and is
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import lanelet2
+import lxml.etree as ET
 import mgrs as mgrs_lib
 from autoware_lanelet2_extension_python.projection import (
     MGRSProjector,
@@ -88,6 +90,21 @@ def _warn_legacy_origin_keys(stacklevel: int) -> None:
             "Origin resolved via legacy 'mgrs_grid'/'lat_lon' config keys "
             "(deprecated). Prefer map_projector_info.yaml. See #564."
         )
+
+
+#: An MGRS code's leading 100 km grid square designator, e.g. ``"54SUE"``.
+_GRID_SQUARE_RE = re.compile(r"^(\d+[A-Z]{3})")
+
+
+def _grid_square(mgrs_code: str) -> str:
+    """Return the 100 km grid square designator of an MGRS code.
+
+    Falls back to the code's first five characters when it does not start
+    with a zone number plus three letters, which is the behaviour the
+    ``lat_lon`` origin branch has always had.
+    """
+    match = _GRID_SQUARE_RE.match(mgrs_code)
+    return match.group(1) if match else mgrs_code[:5]
 
 
 #: Message for a map config that still declares the removed ``offset`` key.
@@ -304,12 +321,7 @@ def _resolve_from_explicit_keys(cfg: DictConfig) -> ResolvedProjection:
     # For a lat/lon origin, derive an approximate MGRS grid for the PROJ
     # string by converting lat/lon back to MGRS and keeping the grid zone.
     m = mgrs_lib.MGRS()
-    mgrs_code = m.toMGRS(latitude, longitude)
-    match = re.match(r"^(\d+[A-Z][A-Z][A-Z])", mgrs_code)
-    if match:
-        mgrs_grid = match.group(1)
-    else:
-        mgrs_grid = mgrs_code[:5]  # Fallback to first 5 chars
+    mgrs_grid = _grid_square(m.toMGRS(latitude, longitude))
 
     logger.info(f"Derived MGRS grid for PROJ string: {mgrs_grid}")
     return ResolvedProjection(
@@ -423,19 +435,129 @@ def _resolve_from_map_projector_info(
     return None
 
 
+def _mgrs_grid_squares_in_osm(input_map_path: Path) -> Optional[set[str]]:
+    """Collect the 100 km MGRS grid squares the map's nodes fall in.
+
+    Streams the ``.osm`` with ``iterparse`` so an 11 MB map does not have to
+    be held in memory. Returns ``None`` when the file cannot be read or
+    parsed, or carries no georeferenced nodes -- i.e. "this layer has nothing
+    to say", not "the map is wrong".
+
+    Entity resolution and network access are off: the map is input data.
+    Recovery is on, because this parser must not be stricter than the one
+    that loads the map: ``walkway_mini.osm`` carries a ``--`` inside an XML
+    comment, which lanelet2's loader accepts and strict lxml rejects, and a
+    map the converter can convert must have a derivable frame.
+    """
+    squares: set[str] = set()
+    projector = mgrs_lib.MGRS()
+    try:
+        for _event, element in ET.iterparse(
+            str(input_map_path),
+            events=("end",),
+            tag="node",
+            resolve_entities=False,
+            no_network=True,
+            recover=True,
+        ):
+            latitude = element.get("lat")
+            longitude = element.get("lon")
+            element.clear()
+            if latitude is None or longitude is None:
+                continue
+            squares.add(
+                _grid_square(
+                    projector.toMGRS(float(latitude), float(longitude), MGRSPrecision=0)
+                )
+            )
+    except (OSError, ET.LxmlError, ValueError) as exc:
+        logger.warning(
+            "Could not read node coordinates from %s (%s); the coordinate "
+            "frame cannot be derived from the map itself",
+            input_map_path,
+            exc,
+        )
+        return None
+
+    if not squares:
+        logger.info(
+            "%s carries no georeferenced <node> elements; the coordinate "
+            "frame cannot be derived from the map itself",
+            input_map_path,
+        )
+        return None
+    return squares
+
+
+def resolve_projection_from_osm(input_map_path: Path) -> Optional[ResolvedProjection]:
+    """Derive the MGRS coordinate frame from the map's own node coordinates.
+
+    Every Lanelet2 ``<node>`` carries ``lat``/``lon``, while the per-node
+    ``mgrs_code`` tag Autoware tooling writes is optional -- so the grid
+    square is derived from the coordinates rather than read off a tag. This
+    is the method Autoware's own tooling uses, and it needs no origin keys
+    and no sidecar file.
+
+    Args:
+        input_map_path: Path to the input ``.osm`` map.
+
+    Returns:
+        A :class:`ResolvedProjection` for the single grid square the map
+        occupies, or ``None`` when the frame cannot be derived: the file is
+        unreadable or unparseable, it carries no georeferenced nodes, or it
+        spans more than one 100 km square (which has no single grid origin).
+    """
+    squares = _mgrs_grid_squares_in_osm(input_map_path)
+    if squares is None:
+        return None
+
+    if len(squares) > 1:
+        logger.warning(
+            "%s spans %d MGRS grid squares (%s), so it has no single grid "
+            "origin; the coordinate frame cannot be derived from the map "
+            "itself",
+            input_map_path,
+            len(squares),
+            ", ".join(sorted(squares)),
+        )
+        return None
+
+    (mgrs_grid,) = squares
+    origin = mgrs_to_lanelet2_origin(mgrs_grid)
+    origin_lat, origin_lon = mgrs_grid_with_offset_to_latlon(mgrs_grid, 0.0, 0.0)
+    return ResolvedProjection(
+        origin=origin,
+        mgrs_code=mgrs_grid,
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
+    )
+
+
 def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
     """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
 
-    When that file sits next to ``input_map_path`` and declares a supported
-    projector, it drives the frame and any explicit ``cfg.map`` origin keys
-    are ignored. Otherwise resolution falls back to the explicit origin keys:
+    Resolution order:
 
-    * no ``map_projector_info.yaml``: the keys are used and the soft
-      deprecation notice is emitted (the yaml is the non-deprecated route);
-    * a ``map_projector_info.yaml`` with a not-yet-supported
-      ``projector_type``: the keys are used *without* the deprecation notice,
-      since the user already provided the yaml and has no non-deprecated way
-      to resolve the origin; a warning says the keys remain required.
+    1. a ``map_projector_info.yaml`` next to ``input_map_path`` declaring a
+       supported projector: it drives the frame and any explicit ``cfg.map``
+       origin keys are ignored;
+    2. no such file: the frame is derived from the map's own node
+       coordinates (:func:`resolve_projection_from_osm`). This is also a
+       non-deprecated route, so no deprecation notice is emitted, and it
+       takes precedence over the explicit keys -- ``MGRSProjector`` emits
+       coordinates relative to each point's own grid square whatever origin
+       it is given, so a key naming a different square only ever mislabelled
+       the geoReference;
+    3. neither available: the explicit origin keys, with the soft
+       deprecation notice.
+
+    One case skips step 2 deliberately: a ``map_projector_info.yaml`` with a
+    not-yet-supported ``projector_type``. The map declares a projection this
+    layer cannot build, and deriving an MGRS frame instead would silently
+    export in a different projection from the one declared. The explicit
+    keys are used there *without* the deprecation notice, since the user
+    already provided the yaml and has no non-deprecated way to resolve the
+    origin; a warning says the keys remain required.
 
     Args:
         cfg: Hydra configuration object with a ``map`` section.
@@ -447,8 +569,8 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
 
     Raises:
         ValueError: If the projector-info file is malformed, if the removed
-            ``offset`` key is declared, or the explicit origin keys are
-            missing/invalid on the fallback path.
+            ``offset`` key is declared, or the frame can be derived from
+            neither the map nor the explicit origin keys.
     """
     # Before the branch, not inside it: the projector-info path never read
     # this key, so a map that declared one used to be converted by its own
@@ -473,6 +595,16 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
             info_path,
         )
         return _resolve_from_explicit_keys(cfg)
+
+    resolved = resolve_projection_from_osm(input_map_path)
+    if resolved is not None:
+        logger.info(
+            "Derived the coordinate frame from %s's own node coordinates "
+            "(MGRS grid square %s); explicit origin keys, if any, are ignored",
+            input_map_path,
+            resolved.mgrs_code,
+        )
+        return resolved
 
     resolved = _resolve_from_explicit_keys(cfg)
     _warn_legacy_origin_keys(stacklevel=3)

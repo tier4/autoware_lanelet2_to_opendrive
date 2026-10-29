@@ -135,10 +135,30 @@ This is the format Autoware itself writes alongside a map, so pointing the
 converter at an Autoware map directory "just works" with no per-map Hydra
 config needed for the origin.
 
+### Derived from the map: no configuration at all
+
+With no `map_projector_info.yaml`, the frame is derived from the map's own
+node coordinates. Every Lanelet2 `<node>` carries `lat`/`lon`, so the 100 km
+MGRS grid square the map occupies follows from the data — the same method
+Autoware's own tooling uses. The per-node `mgrs_code` tag that Autoware
+tooling writes is *optional*, so it is deliberately not read; only `lat`/`lon`
+are.
+
+This is not a fallback but a second canonical route, so it emits no
+deprecation notice, and it takes precedence over the keys below. That is safe
+because `MGRSProjector` emits coordinates relative to each point's own grid
+square whatever origin it is given: a key naming a different square only ever
+mislabelled `<header><geoReference>`.
+
+Derivation declines, with a log line saying why, when the map cannot be read
+or parsed, carries no georeferenced `<node>` elements, or spans more than one
+grid square — the last has no single grid origin, and the log names the
+squares it found. Resolution then falls through to the keys below.
+
 ### Legacy: explicit `mgrs_grid` / `lat_lon` config keys
 
-If no `map_projector_info.yaml` is found (or its `projector_type` isn't yet
-supported), origin resolution falls back to explicit keys in the map config.
+If no `map_projector_info.yaml` is found and the frame cannot be derived from
+the map, origin resolution falls back to explicit keys in the map config.
 **This fallback is deprecated**: it still works unchanged, but emits a
 `DeprecationWarning` (and a matching log warning) and may be removed in a
 future major version (tracked in

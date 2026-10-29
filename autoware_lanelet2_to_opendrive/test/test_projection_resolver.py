@@ -26,6 +26,7 @@ from autoware_lanelet2_to_opendrive.projection_resolver import (
     geo_reference_for_origin,
     resolve_projection,
     resolve_projection_from_hydra,
+    resolve_projection_from_osm,
 )
 
 
@@ -214,19 +215,115 @@ def test_resolved_projection_helpers():
 # ---------------------------------------------------------------------------
 
 
-def _write_map(tmp_path, *, projector_info: str | None = None):
-    """Create a dummy .osm and optional map_projector_info.yaml; return osm path.
+def _write_map(tmp_path, *, projector_info: str | None = None, nodes=None):
+    """Create an .osm and optional map_projector_info.yaml; return the osm path.
 
-    ``resolve_projection`` only reads the projector-info file (not the .osm),
-    so the .osm content is irrelevant here.
+    With ``nodes`` (an iterable of ``(lat, lon)``), the .osm is a minimal
+    georeferenced document, which is what the OSM-derived frame reads. Without
+    it the file is empty and unparseable, so derivation declines and
+    resolution falls back to the explicit origin keys -- the case most of
+    these tests want.
     """
     osm = tmp_path / "lanelet2_map.osm"
-    osm.write_text("", encoding="utf-8")
+    if nodes is None:
+        osm.write_text("", encoding="utf-8")
+    else:
+        elements = "\n".join(
+            f'  <node id="{i + 1}" lat="{lat}" lon="{lon}"/>'
+            for i, (lat, lon) in enumerate(nodes)
+        )
+        osm.write_text(
+            f'<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<osm version="0.6">\n{elements}\n</osm>\n',
+            encoding="utf-8",
+        )
     if projector_info is not None:
         (tmp_path / "map_projector_info.yaml").write_text(
             projector_info, encoding="utf-8"
         )
     return osm
+
+
+#: Two points inside MGRS grid square 54SUE (Nishishinjuku).
+_TOKYO_NODES = [(35.68856, 139.69260), (35.68865, 139.69256)]
+
+
+def test_resolve_projection_derives_the_grid_from_the_osm_nodes(tmp_path, recwarn):
+    """With no projector-info file the frame comes from the map's own nodes.
+
+    Every Lanelet2 OSM node carries ``lat``/``lon``; the per-node
+    ``mgrs_code`` tag is optional, so the grid square is derived from the
+    coordinates rather than read off a tag. This is a non-deprecated route,
+    so no DeprecationWarning fires -- and it needs no origin keys at all.
+    """
+    osm = _write_map(tmp_path, nodes=_TOKYO_NODES)
+
+    resolved = resolve_projection(_cfg({}), osm)
+
+    assert resolved.projector_type == "MGRS"
+    assert resolved.mgrs_code == "54SUE"
+    assert resolved.geo_reference == mgrs_to_proj_string("54SUE")
+    assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
+
+
+def test_osm_derivation_tolerates_a_double_hyphen_comment(tmp_path):
+    """The derivation parser must not be stricter than the map loader.
+
+    ``walkway_mini.osm`` carries a ``--`` inside an XML comment: lanelet2's
+    loader accepts it and strict lxml rejects it as "Double hyphen within
+    comment". A map the converter can convert must have a derivable frame,
+    so the parser recovers instead of giving up.
+    """
+    osm = tmp_path / "lanelet2_map.osm"
+    osm.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic fixture -- note the double hyphen
+-->
+<osm version="0.6">
+  <node id="1" lat="35.68856" lon="139.69260"/>
+</osm>
+""",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_projection_from_osm(osm)
+
+    assert resolved is not None, "a loadable map must have a derivable frame"
+    assert resolved.mgrs_code == "54SUE"
+
+
+def test_osm_derivation_wins_over_the_legacy_origin_keys(tmp_path):
+    """The map's own coordinates beat a stale key.
+
+    ``MGRSProjector`` emits coordinates relative to each point's own grid
+    square whatever origin it is given, so a key naming a different square
+    only ever mislabelled the geoReference.
+    """
+    osm = _write_map(tmp_path, nodes=_TOKYO_NODES)
+
+    resolved = resolve_projection(_cfg({"mgrs_grid": "53SPU"}), osm)
+
+    assert resolved.mgrs_code == "54SUE"
+
+
+def test_osm_derivation_declines_a_map_spanning_two_grid_squares(tmp_path, caplog):
+    """A map in more than one 100 km square has no single grid origin.
+
+    Derivation declines and says which squares it found, rather than picking
+    one; resolution then falls back to the (deprecated) explicit keys.
+    """
+    osm = _write_map(tmp_path, nodes=[_TOKYO_NODES[0], (35.68856, 140.69260)])
+
+    with caplog.at_level(logging.WARNING, logger=projection_resolver.__name__):
+        with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
+            resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
+
+    assert resolved.mgrs_code == "54SUE"  # from the key, not derived
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "54SUE" in m and "54SVE" in m and "grid square" in m for m in messages
+    ), messages
 
 
 def test_resolve_projection_uses_map_projector_info_mgrs(tmp_path, recwarn):
