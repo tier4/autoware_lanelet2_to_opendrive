@@ -137,11 +137,6 @@ def _synthetic_stubs(root):
     return stubs
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the stub takes its heading from the separation between two "
-    "anchors that are the same point in the source map",
-)
 def test_synthetic_connectors_follow_a_linked_road_tangent(nishishinjuku_xodr):
     """Every stub leaves along the tangent of one of the roads it links.
 
@@ -206,11 +201,6 @@ def test_synthetic_connectors_follow_a_linked_road_tangent(nishishinjuku_xodr):
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the stub carries GeometryConstants.divergence_default_lane_width "
-    "regardless of the lanes it joins",
-)
 def test_synthetic_connectors_are_as_wide_as_the_lanes_they_join(nishishinjuku_xodr):
     """Every stub's lane is as wide as the lanes its own links name.
 
