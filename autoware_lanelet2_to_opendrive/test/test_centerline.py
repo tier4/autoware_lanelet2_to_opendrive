@@ -93,11 +93,6 @@ def test_extract_centerline_as_spline(lanelet_map):
     assert point_mid.shape[0] == 3, "Spline should return 3D points"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="_calculate_optimal_num_samples returns ceil(length / interval), "
-    "one sample short of the inclusive endpoint",
-)
 @pytest.mark.parametrize("total_length", [20.0, 40.0, 61.5, 98.0])
 def test_adaptive_sampling_does_not_exceed_configured_interval(total_length):
     """Adaptive sampling must not space width samples further apart than configured.
