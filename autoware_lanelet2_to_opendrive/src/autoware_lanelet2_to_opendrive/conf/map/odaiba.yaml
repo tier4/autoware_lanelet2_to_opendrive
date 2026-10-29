@@ -43,10 +43,3 @@ parampoly3:
   max_segments: 100
   min_segments: 1
   coefficient_epsilon: 1.0e-8
-
-# Width spline sampling configuration
-width_estimation:
-  adaptive_sampling: true
-  min_samples: 5
-  max_samples: 50
-  default_sample_interval: 5.0  # meters
