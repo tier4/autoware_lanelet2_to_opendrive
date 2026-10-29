@@ -6,15 +6,21 @@ emitted maximum exceeds every sample: given 3.5, 3.5, 3.2, 3.5, 3.5 m it
 emits 3.623 m, so 123.5 mm of the exported lane width is width the road does
 not have.
 
-Measured on nishishinjuku, across the 892 lanes with at least three width
-segments and strictly increasing knots, the width emitted beyond the range of
-the fit's own knots is p50 16.9 mm, p95 428.5 mm, p99 1,105.1 mm, max
-1,886.5 mm. Refitting the same knots with PCHIP gives exactly 0.0 mm at every
-percentile, and is worse than ``not-a-knot`` on none of them.
+Measured on nishishinjuku over the 892 lanes with at least two width
+segments, the width emitted beyond the envelope of the fit's own knots is
+p50 0.37 mm, p95 117.6 mm, p99 329.4 mm, max 882.5 mm, and 362 lanes (40.6%)
+exceed it by more than a millimetre. With PCHIP it is 0.0000 mm at every
+percentile and no lane exceeds it at all.
+
+The envelope must be recovered from all N knots. A lane with N width samples
+emits N-1 ``<width>`` elements, each carrying its own start value in ``a``,
+so the segment constants give only N-1 of them; the Nth is the last segment
+evaluated at its end. Measuring against the N-1 constants counts the final
+sample as overshoot and reports overshoot for an interpolant that has none.
 
 What this does **not** fix: the knot values themselves, which span p50
-114.6 mm and p95 1,569.1 mm on the same map. That is the boundary pairing in
-``_estimate_width_samples``, not the interpolant.
+156.9 mm, p95 1,835.2 mm and max 11,036.0 mm on the same map, identically
+before and after. That is the boundary pairing, not the interpolant.
 """
 
 import numpy as np
@@ -33,10 +39,6 @@ def _sampled(spline: CubicSpline1D, count: int = 801) -> np.ndarray:
     return np.array([spline.evaluate(float(s)) for s in grid])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the width interpolant overshoots its own samples; reported " "2026-10-23",
-)
 def test_the_default_width_interpolant_stays_within_its_samples() -> None:
     """The width shipped to a consumer must not exceed every sample."""
     values = _sampled(
@@ -56,10 +58,6 @@ def test_the_default_width_interpolant_stays_within_its_samples() -> None:
     assert undershoot_mm == pytest.approx(0.0, abs=1e-6)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the width interpolant overshoots its own samples; reported " "2026-10-23",
-)
 def test_pchip_is_the_default_for_width() -> None:
     """Pins the default, so a later edit cannot silently restore overshoot."""
     assert DEFAULT_CONFIG.centerline.width_interpolation_method == "pchip"

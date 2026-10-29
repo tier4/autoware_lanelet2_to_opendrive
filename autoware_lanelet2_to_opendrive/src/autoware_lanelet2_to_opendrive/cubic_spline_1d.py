@@ -40,9 +40,11 @@ class CubicSpline1D:
 
                 ``"pchip"`` is ``scipy.interpolate.PchipInterpolator``: C1,
                 monotone-preserving, and therefore unable to leave the
-                envelope of its own samples. On nishishinjuku it removed the
-                overshoot in full (p95 428.5 mm to 0.0 mm) and was not worse
-                than ``"cubic"`` on any of 892 lanes.
+                envelope of its own samples. Measured on nishishinjuku over
+                892 lanes, the width emitted beyond that envelope fell from
+                p95 117.6 mm, max 882.5 mm to **0.0000 mm at every
+                percentile**, and from 362 lanes exceeding it by more than a
+                millimetre to none.
 
                 The cost is the one derivative: the curvature of the
                 interpolated quantity is discontinuous at the knots. For
