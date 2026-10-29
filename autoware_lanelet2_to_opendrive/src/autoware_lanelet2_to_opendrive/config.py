@@ -129,11 +129,21 @@ class CenterlineConstants:
         min_sample_points_for_centerline: Minimum number of sample points for centerline extraction
         sample_point_multiplier: Multiplier for calculating sample points based on control points
         boundary_condition_default: Default boundary condition for cubic spline interpolation
+        width_flat_tolerance_m: Width, in metres, that a lane-width
+            polynomial may add over its own segment before the segment is
+            treated as genuinely varying. Below it the higher coefficients
+            are emitted as exact zeros, because at that magnitude they
+            describe noise in the width samples rather than a change in the
+            road. 1e-5 m sits above the noise measured on boundaries that
+            are parallel to within half a micrometre (3.8e-7 m) and three
+            orders of magnitude below the smallest real width variation
+            measured on Nishishinjuku (1.4e-2 m), so the two do not overlap.
     """
 
     min_sample_points_for_centerline: int = 20
     sample_point_multiplier: int = 2
     boundary_condition_default: str = "not-a-knot"
+    width_flat_tolerance_m: float = 1e-5
 
 
 @dataclass(frozen=True)

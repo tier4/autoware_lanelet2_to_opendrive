@@ -39,6 +39,39 @@ _PARTICIPANT_TO_RESTRICTION: Dict[str, str] = {
 _CURB_LINESTRING_TYPES = frozenset({"curbstone", "road_border"})
 
 
+def _flatten_negligible_width_curvature(
+    a: float, b: float, c: float, d: float, span: float
+) -> Tuple[float, float, float, float]:
+    """Zero ``b``/``c``/``d`` when they describe no width change over ``span``.
+
+    A node coordinate is finite and goes through a projection, so a road
+    built to one constant width does not reach the fit as one constant
+    number. ``CubicSpline`` turns that residue into non-zero higher
+    coefficients and the emitter passes them through, so a flat road's
+    ``<width>`` reads as a curve. Measured on boundaries parallel to within
+    half a micrometre, all nine segments came out curved, describing 380 nm
+    of width variation; on a real conversion, 4,659 of 4,659 ``<width>``
+    elements carried non-zero coefficients.
+
+    The fit itself is faithful -- given exactly equal samples it returns
+    exact zeros -- so this discards only what is below the input's own
+    precision.
+
+    The test is on the width the polynomial adds, not on the size of the
+    coefficients: ``b``, ``c`` and ``d`` are in m/m, m/m^2 and m/m^3, so one
+    threshold cannot be compared against all three, and the quantity that
+    matters to a consumer is metres of width either way. The bound used is
+    the sum of the absolute terms, which overstates the true excursion, so a
+    segment is flattened only when it is certainly flat.
+    """
+    if span <= 0.0:
+        return a, 0.0, 0.0, 0.0
+    bound = abs(b * span) + abs(c * span**2) + abs(d * span**3)
+    if bound <= DEFAULT_CONFIG.centerline.width_flat_tolerance_m:
+        return a, 0.0, 0.0, 0.0
+    return a, b, c, d
+
+
 def _compute_sidewalk_height(
     lanelet: lanelet2.core.Lanelet,
     rule: Optional[str],
@@ -172,10 +205,17 @@ class Lane:
             # Use proper polynomial coefficients from 1D cubic spline
             segments = width_spline.get_polynomial_segments()
 
-            for s_offset, a, b, c, d in segments:
+            for index, (s_offset, a, b, c, d) in enumerate(segments):
                 # Only add segments within the road length
-                if s_offset < road_length:
-                    self._add_width(LaneWidth(s_offset=s_offset, a=a, b=b, c=c, d=d))
+                if s_offset >= road_length:
+                    continue
+                s_end = (
+                    segments[index + 1][0] if index + 1 < len(segments) else road_length
+                )
+                a, b, c, d = _flatten_negligible_width_curvature(
+                    a, b, c, d, s_end - s_offset
+                )
+                self._add_width(LaneWidth(s_offset=s_offset, a=a, b=b, c=c, d=d))
         else:
             # Fallback for legacy Splines objects - sample at intervals
             num_segments = 10  # Number of segments to create

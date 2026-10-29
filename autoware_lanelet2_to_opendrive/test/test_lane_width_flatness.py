@@ -97,11 +97,6 @@ def _curved(widths) -> List[Tuple[float, float, float, float]]:
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="width coefficients below the input's own precision are passed "
-    "through; reported 2026-10-23",
-)
 def test_noise_level_coefficients_are_emitted_as_exact_zeros() -> None:
     """The coefficients measured on a real conversion must come out zero.
 
@@ -125,11 +120,6 @@ def test_noise_level_coefficients_are_emitted_as_exact_zeros() -> None:
     assert width.a == pytest.approx(3.4876740949583320)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="width coefficients below the input's own precision are passed "
-    "through; reported 2026-10-23",
-)
 def test_boundaries_parallel_to_within_a_micrometre_emit_constant_width() -> None:
     """Sub-micrometre boundary noise must not become a width curve.
 
