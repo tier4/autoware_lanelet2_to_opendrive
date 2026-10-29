@@ -24,6 +24,7 @@ from autoware_lanelet2_to_opendrive.projection import (
 from autoware_lanelet2_to_opendrive.projection_resolver import (
     ResolvedProjection,
     geo_reference_for_origin,
+    reject_removed_map_keys,
     resolve_projection,
     resolve_projection_from_hydra,
     resolve_projection_from_osm,
@@ -66,24 +67,51 @@ def test_resolve_rejects_the_offset_key():
         )
 
 
-#: ``example_latlon.yaml`` exists to document the deprecated ``lat_lon`` key,
-#: so it is the one bundled config allowed to declare an origin.
-_LEGACY_ORIGIN_KEY_EXAMPLES = {"example_latlon.yaml"}
-
 _ORIGIN_KEYS = ("mgrs_grid", "mgrs_code", "lat_lon")
 
 
-def test_no_shipped_map_config_needs_an_origin_key():
-    """The frame comes from the map, so a map config declares no origin."""
+@pytest.mark.xfail(strict=True, reason="legacy origin keys still accepted, #564")
+def test_no_shipped_map_config_declares_an_origin_key():
+    """No bundled config may declare an origin -- the keys are gone.
+
+    Not even as documentation: a config that declares one is now rejected,
+    so an example carrying it would be an example that does not run.
+    """
     conf_map = Path(projection_resolver.__file__).parent / "conf" / "map"
     offenders = []
     for path in sorted(conf_map.glob("*.yaml")):
-        if path.name in _LEGACY_ORIGIN_KEY_EXAMPLES:
-            continue
         map_cfg = OmegaConf.load(path)
         if any(k in map_cfg and map_cfg[k] is not None for k in _ORIGIN_KEYS):
             offenders.append(path.name)
     assert offenders == [], f"map configs still declaring an origin: {offenders}"
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        {"mgrs_grid": "54SUE"},
+        {"mgrs_code": "54SUE"},
+        {"lat_lon": {"latitude": 35.0, "longitude": 139.0}},
+        {"offset": {"x": 1.0, "y": 2.0}},
+    ],
+)
+@pytest.mark.xfail(strict=True, reason="legacy origin keys still accepted, #564")
+def test_removed_map_keys_are_rejected(removed):
+    """Every key that used to declare the frame is now an error.
+
+    Ignoring them would be worse than refusing them: a config naming a grid
+    square the map is not in would silently keep converting, with the
+    geoReference it names no longer having any effect.
+    """
+    with pytest.raises(ValueError, match="no longer supported"):
+        reject_removed_map_keys(OmegaConf.create(removed))
+
+
+def test_reject_removed_map_keys_accepts_a_modern_config():
+    """A config with operations and a traffic rule and no origin is fine."""
+    reject_removed_map_keys(
+        OmegaConf.create({"traffic_rule": "LHT", "merge_operations": None})
+    )
 
 
 def test_no_shipped_map_config_declares_an_offset():
@@ -407,34 +435,25 @@ def test_map_projector_info_wins_over_explicit_keys(tmp_path, recwarn):
 
 
 @pytest.mark.parametrize("projector_type", ["LocalCartesianUTM", "LocalCartesian"])
-def test_resolve_projection_unsupported_type_falls_back_without_deprecation(
-    tmp_path, recwarn, caplog, projector_type
-):
-    """A recognised-but-unsupported projector type falls back to the explicit
-    keys, but must NOT tell the user to "provide a map_projector_info.yaml"
-    (they already did, and have no non-deprecated way to resolve the origin).
+@pytest.mark.xfail(strict=True, reason="legacy origin keys still accepted, #564")
+def test_resolve_projection_unsupported_type_raises(tmp_path, projector_type):
+    """A recognised-but-unsupported projector type is now an error.
+
+    Deriving an MGRS frame instead would export the map in a projection it
+    does not declare, and there are no origin keys left to fall back to.
+    The message names the type so the user knows what is missing, rather
+    than reporting an absent origin.
     """
     osm = _write_map(
         tmp_path,
+        nodes=_TOKYO_NODES,
         projector_info=(
             f"projector_type: {projector_type}\n"
             "map_origin:\n  latitude: 35.0\n  longitude: 139.0\n"
         ),
     )
-    with caplog.at_level(logging.WARNING, logger=projection_resolver.__name__):
-        resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
-    assert resolved.mgrs_code == "54SUE"
-
-    assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
-    messages = [r.getMessage() for r in caplog.records]
-    assert not any("deprecated" in m for m in messages), messages
-    assert not any("Prefer map_projector_info.yaml" in m for m in messages), messages
-    assert any(
-        projector_type in m
-        and "not supported yet" in m
-        and "remain required for this map" in m
-        for m in messages
-    ), messages
+    with pytest.raises(ValueError, match=f"{projector_type}.*not supported"):
+        resolve_projection(_cfg({}), osm)
 
 
 def test_resolve_projection_without_info_emits_deprecation(tmp_path, caplog):

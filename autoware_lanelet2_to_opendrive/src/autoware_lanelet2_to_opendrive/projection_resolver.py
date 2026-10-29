@@ -120,6 +120,11 @@ _OFFSET_REMOVED_MESSAGE = (
 )
 
 
+def reject_removed_map_keys(map_cfg: DictConfig) -> None:
+    """Reject map config keys that no longer exist."""
+    return None
+
+
 def _reject_offset_key(map_cfg: DictConfig) -> None:
     """Reject a map config that still declares the removed ``offset`` key.
 
