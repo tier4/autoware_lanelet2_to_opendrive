@@ -98,10 +98,31 @@ projector_type: MGRS
 mgrs_grid: "54SUE"
 ```
 
+**Canonical: the map's own node coordinates**
+
+With no `map_projector_info.yaml`, the frame is derived from the `.osm`
+itself: every Lanelet2 `<node>` carries `lat`/`lon`, so the 100 km MGRS grid
+square the map occupies follows from the data. The per-node `mgrs_code` tag
+Autoware tooling writes is *optional* and is deliberately not read.
+
+This is a second non-deprecated route, not a fallback, so it emits no
+deprecation notice and takes precedence over the explicit keys below —
+`MGRSProjector` emits coordinates relative to each point's own grid square
+whatever origin it is given, so a key naming a different square only ever
+mislabelled the geoReference.
+
+It declines, with a log line saying why, when the map is unreadable or
+unparseable, carries no georeferenced nodes, or spans more than one grid
+square (no single grid origin; the log names the squares found). Streamed
+with `iterparse`, with entity resolution and network access off. Measured on
+`nishishinjuku.osm`: 36,936 nodes in 0.45 s, plus 0.17 s to derive, all of
+them `54SUE`.
+
 **Legacy: explicit config keys**
 
-If no `map_projector_info.yaml` is found, the converter falls back to two
-explicit-key methods in the map config. This fallback still works unchanged
+If no `map_projector_info.yaml` is found and the frame cannot be derived from
+the map, the converter falls back to two explicit-key methods in the map
+config. This fallback still works unchanged
 but is deprecated (`DeprecationWarning` + log warning on use); see
 [#539](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/539)
 for the soft-deprecation and
@@ -457,8 +478,9 @@ remove_turn_direction_operations:
 #### **1.6: Validation and Error Handling**
 
 **Origin Resolution** ([`projection_resolver.py:resolve_projection`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/projection_resolver.py)):
-- Prefers a `map_projector_info.yaml` next to the input map; falls back to
-  the explicit `mgrs_grid`/`lat_lon` config keys otherwise
+- Prefers a `map_projector_info.yaml` next to the input map, then the map's
+  own node coordinates, and falls back to the explicit
+  `mgrs_grid`/`lat_lon` config keys only if neither is available
 - The fallback path (`resolve_projection_from_hydra`, also used by the
   legacy [`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
   wrapper) is deprecated: it emits a `DeprecationWarning` and a log warning
@@ -492,8 +514,9 @@ remove_turn_direction_operations:
 
 **Execution Sequence:**
 1. **Parse Hydra Config**: Load YAML configuration
-2. **Resolve Origin**: Prefer `map_projector_info.yaml`; otherwise fall back
-   to the (deprecated) explicit `mgrs_grid`/`lat_lon` config keys
+2. **Resolve Origin**: Prefer `map_projector_info.yaml`, then the map's own
+   node coordinates; fall back to the (deprecated) explicit
+   `mgrs_grid`/`lat_lon` config keys only if neither is available
 3. **Resolve Coordinate Offset**: Zero for a Hydra conversion; still folded into `ConversionConfig.origin`, from which the converter threads it explicitly through the extraction pipeline
 4. **Run Preprocessing**: If operations configured, execute preprocessing
 5. **Load Map**: Load preprocessed (or original) Lanelet2 map

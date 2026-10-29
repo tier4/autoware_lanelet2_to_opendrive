@@ -247,7 +247,6 @@ def _write_map(tmp_path, *, projector_info: str | None = None, nodes=None):
 _TOKYO_NODES = [(35.68856, 139.69260), (35.68865, 139.69256)]
 
 
-@pytest.mark.xfail(strict=True, reason="OSM-derived frame, #564")
 def test_resolve_projection_derives_the_grid_from_the_osm_nodes(tmp_path, recwarn):
     """With no projector-info file the frame comes from the map's own nodes.
 
@@ -266,7 +265,6 @@ def test_resolve_projection_derives_the_grid_from_the_osm_nodes(tmp_path, recwar
     assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
 
 
-@pytest.mark.xfail(strict=True, reason="OSM-derived frame, #564")
 def test_osm_derivation_wins_over_the_legacy_origin_keys(tmp_path):
     """The map's own coordinates beat a stale key.
 
@@ -281,7 +279,6 @@ def test_osm_derivation_wins_over_the_legacy_origin_keys(tmp_path):
     assert resolved.mgrs_code == "54SUE"
 
 
-@pytest.mark.xfail(strict=True, reason="OSM-derived frame, #564")
 def test_osm_derivation_declines_a_map_spanning_two_grid_squares(tmp_path, caplog):
     """A map in more than one 100 km square has no single grid origin.
 
