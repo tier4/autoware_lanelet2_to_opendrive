@@ -266,7 +266,6 @@ def test_resolve_projection_derives_the_grid_from_the_osm_nodes(tmp_path, recwar
     assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
 
 
-@pytest.mark.xfail(strict=True, reason="derivation parser stricter than the loader")
 def test_osm_derivation_tolerates_a_double_hyphen_comment(tmp_path):
     """The derivation parser must not be stricter than the map loader.
 
