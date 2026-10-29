@@ -19,24 +19,16 @@ from autoware_lanelet2_to_opendrive.projection import (
     latlon_to_proj_string,
     mgrs_grid_with_offset_to_latlon,
     mgrs_grid_with_offset_to_proj_string,
+    mgrs_to_lanelet2_origin,
     mgrs_to_proj_string,
 )
 from autoware_lanelet2_to_opendrive.projection_resolver import (
     ResolvedProjection,
     geo_reference_for_origin,
+    reject_removed_map_keys,
     resolve_projection,
-    resolve_projection_from_hydra,
     resolve_projection_from_osm,
 )
-
-
-@pytest.fixture(autouse=True)
-def _reset_legacy_origin_log_guard(monkeypatch):
-    """The legacy-key logger.warning fires once per process; reset that guard
-    so each test observes it independently of test order."""
-    monkeypatch.setattr(
-        projection_resolver, "_legacy_origin_keys_logged", False, raising=False
-    )
 
 
 def _cfg(map_dict):
@@ -44,46 +36,53 @@ def _cfg(map_dict):
 
 
 # ---------------------------------------------------------------------------
-# resolve_projection_from_hydra
+# reject_removed_map_keys
 # ---------------------------------------------------------------------------
 
-
-def test_resolve_rejects_the_offset_key():
-    """Declaring ``offset`` must fail loudly rather than relocate the map.
-
-    The export offset is gone (#564 follow-up). Ignoring a declared offset
-    would move the exported coordinates by its own magnitude -- 82 km for
-    ``nishishinjuku.yaml`` -- so the key is rejected instead.
-    """
-    with pytest.raises(ValueError, match="'offset' is no longer supported"):
-        resolve_projection_from_hydra(
-            _cfg(
-                {
-                    "mgrs_grid": "54SUE",
-                    "offset": {"x": 81655.73, "y": 50137.43, "z": 42.5},
-                }
-            )
-        )
-
-
-#: ``example_latlon.yaml`` exists to document the deprecated ``lat_lon`` key,
-#: so it is the one bundled config allowed to declare an origin.
-_LEGACY_ORIGIN_KEY_EXAMPLES = {"example_latlon.yaml"}
 
 _ORIGIN_KEYS = ("mgrs_grid", "mgrs_code", "lat_lon")
 
 
-def test_no_shipped_map_config_needs_an_origin_key():
-    """The frame comes from the map, so a map config declares no origin."""
+def test_no_shipped_map_config_declares_an_origin_key():
+    """No bundled config may declare an origin -- the keys are gone.
+
+    Not even as documentation: a config that declares one is now rejected,
+    so an example carrying it would be an example that does not run.
+    """
     conf_map = Path(projection_resolver.__file__).parent / "conf" / "map"
     offenders = []
     for path in sorted(conf_map.glob("*.yaml")):
-        if path.name in _LEGACY_ORIGIN_KEY_EXAMPLES:
-            continue
         map_cfg = OmegaConf.load(path)
         if any(k in map_cfg and map_cfg[k] is not None for k in _ORIGIN_KEYS):
             offenders.append(path.name)
     assert offenders == [], f"map configs still declaring an origin: {offenders}"
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        {"mgrs_grid": "54SUE"},
+        {"mgrs_code": "54SUE"},
+        {"lat_lon": {"latitude": 35.0, "longitude": 139.0}},
+        {"offset": {"x": 1.0, "y": 2.0}},
+    ],
+)
+def test_removed_map_keys_are_rejected(removed):
+    """Every key that used to declare the frame is now an error.
+
+    Ignoring them would be worse than refusing them: a config naming a grid
+    square the map is not in would silently keep converting, with the
+    geoReference it names no longer having any effect.
+    """
+    with pytest.raises(ValueError, match="no longer supported"):
+        reject_removed_map_keys(OmegaConf.create(removed))
+
+
+def test_reject_removed_map_keys_accepts_a_modern_config():
+    """A config with operations and a traffic rule and no origin is fine."""
+    reject_removed_map_keys(
+        OmegaConf.create({"traffic_rule": "LHT", "merge_operations": None})
+    )
 
 
 def test_no_shipped_map_config_declares_an_offset():
@@ -97,81 +96,6 @@ def test_no_shipped_map_config_declares_an_offset():
         if "offset" in map_cfg and map_cfg.offset is not None:
             offenders.append(path.name)
     assert offenders == [], f"map configs still declaring an offset: {offenders}"
-
-
-def test_resolve_mgrs_grid_without_offset():
-    """MGRS grid alone yields a zero offset and grid-corner lat/lon."""
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        resolved = resolve_projection_from_hydra(_cfg({"mgrs_grid": "54SUE"}))
-
-    assert resolved.mgrs_code == "54SUE"
-    assert resolved.offset == (0.0, 0.0, 0.0)
-    expected_lat, expected_lon = mgrs_grid_with_offset_to_latlon("54SUE", 0.0, 0.0)
-    assert resolved.origin_lat == expected_lat
-    assert resolved.origin_lon == expected_lon
-
-
-def test_resolve_lat_lon():
-    """lat_lon origin is passed through and yields a derived MGRS grid."""
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        resolved = resolve_projection_from_hydra(
-            _cfg({"lat_lon": {"latitude": 35.6895, "longitude": 139.6917}})
-        )
-
-    assert resolved.origin_lat == 35.6895
-    assert resolved.origin_lon == 139.6917
-    assert resolved.offset == (0.0, 0.0, 0.0)
-    # Derived grid zone for Tokyo is 54S...
-    assert resolved.mgrs_code.startswith("54S")
-    assert resolved.geo_reference == latlon_to_proj_string(35.6895, 139.6917)
-
-
-def test_resolve_legacy_mgrs_code_alias():
-    """Legacy ``mgrs_code`` map field is treated as ``mgrs_grid``."""
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        resolved = resolve_projection_from_hydra(_cfg({"mgrs_code": "54SUE"}))
-    assert resolved.mgrs_code == "54SUE"
-
-
-def test_resolve_lat_lon_mgrs_fallback(monkeypatch):
-    """If toMGRS returns an unexpected format, fall back to its first 5 chars."""
-    import autoware_lanelet2_to_opendrive.projection_resolver as pr
-
-    class _FakeMGRS:
-        def toMGRS(self, lat, lon):  # noqa: N802 (mirrors mgrs lib API)
-            return "ABCDEFG"  # no leading digits -> the grid-zone regex misses
-
-    monkeypatch.setattr(pr.mgrs_lib, "MGRS", _FakeMGRS)
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        resolved = resolve_projection_from_hydra(
-            _cfg({"lat_lon": {"latitude": 35.0, "longitude": 139.0}})
-        )
-    assert resolved.mgrs_code == "ABCDE"
-
-
-def test_resolve_requires_an_origin():
-    with pytest.raises(ValueError, match="Origin must be specified"):
-        resolve_projection_from_hydra(_cfg({}))
-
-
-def test_resolve_rejects_multiple_methods():
-    with pytest.raises(ValueError, match="Multiple origin specification"):
-        resolve_projection_from_hydra(
-            _cfg({"mgrs_grid": "54SUE", "lat_lon": {"latitude": 1.0, "longitude": 2.0}})
-        )
-
-
-def test_resolve_rejects_the_offset_key_with_a_lat_lon_origin():
-    """The rejection does not depend on which origin key accompanies it."""
-    with pytest.raises(ValueError, match="'offset' is no longer supported"):
-        resolve_projection_from_hydra(
-            _cfg(
-                {
-                    "lat_lon": {"latitude": 1.0, "longitude": 2.0},
-                    "offset": {"x": 1.0, "y": 2.0},
-                }
-            )
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +134,7 @@ def test_geo_reference_requires_origin():
 
 def test_resolved_projection_helpers():
     resolved = ResolvedProjection(
-        origin=resolve_projection_from_hydra(_cfg({"mgrs_grid": "54SUE"})).origin,
+        origin=mgrs_to_lanelet2_origin("54SUE"),
         mgrs_code="54SUE",
         origin_lat=35.6895,
         origin_lon=139.6917,
@@ -313,33 +237,19 @@ def test_osm_derivation_tolerates_a_double_hyphen_comment(tmp_path):
     assert resolved.mgrs_code == "54SUE"
 
 
-def test_osm_derivation_wins_over_the_legacy_origin_keys(tmp_path):
-    """The map's own coordinates beat a stale key.
-
-    ``MGRSProjector`` emits coordinates relative to each point's own grid
-    square whatever origin it is given, so a key naming a different square
-    only ever mislabelled the geoReference.
-    """
-    osm = _write_map(tmp_path, nodes=_TOKYO_NODES)
-
-    resolved = resolve_projection(_cfg({"mgrs_grid": "53SPU"}), osm)
-
-    assert resolved.mgrs_code == "54SUE"
-
-
 def test_osm_derivation_declines_a_map_spanning_two_grid_squares(tmp_path, caplog):
     """A map in more than one 100 km square has no single grid origin.
 
     Derivation declines and says which squares it found, rather than picking
-    one; resolution then falls back to the (deprecated) explicit keys.
+    one. With no origin keys left to fall back to, resolution then fails --
+    and the log is the only place that says why, so it is asserted here.
     """
     osm = _write_map(tmp_path, nodes=[_TOKYO_NODES[0], (35.68856, 140.69260)])
 
     with caplog.at_level(logging.WARNING, logger=projection_resolver.__name__):
-        with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-            resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
+        with pytest.raises(ValueError, match="Cannot determine the coordinate frame"):
+            resolve_projection(_cfg({}), osm)
 
-    assert resolved.mgrs_code == "54SUE"  # from the key, not derived
     messages = [r.getMessage() for r in caplog.records]
     assert any(
         "54SUE" in m and "54SVE" in m and "grid square" in m for m in messages
@@ -347,34 +257,32 @@ def test_osm_derivation_declines_a_map_spanning_two_grid_squares(tmp_path, caplo
 
 
 def test_resolve_projection_uses_map_projector_info_mgrs(tmp_path, recwarn):
-    """An MGRS map_projector_info.yaml reproduces the explicit mgrs_grid frame."""
+    """An MGRS map_projector_info.yaml resolves to the grid square it names."""
     osm = _write_map(
         tmp_path,
         projector_info="projector_type: MGRS\nvertical_datum: WGS84\nmgrs_grid: 54SUE\n",
     )
 
-    # cfg carries no origin keys – the projector-info file supplies the origin.
-    # This is the canonical path: no DeprecationWarning should be emitted.
     resolved = resolve_projection(_cfg({}), osm)
     assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
 
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        explicit = resolve_projection_from_hydra(_cfg({"mgrs_grid": "54SUE"}))
-
-    assert resolved.mgrs_code == explicit.mgrs_code == "54SUE"
-    assert resolved.origin_lat == explicit.origin_lat
-    assert resolved.origin_lon == explicit.origin_lon
-    assert resolved.offset == explicit.offset == (0.0, 0.0, 0.0)
+    # Compared against the projection helpers, not against a second
+    # resolution path: for an MGRS grid square there is only one left.
+    expected_lat, expected_lon = mgrs_grid_with_offset_to_latlon("54SUE", 0.0, 0.0)
+    assert resolved.mgrs_code == "54SUE"
+    assert resolved.origin_lat == expected_lat
+    assert resolved.origin_lon == expected_lon
+    assert resolved.offset == (0.0, 0.0, 0.0)
     # Equal geoReference => byte-identical .xodr for this origin.
-    assert resolved.geo_reference == explicit.geo_reference
+    assert resolved.geo_reference == mgrs_to_proj_string("54SUE")
 
 
-def test_resolve_rejects_the_offset_key_with_projector_info(tmp_path):
-    """The rejection fires on the ``map_projector_info.yaml`` path as well.
+def test_resolve_projection_rejects_a_removed_key_before_resolving(tmp_path):
+    """A sidecar projector-info file does not excuse a removed key.
 
-    That path never consulted ``offset``, so a map declaring one used to be
-    converted 82 km from where its own config said, announced by nothing but
-    "explicit origin keys, if any, are ignored".
+    The check runs before the branch, so a map that would otherwise resolve
+    fine still reports the stale key, rather than converting and leaving the
+    user to wonder why the key had no effect.
     """
     osm = _write_map(
         tmp_path, projector_info="projector_type: MGRS\nmgrs_grid: 54SUE\n"
@@ -383,81 +291,36 @@ def test_resolve_rejects_the_offset_key_with_projector_info(tmp_path):
         resolve_projection(_cfg({"offset": {"x": 81655.73, "y": 50137.43}}), osm)
 
 
-def test_resolve_projection_falls_back_without_info(tmp_path):
-    """With no projector-info file, explicit cfg keys drive the frame (legacy,
-    so a DeprecationWarning is expected)."""
-    osm = _write_map(tmp_path)  # no map_projector_info.yaml
-    with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-        resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
-    assert resolved.mgrs_code == "54SUE"
+def test_resolve_projection_raises_when_nothing_can_supply_the_frame(tmp_path):
+    """No projector-info file and no usable coordinates is an error.
 
-
-def test_map_projector_info_wins_over_explicit_keys(tmp_path, recwarn):
-    """When both are present, the projector-info file is the champion, and
-    since the explicit (legacy) keys are never consulted, no warning fires."""
-    osm = _write_map(
-        tmp_path, projector_info="projector_type: MGRS\nmgrs_grid: 54SUE\n"
-    )
-    # Explicit keys point somewhere else entirely; they must be ignored.
-    resolved = resolve_projection(
-        _cfg({"lat_lon": {"latitude": 10.0, "longitude": 20.0}}), osm
-    )
-    assert resolved.mgrs_code == "54SUE"
-    assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
+    There is no third source left, so this reports the two it tried instead
+    of resolving something arbitrary.
+    """
+    osm = _write_map(tmp_path)  # empty, unparseable, no projector-info file
+    with pytest.raises(ValueError, match="Cannot determine the coordinate frame"):
+        resolve_projection(_cfg({}), osm)
 
 
 @pytest.mark.parametrize("projector_type", ["LocalCartesianUTM", "LocalCartesian"])
-def test_resolve_projection_unsupported_type_falls_back_without_deprecation(
-    tmp_path, recwarn, caplog, projector_type
-):
-    """A recognised-but-unsupported projector type falls back to the explicit
-    keys, but must NOT tell the user to "provide a map_projector_info.yaml"
-    (they already did, and have no non-deprecated way to resolve the origin).
+def test_resolve_projection_unsupported_type_raises(tmp_path, projector_type):
+    """A recognised-but-unsupported projector type is now an error.
+
+    Deriving an MGRS frame instead would export the map in a projection it
+    does not declare, and there are no origin keys left to fall back to.
+    The message names the type so the user knows what is missing, rather
+    than reporting an absent origin.
     """
     osm = _write_map(
         tmp_path,
+        nodes=_TOKYO_NODES,
         projector_info=(
             f"projector_type: {projector_type}\n"
             "map_origin:\n  latitude: 35.0\n  longitude: 139.0\n"
         ),
     )
-    with caplog.at_level(logging.WARNING, logger=projection_resolver.__name__):
-        resolved = resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
-    assert resolved.mgrs_code == "54SUE"
-
-    assert not any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)
-    messages = [r.getMessage() for r in caplog.records]
-    assert not any("deprecated" in m for m in messages), messages
-    assert not any("Prefer map_projector_info.yaml" in m for m in messages), messages
-    assert any(
-        projector_type in m
-        and "not supported yet" in m
-        and "remain required for this map" in m
-        for m in messages
-    ), messages
-
-
-def test_resolve_projection_without_info_emits_deprecation(tmp_path, caplog):
-    """With no projector-info file the normal deprecation is still emitted,
-    both as a DeprecationWarning and as a logger warning."""
-    osm = _write_map(tmp_path)
-    with caplog.at_level(logging.WARNING, logger=projection_resolver.__name__):
-        with pytest.warns(DeprecationWarning, match="map_projector_info.yaml"):
-            resolve_projection(_cfg({"mgrs_grid": "54SUE"}), osm)
-    assert any(
-        "deprecated" in r.getMessage() and "map_projector_info.yaml" in r.getMessage()
-        for r in caplog.records
-    )
-
-
-def test_legacy_origin_log_warning_fires_once(caplog):
-    """The deprecation logger.warning is emitted once per process."""
-    with caplog.at_level(logging.WARNING, logger=projection_resolver.__name__):
-        with pytest.warns(DeprecationWarning):
-            resolve_projection_from_hydra(_cfg({"mgrs_grid": "54SUE"}))
-            resolve_projection_from_hydra(_cfg({"mgrs_grid": "54SUE"}))
-    deprecations = [r for r in caplog.records if "deprecated" in r.getMessage()]
-    assert len(deprecations) == 1
+    with pytest.raises(ValueError, match=f"{projector_type}.*not supported"):
+        resolve_projection(_cfg({}), osm)
 
 
 def test_map_projector_info_mgrs_without_grid_raises(tmp_path):

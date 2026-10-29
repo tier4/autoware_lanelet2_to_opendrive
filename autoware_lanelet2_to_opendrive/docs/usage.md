@@ -29,7 +29,6 @@ conf/
 ├── config.yaml          # base
 ├── map/                 # map-specific (origin + preprocessing)
 │   ├── example.yaml
-│   ├── example_latlon.yaml
 │   ├── example_mgrs_offset.yaml
 │   ├── nishishinjuku.yaml
 │   └── odaiba.yaml
@@ -116,7 +115,7 @@ The preferred way to specify the map origin is a `map_projector_info.yaml`
 file placed next to the input `.osm` map (same directory). When present with
 a supported `projector_type` (`MGRS` or `TransverseMercator`, matched
 case-sensitively as Autoware writes them), it is used as the origin source and
-any `mgrs_grid`/`lat_lon` keys in the map config are ignored:
+the map's own coordinates are not consulted:
 
 ```yaml
 projector_type: MGRS
@@ -144,66 +143,38 @@ Autoware's own tooling uses. The per-node `mgrs_code` tag that Autoware
 tooling writes is *optional*, so it is deliberately not read; only `lat`/`lon`
 are.
 
-This is not a fallback but a second canonical route, so it emits no
-deprecation notice, and it takes precedence over the keys below. That is safe
-because `MGRSProjector` emits coordinates relative to each point's own grid
-square whatever origin it is given: a key naming a different square only ever
-mislabelled `<header><geoReference>`.
+This is a second canonical route, so it emits no
+deprecation notice. It is the only route left for a map without a
+projector-info file.
 
 Derivation declines, with a log line saying why, when the map cannot be read
 or parsed, carries no georeferenced `<node>` elements, or spans more than one
 grid square — the last has no single grid origin, and the log names the
-squares it found. Resolution then falls through to the keys below.
+squares it found. With nothing left to fall back to, resolution then fails,
+naming both sources it tried.
 
-### Legacy: explicit `mgrs_grid` / `lat_lon` config keys
+### Removed: the origin keys
 
-If no `map_projector_info.yaml` is found and the frame cannot be derived from
-the map, origin resolution falls back to explicit keys in the map config.
-**This fallback is deprecated**: it still works unchanged, but emits a
-`DeprecationWarning` (and a matching log warning) and may be removed in a
-future major version (tracked in
-[#564](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/564);
-the soft-deprecation itself is
+A map config used to be able to declare the frame itself. Those keys are
+**gone**, and a config that still carries one is rejected with a message
+naming what replaced it ([#564](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/564);
+the soft deprecation that preceded it was
 [#539](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/539)).
-Prefer `map_projector_info.yaml` for new configs.
 
-Each map config in `conf/map/*.yaml` must specify exactly **one** of the
-following (see
-[`example.yaml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/conf/map/example.yaml)):
+| removed key | what to do |
+| --- | --- |
+| `mgrs_grid` | delete it — the frame comes from `map_projector_info.yaml` or from the map |
+| `mgrs_code` | as above; it was the legacy spelling of `mgrs_grid` |
+| `lat_lon` | as above |
+| `offset` | delete the block; exported coordinates move by exactly the offset it declared |
 
-#### Method 1 — MGRS grid only
+**They are rejected rather than ignored, deliberately.** A config naming a
+grid square its map is not in would otherwise keep converting while the
+geoReference it named had no effect, and `offset` was *subtracted from every
+exported coordinate*, so ignoring it relocated the map by its own magnitude.
 
-```yaml
-mgrs_grid: 54SUE815501
-```
-
-The legacy field name `mgrs_code` is also accepted.
-
-#### Method 2 — Latitude / Longitude
-
-```yaml
-lat_lon:
-  latitude: 35.6762
-  longitude: 139.6503
-  altitude: 0.0
-```
-
-The MGRS grid for the `<header><geoReference>` PROJ string is derived
-automatically.
-
-The validator in
-[`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
-rejects combinations that mix `mgrs_grid` and `lat_lon`.
-
-#### Removed: the `offset` key
-
-A map config used to be able to declare an `offset` that was **subtracted
-from every exported coordinate**, so the `.xodr` lived in a local frame
-anchored at the offset point. That key is gone: exported coordinates are
-always in the frame the projector itself defines, which is what
-`<header><geoReference>` describes. A config that still declares one is
-rejected — it is not ignored, because ignoring it would move the output by
-exactly the offset (82 km, for the Nishishinjuku config). Delete the block.
+`OriginSpec(mgrs_code=...)` in the Python API is a different thing and is
+unaffected: a library caller may still state an origin directly.
 
 ## Preprocessing Operations
 
@@ -223,8 +194,6 @@ conversion. The execution order is fixed (defined in
 Skeleton (commented examples are in `conf/map/example.yaml`):
 
 ```yaml
-mgrs_grid: 54SUE815501
-
 merge_operations:
   - lanelet_ids: [100, 101, 102]
     validate: true
@@ -418,15 +387,24 @@ The repository's `examples/` directory contains:
 `config.yaml` marks `input_map_path` as `???` (Hydra "must override"). Pass
 it on the command line: `convert input_map_path=/path/to/map.osm`.
 
-### `Multiple origin specification methods detected`
+### `The map config key '...' is no longer supported`
 
-Set exactly one of `mgrs_grid` or `lat_lon` in the map config.
+Delete that key from the map config; the message names what replaced it. See
+[Removed: the origin keys](#removed-the-origin-keys).
 
-### `The map config key 'offset' is no longer supported`
+### `Cannot determine the coordinate frame of ...`
 
-Delete the `offset` block from the map config. Exported coordinates move by
-exactly the offset that was removed; see
-[Removed: the `offset` key](#removed-the-offset-key).
+The map has no sibling `map_projector_info.yaml` and no usable node
+coordinates. The log above the error says why derivation declined — most
+often the map is unparseable, or it spans more than one MGRS grid square.
+Add a `map_projector_info.yaml` next to it.
+
+### `projector_type '...' is not supported`
+
+The map's `map_projector_info.yaml` names a projection this converter cannot
+build. Only `MGRS` and `TransverseMercator` are wired. The frame is *not*
+derived from the map instead, because that would export it in a projection it
+does not declare.
 
 ### `Failed to load Lanelet2 map`
 
