@@ -1,20 +1,14 @@
-# Example map configuration using a bare MGRS grid square
+# Example map configuration with no origin specification at all
 #
-# Named for the `offset` key it used to carry. That key is gone: exported
-# coordinates are always in the frame the projector defines, so a grid square
-# is the whole origin specification. The name is kept because several test
-# modules and a CI step pass `map=example_mgrs_offset` on the command line.
+# Named for the `offset` key it used to carry. That key is gone -- exported
+# coordinates are always in the frame the projector defines -- and so is the
+# `mgrs_grid` key, because the frame is resolved from the map rather than
+# declared. What is left is a config that selects no preprocessing and no
+# per-map overrides. The name is kept because several test modules and a CI
+# step pass `map=example_mgrs_offset` on the command line.
 
-# DEPRECATED (#539): the origin keys below ('mgrs_grid' / 'lat_lon') are a
-# legacy fallback. The canonical origin source is a map_projector_info.yaml
-# placed next to the .osm map; when it declares a supported projector_type
-# (currently MGRS or TransverseMercator), these keys are ignored. They are
-# still required when no map_projector_info.yaml exists, or when its
-# projector_type is not supported yet, and will be removed in a future major
-# version (see #564).
-
-# MGRS grid code (legacy, deprecated)
-mgrs_grid: 54SUE
+# No origin keys: the coordinate frame comes from a map_projector_info.yaml
+# next to the .osm map, or failing that from the map's own node coordinates.
 
 # Merge operations - merge multiple lanelets into one
 merge_operations:
