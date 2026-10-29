@@ -29,9 +29,9 @@ they fire once each on Nishi-Shinjuku (both ``target`` values: junctions 1002
 and 11002 both hold a ``<connection>`` for road 229's end, and road 229's
 ``<successor>`` names 11002, so junction 1002's row is never read) and twelve
 times each on a 6,672-lanelet real map, where five road ends are contested
-across nine junctions.  ``junction_cluster`` and the ``*_mini`` fixtures were
-already at zero before the fix, so they do not witness it: the smallest input
-that does is Nishi-Shinjuku.  The two are independent -- a row can go unread
+across nine junctions.  The ``*_mini`` fixtures were already at zero before
+the fix, so they do not witness it: the smallest input that does is
+Nishi-Shinjuku.  The two are independent -- a row can go unread
 without its end being contested, when the slot names a junction that claims
 nothing there -- so both are asserted rather than one standing in for the
 other.
