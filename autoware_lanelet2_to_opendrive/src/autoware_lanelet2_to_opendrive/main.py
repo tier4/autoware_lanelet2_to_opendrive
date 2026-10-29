@@ -407,6 +407,23 @@ class _Lanelet2ToOpenDRIVEConverter:
             routing_graph=routing_graph,
         )
 
+        # A road end carries one <link> slot, so two junctions claiming the
+        # same end can never both be read: the slot names one of them and
+        # every <connection> of the other is dead, along with the connecting
+        # roads those rows point at. Merge such groups into one junction.
+        # Must run after every pass above -- they are the ones that write the
+        # slot -- and before set_all_lane_links, which reads the final links.
+        print("\n=== Merging junctions that claim the same road end ===")
+        from autoware_lanelet2_to_opendrive.junction_claims import (
+            merge_contested_junction_claims,
+        )
+
+        merged_away = merge_contested_junction_claims(
+            all_roads=all_roads,
+            junctions=junctions,
+        )
+        print(f"Merged away {merged_away} junction(s) with contested road ends")
+
         # Set lane links for all roads
         print("\n=== Building lane links for all roads ===")
         lanelet_to_road_and_lane = Road.set_all_lane_links(
