@@ -65,6 +65,27 @@ def test_resolve_rejects_the_offset_key():
         )
 
 
+#: ``example_latlon.yaml`` exists to document the deprecated ``lat_lon`` key,
+#: so it is the one bundled config allowed to declare an origin.
+_LEGACY_ORIGIN_KEY_EXAMPLES = {"example_latlon.yaml"}
+
+_ORIGIN_KEYS = ("mgrs_grid", "mgrs_code", "lat_lon")
+
+
+@pytest.mark.xfail(strict=True, reason="preprocessing needs no origin, #564")
+def test_no_shipped_map_config_needs_an_origin_key():
+    """The frame comes from the map, so a map config declares no origin."""
+    conf_map = Path(projection_resolver.__file__).parent / "conf" / "map"
+    offenders = []
+    for path in sorted(conf_map.glob("*.yaml")):
+        if path.name in _LEGACY_ORIGIN_KEY_EXAMPLES:
+            continue
+        map_cfg = OmegaConf.load(path)
+        if any(k in map_cfg and map_cfg[k] is not None for k in _ORIGIN_KEYS):
+            offenders.append(path.name)
+    assert offenders == [], f"map configs still declaring an origin: {offenders}"
+
+
 def test_no_shipped_map_config_declares_an_offset():
     """Guard: the key must not creep back into the bundled map configs."""
     conf_map = Path(projection_resolver.__file__).parent / "conf" / "map"
