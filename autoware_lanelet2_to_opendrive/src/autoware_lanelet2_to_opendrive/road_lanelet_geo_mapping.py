@@ -33,6 +33,7 @@ from .opendrive.geometry import (
     evaluate_plan_view_world,
     param_for_offset,
 )
+from .divergence import SYNTHETIC_CONNECTOR_NAME_PREFIX
 from .util import CONVERTIBLE_LANELET_SUBTYPES, filter_lanelets_by_subtype
 
 if TYPE_CHECKING:
@@ -78,6 +79,7 @@ _CANDIDATE_BBOX_MARGIN: float = 10.0
 #: ``ParamPoly3Constants.min_segment_length`` — the project's existing
 #: floor for non-degenerate segments.
 _SYNTHETIC_CONNECTOR_MAX_LENGTH: float = 0.5
+"""Fallback proxy for provenance; see ``_synthetic_connector_road_ids``."""
 
 
 # ---------------------------------------------------------------------------
@@ -668,11 +670,18 @@ def parse_roads_from_xodr(
 
         lanes_obj = Lanes(lane_sections=[lane_section])
 
+        # Recover the synthesis provenance.  The emitted file is the only
+        # channel between the conversion and this re-parse, and the mapping
+        # built here is cross-validated against the conversion's own, so the
+        # two have to agree about which roads have no backing lanelet.
+        name = road_elem.get("name") or ""
         road = Road(
             id=road_id,
+            name=name or None,
             junction=junction,
             plan_view=plan_view,
             lanes=lanes_obj,
+            synthetic_connector=name.startswith(SYNTHETIC_CONNECTOR_NAME_PREFIX),
         )
         roads.append(road)
 
@@ -687,18 +696,33 @@ def parse_roads_from_xodr(
 def _synthetic_connector_road_ids(roads: list["ConverterRoad"]) -> set[int]:
     """Road IDs of synthetic divergence/merge connecting roads (#291, #493).
 
-    A connecting road (``junction != -1``) whose total planView length is
-    below ``_SYNTHETIC_CONNECTOR_MAX_LENGTH`` is a synthetic stub from the
-    divergence/merge synthesis pass — it has no backing lanelet. Real
-    ``turn_direction`` connecting roads are at least several metres long.
+    A synthetic stub comes from the divergence/merge synthesis pass and has no
+    backing lanelet, so the geometric mapping must skip it: it cannot be
+    matched to a lanelet, and if it is allowed to compete it takes one away
+    from the road that does own it.
 
-    The check depends only on ``junction`` and planView length, so callers
-    can identify these roads with a lightweight pass — without running the
-    full geometric mapping.
+    Provenance comes first: ``Road.synthetic_connector``, set by the synthesis
+    pass and recovered from the file by :func:`parse_roads_from_xodr`.
+
+    ``_SYNTHETIC_CONNECTOR_MAX_LENGTH`` remains as a fallback for a road that
+    carries no provenance — one built by an older path, or read from an XODR
+    this converter did not write. It is only a proxy: measured on
+    nishishinjuku every synthetic stub is 0.010 m and the shortest real
+    ``turn_direction`` connector is 2.598 m, so it separates the two
+    populations today, but **a synthetic road longer than the threshold would
+    be read as real**, which is what the junction carve produces by design.
+
+    The check needs no geometry beyond ``junction`` and planView length, so
+    callers can still identify these roads with a lightweight pass.
     """
     skipped: set[int] = set()
     for road in roads:
-        if road.junction != -1 and road.plan_view is not None:
+        if road.junction == -1:
+            continue
+        if getattr(road, "synthetic_connector", False):
+            skipped.add(road.id)
+            continue
+        if road.plan_view is not None:
             total_length = sum(g.length for g in road.plan_view.geometries)
             if total_length < _SYNTHETIC_CONNECTOR_MAX_LENGTH:
                 skipped.add(road.id)
