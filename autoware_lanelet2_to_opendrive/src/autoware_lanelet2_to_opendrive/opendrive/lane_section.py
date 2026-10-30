@@ -12,7 +12,6 @@ from ..conversion_config import WidthEstimationConfig
 from ..config import CoordinateOffset
 from .enums import RoadMarkType, RoadMarkLaneChange
 from .lane_elements import road_mark_from_linestring_attrs
-from .xml_utils import replace_subnormal
 
 
 class LaneSection:
@@ -44,9 +43,6 @@ class LaneSection:
         # ``ReferenceLine`` form via ``_lane`` when present.
         self.center_lane: Optional[Union[ReferenceLine, "Lane"]] = None  # ID = 0
         self.right_lanes: Dict[int, "Lane"] = {}  # Negative IDs
-
-        # Lane offset for single lane sections
-        self.lane_offset: Optional[Dict[str, float]] = None
 
     def _add_left_lane(self, lane: "Lane") -> None:
         """Add a left lane to the section."""
@@ -328,13 +324,6 @@ class LaneSection:
         """Convert to XML element."""
         elem = ET.Element("laneSection")
         elem.set("s", str(self.s_offset))
-
-        # Add laneOffset if present (for single lane sections)
-        if self.lane_offset:
-            offset_elem = ET.SubElement(elem, "laneOffset")
-            offset_elem.set("s", str(self.lane_offset["s"]))
-            for key in ("a", "b", "c", "d"):
-                offset_elem.set(key, str(replace_subnormal(self.lane_offset[key])))
 
         # Add left lanes
         if self.left_lanes:

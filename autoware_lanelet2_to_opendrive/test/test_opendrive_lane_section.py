@@ -69,8 +69,14 @@ def test_get_all_lanes(lanelet_map):
     assert center_lane.get("type") == "none"
 
 
-def test_single_lane_section_with_lane_offset(lanelet_map):
-    """Test constructing a LaneSection from a single lanelet with laneOffset."""
+def test_single_lane_section_has_one_right_lane_and_no_lane_offset(lanelet_map):
+    """A one-lanelet section gets lane -1 and emits no ``<laneOffset>``.
+
+    The old name claimed the section was built *with* a laneOffset. It never
+    was: the reference line is the lanelet's own left boundary, so the centre
+    lane sits on it and the offset is zero by construction. Nothing in the
+    converter has ever produced a non-zero one.
+    """
 
     # Use a single lanelet
     single_lanelet = lanelet_map.laneletLayer.get(3002094)
@@ -96,13 +102,12 @@ def test_single_lane_section_with_lane_offset(lanelet_map):
     # Check lane ID for single lane
     assert -1 in lane_section.right_lanes
 
-    # Check that laneOffset is not set (since we use left boundary as reference line)
-    assert lane_section.lane_offset is None
-
-    # Test XML output does not include laneOffset
+    # No <laneOffset>: the reference line is the lanelet's left boundary, so
+    # the centre lane lies on it. (In OpenDRIVE <laneOffset> is a child of
+    # <lanes>, not of <laneSection>, so a section could not carry one anyway.)
     xml_element = lane_section.to_xml()
-    offset_element = xml_element.find("laneOffset")
-    assert offset_element is None
+    assert xml_element.find("laneOffset") is None
+    assert xml_element.find("lanes") is None
 
 
 def test_lane_section_rht_explicit(lanelet_map):
