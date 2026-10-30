@@ -35,6 +35,10 @@ the ones still missing.
   warning signs, regulatory signs, etc.) — Lanelet2's
   `traffic_sign` regulatory element is read only for the `stop_sign`
   case; other subtypes are silently skipped
+- **Detection areas** — a Lanelet2 `detection_area` regulatory element
+  describes where a vehicle must look for an obstacle before a stop line.
+  OpenDRIVE has no counterpart, so it is not emitted and nothing is
+  derived from it
 - **Per-lane signal validity** beyond a single `<validity>` row covering
   the lanelets the regulatory element references — the converter does
   not currently split `<validity>` rows when only a subset of the lanes
