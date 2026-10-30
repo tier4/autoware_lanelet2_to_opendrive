@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Iterable, List, Set, Tuple
 
@@ -138,12 +138,24 @@ class SanityGateInputs:
             successor (or predecessor) lanelet of the source road resolves
             to. Must be a subset of ``set(candidate_road_ids)`` for the
             "group exhaustiveness" check to pass.
+        lane_pair_contacts: for each triple in ``lane_pairs`` that could be
+            resolved, the two ``(x, y, z)`` lane-end anchors it joins --
+            the source road's lane end and the candidate road's lane start
+            (mirrored for a merge). Lanelet2 defines lane connectivity by
+            shared ``Point`` objects, so these two are the same point in
+            the source map and reconstruct to millimetres. Empty for
+            callers that have no lane geometry, in which case the
+            coincidence check falls back to the reference-line endpoints.
     """
 
     endpoint_road: Tuple[float, float, float]
     endpoints_candidates: Dict[int, Tuple[float, float, float]]
     lane_pairs: List[Tuple[int, int, int]]
     all_successor_lanelet_road_ids: Set[int]
+    lane_pair_contacts: Dict[
+        Tuple[int, int, int],
+        Tuple[Tuple[float, float, float], Tuple[float, float, float]],
+    ] = field(default_factory=dict)
 
 
 def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:

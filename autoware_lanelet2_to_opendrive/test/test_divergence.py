@@ -1,5 +1,7 @@
 """Tests for divergence/merge synthesis (issue #291)."""
 
+import pytest
+
 import inspect
 from unittest.mock import MagicMock
 
@@ -163,6 +165,51 @@ def test_sanity_gate_fails_on_endpoint_distance():
     ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
     assert ok is False
     assert "endpoint" in reason
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="check 1 compares reference-line endpoints, which each road takes "
+    "from its own outermost boundary",
+)
+def test_sanity_gate_accepts_a_contact_its_reference_lines_disagree_about():
+    """A real contact must pass even when the two reference lines do not meet.
+
+    Lanelet2 *defines* lane connectivity by shared ``Point`` objects, so the
+    lane end of a road and the lane start of its successor are the same point
+    in the source map; reconstructed, they agree to millimetres. The two
+    roads' *reference lines* are a different matter: each road takes its own
+    outermost lanelet boundary, so a road with a wider carriageway puts its
+    reference line a carriageway away from its neighbour's.
+
+    Measured on Nishishinjuku: of the 29 sites this gate rejects, **28 have a
+    reference-line distance equal to the two roads' carriageway width
+    difference to within 10 mm** (residual p50 1.0 mm). The accepted
+    population contains width differences up to 8.932 m whose reference-line
+    distance is still under 0.070 m, so the width difference is not what
+    produces the distance -- the choice of reference boundary is.
+
+    Here the reference endpoints are 3 m apart, a typical lane width, while
+    every lane pair's two anchors coincide to a millimetre.
+    """
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (3.0, 0.0, 0.0),
+            187: (3.0, 0.0, 0.0),
+            188: (3.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+        lane_pair_contacts={
+            (-1, 186, -1): ((1.5, 0.0, 0.0), (1.5, 0.001, 0.0)),
+            (-2, 187, -1): ((1.5, 0.0, 0.0), (1.5, 0.002, 0.0)),
+            (-3, 188, -1): ((1.5, 0.0, 0.0), (1.5, 0.000, 0.0)),
+        },
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is True, reason
 
 
 def test_sanity_gate_fails_on_lane_collision():
