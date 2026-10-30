@@ -25,8 +25,10 @@ from typing import Dict, List, Set, Tuple
 
 import lanelet2
 
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
     _lane_anchor_xyz,
+    _lane_width_at,
     _make_zero_length_connecting_road,
 )
 from autoware_lanelet2_to_opendrive.opendrive.enums import (
@@ -188,13 +190,37 @@ def complete_direct_junction_lanelinks(
                     )
                     continue
 
-                fallback_heading = 0.0
+                # The incoming road's reference-line tangent at its end is
+                # the connector's heading: the connector leaves that road,
+                # so that is the direction of travel through it. ``None``
+                # when the road has no reference line to read a tangent
+                # from.
+                heading: float | None = None
                 if in_road.plan_view is not None:
                     endpoint_with_h = _evaluate_planview_endpoint_with_heading(
                         in_road.plan_view, at_start=False
                     )
                     if endpoint_with_h is not None:
-                        fallback_heading = endpoint_with_h[2]
+                        heading = endpoint_with_h[2]
+
+                # The connector's lane should be as wide as the lanes it
+                # joins. The mean of the two is used because it carries a
+                # single constant width and neither side is more
+                # authoritative; the configured default applies only when
+                # neither can be read.
+                joined_widths = [
+                    w
+                    for w in (
+                        _lane_width_at(in_road, lane_id, at_start=False),
+                        _lane_width_at(out_road, out_lane, at_start=True),
+                    )
+                    if w is not None
+                ]
+                lane_width = (
+                    sum(joined_widths) / len(joined_widths)
+                    if joined_widths
+                    else DEFAULT_CONFIG.geometry.divergence_default_lane_width
+                )
 
                 new_road = _make_zero_length_connecting_road(
                     road_id=next_id,
@@ -209,7 +235,8 @@ def complete_direct_junction_lanelinks(
                     traffic_rule=traffic_rule,
                     from_lane=lane_id,
                     to_lane=out_lane,
-                    fallback_heading=fallback_heading,
+                    heading=heading,
+                    lane_width=lane_width,
                 )
                 new_roads.append(new_road)
 

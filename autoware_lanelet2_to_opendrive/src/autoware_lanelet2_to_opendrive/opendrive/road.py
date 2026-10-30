@@ -567,6 +567,31 @@ class Road:
         )
         return None if pose is None else pose[:3]
 
+    def evaluate_lane_width(self, lane_id: int, at_start: bool) -> Optional[float]:
+        """Width of lane ``lane_id`` at this road's ``s=0`` or ``s=length``.
+
+        The lane is looked up by its OpenDRIVE id (negative for RHT,
+        positive for LHT) in the first lane section, and its piecewise-cubic
+        ``<width>`` polynomial evaluated there. Returns ``None`` when the
+        road has no lane section, no such lane, or the lane carries no width
+        data -- never a substituted zero, which would let a caller emit a
+        collapsed lane while believing it had read a real width.
+
+        Used to give a synthetic connector the width of the lanes it joins
+        instead of a constant default.
+        """
+        if self.lanes is None or not self.lanes.lane_sections:
+            return None
+        lane_section = self.lanes.lane_sections[0]
+        lane = (
+            lane_section.left_lanes.get(lane_id)
+            if lane_id > 0
+            else lane_section.right_lanes.get(lane_id)
+        )
+        if lane is None:
+            return None
+        return _evaluate_lane_width(lane, 0.0 if at_start else self.length)
+
     def to_xml(self) -> ET.Element:
         """Convert to XML element."""
         elem = ET.Element("road")

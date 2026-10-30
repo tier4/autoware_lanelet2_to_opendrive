@@ -237,39 +237,58 @@ def _make_zero_length_connecting_road(
     traffic_rule: TrafficRule,
     from_lane: int,
     to_lane: int,
-    fallback_heading: float = 0.0,
+    heading: float | None = None,
     lane_width: float = 3.5,
 ) -> Road:
-    """Build a single-segment single-lane connecting road floored at ``min_segment_length``.
+    """Build a single-segment single-lane connecting road of ``min_segment_length``.
 
-    The geometry is a :class:`ParamPoly3` segment whose length is the
-    planar distance between ``start_xyz`` and ``end_xyz``, lifted to at
-    least ``min_segment_length`` so OpenDRIVE consumers that reject
-    zero-length geometry (e.g. CARLA) still accept it.  ParamPoly3 is
-    used (rather than :class:`Line`) because downstream samplers in this
-    converter — ``road_lanelet_geo_mapping``, ``analyze_xodr``,
-    ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc. directly without
-    a geometry-type guard. For a straight segment the coefficients
-    reduce to ``u(p) = p``, ``v(p) = 0``.  When ``start_xyz`` and
-    ``end_xyz`` coincide the heading falls back to ``fallback_heading``
-    (typically the source road's reference-line tangent) so the
-    connector aligns with the linked roads instead of pointing along
-    the world X axis.  The lane carries lane-level predecessor/successor
-    links from ``from_lane`` to ``to_lane`` and a constant ``lane_width``
-    so the eventual XML always emits a ``<width>`` element.
+    The geometry is a :class:`ParamPoly3` segment of exactly
+    ``min_segment_length`` — long enough that OpenDRIVE consumers which
+    reject zero-length geometry (e.g. CARLA) still accept it — pointing
+    along ``heading`` and centred on the midpoint of ``start_xyz`` and
+    ``end_xyz``.  ParamPoly3 is used (rather than :class:`Line`) because
+    downstream samplers in this converter — ``road_lanelet_geo_mapping``,
+    ``analyze_xodr``, ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc.
+    directly without a geometry-type guard. For a straight segment the
+    coefficients reduce to ``u(p) = p``, ``v(p) = 0``.
+
+    ``heading`` is the linked road's reference-line tangent at the
+    contact, and it is used unconditionally.  The two anchors are two
+    renderings of the *same* source point — Lanelet2 defines lane
+    connectivity by shared ``Point`` objects, so a successor lanelet
+    starts on the very points its predecessor ends on — which makes any
+    separation between them reconstruction error (reference-line fit plus
+    accumulated width splines), never a direction of travel.  Reading a
+    heading out of that separation, as this function used to, pointed the
+    stub across its own carriageway by a median of 91 degrees.  Centring
+    the segment on the midpoint splits the residual error evenly between
+    the incoming and outgoing contact instead of loading it onto one.
+
+    ``heading`` may be ``None`` when the caller has no reference line to
+    take a tangent from (mock roads in unit tests, or a road without
+    planView geometry); the anchor separation is then the only direction
+    information left and is used as a last resort.
+
+    The lane carries lane-level predecessor/successor links from
+    ``from_lane`` to ``to_lane`` and a constant ``lane_width`` — the width
+    of the lanes it joins, supplied by the caller — so the eventual XML
+    always emits a ``<width>`` element.
     """
-    dx = end_xyz[0] - start_xyz[0]
-    dy = end_xyz[1] - start_xyz[1]
-    raw_length = math.sqrt(dx * dx + dy * dy)
-    length = max(raw_length, min_segment_length)
-    heading = math.atan2(dy, dx) if raw_length > 1e-9 else fallback_heading
+    length = min_segment_length
+    if heading is None:
+        heading = math.atan2(end_xyz[1] - start_xyz[1], end_xyz[0] - start_xyz[0])
+    mid_x = 0.5 * (start_xyz[0] + end_xyz[0])
+    mid_y = 0.5 * (start_xyz[1] + end_xyz[1])
+    mid_z = 0.5 * (start_xyz[2] + end_xyz[2])
+    start_x = mid_x - 0.5 * length * math.cos(heading)
+    start_y = mid_y - 0.5 * length * math.sin(heading)
 
     plan_view = PlanView(
         geometries=[
             ParamPoly3(
                 s=0.0,
-                x=start_xyz[0],
-                y=start_xyz[1],
+                x=start_x,
+                y=start_y,
                 hdg=heading,
                 length=length,
                 aU=0.0,
@@ -285,17 +304,20 @@ def _make_zero_length_connecting_road(
         ]
     )
 
-    # Linear elevation profile so the connector matches the linked roads'
-    # z at both endpoints. Without this the synthesised road serializes
-    # without an <elevationProfile> and downstream consumers (CARLA,
-    # qc-validate, test_junction_endpoint_fidelity) read z=0 — producing
-    # gross 3D mismatches at ramps, hills, or any non-flat divergence.
-    z_start = start_xyz[2]
-    z_end = end_xyz[2]
-    elev_b = (z_end - z_start) / length if length > 0 else 0.0
+    # An explicit elevation profile is required: without it the synthesised
+    # road serializes with no <elevationProfile> and downstream consumers
+    # (CARLA, qc-validate, test_junction_endpoint_fidelity) read z=0 —
+    # producing gross 3D mismatches at ramps, hills, or any non-flat
+    # divergence.
+    # The plan view carries no vertical tangent, and over
+    # ``min_segment_length`` the anchors' z separation is the same
+    # reconstruction error as their x/y separation, so the midpoint z with
+    # zero slope splits it the same way. A slope of
+    # ``(z_end - z_start) / min_segment_length`` would instead turn a few
+    # millimetres of fit error into a gradient of tens of percent.
     elevation_profile = ElevationProfile(
         elevations=[
-            Elevation(s=0.0, a=z_start, b=elev_b, c=0.0, d=0.0),
+            Elevation(s=0.0, a=mid_z, b=0.0, c=0.0, d=0.0),
         ]
     )
 
@@ -372,7 +394,7 @@ def synthesise_junction_for_site(
     junction_id: int,
     traffic_rule: TrafficRule,
     min_segment_length: float,
-    fallback_heading: float = 0.0,
+    heading: float | None = None,
     lane_width: float = 3.5,
     lane_pair_endpoints: (
         Dict[
@@ -381,6 +403,7 @@ def synthesise_junction_for_site(
         ]
         | None
     ) = None,
+    lane_pair_widths: Dict[Tuple[int, int, int], float] | None = None,
 ) -> SynthesisOutput:
     """Build one synthetic :class:`Junction` plus N zero-length connecting roads.
 
@@ -401,6 +424,10 @@ def synthesise_junction_for_site(
     synthesiser falls back to ``inputs.endpoint_road`` /
     ``inputs.endpoints_candidates`` so non-Road callers (unit tests
     using mock road stubs) still work.
+
+    ``lane_pair_widths`` optionally supplies, per the same key, the width
+    the connector's lane should carry — the width of the lanes it joins.
+    Keys it does not cover fall back to ``lane_width``.
     """
     junction = Junction(
         id=junction_id, name=f"divergence_{site.road_id}", connections=[]
@@ -466,8 +493,14 @@ def synthesise_junction_for_site(
             traffic_rule=traffic_rule,
             from_lane=from_lane,
             to_lane=to_lane,
-            fallback_heading=fallback_heading,
-            lane_width=lane_width,
+            heading=heading,
+            lane_width=(
+                lane_width
+                if lane_pair_widths is None
+                else lane_pair_widths.get(
+                    (src_lane, cand_road_id, cand_lane), lane_width
+                )
+            ),
         )
 
         connecting_roads.append(road)
@@ -542,6 +575,27 @@ def _lane_anchor_xyz(
     if not (0 <= sorted_index < n):
         return None
     return evaluator(sorted_index=sorted_index, at_start=at_start)
+
+
+def _lane_width_at(
+    road: Road | None,
+    lane_id: int,
+    *,
+    at_start: bool,
+) -> float | None:
+    """Resolve ``Road.evaluate_lane_width`` for a given OpenDRIVE lane id.
+
+    Mirrors :func:`_lane_anchor_xyz`: ``None`` whenever the width cannot be
+    read, so callers fall back to the configured default instead of emitting
+    a collapsed lane.  Uses ``getattr`` for defence against mock road stubs
+    that omit the method from their ``spec``.
+    """
+    if road is None:
+        return None
+    evaluator = getattr(road, "evaluate_lane_width", None)
+    if evaluator is None:
+        return None
+    return evaluator(lane_id=lane_id, at_start=at_start)
 
 
 def _lane_pairs_for_site(
@@ -697,17 +751,21 @@ def apply_divergence_synthesis(
                 )
             continue
 
-        # Source road tangent at the divergence/merge endpoint becomes the
-        # heading fallback when start_xyz and end_xyz coincide (#291 review).
+        # The source road's reference-line tangent at the divergence/merge
+        # endpoint is the connector's heading. The junction hangs off this
+        # road, so it is the one the connector has to leave along; the
+        # candidates may each turn away at their own angle. ``None`` when
+        # the road has no reference line to read a tangent from, which
+        # makes the connector fall back to its anchor separation.
         source_plan_view = getattr(source_road, "plan_view", None)
-        fallback_heading = 0.0
+        source_heading: float | None = None
         if source_plan_view is not None:
             endpoint_with_heading = _evaluate_planview_endpoint_with_heading(
                 source_plan_view,
                 at_start=not site.is_divergence,
             )
             if endpoint_with_heading is not None:
-                fallback_heading = endpoint_with_heading[2]
+                source_heading = endpoint_with_heading[2]
 
         # Per-pair lane-aware anchor endpoints. For divergence the source
         # side uses ``Road.evaluate_lane_anchor_xyz(lane_index, at_start=
@@ -749,6 +807,33 @@ def apply_divergence_synthesis(
                 end_anchor,
             )
 
+        # Per-pair lane width. A connector joins one lane of the source
+        # road to one lane of a candidate; its own lane should be as wide
+        # as those, not a constant. On nishishinjuku the lanes these
+        # connectors join run from 2.40 m to 4.75 m, so the 3.5 m default
+        # was out by over 25 cm on two thirds of them. The mean of the two
+        # is used because the connector carries a single constant width and
+        # neither side is more authoritative; when only one side can be
+        # read that one is used, and when neither can the configured
+        # default applies.
+        lane_pair_widths: Dict[Tuple[int, int, int], float] = {}
+        for src_lane, cand_road_id, cand_lane in lane_pairs:
+            cand_road = roads_by_id.get(cand_road_id)
+            widths = [
+                w
+                for w in (
+                    _lane_width_at(
+                        source_road, src_lane, at_start=not site.is_divergence
+                    ),
+                    _lane_width_at(cand_road, cand_lane, at_start=site.is_divergence),
+                )
+                if w is not None
+            ]
+            if widths:
+                lane_pair_widths[(src_lane, cand_road_id, cand_lane)] = sum(
+                    widths
+                ) / len(widths)
+
         synthesis = synthesise_junction_for_site(
             site=site,
             inputs=gate_inputs,
@@ -756,9 +841,10 @@ def apply_divergence_synthesis(
             junction_id=next_junction_id,
             traffic_rule=traffic_rule,
             min_segment_length=min_segment_length,
-            fallback_heading=fallback_heading,
+            heading=source_heading,
             lane_width=DEFAULT_CONFIG.geometry.divergence_default_lane_width,
             lane_pair_endpoints=lane_pair_endpoints,
+            lane_pair_widths=lane_pair_widths,
         )
 
         out_junctions.append(synthesis.junction)
