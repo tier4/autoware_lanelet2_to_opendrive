@@ -143,7 +143,7 @@ Not applicable - CLI tool without dashboard.
 
 ## Known Limitations
 
-* **Partial Element Support**: Currently supports core road geometry and lanes; traffic signs, signals, and objects pending implementation
+* **Partial Element Support**: Road geometry, lanes, traffic lights, stop/yield signs, stop lines and crosswalk objects are implemented; other traffic-sign subtypes and Lanelet2 `detection_area` elements are not. See [Special Traffic Signals](../../autoware_lanelet2_to_opendrive/docs/limitations/special-signals.md) for the supported and unsupported lists
 * **One-way Conversion**: Lanelet2 to OpenDRIVE only; reverse conversion not yet supported
 * **Coordinate Precision**: Some coordinate transformations may introduce minor precision loss (\< 1cm)
 * **Performance on Large Maps**: Maps over 50MB may require optimization for memory usage
