@@ -120,7 +120,15 @@ class TestGrowLine:
             spline,
             s_start=0.0,
             s_max=spline.total_length,
-            config=ArcSpiralConfig(enabled=True),
+            # _build_straightish reaches its curvature by swinging
+            # 18.6 mm off its chord, so it cannot clear the 1 mm
+            # position budget the default now sets, and its median
+            # curvature of 1.4e-3 is above the default. This test is about
+            # phase 1 -- the median-based growth that ignores curvature
+            # spikes -- so it pins the tolerance it was written against.
+            config=ArcSpiralConfig(
+                enabled=True, line_curvature_tol=1e-3, arc_position_tol=0.05
+            ),
             constants=DEFAULT_CONFIG.arcspiral,
         )
         assert end >= 0.9 * spline.total_length
@@ -136,8 +144,12 @@ class TestGrowArc:
         )
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
-        # Circle r=50, sweep π/2 radians → arc length = 50 * π/2 ≈ 78.5
-        spline = _build_circle(radius=50.0, arc_rad=np.pi / 2.0)
+        # Circle r=50, sweep π/2 radians → arc length = 50 * π/2 ≈ 78.5.
+        # n=320 gives ~0.25 m point spacing. The default n=80 leaves ~1 m,
+        # and the fit error that spacing injects (37 mm, measured) is itself
+        # over the position tolerance, so no arc is accepted at all -- the
+        # fixture, not the algorithm, would decide the result.
+        spline = _build_circle(radius=50.0, arc_rad=np.pi / 2.0, n=320)
         end_s, kappa = _grow_arc(
             spline,
             s_start=2.0,  # avoid boundary noise from spline ends
@@ -145,11 +157,9 @@ class TestGrowArc:
             config=ArcSpiralConfig(enabled=True),
             constants=DEFAULT_CONFIG.arcspiral,
         )
-        # Should grow at least 10m (well over min_arc_length=5m).
-        # Relaxed from the spec's 30m: the n=80 synthetic spline has ~1m
-        # point spacing, producing arc-position errors that cause the
-        # bisection to shrink the accepted window to ~18m.  The algorithm
-        # is correct; the test spline is coarse.
+        # Should grow at least 10m (well over min_arc_length=5m). The
+        # bisection stops at about 18 m because the position tolerance is
+        # 1 mm; a longer window on a sampled circle exceeds it.
         assert end_s - 2.0 >= 10.0
         # κ should be close to 1/50 in magnitude.
         assert abs(abs(kappa) - 1.0 / 50.0) < 5e-4
@@ -274,7 +284,15 @@ class TestClassifySpline:
         spline = _build_straightish()
         runs = classify_spline(
             spline,
-            config=ArcSpiralConfig(enabled=True),
+            # _build_straightish reaches its curvature by swinging
+            # 18.6 mm off its chord, so it cannot clear the 1 mm
+            # position budget the default now sets, and its median
+            # curvature of 1.4e-3 is above the default. This test is about
+            # phase 1 -- the median-based growth that ignores curvature
+            # spikes -- so it pins the tolerance it was written against.
+            config=ArcSpiralConfig(
+                enabled=True, line_curvature_tol=1e-3, arc_position_tol=0.05
+            ),
             constants=DEFAULT_CONFIG.arcspiral,
         )
         line_len = sum(r.s_end - r.s_start for r in runs if isinstance(r, LineRun))
@@ -297,3 +315,114 @@ class TestClassifySpline:
             constants=DEFAULT_CONFIG.arcspiral,
         )
         assert any(isinstance(r, ArcRun) for r in runs)
+
+
+# The classifier rides on a B-spline fit whose own distance to the source
+# boundary is p95 16.3 mm on Nishishinjuku. A primitive it substitutes for
+# that fit must therefore contribute an error an order of magnitude smaller,
+# or the representation choice -- not the fit -- becomes the dominant term.
+MAX_PRIMITIVE_DEVIATION_M = 0.001
+
+
+def _build_fitting_ripple(
+    length: float = 60.0, amp: float = 0.0005, wavelength: float = 4.0, n: int = 601
+):
+    """A straight road carrying curvature noise of the shape a fit produces.
+
+    Same construction as :func:`_build_straightish`, but with the amplitude
+    and wavelength a B-spline fit of a straight road actually exhibits: the
+    path stays within about 1 mm of its chord while the median curvature
+    still sits near ``line_curvature_tol``. ``_build_straightish`` reaches
+    that curvature only by swinging 18.6 mm off the chord, which is more
+    than the converter's whole accuracy budget.
+    """
+    from autoware_lanelet2_to_opendrive.spline import Splines
+
+    x = np.linspace(0.0, length, n)
+    y = amp * (1.0 - np.cos(2.0 * np.pi * x / wavelength))
+    return Splines(np.column_stack([x, y, np.zeros(n)]))
+
+
+class TestDefaultToleranceBudget:
+    """The shipped defaults must bound a primitive's own deviation.
+
+    ``arc_position_tol`` is the only knob that bounds it: ``_grow_line``
+    validates its run with the same ``_arc_position_error`` call as
+    ``_grow_arc``, against that same tolerance. ``line_curvature_tol`` and
+    ``min_line_length`` decide which windows are *attempted*, not how far
+    the accepted one may stray.
+
+    Both tests pin the accepted run length as well, so neither can pass by
+    the classifier declining to emit a primitive at all.
+    """
+
+    def test_accepted_line_stays_within_the_accuracy_budget(self):
+        from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
+            _arc_position_error,
+            _grow_line,
+        )
+        from autoware_lanelet2_to_opendrive.conversion_config import (
+            ArcSpiralConfig,
+        )
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
+        spline = _build_fitting_ripple()
+        # The subject here is arc_position_tol. line_curvature_tol is pinned
+        # at the looser 1e-3 so this fixture reaches the position check at
+        # all; with the default 1e-5 its own ripple ends phase 1 immediately
+        # and the test would measure window selection instead of the budget.
+        config = ArcSpiralConfig(enabled=True, line_curvature_tol=1e-3)
+        end = _grow_line(
+            spline,
+            s_start=0.0,
+            s_max=spline.total_length,
+            config=config,
+            constants=DEFAULT_CONFIG.arcspiral,
+        )
+
+        assert (
+            end >= config.min_line_length
+        ), "no line was accepted, so the deviation assertion would be vacuous"
+        error = _arc_position_error(spline, 0.0, end, 0.0, DEFAULT_CONFIG.arcspiral)
+        assert error <= MAX_PRIMITIVE_DEVIATION_M, (
+            f"the line accepted at the shipped defaults spans {end:.2f} m and "
+            f"deviates {error * 1000:.3f} mm from the spline, over the "
+            f"{MAX_PRIMITIVE_DEVIATION_M * 1000:.0f} mm budget"
+        )
+
+    def test_accepted_arc_stays_within_the_accuracy_budget(self):
+        from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
+            _arc_position_error,
+            _grow_arc,
+        )
+        from autoware_lanelet2_to_opendrive.conversion_config import (
+            ArcSpiralConfig,
+        )
+        from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+
+        # n=320 keeps the point spacing fine enough that the sampled spline
+        # really is a circle; the n=80 fixture used elsewhere has about 1 m
+        # spacing and its own fit error dominates.
+        spline = _build_circle(radius=50.0, arc_rad=np.pi / 2.0, n=320)
+        config = ArcSpiralConfig(enabled=True)
+        s_start = 2.0  # avoid the boundary noise at the spline ends
+        end, kappa = _grow_arc(
+            spline,
+            s_start=s_start,
+            s_max=spline.total_length - 2.0,
+            config=config,
+            constants=DEFAULT_CONFIG.arcspiral,
+        )
+
+        assert (
+            end - s_start >= config.min_arc_length
+        ), "no arc was accepted, so the deviation assertion would be vacuous"
+        error = _arc_position_error(
+            spline, s_start, end, kappa, DEFAULT_CONFIG.arcspiral
+        )
+        assert error <= MAX_PRIMITIVE_DEVIATION_M, (
+            f"the arc accepted at the shipped defaults spans "
+            f"{end - s_start:.2f} m and deviates {error * 1000:.3f} mm from "
+            f"the spline, over the {MAX_PRIMITIVE_DEVIATION_M * 1000:.0f} mm "
+            f"budget"
+        )
