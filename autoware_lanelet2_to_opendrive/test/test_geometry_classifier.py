@@ -120,7 +120,15 @@ class TestGrowLine:
             spline,
             s_start=0.0,
             s_max=spline.total_length,
-            config=ArcSpiralConfig(enabled=True),
+            # _build_straightish reaches its curvature by swinging
+            # 18.6 mm off its chord, so it cannot clear the 1 mm
+            # position budget the default now sets, and its median
+            # curvature of 1.4e-3 is above the default. This test is about
+            # phase 1 -- the median-based growth that ignores curvature
+            # spikes -- so it pins the tolerance it was written against.
+            config=ArcSpiralConfig(
+                enabled=True, line_curvature_tol=1e-3, arc_position_tol=0.05
+            ),
             constants=DEFAULT_CONFIG.arcspiral,
         )
         assert end >= 0.9 * spline.total_length
@@ -136,8 +144,12 @@ class TestGrowArc:
         )
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
-        # Circle r=50, sweep π/2 radians → arc length = 50 * π/2 ≈ 78.5
-        spline = _build_circle(radius=50.0, arc_rad=np.pi / 2.0)
+        # Circle r=50, sweep π/2 radians → arc length = 50 * π/2 ≈ 78.5.
+        # n=320 gives ~0.25 m point spacing. The default n=80 leaves ~1 m,
+        # and the fit error that spacing injects (37 mm, measured) is itself
+        # over the position tolerance, so no arc is accepted at all -- the
+        # fixture, not the algorithm, would decide the result.
+        spline = _build_circle(radius=50.0, arc_rad=np.pi / 2.0, n=320)
         end_s, kappa = _grow_arc(
             spline,
             s_start=2.0,  # avoid boundary noise from spline ends
@@ -145,11 +157,9 @@ class TestGrowArc:
             config=ArcSpiralConfig(enabled=True),
             constants=DEFAULT_CONFIG.arcspiral,
         )
-        # Should grow at least 10m (well over min_arc_length=5m).
-        # Relaxed from the spec's 30m: the n=80 synthetic spline has ~1m
-        # point spacing, producing arc-position errors that cause the
-        # bisection to shrink the accepted window to ~18m.  The algorithm
-        # is correct; the test spline is coarse.
+        # Should grow at least 10m (well over min_arc_length=5m). The
+        # bisection stops at about 18 m because the position tolerance is
+        # 1 mm; a longer window on a sampled circle exceeds it.
         assert end_s - 2.0 >= 10.0
         # κ should be close to 1/50 in magnitude.
         assert abs(abs(kappa) - 1.0 / 50.0) < 5e-4
@@ -274,7 +284,15 @@ class TestClassifySpline:
         spline = _build_straightish()
         runs = classify_spline(
             spline,
-            config=ArcSpiralConfig(enabled=True),
+            # _build_straightish reaches its curvature by swinging
+            # 18.6 mm off its chord, so it cannot clear the 1 mm
+            # position budget the default now sets, and its median
+            # curvature of 1.4e-3 is above the default. This test is about
+            # phase 1 -- the median-based growth that ignores curvature
+            # spikes -- so it pins the tolerance it was written against.
+            config=ArcSpiralConfig(
+                enabled=True, line_curvature_tol=1e-3, arc_position_tol=0.05
+            ),
             constants=DEFAULT_CONFIG.arcspiral,
         )
         line_len = sum(r.s_end - r.s_start for r in runs if isinstance(r, LineRun))
@@ -338,10 +356,6 @@ class TestDefaultToleranceBudget:
     the classifier declining to emit a primitive at all.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="arc_position_tol defaults to 0.05 m, so an accepted line may stray 3.7 mm",
-    )
     def test_accepted_line_stays_within_the_accuracy_budget(self):
         from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
             _arc_position_error,
@@ -353,7 +367,11 @@ class TestDefaultToleranceBudget:
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
         spline = _build_fitting_ripple()
-        config = ArcSpiralConfig(enabled=True)
+        # The subject here is arc_position_tol. line_curvature_tol is pinned
+        # at the looser 1e-3 so this fixture reaches the position check at
+        # all; with the default 1e-5 its own ripple ends phase 1 immediately
+        # and the test would measure window selection instead of the budget.
+        config = ArcSpiralConfig(enabled=True, line_curvature_tol=1e-3)
         end = _grow_line(
             spline,
             s_start=0.0,
@@ -372,10 +390,6 @@ class TestDefaultToleranceBudget:
             f"{MAX_PRIMITIVE_DEVIATION_M * 1000:.0f} mm budget"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="arc_position_tol defaults to 0.05 m, so an accepted arc may stray 3.2 mm",
-    )
     def test_accepted_arc_stays_within_the_accuracy_budget(self):
         from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
             _arc_position_error,

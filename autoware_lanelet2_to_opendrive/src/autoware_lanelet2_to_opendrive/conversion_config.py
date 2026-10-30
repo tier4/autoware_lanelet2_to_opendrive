@@ -132,23 +132,36 @@ class ArcSpiralConfig:
         line_curvature_tol: median signed curvature below this (in
             magnitude) classifies a window as a straight line (1/m). Set
             above the B-spline fitting curvature-noise floor so a noisy
-            fit of a straight road is not mistaken for a gentle arc (#496).
+            fit of a straight road is not mistaken for a gentle arc (#496),
+            but far below the curvature of a road anyone would call curved:
+            at 1e-3 a 1 km-radius bend passes as straight and is emitted as
+            a chain of <line> records truncated by arc_position_tol, where
+            1e-5 makes it the single <arc> it is.
         arc_curvature_tol: Window-relative |κ - κ_const| tolerance during
             arc growth (1/m).
         arc_position_tol: Maximum allowed deviation between the analytic
-            arc model and the spline samples within a candidate window (m).
+            primitive and the spline samples within a candidate window (m).
+            This is the only knob that bounds a primitive's own error:
+            ``_grow_line`` validates its run against the same tolerance with
+            a straight (kappa = 0) model, so it applies to <line> as well as
+            <arc>. Set an order of magnitude below the converter's own
+            accuracy -- the emitted plan view sits p95 16.3 mm from the
+            source boundary on Nishishinjuku -- so the choice of primitive
+            never becomes the dominant error term.
         min_line_length: Minimum line-run length to accept (m); shorter
-            candidates roll into the arc / paramPoly3 fallback.
+            candidates roll into the arc / paramPoly3 fallback. Also the
+            window length at which the median curvature test first applies,
+            so it doubles as the robustness of that median.
         min_arc_length: Minimum arc-run length to accept (m).
     """
 
     enabled: bool = False
     arc_enabled: bool = True
     spiral_enabled: bool = False
-    line_curvature_tol: float = 1e-3
+    line_curvature_tol: float = 1e-5
     arc_curvature_tol: float = 5e-4
-    arc_position_tol: float = 0.05
-    min_line_length: float = 5.0
+    arc_position_tol: float = 0.001
+    min_line_length: float = 10.0
     min_arc_length: float = 5.0
 
 

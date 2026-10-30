@@ -1594,15 +1594,28 @@ def preprocess_and_convert_with_hydra(
     # Priority: map config > target config > default
     arcspiral_dict = cfg.map.get("arcspiral") or cfg.target.get("arcspiral", {})
     if arcspiral_dict:
+        arc_defaults = ArcSpiralConfig()
         arcspiral_config = ArcSpiralConfig(
-            enabled=arcspiral_dict.get("enabled", False),
-            arc_enabled=arcspiral_dict.get("arc_enabled", True),
-            spiral_enabled=arcspiral_dict.get("spiral_enabled", False),
-            line_curvature_tol=arcspiral_dict.get("line_curvature_tol", 1e-3),
-            arc_curvature_tol=arcspiral_dict.get("arc_curvature_tol", 5e-4),
-            arc_position_tol=arcspiral_dict.get("arc_position_tol", 0.05),
-            min_line_length=arcspiral_dict.get("min_line_length", 5.0),
-            min_arc_length=arcspiral_dict.get("min_arc_length", 5.0),
+            enabled=arcspiral_dict.get("enabled", arc_defaults.enabled),
+            arc_enabled=arcspiral_dict.get("arc_enabled", arc_defaults.arc_enabled),
+            spiral_enabled=arcspiral_dict.get(
+                "spiral_enabled", arc_defaults.spiral_enabled
+            ),
+            line_curvature_tol=arcspiral_dict.get(
+                "line_curvature_tol", arc_defaults.line_curvature_tol
+            ),
+            arc_curvature_tol=arcspiral_dict.get(
+                "arc_curvature_tol", arc_defaults.arc_curvature_tol
+            ),
+            arc_position_tol=arcspiral_dict.get(
+                "arc_position_tol", arc_defaults.arc_position_tol
+            ),
+            min_line_length=arcspiral_dict.get(
+                "min_line_length", arc_defaults.min_line_length
+            ),
+            min_arc_length=arcspiral_dict.get(
+                "min_arc_length", arc_defaults.min_arc_length
+            ),
         )
         logger.info(
             f"ArcSpiral config: enabled={arcspiral_config.enabled}, "
