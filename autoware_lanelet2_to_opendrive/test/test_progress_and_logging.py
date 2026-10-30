@@ -12,8 +12,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-import pytest
-
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 
 
@@ -37,10 +35,6 @@ class _ExplodingRoad:
         raise RuntimeError("lane link resolution failed")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="road.py reports caught exceptions with tqdm.write, which logging cannot see",
-)
 def test_lane_link_failure_is_reported_through_logging(
     caplog: Any,
 ) -> None:

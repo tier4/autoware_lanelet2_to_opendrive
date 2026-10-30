@@ -22,10 +22,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-from tqdm import tqdm
 
 from .config import DEFAULT_CONFIG
 from .opendrive.enums import TrafficRule
+from .progress import manual, track
 from .opendrive.geometry import (
     Arc,
     GeometryBase,
@@ -737,7 +737,7 @@ def _compute_all_candidates(
     # that a map with a single traffic rule never pays for the unused side.
     grids: dict[bool, Optional[_BoundaryGrid]] = {True: None, False: None}
 
-    for road in tqdm(roads, desc="Computing road candidates", unit="road"):
+    for road in track(roads, "Computing road candidates", unit="road"):
         if road.id in skipped_synthetic:
             continue
 
@@ -941,10 +941,10 @@ def _resolve_conflicts(
     # Both loops below run for an unknown number of rounds, so the bars count
     # rounds rather than showing a percentage.  Without them this phase is
     # silent, and on a large map that silence is indistinguishable from a hang.
-    rounds = tqdm(desc="Resolving candidate conflicts", unit="round")
+    rounds = manual("Resolving candidate conflicts", unit="round")
 
     while True:
-        rounds.update()
+        rounds.advance()
         # Build claims: lanelet_id -> [(rc_idx, distance), ...]
         claims: dict[int, list[tuple[int, float]]] = {}
         for rc_idx, cand_idx in assignment.items():
@@ -1083,10 +1083,10 @@ def _resolve_conflicts(
         for cand_lid in all_rc[rc_idx].raw_dists:
             holders.setdefault(cand_lid, []).append(position)
 
-    swaps = tqdm(desc="Fixing pairwise swaps", unit="pass")
+    swaps = manual("Fixing pairwise swaps", unit="pass")
     swap_found = True
     while swap_found:
-        swaps.update()
+        swaps.advance()
         swap_found = False
         for i, rc_a in enumerate(order):
             _, lid_a = all_rc[rc_a].candidates[valid[rc_a]]
@@ -1232,7 +1232,7 @@ def build_mapping(
             n_excluded,
         )
 
-    for ll in tqdm(lanelets, desc="Pre-computing lanelet boundaries", unit="lanelet"):
+    for ll in track(lanelets, "Pre-computing lanelet boundaries", unit="lanelet"):
         lid = ll.id
         lp = np.array([(p.x - offset_x, p.y - offset_y) for p in ll.leftBound])
         rp = np.array([(p.x - offset_x, p.y - offset_y) for p in ll.rightBound])
@@ -1354,8 +1354,8 @@ def build_mapping(
         key=lambda item: all_rc[item[0]].candidates[item[1]][0],
     )
 
-    for rc_idx, cand_idx in tqdm(
-        sorted_assignments, desc="Matching roads to lanelets", unit="road"
+    for rc_idx, cand_idx in track(
+        sorted_assignments, "Matching roads to lanelets", unit="road"
     ):
         rc = all_rc[rc_idx]
         _, best_lid = rc.candidates[cand_idx]
@@ -1469,7 +1469,7 @@ def build_mapping(
     # ties included.  Built on first use so a map with no dropped roads, or
     # with a single traffic rule, never pays for it.
     rescue_grids: dict[bool, Optional[_BoundaryGrid]] = {True: None, False: None}
-    for rc_idx in tqdm(dropped_rc_indices, desc="Rescuing dropped roads", unit="road"):
+    for rc_idx in track(dropped_rc_indices, "Rescuing dropped roads", unit="road"):
         rc = all_rc[rc_idx]
         boundaries = lanelet_left if rc.is_rht else lanelet_right
         bboxes = lanelet_left_bbox if rc.is_rht else lanelet_right_bbox
@@ -1556,31 +1556,32 @@ def build_mapping(
             f"by a later road (the earlier assignment was dropped); "
             f"{len({lid for lid, _, _ in overwrites})} distinct lanelets"
         )
-        tqdm.write(msg)
         logger.warning(msg)
         for lid, previous, current in overwrites[:10]:
-            tqdm.write(f"    lanelet {lid}: {previous} -> {current}")
+            logger.warning("    lanelet %d: %s -> %s", lid, previous, current)
     if roads_no_candidates:
         msg = (
             f"  [Diag] Phase 1: {len(roads_no_candidates)} roads had 0 "
             f"candidates (threshold={_MATCH_THRESHOLD}m): "
             f"road IDs = {sorted(roads_no_candidates)[:30]}"
         )
-        tqdm.write(msg)
         logger.warning(msg)
         # Print detailed diagnostics for roads without candidates
         for rid in sorted(roads_no_candidates)[:10]:
             diag = no_candidate_diag.get(rid)
             if diag:
-                tqdm.write(
-                    f"    road {rid}: rule={diag['rule']}, "
-                    f"is_rht={diag['is_rht']}, "
-                    f"lanes={diag['lane_ids']}, "
-                    f"ref_pts={diag['ref_pts']}, "
-                    f"bbox_skip={diag['n_bbox_skip']}, "
-                    f"dir_skip={diag['n_dir_skip']}, "
-                    f"nearest_dist={diag['nearest_dist']}m "
-                    f"(lanelet {diag['nearest_lid']})"
+                logger.warning(
+                    "    road %s: rule=%s, is_rht=%s, lanes=%s, ref_pts=%s, "
+                    "bbox_skip=%s, dir_skip=%s, nearest_dist=%sm (lanelet %s)",
+                    rid,
+                    diag["rule"],
+                    diag["is_rht"],
+                    diag["lane_ids"],
+                    diag["ref_pts"],
+                    diag["n_bbox_skip"],
+                    diag["n_dir_skip"],
+                    diag["nearest_dist"],
+                    diag["nearest_lid"],
                 )
     if roads_dropped_phase2:
         unrecovered = roads_dropped_phase2 - rescued_road_ids
@@ -1591,7 +1592,6 @@ def build_mapping(
                 f"in conflict resolution (unrecovered): "
                 f"road IDs = {sorted(unrecovered)[:30]}"
             )
-            tqdm.write(msg)
             logger.warning(msg)
         if rescued:
             msg = (
@@ -1599,7 +1599,6 @@ def build_mapping(
                 f"in conflict resolution but rescued: "
                 f"road IDs = {sorted(rescued)[:30]}"
             )
-            tqdm.write(msg)
             logger.info(msg)
     if roads_not_fully_mapped:
         msg = (
@@ -1607,7 +1606,6 @@ def build_mapping(
             f"fully mapped (walk stopped early): "
             f"{sorted(roads_not_fully_mapped)[:30]}"
         )
-        tqdm.write(msg)
         logger.warning(msg)
 
     return GeoRoadLaneletMapping(
@@ -1730,10 +1728,6 @@ def validate_mapping_consistency(
             "%s\nCross-validation is non-strict, so the conversion output is "
             "kept.  Set strict_mapping_validation=true to fail instead.",
             summary,
-        )
-        tqdm.write(
-            f"  Mapping cross-validation: {total} mismatching entries "
-            f"(non-fatal; see log for details)"
         )
         return False
 
@@ -1885,7 +1879,7 @@ def load_or_build_mapping(
 
     The mapping is stored as ``<xodr_stem>.mapping.json`` next to the XODR file.
     """
-    tqdm.write("Computing SHA256 checksums for map files...")
+    logger.info("Computing SHA256 checksums for map files")
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
     cache_file = _cache_path_for(xodr_path)
@@ -1899,17 +1893,12 @@ def load_or_build_mapping(
                 and data.get("osm_sha256") == osm_sha256
             ):
                 mapping = GeoRoadLaneletMapping.from_dict(data)
-                tqdm.write(
-                    f"Loaded cached mapping from {cache_file} "
-                    f"({len(mapping.lanelet_to_road_and_lane)} entries)"
-                )
                 logger.info(
                     "Loaded cached lanelet-to-road mapping from %s (%d entries)",
                     cache_file,
                     len(mapping.lanelet_to_road_and_lane),
                 )
                 return mapping
-            tqdm.write("Cache invalidated (SHA256 mismatch); rebuilding mapping...")
             logger.info("Cache invalidated (SHA256 mismatch); rebuilding mapping")
         except (json.JSONDecodeError, KeyError, TypeError):
             logger.warning(
@@ -1922,13 +1911,16 @@ def load_or_build_mapping(
 
     # Save to cache
     try:
-        tqdm.write(f"Saving mapping to {cache_file}...")
+        logger.info("Saving mapping to %s", cache_file)
         cache_file.write_text(
             json.dumps(mapping.to_dict(), indent=2) + "\n",
             encoding="utf-8",
         )
-        tqdm.write(f"Saved mapping ({len(mapping.lanelet_to_road_and_lane)} entries)")
-        logger.info("Saved lanelet-to-road mapping to %s", cache_file)
+        logger.info(
+            "Saved lanelet-to-road mapping to %s (%d entries)",
+            cache_file,
+            len(mapping.lanelet_to_road_and_lane),
+        )
     except OSError:
         logger.warning("Could not write mapping cache to %s", cache_file, exc_info=True)
 
