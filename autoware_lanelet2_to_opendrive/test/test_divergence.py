@@ -165,6 +165,102 @@ def test_sanity_gate_fails_on_endpoint_distance():
     assert "endpoint" in reason
 
 
+def test_sanity_gate_accepts_a_contact_its_reference_lines_disagree_about():
+    """A real contact must pass even when the two reference lines do not meet.
+
+    Lanelet2 *defines* lane connectivity by shared ``Point`` objects, so the
+    lane end of a road and the lane start of its successor are the same point
+    in the source map; reconstructed, they agree to millimetres. The two
+    roads' *reference lines* are a different matter: each road takes its own
+    outermost lanelet boundary, so a road with a wider carriageway puts its
+    reference line a carriageway away from its neighbour's.
+
+    Measured on Nishishinjuku: of the 29 sites this gate rejects, **28 have a
+    reference-line distance equal to the two roads' carriageway width
+    difference to within 10 mm** (residual p50 1.0 mm). The accepted
+    population contains width differences up to 8.932 m whose reference-line
+    distance is still under 0.070 m, so the width difference is not what
+    produces the distance -- the choice of reference boundary is.
+
+    Here the reference endpoints are 3 m apart, a typical lane width, while
+    every lane pair's two anchors coincide to a millimetre.
+    """
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (3.0, 0.0, 0.0),
+            187: (3.0, 0.0, 0.0),
+            188: (3.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+        lane_pair_contacts={
+            (-1, 186, -1): ((1.5, 0.0, 0.0), (1.5, 0.001, 0.0)),
+            (-2, 187, -1): ((1.5, 0.0, 0.0), (1.5, 0.002, 0.0)),
+            (-3, 188, -1): ((1.5, 0.0, 0.0), (1.5, 0.000, 0.0)),
+        },
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is True, reason
+
+
+def test_sanity_gate_still_fails_when_the_lane_contacts_are_apart():
+    """The lane-level check must be able to reject, or it checks nothing.
+
+    Same shape as the test above, but the lane anchors of candidate 186 are
+    5 m apart while its reference endpoints coincide -- the reverse of the
+    reference-line case. Without this, moving check 1 onto the lane anchors
+    could pass every site and no test would notice.
+    """
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (0.0, 0.0, 0.0),
+            187: (0.0, 0.0, 0.0),
+            188: (0.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+        lane_pair_contacts={
+            (-1, 186, -1): ((0.0, 0.0, 0.0), (5.0, 0.0, 0.0)),
+            (-2, 187, -1): ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+            (-3, 188, -1): ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+        },
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "lane contact" in reason
+
+
+def test_sanity_gate_reports_no_lane_pairs_as_coverage_not_as_a_gap():
+    """A candidate with no lane pair is check 4's business, not check 1's.
+
+    Check 1 used to run first on the reference endpoints, so a candidate that
+    had no recovered lane pair *and* a distant reference line was reported as
+    an endpoint failure, hiding the coverage problem behind a geometry one.
+    """
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (0.0, 0.0, 0.0),
+            187: (0.0, 0.0, 0.0),
+            188: (0.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1)],  # 188 has none
+        all_successor_lanelet_road_ids={186, 187, 188},
+        lane_pair_contacts={
+            (-1, 186, -1): ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+            (-2, 187, -1): ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+        },
+    )
+
+    ok, reason = sanity_gate_passes(_site(), inputs, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "no recovered lane pairs" in reason
+
+
 def test_sanity_gate_fails_on_lane_collision():
     inputs = SanityGateInputs(
         endpoint_road=(0.0, 0.0, 0.0),

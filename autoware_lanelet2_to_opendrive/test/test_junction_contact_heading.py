@@ -429,8 +429,8 @@ def test_pinned_junction_contacts_agree_on_heading(nishishinjuku_xodr):
 
     On nishishinjuku exactly one contact is declined: road 300 ends on
     lanelet 301024, whose end cut is skewed about 41 deg off its boundaries,
-    so its reference line ends on a 139.6 deg tangent, while connector 644
-    (lanelet 301030, 2.6 m long) runs at 99.4 deg.  It appeared when
+    so its reference line ends on a 139.6 deg tangent, while the connector
+    out of it (lanelet 301030, 2.6 m long) runs at 99.4 deg.  It appeared when
     ``conf/map/nishishinjuku.yaml`` stopped merging those lanelets into
     longer ones.  The 40 deg break there is a known defect outside this
     test's scope: ``_calculate_centerline_velocity_vector`` takes a lanelet's
@@ -518,17 +518,29 @@ def test_pinned_junction_contacts_agree_on_heading(nishishinjuku_xodr):
 
     assert checked > 0, "no pinned junction contacts found; the scope is wrong"
 
-    # (connecting road, incoming road, contactPoint) of every contact whose
-    # heading pin the guard is expected to decline; see the docstring.
-    EXPECTED_DECLINED = {(644, 300, "start")}
-    declined_keys = {(c, i, p) for c, i, p, _ in declined}
+    # (incoming road, contactPoint) of every contact whose heading pin the
+    # guard is expected to decline; see the docstring.
+    #
+    # The connecting road's own id is deliberately not part of the key.
+    # Connector ids are handed out sequentially after the regular roads, so
+    # any change in how many connectors are synthesised renumbers all of
+    # them — the same single declined contact has been road 644 and road 730
+    # across two bases. The incoming road and the contact point identify the
+    # contact; the count below keeps the assertion exact.
+    EXPECTED_DECLINED = {(300, "start")}
+    declined_keys = {(i, p) for _c, i, p, _d in declined}
+    declined_report = ", ".join(
+        f"conn_road={c} incoming={i} contact={p} dpsi={d:.2f} deg"
+        for c, i, p, d in sorted(declined)
+    )
     assert declined_keys == EXPECTED_DECLINED, (
         "the set of contacts beyond the "
         f"{math.degrees(heading_pin_limit):.1f} deg guard limit changed: "
-        + ", ".join(
-            f"conn_road={c} incoming={i} contact={p} dpsi={d:.2f} deg"
-            for c, i, p, d in sorted(declined)
-        )
+        + declined_report
+    )
+    assert len(declined) == len(EXPECTED_DECLINED), (
+        f"{len(declined)} declined contacts at "
+        f"{sorted(EXPECTED_DECLINED)}, expected one each: " + declined_report
     )
 
     if offenders:
