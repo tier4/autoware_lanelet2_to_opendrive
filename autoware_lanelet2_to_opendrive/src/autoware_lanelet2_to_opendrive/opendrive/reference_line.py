@@ -50,6 +50,94 @@ if TYPE_CHECKING:
     pass
 
 
+def _cut_at_arc_length(
+    points_3d: np.ndarray, distance: float, from_end: bool
+) -> np.ndarray:
+    """Return ``points_3d`` with ``distance`` of 2D arc length removed.
+
+    The cut point is interpolated on the segment it falls in -- linearly in
+    x, y **and** z against the 2D arc length, which is the interpolation
+    ``resample_points_3d`` and the height spline both use, so the elevation
+    the shortened line reports is the elevation the original reported there.
+
+    Vertices in the kept stretch are returned verbatim. The caller has
+    already established that the polyline is long enough.
+    """
+    work = points_3d[::-1] if from_end else points_3d
+
+    segments = np.linalg.norm(np.diff(work[:, :2], axis=0), axis=1)
+    travelled = np.cumsum(segments)
+
+    # The first vertex at or beyond the cut. ``searchsorted`` with "left"
+    # gives the segment the cut falls in, which may be the first.
+    index = int(np.searchsorted(travelled, distance, side="left"))
+
+    before = travelled[index - 1] if index > 0 else 0.0
+    segment_length = segments[index]
+    remainder = distance - before
+
+    kept = work[index + 1 :]
+    if remainder >= segment_length:
+        # The cut lands exactly on a vertex, so no point is interpolated.
+        return kept[::-1] if from_end else kept
+
+    fraction = remainder / segment_length
+    cut_point = work[index] + fraction * (work[index + 1] - work[index])
+    trimmed = np.vstack([cut_point[np.newaxis, :], kept])
+    return trimmed[::-1] if from_end else trimmed
+
+
+def trim_polyline(
+    points_3d: np.ndarray,
+    trim_start: float = 0.0,
+    trim_end: float = 0.0,
+) -> Optional[np.ndarray]:
+    """Shorten a boundary polyline from either end by a 2D arc length.
+
+    This is the geometric half of the junction carve: an incoming road is
+    ended short of the junction so the freed stretch can be emitted as a
+    connecting road with real extent. Shortening the polyline *before* the
+    spline is fitted costs no re-parameterisation of the emitted geometry --
+    the fitter runs on a shorter line -- at the price that the fit changes
+    along the whole road rather than only at the trimmed end.
+
+    Lengths are 2D (XY) arc length, matching :func:`resample_points_3d`, so
+    the trim and the resampling agree on what a metre is.
+
+    Args:
+        points_3d: (N, 3) array of [x, y, z] boundary points.
+        trim_start: Metres to remove from the s=0 end.
+        trim_end: Metres to remove from the s=length end.
+
+    Returns:
+        The shortened (M, 3) array, the input itself when neither trim is
+        positive, or ``None`` when the polyline cannot spare the lengths
+        asked for -- which is how a road too short to carve is reported.
+        A road reduced to a single point, or to nothing, is never returned:
+        three roads on Nishishinjuku are under a metre long, and a
+        degenerate reference line is worse than an untrimmed one.
+    """
+    if trim_start <= 0.0 and trim_end <= 0.0:
+        return points_3d
+    if len(points_3d) < 2:
+        return None
+
+    total = float(np.sum(np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1)))
+    requested = max(trim_start, 0.0) + max(trim_end, 0.0)
+    if requested >= total:
+        return None
+
+    trimmed = points_3d
+    if trim_end > 0.0:
+        trimmed = _cut_at_arc_length(trimmed, trim_end, from_end=True)
+    if trim_start > 0.0:
+        trimmed = _cut_at_arc_length(trimmed, trim_start, from_end=False)
+
+    if len(trimmed) < 2:
+        return None
+    return trimmed
+
+
 def resample_points_3d(points_3d: np.ndarray, spacing: float) -> np.ndarray:
     """Subdivide a boundary polyline so no segment is longer than ``spacing``.
 
