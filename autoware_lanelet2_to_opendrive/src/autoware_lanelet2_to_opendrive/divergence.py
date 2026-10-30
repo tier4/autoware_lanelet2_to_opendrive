@@ -170,13 +170,50 @@ def sanity_gate_passes(
     """Return ``(passed, reason)``.
 
     The gate fails fast on the first violation; the second-level reason
-    string is logged by the caller. Order matches the spec: endpoint
-    coincidence, lane uniqueness, group exhaustiveness.
+    string is logged by the caller. Order matches the spec: contact
+    coincidence, lane uniqueness, group exhaustiveness, lane-pair coverage.
+
+    Check 1 prefers the lane-end anchors in ``inputs.lane_pair_contacts``
+    and falls back to the reference-line endpoints only for a candidate
+    whose lane anchors could not be resolved. A candidate with no lane pair
+    at all is not a check-1 failure -- check 4 reports that, and reporting
+    it there is what lets the two be told apart.
     """
     candidate_set = set(site.candidate_road_ids)
 
-    # 1. Endpoint coincidence.
+    # 1. Contact coincidence, measured at lane level wherever the lanes are
+    #    known. Lanelet2 defines lane connectivity by shared ``Point``
+    #    objects, so a lane end and its successor's lane start are the same
+    #    point in the source map and reconstruct to millimetres. Reference
+    #    lines are not: each road takes its own outermost lanelet boundary,
+    #    so two roads that genuinely touch can have reference-line ends a
+    #    whole carriageway apart, and comparing those rejects the contact for
+    #    the width difference rather than for a gap.
+    pairs_by_candidate: Dict[int, List[Tuple[int, int, int]]] = {}
+    for pair in inputs.lane_pairs:
+        pairs_by_candidate.setdefault(pair[1], []).append(pair)
+
     for cand_id in site.candidate_road_ids:
+        contacts = [
+            inputs.lane_pair_contacts[pair]
+            for pair in pairs_by_candidate.get(cand_id, [])
+            if pair in inputs.lane_pair_contacts
+        ]
+        if contacts:
+            closest = min(_distance(a, b) for a, b in contacts)
+            if closest > endpoint_tolerance:
+                return (
+                    False,
+                    f"lane contact distance for candidate {cand_id} exceeds "
+                    f"{endpoint_tolerance:.3f} m (closest of {len(contacts)} "
+                    f"lane pair(s): {closest:.3f} m)",
+                )
+            continue
+
+        # No lane anchor could be resolved for any of this candidate's lane
+        # pairs, so the reference-line endpoints are the only evidence there
+        # is. Keep the old comparison for that case rather than passing a
+        # candidate no one has looked at.
         cand_endpoint = inputs.endpoints_candidates.get(cand_id)
         if cand_endpoint is None:
             return False, f"missing endpoint for candidate road {cand_id}"
@@ -679,11 +716,38 @@ def apply_divergence_synthesis(
             site, roads_by_id, lanelet_map, routing_graph, lanelet_to_road
         )
 
+        # The lane ends the transition actually joins. For a divergence the
+        # source road is contacted at its end and the candidate at its start;
+        # a merge is the mirror image.
+        lane_pair_contacts: Dict[
+            Tuple[int, int, int],
+            Tuple[Tuple[float, float, float], Tuple[float, float, float]],
+        ] = {}
+        for src_lane, cand_id, cand_lane in lane_pairs:
+            src_anchor = _lane_anchor_xyz(
+                source_road,
+                src_lane,
+                at_start=not site.is_divergence,
+                traffic_rule=traffic_rule,
+            )
+            cand_anchor = _lane_anchor_xyz(
+                roads_by_id.get(cand_id),
+                cand_lane,
+                at_start=site.is_divergence,
+                traffic_rule=traffic_rule,
+            )
+            if src_anchor is not None and cand_anchor is not None:
+                lane_pair_contacts[(src_lane, cand_id, cand_lane)] = (
+                    src_anchor,
+                    cand_anchor,
+                )
+
         gate_inputs = SanityGateInputs(
             endpoint_road=endpoint_road,
             endpoints_candidates=endpoints_candidates,
             lane_pairs=lane_pairs,
             all_successor_lanelet_road_ids=neighbour_road_ids,
+            lane_pair_contacts=lane_pair_contacts,
         )
         ok, reason = sanity_gate_passes(site, gate_inputs, endpoint_tolerance)
         if not ok:
