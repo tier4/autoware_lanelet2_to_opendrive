@@ -56,6 +56,7 @@ from autoware_lanelet2_to_opendrive.opendrive.signals_and_controllers import (
 )
 from autoware_lanelet2_to_opendrive.conversion_config import (
     ArcSpiralConfig,
+    CarveConfig,
     ConversionConfig,
     OriginSpec,
     ParamPoly3Config,
@@ -171,6 +172,7 @@ class _Lanelet2ToOpenDRIVEConverter:
             arcspiral_config=self.config.arcspiral,
             width_config=self.config.width_estimation,
             offset=self.offset,
+            carve_config=self.config.carve,
         )
         return result
 
@@ -1611,6 +1613,28 @@ def preprocess_and_convert_with_hydra(
     else:
         arcspiral_config = ArcSpiralConfig()
 
+    # Build CarveConfig from Hydra config
+    # Priority: map config > target config > default
+    #
+    # The defaults are read off ``CarveConfig()`` rather than written here as
+    # literals.  Repeating them is what made #466's ArcSpiralConfig defaults
+    # unreachable: the dataclass held one value and this function handed the
+    # conversion another, so changing the dataclass had no effect.
+    carve_defaults = CarveConfig()
+    carve_dict = cfg.map.get("carve") or cfg.target.get("carve", {})
+    if carve_dict:
+        carve_config = CarveConfig(
+            enabled=carve_dict.get("enabled", carve_defaults.enabled),
+            length=carve_dict.get("length", carve_defaults.length),
+        )
+        logger.info(
+            "Carve config: enabled=%s, length=%s m",
+            carve_config.enabled,
+            carve_config.length,
+        )
+    else:
+        carve_config = carve_defaults
+
     # Build WidthEstimationConfig from Hydra config
     # Priority: map config > target config > default
     width_dict = cfg.map.get("width_estimation") or cfg.target.get(
@@ -1714,6 +1738,7 @@ def preprocess_and_convert_with_hydra(
         traffic_rule=traffic_rule,
         parampoly3=parampoly3_config,
         arcspiral=arcspiral_config,
+        carve=carve_config,
         width_estimation=width_config,
         stopline=stopline_config,
         traffic_light=tl_config,

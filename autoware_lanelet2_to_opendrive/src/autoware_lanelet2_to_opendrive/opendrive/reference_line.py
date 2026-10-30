@@ -235,6 +235,8 @@ class ReferenceLine:
         offset: CoordinateOffset = CoordinateOffset(),
         start_hdg_override: Optional[float] = None,
         end_hdg_override: Optional[float] = None,
+        trim_start: float = 0.0,
+        trim_end: float = 0.0,
     ) -> "ReferenceLine":
         """
         Construct a ReferenceLine from a group of Lanelet2 lanelets.
@@ -271,6 +273,14 @@ class ReferenceLine:
                 the residual ``lane_smoothness`` gap at junction boundaries.
             end_hdg_override: The s=length counterpart of
                 ``start_hdg_override``.
+            trim_start: Metres of boundary polyline to drop from the
+                s=0 end before fitting (junction carve). 0.0 keeps
+                the whole line.
+            trim_end: The s=length counterpart of ``trim_start``.
+                Raises ``ValueError`` when the boundary cannot spare
+                the lengths asked for; the caller is expected to have
+                checked, because a road too short to carve must be
+                left alone rather than collapsed.
 
         Returns:
             ReferenceLine instance constructed from the center of the lanelet group
@@ -405,6 +415,25 @@ class ReferenceLine:
             if start_xyz_override is None:
                 points_3d = points_3d.copy()
             points_3d[-1] = override
+
+        # Carve: end the road short of the junction it feeds.  This has
+        # to happen after the endpoint overrides -- which pin the line to
+        # a neighbour's endpoint -- and before the resampling and the
+        # fit, so that the fitter simply runs on a shorter line and no
+        # emitted geometry record has to be re-parameterised.  The lane
+        # widths, the elevation profile and the links are all derived
+        # from the reference line below, so they follow the trim without
+        # a special case.
+        if trim_start > 0.0 or trim_end > 0.0:
+            carved = trim_polyline(points_3d, trim_start=trim_start, trim_end=trim_end)
+            if carved is None:
+                raise ValueError(
+                    f"boundary of 2D length "
+                    f"{float(np.sum(np.linalg.norm(np.diff(points_3d[:, :2], axis=0), axis=1))):.3f} m "
+                    f"cannot spare trim_start={trim_start} + "
+                    f"trim_end={trim_end}"
+                )
+            points_3d = carved
 
         # Densify the polyline before fitting.  The spline below is fitted to
         # these points and its control-point count is derived from their
