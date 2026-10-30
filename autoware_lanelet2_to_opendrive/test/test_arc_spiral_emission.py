@@ -121,10 +121,6 @@ def test_short_spline_becomes_single_straight_segment():
     assert (geoms[0].cU, geoms[0].dU, geoms[0].cV, geoms[0].dV) == (0.0, 0.0, 0.0, 0.0)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ArcSpiralConfig.enabled defaults to False, so every record is a paramPoly3",
-)
 def test_shipped_conversion_emits_line_and_arc_primitives(nishishinjuku_xodr):
     """The default conversion classifies its plan view, not just fits it.
 
