@@ -153,6 +153,44 @@ class ArcSpiralConfig:
 
 
 @dataclass
+class CarveConfig:
+    """Opt-in: end an incoming road short of the junction it feeds.
+
+    A fork is modelled in published OpenDRIVE by ending the incoming road
+    before the split, so the junction has physical extent and each movement
+    gets a connecting road with real geometry. Across the esmini corpus the
+    shortest of 54 connecting roads is 9.141 m; every one of ours is 0.010 m,
+    because the incoming road runs all the way to the split and the connector
+    has nowhere to be.
+
+    Carving trims ``length`` metres of boundary polyline off the road's end
+    before the reference line is fitted, and the synthesised connector spans
+    the freed stretch. **The Lanelet2 map is not touched** -- no lanelet is
+    split and no point moves; what changes is the OpenDRIVE output and the
+    stretch of lanelet a road in ``lanelet_to_road_and_lane`` covers.
+
+    It is off by default because it changes the emitted topology: connecting
+    road ids are handed out after the regular roads, so any consumer holding
+    cached ids must re-read them.
+
+    A road end is left alone -- silently, falling back to the present
+    behaviour -- when it cannot spare ``length``. On Nishishinjuku that is 3
+    of 112 candidate roads at 1 m (0.535 m and two of 0.999 m).
+
+    Attributes:
+        enabled: Master switch. False (default) preserves current output.
+        length: Metres to trim from a carved road end (m). The ceiling is
+            what the roads can spare: 109 of 112 candidates at 1 m, 106 at
+            2 m, 101 at 5 m. Trimming moves the spline knots, so the fit
+            changes along the whole road, not only at the trimmed end -- the
+            accuracy cost is what should decide this value.
+    """
+
+    enabled: bool = False
+    length: float = 1.0
+
+
+@dataclass
 class WidthEstimationConfig:
     """Configuration for lanelet width estimation.
 
@@ -289,6 +327,9 @@ class ConversionConfig:
         parampoly3: Configuration for ParamPoly3 segment generation
         arcspiral: Configuration for arc/spiral primitive detection (#466).
             Default is disabled — preserves existing paramPoly3-only output.
+        carve: Configuration for carving the junction out of the incoming
+            road. Default is disabled — preserves the present zero-length
+            connector stubs.
         width_estimation: Configuration for width spline sampling
         stopline: Configuration for stop line object generation.
             Set stopline.carla_stop_line=True to enable CARLA Stencil_STOP format
@@ -308,6 +349,7 @@ class ConversionConfig:
     traffic_rule: Optional[str] = "RHT"
     parampoly3: ParamPoly3Config = field(default_factory=ParamPoly3Config)
     arcspiral: ArcSpiralConfig = field(default_factory=ArcSpiralConfig)
+    carve: CarveConfig = field(default_factory=CarveConfig)
     width_estimation: WidthEstimationConfig = field(
         default_factory=WidthEstimationConfig
     )

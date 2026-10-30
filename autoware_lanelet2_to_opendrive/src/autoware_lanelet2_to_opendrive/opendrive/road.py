@@ -23,6 +23,7 @@ from tqdm import tqdm
 from ..config import CoordinateOffset
 from ..conversion_config import (
     ArcSpiralConfig,
+    CarveConfig,
     LaneLinksContext,
     ParamPoly3Config,
     WidthEstimationConfig,
@@ -1120,6 +1121,8 @@ class Road:
         offset: CoordinateOffset = CoordinateOffset(),
         start_hdg_override: Optional[float] = None,
         end_hdg_override: Optional[float] = None,
+        trim_start: float = 0.0,
+        trim_end: float = 0.0,
     ) -> "Road":
         """Construct a Road from a group of lanelets.
 
@@ -1151,6 +1154,9 @@ class Road:
                 from it by ``2 * w * sin(dpsi / 2)``.
             end_hdg_override: The s=length counterpart of
                 ``start_hdg_override``.
+            trim_start: Metres of boundary polyline to drop from the
+                s=0 end before fitting (junction carve).
+            trim_end: The s=length counterpart of ``trim_start``.
 
         Returns:
             Road object constructed from the lanelet group
@@ -1174,6 +1180,8 @@ class Road:
             offset=offset,
             start_hdg_override=start_hdg_override,
             end_hdg_override=end_hdg_override,
+            trim_start=trim_start,
+            trim_end=trim_end,
         )
         centerline_2d = reference_line.centerline_2d
 
@@ -1296,6 +1304,99 @@ class Road:
         return road
 
     @staticmethod
+    def carve_lengths_per_group(
+        lanelet_map: lanelet2.core.LaneletMap,
+        adjacent_groups: List[Set[lanelet2.core.Lanelet]],
+        routing_graph: RoutingGraph,
+        length: float,
+    ) -> Dict[int, Tuple[float, float]]:
+        """Which group ends feed a synthesised junction, and so can be carved.
+
+        The carve exists to give a junction physical extent. A junction built
+        from real ``turn_direction`` lanelets already has extent; the ones that
+        do not are the divergence and merge sites this converter synthesises,
+        where the incoming road runs to the split and the connector is left
+        with no length. So the predicate is the group-level topology:
+
+        * a group's **end** is carved when the group fans out to more than one
+          downstream group, **or** when its single successor is fed by more
+          than one group -- a merge forms a junction at the incoming end too;
+        * a group's **start** is carved when more than one group feeds it,
+          **or** when a group feeding it fans out.
+
+        Groups returned by ``find_connecting_lanelet_groups`` that are not
+        themselves road groups -- the lanelets of a real junction -- have no
+        index here and are skipped, which is the intent: that junction already
+        has extent.
+
+        Args:
+            lanelet_map: The map the groups came from.
+            adjacent_groups: The road groups, in the order roads are built.
+            routing_graph: Graph for the same map.
+            length: Metres to carve from a carved end.
+
+        Returns:
+            ``{group index: (trim_start, trim_end)}``, holding only the groups
+            with at least one carved end. Whether the group's boundary can
+            spare the length is **not** decided here -- the reference line
+            chooses which boundary it fits, so feasibility is settled where
+            the road is built.
+        """
+        from ..util import find_connecting_lanelet_groups, ConnectionDirection
+
+        index_of: Dict[frozenset, int] = {}
+        for index, group in enumerate(adjacent_groups):
+            index_of[frozenset(ll.id for ll in group)] = index
+
+        out_edges: Dict[int, Set[int]] = {i: set() for i in range(len(adjacent_groups))}
+        in_edges: Dict[int, Set[int]] = {i: set() for i in range(len(adjacent_groups))}
+
+        for index, group in enumerate(adjacent_groups):
+            try:
+                following = find_connecting_lanelet_groups(
+                    lanelet_map,
+                    group,
+                    ConnectionDirection.FOLLOWING,
+                    routing_graph,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Carve: could not resolve successors of group %d: %s",
+                    index,
+                    e,
+                    exc_info=True,
+                )
+                continue
+            for follower in following:
+                target = index_of.get(frozenset(ll.id for ll in follower))
+                if target is not None:
+                    out_edges[index].add(target)
+                    in_edges[target].add(index)
+
+        carved: Dict[int, Tuple[float, float]] = {}
+        for index in range(len(adjacent_groups)):
+            trim_end = 0.0
+            trim_start = 0.0
+            if len(out_edges[index]) >= 2 or any(
+                len(in_edges[j]) >= 2 for j in out_edges[index]
+            ):
+                trim_end = length
+            if len(in_edges[index]) >= 2 or any(
+                len(out_edges[j]) >= 2 for j in in_edges[index]
+            ):
+                trim_start = length
+            if trim_start > 0.0 or trim_end > 0.0:
+                carved[index] = (trim_start, trim_end)
+
+        logger.info(
+            "Carve: %d of %d road groups have at least one end to carve at %s m",
+            len(carved),
+            len(adjacent_groups),
+            length,
+        )
+        return carved
+
+    @staticmethod
     def construct_from_lanelet_map(
         lanelet_map: lanelet2.core.LaneletMap,
         traffic_rule: Optional[str] = None,
@@ -1303,6 +1404,7 @@ class Road:
         arcspiral_config: Optional[ArcSpiralConfig] = None,
         width_config: Optional[WidthEstimationConfig] = None,
         offset: CoordinateOffset = CoordinateOffset(),
+        carve_config: Optional[CarveConfig] = None,
     ) -> "ConstructedRoadsResult":
         """Construct Roads from a lanelet map.
 
@@ -1315,6 +1417,9 @@ class Road:
             width_config: Configuration for width spline sampling
             offset: Coordinate offset to subtract from extracted boundary
                 points. Defaults to a zero offset.
+            carve_config: Configuration for carving the junction out of
+                the incoming road. ``None`` or disabled (the default)
+                leaves every road running to its split, as before.
 
         Returns:
             ConstructedRoadsResult: roads, lanelet-to-road mapping, total
@@ -1373,8 +1478,18 @@ class Road:
             lanelet_map, adjacent_groups, routing_graph
         )
 
+        # Which group ends feed a synthesised junction and so can be carved.
+        # Computed before the roads are built because the trim has to be
+        # applied to the boundary polyline the reference line is fitted to.
+        carve_lengths: Dict[int, Tuple[float, float]] = {}
+        if carve_config is not None and carve_config.enabled:
+            carve_lengths = Road.carve_lengths_per_group(
+                lanelet_map, adjacent_groups, routing_graph, carve_config.length
+            )
+
         # Create roads from adjacent groups
         roads = []
+        carve_refused: List[int] = []
         # Store mapping from lanelet ID to road ID and adjacent group for each road
         lanelet_to_road: dict[int, int] = {}
         road_to_group: dict[int, Set[lanelet2.core.Lanelet]] = {}
@@ -1392,19 +1507,53 @@ class Road:
             # target_ids = [3013259]
             # if set(ll_ids).isdisjoint(target_ids):
             #     continue
+            trim_start, trim_end = carve_lengths.get(road_id, (0.0, 0.0))
             try:
-                road = Road.construct_from_lanelet_groups(
-                    lanelet_map=lanelet_map,  # Use original map for proper connectivity
-                    lanelet_group=adjacent_group,
-                    road_id=road_id,
-                    s_offset=0.0,
-                    traffic_rule=traffic_rule,
-                    parampoly3_config=parampoly3_config,
-                    arcspiral_config=arcspiral_config,
-                    width_config=width_config,
-                    routing_graph=routing_graph,
-                    offset=offset,
-                )
+                try:
+                    road = Road.construct_from_lanelet_groups(
+                        lanelet_map=lanelet_map,  # Use original map for proper connectivity
+                        lanelet_group=adjacent_group,
+                        road_id=road_id,
+                        s_offset=0.0,
+                        traffic_rule=traffic_rule,
+                        parampoly3_config=parampoly3_config,
+                        arcspiral_config=arcspiral_config,
+                        width_config=width_config,
+                        routing_graph=routing_graph,
+                        offset=offset,
+                        trim_start=trim_start,
+                        trim_end=trim_end,
+                    )
+                except ValueError as e:
+                    # A road too short to spare the carve length is left
+                    # running to its split, as before.  This is the expected
+                    # outcome for a handful of roads -- three on Nishishinjuku
+                    # at 1 m are under a metre long -- and must not fail the
+                    # conversion or produce a degenerate reference line.
+                    if (
+                        trim_start <= 0.0 and trim_end <= 0.0
+                    ) or "cannot spare" not in str(e):
+                        raise
+                    logger.info(
+                        "Carve: group %d cannot spare %s / %s m, left uncarved (%s)",
+                        road_id,
+                        trim_start,
+                        trim_end,
+                        e,
+                    )
+                    carve_refused.append(road_id)
+                    road = Road.construct_from_lanelet_groups(
+                        lanelet_map=lanelet_map,
+                        lanelet_group=adjacent_group,
+                        road_id=road_id,
+                        s_offset=0.0,
+                        traffic_rule=traffic_rule,
+                        parampoly3_config=parampoly3_config,
+                        arcspiral_config=arcspiral_config,
+                        width_config=width_config,
+                        routing_graph=routing_graph,
+                        offset=offset,
+                    )
                 roads.append(road)
 
                 # Store lanelet ID to road ID mapping
@@ -1429,6 +1578,13 @@ class Road:
                             break
                 tqdm.write(f"Warning: Failed to create road from group {road_id}: {e}")
                 continue
+
+        if carve_lengths:
+            logger.info(
+                "Carve: %d of %d carve candidates were refused for want of length",
+                len(carve_refused),
+                len(carve_lengths),
+            )
 
         if not roads:
             raise ValueError("No valid roads could be constructed from the lanelet map")
