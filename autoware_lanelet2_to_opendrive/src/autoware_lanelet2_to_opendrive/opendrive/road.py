@@ -459,6 +459,15 @@ class Road:
     # correct rendered lane edge rather than the regular road's reference
     # line — see :meth:`evaluate_lane_anchor_xyz` and #437.
     sorted_lanelet_ids: Optional[List[int]] = None
+    # True for a connecting road this converter synthesised rather
+    # than built from a lanelet -- the divergence/merge stubs of
+    # #291/#493.  The geo-mapping phase must skip these: a road with
+    # no backing lanelet cannot be matched to one, and if it is
+    # allowed to compete it takes the lanelet away from the road that
+    # does own it.  Recovered from the file by
+    # ``parse_roads_from_xodr`` through the ``name`` attribute, so the
+    # conversion-time mapping and the re-parsed one agree.
+    synthetic_connector: bool = False
 
     def evaluate_lane_anchor_pose(
         self,

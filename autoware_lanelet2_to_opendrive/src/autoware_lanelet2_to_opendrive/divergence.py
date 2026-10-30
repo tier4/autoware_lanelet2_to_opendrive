@@ -146,6 +146,17 @@ class SanityGateInputs:
     all_successor_lanelet_road_ids: Set[int]
 
 
+SYNTHETIC_CONNECTOR_NAME_PREFIX = "SyntheticConnector_"
+"""``name`` prefix marking a connecting road as synthesised.
+
+The emitted file is the only channel between the conversion and the
+cross-validation, which re-parses it, so the provenance has to live
+there. ``name`` is an optional standard attribute on ``<road>``, it
+was previously left unset on these roads and set to ``Road_<id>`` on
+every other, and no consumer in this repository reads it.
+"""
+
+
 def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
     return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
 
@@ -375,8 +386,15 @@ def _make_zero_length_connecting_road(
 
     return Road(
         id=road_id,
+        # Names the road as synthesised, which is the only provenance
+        # that survives into the emitted file.  Without it the
+        # geo-mapping phase has nothing but the road's length to go
+        # on, and a synthetic road longer than
+        # ``_SYNTHETIC_CONNECTOR_MAX_LENGTH`` is then read as real.
+        name=f"{SYNTHETIC_CONNECTOR_NAME_PREFIX}{road_id}",
         length=length,
         junction=junction_id,
+        synthetic_connector=True,
         rule=traffic_rule,
         plan_view=plan_view,
         elevation_profile=elevation_profile,
