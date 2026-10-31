@@ -29,7 +29,6 @@ from typing import List, Tuple
 
 import lanelet2
 import numpy as np
-import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.reference_line import ReferenceLine
 
@@ -109,10 +108,6 @@ def _tangent_deg(reference_line: ReferenceLine, at_start: bool) -> float:
     return math.degrees(math.atan2(derivative[1], derivative[0]))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the cut perpendicular is applied even where no neighbour shares the cut",
-)
 def test_isolated_end_tangent_follows_the_boundary() -> None:
     """A skewed cut on an end nobody shares must not steer the fit."""
     left_xy = _straight_xy(0.0, 20.0)

@@ -46,6 +46,24 @@ def _guard_heading_override(
     return hdg_override
 
 
+def _polyline_tangent_2d(points_3d: np.ndarray, at_start: bool) -> np.ndarray:
+    """Unit XY direction of the polyline's own first or last segment.
+
+    ``Splines`` scales its velocity targets internally and its own estimates
+    are unit vectors, so a unit vector is the right magnitude to hand it.
+    """
+    if len(points_3d) < 2:
+        return np.array([1.0, 0.0])
+    if at_start:
+        segment = points_3d[1, :2] - points_3d[0, :2]
+    else:
+        segment = points_3d[-1, :2] - points_3d[-2, :2]
+    length = float(np.linalg.norm(segment))
+    if length < DEFAULT_CONFIG.geometry.epsilon:
+        return np.array([1.0, 0.0])
+    return segment / length
+
+
 if TYPE_CHECKING:
     pass
 
@@ -353,6 +371,45 @@ class ReferenceLine:
         if boundary_reversed:
             start_vel, end_vel = -end_vel, -start_vel
             logger.debug("Reversed velocity vectors to match reversed boundary points")
+
+        # An end that no other lanelet shares has no continuity to buy.
+        #
+        # The cut perpendicular is used because the cut itself is *shared*
+        # between longitudinally connected lanelets, so both sides derive the
+        # same tangent from the same data and meet exactly; the price is that
+        # a skewed cut steers the fit off the polyline by the skew (replacing
+        # the rule everywhere was measured and makes 877 of 889 neighbour
+        # contacts worse, so the price is worth paying where there is a
+        # neighbour).  Where no lanelet shares the end there is nothing on the
+        # other side to agree with, and the skew is paid for nothing: the
+        # fitter is asked to leave a polyline at up to 86 deg off its own
+        # direction.  Take the polyline's own direction there instead.
+        #
+        # Measured on nishishinjuku this is 16 of 600 reference-lanelet ends,
+        # all of them on the 8 walkway-only roads, with cut skews up to
+        # 85.113 deg; the road_shoulder ends do have contacts and keep the
+        # shared rule.
+        from ..util import lanelet_end_has_contact
+
+        emitted_start_is_lanelet_start = not boundary_reversed
+        if not lanelet_end_has_contact(
+            lanelet_map, reference_lanelet, at_start=emitted_start_is_lanelet_start
+        ):
+            start_vel = _polyline_tangent_2d(points_3d, at_start=True)
+            logger.debug(
+                "Lanelet %d start is shared with no other lanelet; using the "
+                "boundary's own tangent for the reference line",
+                reference_lanelet.id,
+            )
+        if not lanelet_end_has_contact(
+            lanelet_map, reference_lanelet, at_start=not emitted_start_is_lanelet_start
+        ):
+            end_vel = _polyline_tangent_2d(points_3d, at_start=False)
+            logger.debug(
+                "Lanelet %d end is shared with no other lanelet; using the "
+                "boundary's own tangent for the reference line",
+                reference_lanelet.id,
+            )
 
         # Apply the heading overrides (direction half of the junction contact
         # contract).  These must come *after* the reversal above: they are
