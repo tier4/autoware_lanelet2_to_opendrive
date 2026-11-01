@@ -22,8 +22,6 @@ import lanelet2
 import lxml.etree as ET
 import numpy as np
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
-from tqdm import tqdm
-
 from ..config import CoordinateOffset
 from ..conversion_config import (
     ArcSpiralConfig,
@@ -31,6 +29,7 @@ from ..conversion_config import (
     ParamPoly3Config,
     WidthEstimationConfig,
 )
+from ..progress import track
 from ..util import (
     BOUNDARY_ATTACHED_LANELET_SUBTYPES,
     CONVERTIBLE_LANELET_SUBTYPES,
@@ -1808,11 +1807,12 @@ class Road:
         lanelet_to_road: dict[int, int] = {}
         road_to_group: dict[int, Set[lanelet2.core.Lanelet]] = {}
 
-        print(f"Creating roads from {len(adjacent_groups)} lanelet groups...")
-        for road_id, adjacent_group in tqdm(
+        logger.info("Creating roads from %d lanelet groups", len(adjacent_groups))
+        for road_id, adjacent_group in track(
             enumerate(adjacent_groups),
+            "Building roads",
+            unit="group",
             total=len(adjacent_groups),
-            desc="Building roads",
         ):
             # ll_ids = [ll.id for ll in adjacent_group]
             # target_ids = [112, 114, 115, 116]
@@ -1852,11 +1852,16 @@ class Road:
                     # Find the line that actually called len()
                     for line in full_trace.split("\n"):
                         if "len(" in line and "autoware_lanelet2_to_opendrive" in line:
-                            tqdm.write(
-                                f"len() error in group {road_id}: {line.strip()}"
+                            logger.warning(
+                                "len() error in group %d: %s", road_id, line.strip()
                             )
                             break
-                tqdm.write(f"Warning: Failed to create road from group {road_id}: {e}")
+                logger.warning(
+                    "Failed to create road from group %d: %s",
+                    road_id,
+                    e,
+                    exc_info=True,
+                )
                 continue
 
         if not roads:
@@ -1868,8 +1873,8 @@ class Road:
         deferred_predecessor_candidates: Dict[int, List[int]] = {}
         deferred_successor_candidates: Dict[int, List[int]] = {}
 
-        print(f"Building road links for {len(roads)} roads...")
-        for road in tqdm(roads, desc="Building road links"):
+        logger.info("Building road links for %d roads", len(roads))
+        for road in track(roads, "Building road links", unit="road"):
             adjacent_group = road_to_group[road.id]
 
             # Predecessor
@@ -1893,8 +1898,11 @@ class Road:
                     # Defer to divergence/merge synthesis (issue #291).
                     deferred_predecessor_candidates[road.id] = pred_candidates
             except Exception as e:
-                tqdm.write(
-                    f"Warning: Failed to find predecessors for road {road.id}: {e}"
+                logger.warning(
+                    "Failed to find predecessors for road %d: %s",
+                    road.id,
+                    e,
+                    exc_info=True,
                 )
 
             # Successor
@@ -1918,8 +1926,11 @@ class Road:
                     # Defer to divergence/merge synthesis (issue #291).
                     deferred_successor_candidates[road.id] = succ_candidates
             except Exception as e:
-                tqdm.write(
-                    f"Warning: Failed to find successors for road {road.id}: {e}"
+                logger.warning(
+                    "Failed to find successors for road %d: %s",
+                    road.id,
+                    e,
+                    exc_info=True,
                 )
 
         # Build lane links based on lanelet previous/following relationships
@@ -2098,14 +2109,16 @@ class Road:
 
         current_road_id = starting_road_id
 
-        print(
-            f"Creating connecting roads from {len(junction_groups)} junction groups..."
+        logger.info(
+            "Creating connecting roads from %d junction groups",
+            len(junction_groups),
         )
 
-        for junction_index, junction_group in tqdm(
+        for junction_index, junction_group in track(
             enumerate(junction_groups),
+            "Building junction roads",
+            unit="junction",
             total=len(junction_groups),
-            desc="Building junction roads",
         ):
             # Issue #132 fix: Apply offset to junction ID
             junction_id = junction_index + junction_id_offset
@@ -2327,16 +2340,21 @@ class Road:
                         current_road_id += 1
 
                     except Exception as e:
-                        tqdm.write(
-                            f"Warning: Failed to create connecting road in junction {junction_id}: {e}"
+                        logger.warning(
+                            "Failed to create connecting road in junction %d: %s",
+                            junction_id,
+                            e,
+                            exc_info=True,
                         )
                         continue
 
             # Store the mapping from junction ID to its road IDs
             junction_to_roads[junction_id] = junction_road_ids
 
-        print(
-            f"Created {len(connecting_roads)} connecting roads across {len(junction_groups)} junctions"
+        logger.info(
+            "Created %d connecting roads across %d junctions",
+            len(connecting_roads),
+            len(junction_groups),
         )
 
         return connecting_roads, junction_to_roads, lanelet_to_road
@@ -2542,8 +2560,8 @@ class Road:
         )
 
         # Set lane links for each road
-        print(f"Building lane links for {len(roads)} roads...")
-        for road in tqdm(roads, desc="Building lane links"):
+        logger.info("Building lane links for %d roads", len(roads))
+        for road in track(roads, "Building lane links", unit="road"):
             try:
                 context = LaneLinksContext(
                     lanelet_map=lanelet_map,
@@ -2555,7 +2573,12 @@ class Road:
                 )
                 road.set_lane_links(context)
             except Exception as e:
-                tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
+                logger.warning(
+                    "Failed to set lane links for road %d: %s",
+                    road.id,
+                    e,
+                    exc_info=True,
+                )
 
         Road._drop_asymmetric_non_vehicle_lane_links(roads, road_id_to_road)
 
@@ -2873,8 +2896,10 @@ class Road:
             junction_lanelet_ids.update(own_ids)
             junction_to_lanelet_ids.setdefault(road.junction, set()).update(own_ids)
 
-        print(f"Setting road links for {len(connecting_roads)} connecting roads...")
-        for road in tqdm(connecting_roads, desc="Building connecting road links"):
+        logger.info("Setting road links for %d connecting roads", len(connecting_roads))
+        for road in track(
+            connecting_roads, "Building connecting road links", unit="road"
+        ):
             # A chain-merged connecting road spans a whole in-junction
             # maneuver: its predecessor is read from the path's first lanelet
             # and its successor from the last.  Going through
@@ -3137,6 +3162,7 @@ class Road:
             road_to_lanelet_ids, road_junction, routing_previous
         )
         _apply_outgoing_junction_links(roads, outgoing_links)
-        print(
-            f"Set junction predecessor links for {len(outgoing_links)} outgoing roads"
+        logger.info(
+            "Set junction predecessor links for %d outgoing roads",
+            len(outgoing_links),
         )
