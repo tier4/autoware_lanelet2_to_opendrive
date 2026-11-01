@@ -48,11 +48,11 @@ from .enums import ContactPoint, ElementType, LaneType, RoadType, TrafficRule
 from .geometry import (
     Arc,
     GeometryBase,
-    Line,
     ParamPoly3,
     PlanView,
     end_param,
     evaluate_plan_view_world,
+    line_or_arc_from_spline_window,
 )
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .lane_sections import Lanes
@@ -353,7 +353,11 @@ def _build_planview_geometries(
     out: List[GeometryBase] = []
     for run in runs:
         if isinstance(run, LineRun):
-            out.append(Line.from_spline_window(spline, run.s_start, run.s_end))
+            # A straight run is only straight to within arc_position_tol, so
+            # it is emitted as a <line> where the circular solution really is
+            # one and as a very-low-curvature <arc> otherwise; either way the
+            # record ends where the next one starts.
+            out.append(line_or_arc_from_spline_window(spline, run.s_start, run.s_end))
         elif isinstance(run, ArcRun):
             out.append(
                 Arc.from_spline_window(spline, run.s_start, run.s_end, run.curvature)
