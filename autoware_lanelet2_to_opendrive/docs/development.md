@@ -164,16 +164,21 @@ uv run python -m autoware_lanelet2_to_opendrive.main \
     from source against the system Boost. Hosts whose Boost ABI does not
     match (e.g. Ubuntu 24.04 with Boost 1.83) will fail the wheel build
     with `RuntimeError: Command failed: make -jN`. The Docker image
-    pins Ubuntu 22.04 with Boost 1.74, matching CI exactly.
+    pins Ubuntu 22.04 with Boost 1.74, the same OS and Boost versions
+    CI uses. CI itself runs `uv run pytest` on the runner rather than
+    in this image, so the container matches CI's platform, not its
+    execution path.
 
 The repository ships a multi-stage `Dockerfile` and `docker-compose.yml`
-with profiles that mirror each CI job:
+with profiles covering CI's `test` and `lint-and-format` jobs (there is
+none for `docs`, `auto-format` or `check-src-changes`):
 
 ```bash
-# Full pytest suite (matches CI's `test` job)
+# Full pytest suite (the same pytest flags as CI's `test` job; CI invokes
+# them through `uv run` and this does not)
 docker compose --profile test run --rm pytest
 
-# Pre-commit on all files (matches CI's `lint-and-format` job)
+# Pre-commit on all files (the same check as CI's `lint-and-format` job)
 docker compose --profile lint run --rm lint
 
 # QC: convert nishishinjuku and run qc-validate on the result

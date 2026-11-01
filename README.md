@@ -14,7 +14,7 @@ The CARLA scenario-testing framework that used to live here as `autoware_carla_s
 ├── examples/                         # Standalone usage examples
 ├── docs/                             # Repository-level documentation (Docker, etc.)
 ├── Dockerfile                        # Multi-stage image: dev / convert
-├── docker-compose.yml                # CI-equivalent profiles: test / lint / qc / carla / dev / convert
+├── docker-compose.yml                # local profiles: test / lint / qc / carla / dev / convert
 ├── pyproject.toml                    # uv workspace root
 └── uv.lock
 ```

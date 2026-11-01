@@ -76,7 +76,7 @@ uv run analyze /path/to/map.osm /path/to/map.xodr
 
 ## Docker
 
-The repository's multi-stage Docker image exposes a slim conversion image and a CI-equivalent test profile:
+The repository's multi-stage Docker image exposes a slim conversion image and a test profile on CI's OS and Boost versions:
 
 ```bash
 # One-shot conversion via the slim image (mount the directory holding your map)
