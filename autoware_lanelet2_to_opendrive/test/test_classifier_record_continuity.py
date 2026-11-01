@@ -29,11 +29,17 @@ import numpy as np
 import pytest
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
-from autoware_lanelet2_to_opendrive.conversion_config import ArcSpiralConfig
+from autoware_lanelet2_to_opendrive.conversion_config import (
+    ArcSpiralConfig,
+    ParamPoly3Config,
+)
 from autoware_lanelet2_to_opendrive.opendrive.geometry import (
     Arc,
     GeometryBase,
-    line_or_arc_from_spline_window,
+    Line,
+)
+from autoware_lanelet2_to_opendrive.opendrive.road import (
+    _build_planview_geometries,
 )
 from autoware_lanelet2_to_opendrive.opendrive.geometry_classifier import (
     ArcRun,
@@ -103,11 +109,19 @@ def test_straight_run_is_emitted_as_a_record_that_closes_the_window() -> None:
     # rather than one chosen to make the number large.
     spline = _straightish_spline()
     s_end = 12.0
-    record = line_or_arc_from_spline_window(spline, s_start=0.0, s_end=s_end)
+    record = Line.from_spline_window(spline, s_start=0.0, s_end=s_end)
 
-    assert record.length == pytest.approx(s_end, abs=1e-12), (
-        "the record must carry the window's arc length, or the road's "
-        "@length no longer equals the sum of its geometries"
+    assert isinstance(record, Line), (
+        "a straight run has to stay a <line>: the shipped output is expected "
+        "to carry both primitives (test_arc_spiral_emission), and a run the "
+        "classifier calls straight is the only source of them"
+    )
+    chord = math.dist(_spline_xy(spline, 0.0), _spline_xy(spline, s_end))
+    assert record.length == pytest.approx(chord, abs=1e-12), (
+        "a straight record's length is its own, not the window's arc length: "
+        "the road's @length is the sum of its records' lengths, so the two "
+        "stay consistent either way, and only the chord lands the record on "
+        "the far point"
     )
     gap = math.dist(_record_end_xy(record), _spline_xy(spline, s_end))
     assert gap < CONTINUITY_TOLERANCE_M, (
@@ -153,10 +167,7 @@ def test_classified_records_form_one_unbroken_chain() -> None:
     for run in runs:
         if isinstance(run, LineRun):
             built.append(
-                (
-                    line_or_arc_from_spline_window(spline, run.s_start, run.s_end),
-                    run.s_end,
-                )
+                (Line.from_spline_window(spline, run.s_start, run.s_end), run.s_end)
             )
         elif isinstance(run, ArcRun):
             built.append(
@@ -180,4 +191,45 @@ def test_classified_records_form_one_unbroken_chain() -> None:
     assert worst < CONTINUITY_TOLERANCE_M, (
         f"{where} ends {worst:.3e} m away from the spline point the next "
         "record anchors on, so the reference line steps there"
+    )
+
+
+def test_record_s_values_are_contiguous() -> None:
+    """Each record's ``s`` must be the previous one's ``s`` plus its length.
+
+    The plan view is what defines a road's s-domain: a reader locating ``s``
+    walks the records' own ``s``/``length``, and ``road@length`` is written as
+    the sum of those lengths. The classifier labels an arc or line run with
+    the fitted spline's arc length while a paramPoly3 chain carries each
+    piece's own quadrature length, and the two measures of one span differ by
+    about 1e-5 relative -- the known "three arc lengths" split. Mixed in one
+    plan view that becomes a step: on nishishinjuku road 148, record 20's
+    paramPoly3 ends at s=141.999904 while record 21's arc is labelled
+    s=142.000000, so the plan view stops 9.629e-05 m short of the road's own
+    @length and every s past the step names a different point. 38 roads
+    carried such a step, and the 11 of them sitting at a road-typed contact
+    are exactly the 11 ASAM road.geometry.contact_point errors.
+    """
+    spline = _curving_spline(radius=60.0, arc=1.2, n=160)
+    records = _build_planview_geometries(
+        spline,
+        parampoly3_config=ParamPoly3Config(),
+        arcspiral_config=ArcSpiralConfig(enabled=True),
+    )
+    assert len(records) >= 2
+
+    worst = 0.0
+    where = ""
+    for first, second in zip(records, records[1:]):
+        step = abs(first.s + first.length - second.s)
+        if step > worst:
+            worst = step
+            where = (
+                f"{type(first).__name__} s={first.s:.6f} len={first.length:.6f} "
+                f"-> {type(second).__name__} s={second.s:.6f}"
+            )
+    assert worst < CONTINUITY_TOLERANCE_M, (
+        f"the record s-domain steps by {worst:.3e} m at {where}, so every s "
+        "past it -- the road's own @length included -- names a point the plan "
+        "view does not reach"
     )

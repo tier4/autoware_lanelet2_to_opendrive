@@ -38,11 +38,11 @@ from .enums import ContactPoint, ElementType, RoadType, TrafficRule
 from .geometry import (
     Arc,
     GeometryBase,
+    Line,
     ParamPoly3,
     PlanView,
     end_param,
     evaluate_plan_view_world,
-    line_or_arc_from_spline_window,
 )
 from .lane_elements import LaneLink, RoadTypeDefinition, RoadTypeSpeed, SpeedUnit
 from .lane_sections import Lanes
@@ -92,11 +92,7 @@ def _build_planview_geometries(
     out: List[GeometryBase] = []
     for run in runs:
         if isinstance(run, LineRun):
-            # A straight run is only straight to within arc_position_tol, so
-            # it is emitted as a <line> where the circular solution really is
-            # one and as a very-low-curvature <arc> otherwise; either way the
-            # record ends where the next one starts.
-            out.append(line_or_arc_from_spline_window(spline, run.s_start, run.s_end))
+            out.append(Line.from_spline_window(spline, run.s_start, run.s_end))
         elif isinstance(run, ArcRun):
             out.append(
                 Arc.from_spline_window(spline, run.s_start, run.s_end, run.curvature)
@@ -106,6 +102,20 @@ def _build_planview_geometries(
             out.extend(_emit_paramPoly3_run(spline, run, pp3_cfg))
         else:
             raise TypeError(f"Unknown ClassifiedSegment type: {type(run)!r}")
+
+    # The plan view is its own s-domain: a reader locating s walks the
+    # records' own s and length, and road@length is written as the sum of
+    # those lengths. The runs are labelled in the fitted spline's arc length
+    # while a paramPoly3 piece carries its own quadrature length, and the two
+    # measures of one span differ by about 1e-5 relative, so mixing them left
+    # the plan view ending up to 9.6e-05 m short of the road's own @length --
+    # 38 roads on nishishinjuku, and the 11 of them at a road-typed contact
+    # were the 11 ASAM road.geometry.contact_point errors. The spline's s
+    # chooses the windows; the records' own lengths name them.
+    running = out[0].s if out else 0.0
+    for record in out:
+        record.s = running
+        running += record.length
     return out
 
 
