@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libboost-filesystem-dev libboost-program-options-dev \
       libgl1 \
       git ca-certificates curl \
+      tzdata \
     && rm -rf /var/lib/apt/lists/*
 # Avoid "dubious ownership" errors from git on the host-owned bind-mounted
 # .git (see docs/docker.md#running-from-a-git-worktree).
