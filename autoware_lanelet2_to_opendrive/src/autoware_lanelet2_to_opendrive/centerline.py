@@ -377,6 +377,11 @@ def _calculate_optimal_num_samples(
     """
     Calculate optimal number of samples based on road length.
 
+    The samples are laid out by the callers with ``np.linspace(0.0, 1.0, n)``,
+    which is inclusive at both ends, so n samples span n-1 intervals. The count
+    is therefore one more than the number of intervals the target spacing asks
+    for; without it the realised spacing is always coarser than configured.
+
     Args:
         total_length: Total length of the road/lanelet
         config: WidthEstimationConfig containing sampling parameters
@@ -385,8 +390,8 @@ def _calculate_optimal_num_samples(
         Optimal number of samples (clamped to [min_samples, max_samples])
 
     Examples:
-        >>> _calculate_optimal_num_samples(50.0, config)  # 50m road
-        10  # 10 samples at 5m intervals
+        >>> _calculate_optimal_num_samples(50.0, config)  # 50m road, 5m interval
+        11  # 10 intervals of 5m need 11 inclusive samples
 
         >>> _calculate_optimal_num_samples(10.0, config)  # 10m road
         5  # min_samples (clamped)
@@ -398,8 +403,9 @@ def _calculate_optimal_num_samples(
     if total_length <= 0:
         return config.min_samples
 
-    # Calculate based on target interval
-    num_by_interval = int(np.ceil(total_length / config.default_sample_interval))
+    # Calculate based on target interval. The +1 is the inclusive endpoint:
+    # n samples span n-1 intervals.
+    num_by_interval = int(np.ceil(total_length / config.default_sample_interval)) + 1
 
     # Clamp to valid range
     num_samples = max(config.min_samples, min(num_by_interval, config.max_samples))
