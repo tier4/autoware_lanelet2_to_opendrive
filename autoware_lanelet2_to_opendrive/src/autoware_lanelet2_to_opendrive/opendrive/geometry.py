@@ -376,6 +376,94 @@ class GeometryBase:
         return elem
 
 
+#: Below this curvature the circular solution is a straight line to machine
+#: precision: the endpoint of a line of the same length differs by
+#: ``length * (kappa * length) ** 2 / 24``, which is under 1e-14 m for any
+#: road-sized length.
+STRAIGHT_CURVATURE_EPSILON = 1e-10
+
+
+def _solve_half_turn(chord_over_length: float) -> float:
+    """Return ``u`` in [0, pi) with ``sin(u) / u == chord_over_length``.
+
+    ``u`` is half the arc's total turn. ``sin(u)/u`` decreases monotonically
+    from 1 at u=0 to 0 at u=pi, so a bisection converges on the one root; the
+    ratio of a chord to its own arc length is in (0, 1], which is exactly
+    that range.
+    """
+    if chord_over_length >= 1.0:
+        return 0.0
+    lo, hi = 0.0, np.pi - 1e-12
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if mid <= 0.0:
+            break
+        if np.sin(mid) / mid > chord_over_length:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def arc_through_spline_window(
+    spline: "Splines",
+    s_start: float,
+    s_end: float,
+    curvature_hint: float = 0.0,
+) -> Tuple[float, float, float, float]:
+    """Return ``(x, y, hdg, curvature)`` of the arc that spans the window.
+
+    The arc starts at the spline point of ``s_start``, **ends at the spline
+    point of ``s_end``**, and has the window's own arc length
+    ``s_end - s_start``. Those three constraints fix it: with ``u`` the half
+    turn, a circular arc of length ``L`` subtends a chord of ``L*sin(u)/u``,
+    so ``u`` follows from the chord the two spline points span, the curvature
+    is ``2u/L``, and the heading is the chord's direction rotated back by
+    ``u``.
+
+    This is what makes a chain of records continuous. Anchoring a record on
+    the spline point and tangent of ``s_start`` and giving it the window's
+    arc length -- the previous rule -- leaves its far end wherever the
+    primitive happens to arrive, which on nishishinjuku was up to 1.766e-3 m
+    from where the next record starts (529 of 9133 pairs over 1e-6 m), and
+    cost 11 ``road.geometry.contact_point`` errors. Keeping the length
+    exactly ``s_end - s_start`` is what keeps ``road@length`` equal to the
+    sum of its geometries, so continuity is not bought by breaking that.
+
+    ``curvature_hint`` only picks the turn direction, and only when the
+    chord and the start tangent are too close to co-linear to say; the
+    magnitude is always derived.
+    """
+    start = spline.evaluate(s_start, derivative=0)
+    end = spline.evaluate(s_end, derivative=0)
+    tangent = spline.evaluate(s_start, derivative=1)
+    x0, y0 = float(start[0]), float(start[1])
+    length = float(s_end - s_start)
+
+    dx, dy = float(end[0]) - x0, float(end[1]) - y0
+    chord = float(np.hypot(dx, dy))
+    tangent_hdg = float(np.arctan2(tangent[1], tangent[0]))
+    if length <= 0.0 or chord <= 0.0:
+        return x0, y0, tangent_hdg, 0.0
+
+    chord_hdg = float(np.arctan2(dy, dx))
+    u = _solve_half_turn(chord / length)
+
+    # The heading leaves the chord by -u on one side and +u on the other;
+    # the spline's own tangent says which.
+    offset = float(
+        np.arctan2(np.sin(chord_hdg - tangent_hdg), np.cos(chord_hdg - tangent_hdg))
+    )
+    if abs(offset) > 1e-12:
+        sign = 1.0 if offset > 0.0 else -1.0
+    elif curvature_hint != 0.0:
+        sign = 1.0 if curvature_hint > 0.0 else -1.0
+    else:
+        sign = 1.0
+    half_turn = sign * u
+    return x0, y0, chord_hdg - half_turn, 2.0 * half_turn / length
+
+
 @dataclass
 class Line(GeometryBase):
     """Straight line geometry."""
@@ -394,16 +482,33 @@ class Line(GeometryBase):
     ) -> "Line":
         """Build a Line covering arc-length [s_start, s_end] of ``spline``.
 
-        Heading is taken from the spline tangent at ``s_start`` so that
-        adjacent primitives are G1-continuous when their bounds match.
+        The heading is the direction of the chord between the window's two
+        spline points, not the tangent at ``s_start``: a straight record has
+        to *arrive* where the next record starts, and the tangent only
+        guarantees where it leaves. On a window the classifier calls straight
+        the two differ by less than the position tolerance it validated
+        against, so this costs nothing at the start and fixes the end.
+
+        Use :func:`line_or_arc_from_spline_window` rather than this method
+        when the window may not be straight to machine precision: a line of
+        the window's arc length still misses the far point by
+        ``length - chord``, and only a curvature can absorb that.
         """
         start = spline.evaluate(s_start, derivative=0)
+        end = spline.evaluate(s_end, derivative=0)
+        dx = float(end[0]) - float(start[0])
+        dy = float(end[1]) - float(start[1])
         tangent = spline.evaluate(s_start, derivative=1)
+        hdg = (
+            float(np.arctan2(dy, dx))
+            if np.hypot(dx, dy) > 0.0
+            else float(np.arctan2(tangent[1], tangent[0]))
+        )
         return cls(
             s=s_start,
             x=float(start[0]),
             y=float(start[1]),
-            hdg=float(np.arctan2(tangent[1], tangent[0])),
+            hdg=hdg,
             length=float(s_end - s_start),
         )
 
@@ -432,19 +537,25 @@ class Arc(GeometryBase):
     ) -> "Arc":
         """Build an Arc covering arc-length [s_start, s_end] of ``spline``.
 
-        ``curvature`` must be the constant κ chosen by the classifier
-        (typically ``Splines.evaluate(s_start, derivative=2)`` projected
-        appropriately). Heading and start position come from the spline.
+        The emitted curvature is **derived** from the window, not taken from
+        ``curvature``: the arc is the one that starts at the spline point of
+        ``s_start``, ends at the spline point of ``s_end``, and carries the
+        window's arc length (see :func:`arc_through_spline_window`). That is
+        what makes the record chain continuous while leaving ``road@length``
+        equal to the sum of its geometries. ``curvature`` is kept as the
+        classifier's κ and used only to pick the turn direction in the
+        degenerate case where the chord and the start tangent are co-linear.
         """
-        start = spline.evaluate(s_start, derivative=0)
-        tangent = spline.evaluate(s_start, derivative=1)
+        x, y, hdg, derived = arc_through_spline_window(
+            spline, s_start, s_end, curvature_hint=float(curvature)
+        )
         return cls(
             s=s_start,
-            x=float(start[0]),
-            y=float(start[1]),
-            hdg=float(np.arctan2(tangent[1], tangent[0])),
+            x=x,
+            y=y,
+            hdg=hdg,
             length=float(s_end - s_start),
-            curvature=float(curvature),
+            curvature=derived,
         )
 
 
@@ -454,13 +565,34 @@ def line_or_arc_from_spline_window(
     s_end: float,
     curvature_hint: float = 0.0,
 ) -> GeometryBase:
-    """Emit a classified straight run as one plan-view record.
+    """Emit the window as a <line> when it is straight, else as an <arc>.
 
-    Placeholder: hands the window to :meth:`Line.from_spline_window`, which
-    anchors on the spline tangent at ``s_start`` and so says nothing about
-    where the record arrives.
+    A run the classifier calls straight is straight only to within
+    ``arc_position_tol`` -- 1 mm at the retuned default. Over such a window a
+    straight record of the window's arc length ends ``length - chord`` short
+    of the next record's start, and no choice of heading fixes that; a
+    curvature does, and the one that does is tiny (a 1 mm bow over 40 m is a
+    radius of about 200 km). So a run is emitted as <line> only where the
+    circular solution is a straight line to machine precision, and otherwise
+    as the <arc> that interpolates both ends.
+
+    The trade is deliberate: the alternative is a <line> record that is
+    idiomatic and discontinuous. Record count, which is what classifying the
+    plan view buys, is unaffected -- one record either way.
     """
-    return Line.from_spline_window(spline, s_start, s_end)
+    x, y, hdg, curvature = arc_through_spline_window(
+        spline, s_start, s_end, curvature_hint=curvature_hint
+    )
+    if abs(curvature) <= STRAIGHT_CURVATURE_EPSILON:
+        return Line(s=s_start, x=x, y=y, hdg=hdg, length=float(s_end - s_start))
+    return Arc(
+        s=s_start,
+        x=x,
+        y=y,
+        hdg=hdg,
+        length=float(s_end - s_start),
+        curvature=curvature,
+    )
 
 
 @dataclass

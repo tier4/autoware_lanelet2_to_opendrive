@@ -88,11 +88,6 @@ def _spline_xy(spline: Splines, s: float) -> tuple:
     return (float(point[0]), float(point[1]))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a plan-view record is anchored on its start and arrives wherever "
-    "the primitive lands",
-)
 def test_straight_run_is_emitted_as_a_record_that_closes_the_window() -> None:
     """What the converter calls for a straight run has to close the window.
 
@@ -122,11 +117,6 @@ def test_straight_run_is_emitted_as_a_record_that_closes_the_window() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a plan-view record is anchored on its start and arrives wherever "
-    "the primitive lands",
-)
 def test_arc_record_ends_where_the_spline_window_ends() -> None:
     spline = _curving_spline()
     s_start, s_end = 5.0, 30.0
@@ -143,11 +133,6 @@ def test_arc_record_ends_where_the_spline_window_ends() -> None:
     ), f"the arc record ends {gap:.3e} m from the spline point at s={s_end}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a plan-view record is anchored on its start and arrives wherever "
-    "the primitive lands",
-)
 def test_classified_records_form_one_unbroken_chain() -> None:
     """The property the two tests above exist to buy."""
     # A real curve, so the classifier has an arc to find; the straightish
