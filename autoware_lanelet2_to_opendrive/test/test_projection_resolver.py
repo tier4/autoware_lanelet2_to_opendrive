@@ -27,7 +27,6 @@ from autoware_lanelet2_to_opendrive.projection_resolver import (
     geo_reference_for_origin,
     reject_removed_map_keys,
     resolve_projection,
-    resolve_projection_from_hydra,
     resolve_projection_from_map_info,
     resolve_projection_from_osm,
 )
