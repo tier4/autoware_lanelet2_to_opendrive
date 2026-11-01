@@ -169,9 +169,17 @@ class OpenDriveConstants:
                            Once the highest road ID reaches the offset, junction
                            IDs start at the next multiple of the offset above it
                            instead, so they never collide with road IDs.
+        redundant_record_tolerance: Coefficient tolerance below which two
+                           consecutive profile records (a lane ``<width>``, a
+                           road ``<elevation>``) state the same polynomial and
+                           the second is not written. Matches the 1e-6 the ASAM
+                           rule ``performance.avoid_redundant_info`` uses, so
+                           the output and the checker agree on what counts as
+                           redundant.
     """
 
     junction_id_offset: int = 1000
+    redundant_record_tolerance: float = 1e-6
 
 
 @dataclass(frozen=True)
