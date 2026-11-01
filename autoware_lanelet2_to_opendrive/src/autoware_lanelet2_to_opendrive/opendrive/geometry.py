@@ -489,19 +489,23 @@ class Line(GeometryBase):
         the two differ by less than the position tolerance it validated
         against, so this costs nothing at the start and fixes the end.
 
-        Use :func:`line_or_arc_from_spline_window` rather than this method
-        when the window may not be straight to machine precision: a line of
-        the window's arc length still misses the far point by
-        ``length - chord``, and only a curvature can absorb that.
+        ``length`` is the chord's own length, not the window's arc length:
+        those differ whenever the window bends at all, and only the chord
+        lands the record on the far point. Nothing is lost by it --
+        ``road@length`` is written as the sum of its records' lengths
+        (``Road.construct_*``), and ``_build_planview_geometries`` labels each
+        record's ``s`` by accumulating those same lengths, so the plan view
+        stays its own consistent s-domain.
         """
         start = spline.evaluate(s_start, derivative=0)
         end = spline.evaluate(s_end, derivative=0)
         dx = float(end[0]) - float(start[0])
         dy = float(end[1]) - float(start[1])
+        chord = float(np.hypot(dx, dy))
         tangent = spline.evaluate(s_start, derivative=1)
         hdg = (
             float(np.arctan2(dy, dx))
-            if np.hypot(dx, dy) > 0.0
+            if chord > 0.0
             else float(np.arctan2(tangent[1], tangent[0]))
         )
         return cls(
@@ -509,7 +513,7 @@ class Line(GeometryBase):
             x=float(start[0]),
             y=float(start[1]),
             hdg=hdg,
-            length=float(s_end - s_start),
+            length=chord if chord > 0.0 else float(s_end - s_start),
         )
 
 
@@ -557,42 +561,6 @@ class Arc(GeometryBase):
             length=float(s_end - s_start),
             curvature=derived,
         )
-
-
-def line_or_arc_from_spline_window(
-    spline: "Splines",
-    s_start: float,
-    s_end: float,
-    curvature_hint: float = 0.0,
-) -> GeometryBase:
-    """Emit the window as a <line> when it is straight, else as an <arc>.
-
-    A run the classifier calls straight is straight only to within
-    ``arc_position_tol`` -- 1 mm at the retuned default. Over such a window a
-    straight record of the window's arc length ends ``length - chord`` short
-    of the next record's start, and no choice of heading fixes that; a
-    curvature does, and the one that does is tiny (a 1 mm bow over 40 m is a
-    radius of about 200 km). So a run is emitted as <line> only where the
-    circular solution is a straight line to machine precision, and otherwise
-    as the <arc> that interpolates both ends.
-
-    The trade is deliberate: the alternative is a <line> record that is
-    idiomatic and discontinuous. Record count, which is what classifying the
-    plan view buys, is unaffected -- one record either way.
-    """
-    x, y, hdg, curvature = arc_through_spline_window(
-        spline, s_start, s_end, curvature_hint=curvature_hint
-    )
-    if abs(curvature) <= STRAIGHT_CURVATURE_EPSILON:
-        return Line(s=s_start, x=x, y=y, hdg=hdg, length=float(s_end - s_start))
-    return Arc(
-        s=s_start,
-        x=x,
-        y=y,
-        hdg=hdg,
-        length=float(s_end - s_start),
-        curvature=curvature,
-    )
 
 
 @dataclass
