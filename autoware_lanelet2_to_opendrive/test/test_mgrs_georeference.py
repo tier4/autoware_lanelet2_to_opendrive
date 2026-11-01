@@ -13,7 +13,6 @@ the same geoReference for the same grid square.
 import lanelet2
 import pytest
 from autoware_lanelet2_extension_python.projection import MGRSProjector
-from omegaconf import OmegaConf
 from pyproj import Transformer
 
 from autoware_lanelet2_to_opendrive.projection import (
@@ -21,9 +20,6 @@ from autoware_lanelet2_to_opendrive.projection import (
     mgrs_grid_with_offset_to_proj_string,
     mgrs_to_proj_string,
     parse_mgrs_frame_proj_string,
-)
-from autoware_lanelet2_to_opendrive.projection_resolver import (
-    resolve_projection_from_hydra,
 )
 
 TOKYO_GRID = "54SUE"
@@ -37,10 +33,6 @@ EXPECTED_SYDNEY_GEO_REFERENCE = (
     "+proj=tmerc +lat_0=0 +lon_0=153 +k_0=0.9996 "
     "+x_0=200000.0 +y_0=3800000.0 +datum=WGS84 +units=m +no_defs"
 )
-
-
-def _cfg(map_dict=None):
-    return OmegaConf.create({"map": map_dict or {}})
 
 
 # ---------------------------------------------------------------------------
@@ -121,23 +113,21 @@ def test_geo_reference_matches_real_mgrs_projector_binding():
 # ---------------------------------------------------------------------------
 
 
-def test_hydra_resolution_lat_lon_matches_mgrs_grid_for_same_square():
-    """``lat_lon`` and ``mgrs_grid`` origins converge to the same geoReference.
+def test_lat_lon_and_its_grid_square_give_the_same_geo_reference():
+    """A lat/lon and the grid square containing it converge to one PROJ string.
 
-    When the ``lat_lon`` origin falls in the same 100 km grid square as an
-    equivalent ``mgrs_grid`` origin, both resolve through ``MGRSProjector``
-    and must therefore produce an identical geoReference (issue #550
+    ``MGRSProjector`` emits coordinates relative to each point's own 100 km
+    square whatever origin it is given, so describing the frame by a lat/lon
+    inside that square and by the square itself must agree (issue #550
     frame-consistency invariant).
+
+    Asserted on the projection helpers rather than through a config, because
+    the ``lat_lon`` and ``mgrs_grid`` keys that used to express the two sides
+    are removed (#564).
     """
     lat, lon = 35.7, 139.75  # inside grid "54SUE"
 
-    resolved_latlon = resolve_projection_from_hydra(
-        _cfg({"lat_lon": {"latitude": lat, "longitude": lon}})
-    )
-    resolved_mgrs = resolve_projection_from_hydra(_cfg({"mgrs_grid": TOKYO_GRID}))
-
-    assert resolved_latlon.geo_reference == resolved_mgrs.geo_reference
-    assert resolved_latlon.geo_reference == latlon_to_proj_string(lat, lon)
+    assert latlon_to_proj_string(lat, lon) == mgrs_to_proj_string(TOKYO_GRID)
 
 
 # ---------------------------------------------------------------------------
