@@ -21,6 +21,7 @@ from .opendrive_dataclass import (
     LaneAccess,
     SpeedUnit,
 )
+from .profile_redundancy import without_redundant_records
 
 logger = logging.getLogger(__name__)
 
@@ -430,8 +431,12 @@ class Lane:
         for border in self.borders:
             elem.append(border.to_xml())
 
-        # Add width definitions
-        for width in self.widths:
+        # Add width definitions. A record that restates its predecessor's
+        # polynomial is not written: it covers the same s with the same value,
+        # and ASAM reports it (performance.avoid_redundant_info). Only such a
+        # record is dropped -- a lane whose widths do not cover its whole s
+        # makes consumers abort.
+        for width in without_redundant_records(self.widths, "s_offset"):
             elem.append(width.to_xml())
 
         # Add road marks
