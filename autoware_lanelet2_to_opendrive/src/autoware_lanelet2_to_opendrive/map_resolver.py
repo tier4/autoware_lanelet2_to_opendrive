@@ -50,12 +50,13 @@ import hashlib
 import json
 import logging
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
-from .conversion_config import ConversionConfig
+from .conversion_config import ConversionConfig, OriginSpec
 from .map_projector_info import MAP_PROJECTOR_INFO_FILENAME
 
 logger = logging.getLogger(__name__)
@@ -63,25 +64,18 @@ logger = logging.getLogger(__name__)
 _CACHE_DIR = Path("/tmp/autoware_lanelet2_to_opendrive_cache")
 
 
-def _reject_unsupported_cache_path_projector(lanelet2_path: Path) -> None:
-    """Raise if a TransverseMercator ``map_projector_info.yaml`` sits next to *lanelet2_path*.
+def _check_projector_info_is_a_mapping(lanelet2_path: Path) -> None:
+    """Reject a sibling ``map_projector_info.yaml`` that is not a YAML mapping.
 
-    The cache path bypasses the projector-resolution layer entirely -- it
-    derives the origin only from ``mgrs_code``/``config.origin.lat``/
-    ``config.origin.lon`` and never reads ``map_projector_info.yaml``, so a
-    TransverseMercator map would silently be mis-projected as MGRS/lat-lon.
-    Fail loudly instead and point users at the non-cache conversion flow,
-    which does honor ``map_projector_info.yaml``. Reads the YAML directly
-    (rather than importing :mod:`.projection_resolver`) to avoid pulling in
-    ``lanelet2``/``autoware_lanelet2_extension_python`` for this cheap, early
-    check; :mod:`.map_projector_info` only needs PyYAML.
+    The frame itself is resolved on the cache-miss path, which has to import
+    ``lanelet2``/``autoware_lanelet2_extension_python``. This runs before the
+    cache lookup so that a projector-info file nobody can read is reported
+    even when the conversion is served from cache, and it only needs PyYAML.
 
     Args:
         lanelet2_path: Path to the Lanelet2 ``.osm``/``.bin`` file.
 
     Raises:
-        RuntimeError: If a sibling ``map_projector_info.yaml`` declares
-            ``projector_type: TransverseMercator``.
         ValueError: If the file's top-level YAML document is not a mapping.
     """
     info_path = lanelet2_path.parent / MAP_PROJECTOR_INFO_FILENAME
@@ -96,17 +90,6 @@ def _reject_unsupported_cache_path_projector(lanelet2_path: Path) -> None:
         return
     if not isinstance(data, dict):
         raise ValueError(f"{info_path}: expected a YAML mapping at the top level")
-
-    projector_type = str(data.get("projector_type", "")).strip()
-    if projector_type == "TransverseMercator":
-        raise RuntimeError(
-            f"{info_path} declares projector_type: TransverseMercator, which "
-            "the cached map-resolution path (resolve_map_to_xodr) does not "
-            "support -- it does not read map_projector_info.yaml. Please use "
-            "the non-cache conversion flow (preprocess_and_convert_with_hydra "
-            "/ the `convert` CLI) instead, which resolves TransverseMercator "
-            "origins correctly."
-        )
 
 
 def _sha256_of_file(path: Path) -> str:
@@ -156,28 +139,31 @@ def _convert_lanelet2_to_xodr_cached(
 ) -> Path:
     """Convert a Lanelet2 map to OpenDRIVE with ``/tmp``-based caching.
 
+    A sibling ``map_projector_info.yaml`` is the canonical origin source and
+    takes precedence over *config*/*mgrs_code*, exactly as in the Hydra
+    conversion flow (issue #547).
+
     Args:
         lanelet2_path: Path to the Lanelet2 ``.osm`` (or ``.bin``) file.
         config: Conversion configuration.  A default :class:`ConversionConfig`
                 is used when *None*.
         mgrs_code: MGRS grid code for the coordinate origin.  When provided it
-                   takes precedence over ``config.origin.mgrs_code``.
+                   takes precedence over ``config.origin.mgrs_code``.  Ignored
+                   when a ``map_projector_info.yaml`` supplies the origin.
 
     Returns:
         Path to the cached ``.xodr`` file.
 
     Raises:
         FileNotFoundError: If *lanelet2_path* does not exist.
-        ValueError: If the map origin cannot be determined from *config* or
+        ValueError: If a sibling ``map_projector_info.yaml`` is malformed, or
+                    the map origin cannot be determined from it, *config* or
                     *mgrs_code*.
-        RuntimeError: If a sibling ``map_projector_info.yaml`` declares
-                    ``projector_type: TransverseMercator``; the cache path
-                    does not support it.
     """
     if not lanelet2_path.exists():
         raise FileNotFoundError(f"Lanelet2 map not found: {lanelet2_path}")
 
-    _reject_unsupported_cache_path_projector(lanelet2_path)
+    _check_projector_info_is_a_mapping(lanelet2_path)
 
     if config is None:
         config = ConversionConfig()
@@ -202,21 +188,61 @@ def _convert_lanelet2_to_xodr_cached(
     # Determine coordinate origin (only needed on cache miss)
     # ------------------------------------------------------------------
     from .projection import latlon_to_lanelet2_origin, mgrs_to_lanelet2_origin
+    from .projection_resolver import (
+        ResolvedProjection,
+        resolve_projection_from_map_info,
+    )
 
-    # Merge the separate mgrs_code argument (legacy API) into config.origin so
-    # that the converter has a single, consistent source of truth.
-    effective_mgrs = mgrs_code or config.origin.mgrs_code
-    if effective_mgrs is not None:
-        config = config.with_mgrs_code(effective_mgrs)
+    # A sibling map_projector_info.yaml is the canonical origin source, so
+    # resolve it through the very layer the Hydra path uses. Without this the
+    # two entry points resolve different frames for the same map (issue #547)
+    # -- a TransverseMercator map in particular, which this path used to
+    # refuse rather than mis-project as MGRS.
+    resolved = resolve_projection_from_map_info(lanelet2_path)
 
-    if effective_mgrs is not None:
-        origin = mgrs_to_lanelet2_origin(effective_mgrs)
-    elif config.origin.lat is not None and config.origin.lon is not None:
-        origin = latlon_to_lanelet2_origin(config.origin.lat, config.origin.lon)
+    if resolved is not None:
+        logger.info(
+            "Origin resolved from %s next to %s (projector_type=%s); the "
+            "config/mgrs_code origin is ignored.",
+            MAP_PROJECTOR_INFO_FILENAME,
+            lanelet2_path,
+            resolved.projector_type,
+        )
+        config = replace(
+            config,
+            origin=OriginSpec(
+                mgrs_code=resolved.mgrs_code,
+                lat=resolved.origin_lat,
+                lon=resolved.origin_lon,
+                scale_factor=resolved.scale_factor,
+                geo_reference=resolved.geo_reference,
+            ),
+        )
     else:
-        raise ValueError(
-            "Cannot convert Lanelet2 map: no origin specified. "
-            "Provide mgrs_code or set lat/lon in ConversionConfig.origin."
+        # Merge the separate mgrs_code argument (legacy API) into
+        # config.origin so that the converter has a single, consistent
+        # source of truth.
+        effective_mgrs = mgrs_code or config.origin.mgrs_code
+        if effective_mgrs is not None:
+            config = config.with_mgrs_code(effective_mgrs)
+
+        if effective_mgrs is not None:
+            origin = mgrs_to_lanelet2_origin(effective_mgrs)
+            origin_lat, origin_lon = None, None
+        elif config.origin.lat is not None and config.origin.lon is not None:
+            origin = latlon_to_lanelet2_origin(config.origin.lat, config.origin.lon)
+            origin_lat, origin_lon = config.origin.lat, config.origin.lon
+        else:
+            raise ValueError(
+                "Cannot convert Lanelet2 map: no origin specified. "
+                "Provide mgrs_code or set lat/lon in ConversionConfig.origin."
+            )
+
+        resolved = ResolvedProjection(
+            origin=origin,
+            mgrs_code=effective_mgrs,
+            origin_lat=origin_lat,
+            origin_lon=origin_lon,
         )
 
     # ------------------------------------------------------------------
@@ -224,8 +250,6 @@ def _convert_lanelet2_to_xodr_cached(
     # ------------------------------------------------------------------
     logger.info("Converting Lanelet2 map to OpenDRIVE: %s", lanelet2_path)
 
-    # Import autoware extensions before loading maps (registers custom types)
-    from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
     import lanelet2
 
     from .main import convert_lanelet2_to_opendrive
@@ -235,8 +259,11 @@ def _convert_lanelet2_to_xodr_cached(
         save_mapping_json,
     )
 
-    projector = MGRSProjector(origin)
-    lanelet_map = lanelet2.io.load(lanelet2_path, projector)
+    # The autoware extension types are registered by importing
+    # .projection_resolver above, which has to happen before loading a map.
+    projector = resolved.make_projector()
+    # str(): the lanelet2 binding takes a std::string, not a pathlib.Path.
+    lanelet_map = lanelet2.io.load(str(lanelet2_path), projector)
 
     # mgrs_code is already in config.origin.mgrs_code (merged above).
     opendrive, _, lanelet_to_road_and_lane, _, _ = convert_lanelet2_to_opendrive(
@@ -283,7 +310,9 @@ def resolve_map_to_xodr(
     * ``.xodr`` – returned as-is; no conversion is performed.
     * Any other extension (e.g. ``.osm``, ``.bin``) – treated as a Lanelet2
       map.  The map is converted to OpenDRIVE and the result is cached in
-      ``/tmp`` so that repeated calls with the same input are instant.
+      ``/tmp`` so that repeated calls with the same input are instant.  A
+      ``map_projector_info.yaml`` sitting next to the map defines the
+      coordinate frame and takes precedence over *config*/*mgrs_code*.
 
     Args:
         map_path: Path to the map file (``.xodr`` or Lanelet2 format).

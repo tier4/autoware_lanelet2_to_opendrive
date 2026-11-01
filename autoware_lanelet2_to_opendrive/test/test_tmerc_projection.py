@@ -5,8 +5,9 @@ a UTM-style ``k_0=0.9996`` fixture and a Japan plane rectangular coordinate
 system ``k_0=0.9999`` fixture), the exact geoReference PROJ string, a pyproj
 round trip, end-to-end ``.osm`` -> ``.xodr`` conversion, that the C++
 projector binding actually applies ``scale_factor``, error handling for
-invalid ``map_origin``/``scale_factor``, and that the MGRS path and the
-cached map-resolution path are unaffected.
+invalid ``map_origin``/``scale_factor``, that the MGRS path is unaffected,
+and that the cached map-resolution path and the post-conversion analysis
+step resolve the same frame through the shared projector-resolution layer.
 """
 
 import logging
@@ -325,26 +326,82 @@ def test_tm_yaml_emits_no_deprecation_or_unsupported_warning(recwarn, caplog):
 
 
 # ---------------------------------------------------------------------------
-# 7. map_resolver cache path rejects TransverseMercator maps
+# 7. map_resolver cache path resolves TransverseMercator maps
 # ---------------------------------------------------------------------------
 
 
-def test_map_resolver_rejects_tm_yaml(tmp_path):
-    from autoware_lanelet2_to_opendrive.map_resolver import (
-        _convert_lanelet2_to_xodr_cached,
-    )
+class _StopBeforeConversion(Exception):
+    """Sentinel raised from the patched converter to end the test early."""
 
-    osm = _write_projector_info(
-        tmp_path,
-        "projector_type: TransverseMercator\n"
-        "vertical_datum: WGS84\n"
-        "map_origin:\n"
-        f"  latitude: {EXPECTED_LAT}\n"
-        f"  longitude: {EXPECTED_LON}\n"
-        "scale_factor: 0.9996\n",
-    )
-    with pytest.raises(RuntimeError, match="TransverseMercator"):
-        _convert_lanelet2_to_xodr_cached(osm)
+
+def _capture_cached_conversion_config(tmp_path, monkeypatch, osm, **kwargs):
+    """Run the cached path far enough to capture the config it would convert with.
+
+    The conversion itself is replaced: this is about which frame the cached
+    entry point resolves, and converting a map would take minutes. The
+    ``/tmp`` cache is redirected into *tmp_path* so the cache-miss path --
+    the only one that resolves an origin -- always runs.
+    """
+    from autoware_lanelet2_to_opendrive import main as main_module
+    from autoware_lanelet2_to_opendrive import map_resolver
+
+    monkeypatch.setattr(map_resolver, "_CACHE_DIR", tmp_path / "cache")
+
+    captured = {}
+
+    def _fake_convert(lanelet_map, config):
+        captured["config"] = config
+        raise _StopBeforeConversion
+
+    monkeypatch.setattr(main_module, "convert_lanelet2_to_opendrive", _fake_convert)
+
+    with pytest.raises(_StopBeforeConversion):
+        map_resolver._convert_lanelet2_to_xodr_cached(osm, **kwargs)
+
+    return captured["config"]
+
+
+def test_map_resolver_uses_tm_projector_info(tmp_path, monkeypatch):
+    """The cached path must resolve the frame like the Hydra path does.
+
+    It derived the origin from ``mgrs_code``/``lat``/``lon`` only and never
+    read ``map_projector_info.yaml`` (issue #547), so a TransverseMercator
+    map had to be rejected outright rather than silently mis-projected as
+    MGRS. The origin, scale factor and geoReference handed to the converter
+    now come from the projector-info file instead.
+    """
+    origin = _capture_cached_conversion_config(
+        tmp_path, monkeypatch, TMERC_MINI_OSM
+    ).origin
+
+    assert origin.lat == EXPECTED_LAT
+    assert origin.lon == EXPECTED_LON
+    assert origin.scale_factor == EXPECTED_SCALE_FACTOR
+    assert origin.geo_reference == EXPECTED_GEO_REFERENCE
+    assert origin.mgrs_code is None
+
+
+def test_map_resolver_without_projector_info_keeps_legacy_origin(tmp_path, monkeypatch):
+    """Without a projector-info file the legacy mgrs_code origin still wins.
+
+    Reaching the converter at all is part of what this pins: the cached path
+    used to call ``lanelet2.io.load(lanelet2_path, projector)`` with a
+    :class:`pathlib.Path`, and the Boost.Python binding only accepts a
+    ``std::string``, so every cached conversion raised
+    ``Boost.Python.ArgumentError`` before the config was ever used. Nothing
+    exercised it, because the TransverseMercator rejection fired first for
+    the only map the suite sent down this path.
+    """
+    osm = tmp_path / "lanelet2_map.osm"
+    osm.write_bytes(TMERC_MINI_OSM.read_bytes())  # no sibling projector info
+
+    origin = _capture_cached_conversion_config(
+        tmp_path, monkeypatch, osm, mgrs_code="54SUE"
+    ).origin
+
+    assert origin.mgrs_code == "54SUE"
+    assert origin.scale_factor is None
+    assert origin.geo_reference is None
 
 
 @pytest.mark.parametrize(
@@ -359,3 +416,61 @@ def test_map_resolver_non_mapping_yaml_raises_value_error(tmp_path, contents):
     osm = _write_projector_info(tmp_path, contents)
     with pytest.raises(ValueError, match="expected a YAML mapping"):
         _convert_lanelet2_to_xodr_cached(osm)
+
+
+# ---------------------------------------------------------------------------
+# 8. The analysis step reloads the OSM in the converter's frame
+# ---------------------------------------------------------------------------
+
+
+def test_analysis_projection_resolved_from_projector_info():
+    """``analyze`` must not assume MGRS when reloading the OSM.
+
+    The cross-validation pass reloads the source OSM and compares the
+    resulting lanelet geometry against the emitted roads. Reloading a
+    TransverseMercator map with an ``MGRSProjector`` puts the lanelets in a
+    rotated, rescaled frame -- at lon 139.78 in UTM zone 54 that is about
+    0.7 deg of meridian convergence plus a scale mismatch -- so the
+    comparison was between mismatched frames.
+    """
+    from autoware_lanelet2_to_opendrive.analyze_xodr import (
+        _resolve_analysis_projection,
+    )
+
+    # lat_0/lon_0 as they would be parsed from the XODR geoReference.
+    resolved = _resolve_analysis_projection(TMERC_MINI_OSM, EXPECTED_LAT, EXPECTED_LON)
+
+    assert resolved.projector_type == "TransverseMercator"
+    assert resolved.scale_factor == EXPECTED_SCALE_FACTOR
+    assert resolved.origin_lat == EXPECTED_LAT
+    assert resolved.origin_lon == EXPECTED_LON
+
+    # The map origin is the frame origin, so its forward projection is (0, 0).
+    # An MGRSProjector would put it at the grid square's offset instead.
+    fwd = resolved.make_projector().forward(
+        lanelet2.core.GPSPoint(EXPECTED_LAT, EXPECTED_LON, 0.0)
+    )
+    assert fwd.x == pytest.approx(0.0, abs=1e-6)
+    assert fwd.y == pytest.approx(0.0, abs=1e-6)
+
+
+def test_analysis_projection_falls_back_to_mgrs(tmp_path):
+    """Without a projector-info file the historical MGRS frame is kept.
+
+    That fallback stays correct for MGRS maps because ``MGRSProjector``
+    ignores its origin and emits coordinates relative to each point's own
+    100 km grid square.
+    """
+    from autoware_lanelet2_to_opendrive.analyze_xodr import (
+        _resolve_analysis_projection,
+    )
+
+    osm = tmp_path / "lanelet2_map.osm"
+    osm.write_text("", encoding="utf-8")
+
+    # lat_0/lon_0 of an MGRS geoReference (see test_mgrs_georeference.py).
+    resolved = _resolve_analysis_projection(osm, 0.0, 141.0)
+
+    assert resolved.projector_type == "MGRS"
+    assert resolved.origin_lat == 0.0
+    assert resolved.origin_lon == 141.0

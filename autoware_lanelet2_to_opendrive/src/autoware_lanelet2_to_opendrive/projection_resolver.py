@@ -428,6 +428,38 @@ def _resolve_from_map_projector_info(
     return None
 
 
+def resolve_projection_from_map_info(
+    input_map_path: Path,
+) -> Optional[ResolvedProjection]:
+    """Resolve the coordinate frame from a map's ``map_projector_info.yaml``.
+
+    The single entry point for "resolve this map's frame the way Autoware
+    declares it", for callers that have no Hydra config to fall back on: the
+    cached map-resolution path and the post-conversion analysis step. Both
+    used to load maps without consulting the file at all.
+
+    Args:
+        input_map_path: Path to the input map. The ``map_projector_info.yaml``
+            is looked up in its directory.
+
+    Returns:
+        A :class:`ResolvedProjection`, or ``None`` when no projector-info file
+        sits next to the map or it declares a projector type that is not
+        supported yet. ``None`` means "this layer has nothing to say", so the
+        caller keeps whatever origin it already had.
+
+    Raises:
+        ValueError: If the projector-info file exists but is malformed (see
+            :meth:`~.map_projector_info.MapProjectorInfo.from_yaml` and
+            :func:`_resolve_from_map_projector_info`).
+    """
+    info_path = Path(input_map_path).parent / MAP_PROJECTOR_INFO_FILENAME
+    if not info_path.is_file():
+        return None
+    info = MapProjectorInfo.from_yaml(info_path)
+    return _resolve_from_map_projector_info(info, info_path)
+
+
 def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
     """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
 
@@ -456,8 +488,7 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
     """
     info_path = Path(input_map_path).parent / MAP_PROJECTOR_INFO_FILENAME
     if info_path.is_file():
-        info = MapProjectorInfo.from_yaml(info_path)
-        resolved = _resolve_from_map_projector_info(info, info_path)
+        resolved = resolve_projection_from_map_info(input_map_path)
         if resolved is not None:
             logger.info(
                 "Using %s as the canonical origin source (explicit origin keys, "
@@ -468,7 +499,7 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
         logger.warning(
             "projector_type %r in %s is not supported yet; the explicit origin "
             "keys ('mgrs_grid'/'lat_lon') remain required for this map",
-            info.projector_type,
+            MapProjectorInfo.from_yaml(info_path).projector_type,
             info_path,
         )
         return _resolve_from_explicit_keys(cfg)
