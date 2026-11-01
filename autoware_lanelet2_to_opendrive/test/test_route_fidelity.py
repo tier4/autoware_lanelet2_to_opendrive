@@ -24,15 +24,19 @@ written naively:
 
 from pathlib import Path
 
-import pytest
-
 from autoware_lanelet2_to_opendrive.route_fidelity import EmittedNetwork, measure
 
 NISHISHINJUKU_MIN_SUCCESSIONS = 900
 """Below this the measurement did not run; the map states roughly 970."""
 
 MAX_MISSING_SHARE = 0.02
-"""The measured loss is 0.93% and is understood; 2% is the regression line."""
+"""The regression line, not a target.
+
+Measured 1.55% here -- 15 of 969 successions on ``nishishinjuku`` as this
+branch's base converts it. The same measurement reads 0.93% once the junction
+and fork fixes land, so the bound is set above the worse of the two rather
+than retightened every time the base moves.
+"""
 
 
 def _mapping_beside(xodr: Path) -> Path:
@@ -80,7 +84,6 @@ def _lane(lane_id: int, link: str = "") -> str:
       </{side}>"""
 
 
-@pytest.mark.xfail(strict=True, reason="route_fidelity reads no travel direction yet")
 def test_a_left_hand_lane_leaves_by_the_successor_end(tmp_path: Path) -> None:
     """A positive-id lane under LHT travels along +s."""
     body = (
@@ -96,7 +99,6 @@ def test_a_left_hand_lane_leaves_by_the_successor_end(tmp_path: Path) -> None:
     assert network.forward_end(2, -1) == "successor"
 
 
-@pytest.mark.xfail(strict=True, reason="route_fidelity walks no connectors yet")
 def test_a_connector_with_no_backing_lanelet_is_walked_through(
     tmp_path: Path,
 ) -> None:
@@ -131,7 +133,6 @@ def test_a_connector_with_no_backing_lanelet_is_walked_through(
     assert ((1, 1), (2, 1)) in network.transitions(walk_through=set())
 
 
-@pytest.mark.xfail(strict=True, reason="route_fidelity measures nothing yet")
 def test_shipped_conversion_preserves_the_stated_successions(
     nishishinjuku_xodr: Path,
 ) -> None:
