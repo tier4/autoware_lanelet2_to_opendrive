@@ -183,6 +183,61 @@ class TestSaveMappingJson:
         assert restored.xodr_sha256 == original.xodr_sha256
         assert restored.osm_sha256 == original.osm_sha256
 
+    def test_additional_road_lanes_is_absent_when_empty(self, tmp_path: Path) -> None:
+        """A map with no in-junction fork writes the key not at all.
+
+        The field is empty for the overwhelming majority of lanelets, so
+        omitting it keeps the sidecar of an ordinary map byte-identical to
+        what it was before the field existed.
+        """
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        mapping = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+        )
+        data = json.loads(save_mapping_json(mapping, xodr_path).read_text("utf-8"))
+        assert "lanelet_additional_road_lanes" not in data
+
+    def test_round_trip_preserves_additional_road_lanes(self, tmp_path: Path) -> None:
+        """The extra ``(road, lane)`` pairs survive the JSON round trip.
+
+        JSON has no tuples, so the pairs come back as lists unless the
+        reader rebuilds them; the reverse index and every existing consumer
+        compare against tuples.
+        """
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            lanelet_additional_road_lanes={10: [(2, -1), (3, -1)]},
+        )
+        data = json.loads(save_mapping_json(original, xodr_path).read_text("utf-8"))
+        assert data["lanelet_additional_road_lanes"] == {"10": [[2, -1], [3, -1]]}
+
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.lanelet_additional_road_lanes == {10: [(2, -1), (3, -1)]}
+        # The 1:1 field and the reverse index are untouched by the widening.
+        assert restored.lanelet_to_road_and_lane == {10: (1, -1)}
+        assert restored.road_lane_to_lanelet == {(1, -1): 10}
+
+    def test_mapping_without_additional_road_lanes_still_loads(self) -> None:
+        """A sidecar written before the field existed loads unchanged."""
+        restored = GeoRoadLaneletMapping.from_dict(
+            {
+                "xodr_sha256": "abc",
+                "osm_sha256": "def",
+                "lanelet_to_road_and_lane": {"10": [1, -1]},
+            }
+        )
+        assert restored.lanelet_additional_road_lanes is None
+        assert restored.lanelet_to_road_and_lane == {10: (1, -1)}
+
     def test_round_trip_preserves_skipped_synthetic_roads(self, tmp_path: Path) -> None:
         """#493: synthetic divergence connectors are recorded in the mapping
         JSON so consumers can tell them apart from real mapping failures."""

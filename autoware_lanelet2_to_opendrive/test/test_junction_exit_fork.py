@@ -419,3 +419,66 @@ def test_duplicate_copies_are_recorded_in_the_mapping_sidecar() -> None:
         GeoRoadLaneletMapping.from_dict(mapping.to_dict()).exit_fork_duplicate_roads
         == duplicates
     )
+
+
+def test_duplicate_copies_get_their_own_lanelet_attribution() -> None:
+    """A duplicated stage names every ``(road, lane)`` it belongs to.
+
+    ``lanelet_to_road_and_lane`` can name only the copy that claimed the
+    lanelet, which is what made the shared stage unattributable: assigning
+    it to either copy traded one missing transition for one extra.  The
+    extra pairs go in ``lanelet_additional_road_lanes`` instead, so the
+    relation can be read in full while the 1:1 field stays exactly as every
+    existing consumer expects it.
+    """
+    from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+        GeoRoadLaneletMapping,
+        _additional_road_lanes,
+    )
+
+    lanelet_map, junction_group, regular_roads, lanelet_to_road_id, _out = (
+        _exit_fork_fixture(exits=2)
+    )
+    connector = junction_group[0]
+
+    connecting, _to_roads, _ll_to_road = _construct(
+        lanelet_map, [junction_group], regular_roads, lanelet_to_road_id
+    )
+    roads = regular_roads + connecting
+
+    # The record as the converter builds it: the duplicates claim nothing.
+    primary: dict[int, tuple[int, int]] = {}
+    for road in roads:
+        if road.exit_fork_duplicate:
+            continue
+        for lanelet_id, lane_id in road.get_lanelet_to_lane_mapping().items():
+            primary[lanelet_id] = (road.id, lane_id)
+
+    extras = _additional_road_lanes(roads, primary)
+
+    claiming = [road for road in connecting if not road.exit_fork_duplicate]
+    dup_ids = {road.id for road in connecting if road.exit_fork_duplicate}
+    assert dup_ids, "the fixture is supposed to produce at least one duplicate"
+
+    # The shared connector lanelet is the one that gains pairs, and it gains
+    # exactly the duplicates -- never the copy the record already names.
+    assert set(extras) == {connector.id}
+    assert {road_id for road_id, _lane in extras[connector.id]} == dup_ids
+    assert primary[connector.id] not in extras[connector.id]
+    assert primary[connector.id][0] == claiming[0].id
+
+    # Extras only: the union with the 1:1 field is the complete relation,
+    # and the two fields never restate each other.
+    complete = {primary[connector.id], *extras[connector.id]}
+    assert len(complete) == 1 + len(dup_ids)
+
+    # Survives the JSON round trip the sidecar goes through.
+    mapping = GeoRoadLaneletMapping(
+        xodr_sha256="x",
+        osm_sha256="o",
+        lanelet_to_road_and_lane=primary,
+        lanelet_additional_road_lanes=extras,
+    )
+    restored = GeoRoadLaneletMapping.from_dict(mapping.to_dict())
+    assert restored.lanelet_additional_road_lanes == extras
+    assert restored.lanelet_to_road_and_lane == primary

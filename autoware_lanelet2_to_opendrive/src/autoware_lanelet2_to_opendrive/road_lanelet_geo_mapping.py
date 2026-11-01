@@ -172,6 +172,27 @@ class GeoRoadLaneletMapping:
     #: claimed them; without this a consumer would read a duplicate's lanes
     #: as synthetic rather than as the same maneuver stage.
     exit_fork_duplicate_roads: dict[int, list[int]] | None = None
+    #: ``lanelet id -> the (road, lane) pairs it belongs to *beyond* the one
+    #: ``lanelet_to_road_and_lane`` names``.  Junction forks are handled by
+    #: duplicating a shared stage into several connecting roads, so such a
+    #: lanelet genuinely belongs to several pairs while the 1:1 field can
+    #: name only the one that claimed it.  This records the rest, so the
+    #: relation can be read in full without re-deriving it from
+    #: ``chain_merged_roads`` / ``exit_fork_duplicate_roads`` and the XODR.
+    #:
+    #: Deliberately the *extra* pairs only, never the full list: a full list
+    #: would restate what ``lanelet_to_road_and_lane`` already says, and two
+    #: fields that can disagree eventually do.  Read the complete relation as
+    #: ``{lanelet_to_road_and_lane[lid]} | set(lanelet_additional_road_lanes
+    #: .get(lid, []))``.
+    #:
+    #: Empty for the overwhelming majority of lanelets -- 5 of 892 on
+    #: nishishinjuku carry anything at all -- so an empty dict is the normal
+    #: case for a map without in-junction forks, not a failure to populate
+    #: it.  ``None`` for mappings written before this field existed, and for
+    #: mappings built from an XODR alone (the geometric pass matches one
+    #: lanelet per road and so never produces a second attribution).
+    lanelet_additional_road_lanes: dict[int, list[tuple[int, int]]] | None = None
     traffic_light_config: dict | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
@@ -224,6 +245,11 @@ class GeoRoadLaneletMapping:
             result["exit_fork_duplicate_roads"] = {
                 str(k): list(v) for k, v in self.exit_fork_duplicate_roads.items()
             }
+        if self.lanelet_additional_road_lanes:
+            result["lanelet_additional_road_lanes"] = {
+                str(k): [list(pair) for pair in v]
+                for k, v in self.lanelet_additional_road_lanes.items()
+            }
         return result
 
     @classmethod
@@ -263,6 +289,12 @@ class GeoRoadLaneletMapping:
             exit_fork_duplicate_roads=(
                 {int(k): list(v) for k, v in raw_dup.items()}
                 if (raw_dup := data.get("exit_fork_duplicate_roads")) is not None
+                else None
+            ),
+            lanelet_additional_road_lanes=(
+                {int(k): [(p[0], p[1]) for p in v] for k, v in raw_additional.items()}
+                if (raw_additional := data.get("lanelet_additional_road_lanes"))
+                is not None
                 else None
             ),
             traffic_light_config=data.get("traffic_light_config"),
@@ -793,6 +825,65 @@ def _exit_fork_duplicate_roads(
         for road in sorted(roads, key=lambda r: r.id)
         if getattr(road, "exit_fork_duplicate", False)
     }
+
+
+def _additional_road_lanes(
+    roads: list["ConverterRoad"],
+    primary: dict[int, tuple[int, int]],
+) -> dict[int, list[tuple[int, int]]]:
+    """``lanelet id -> (road, lane) pairs beyond the one *primary* names``.
+
+    A junction fork is realised by duplicating a shared stage into several
+    connecting roads, so one lanelet can genuinely belong to several
+    ``(road, lane)`` pairs while ``lanelet_to_road_and_lane`` names only the
+    one that claimed it.  Two constructs produce such a lanelet:
+
+    * a **chain-merged** road's shared prefix, traversed by every branch of
+      an in-junction fork but owned by whichever branch claimed it first
+      (``Road.chain_owned_lanelet_ids`` is the unclaimed remainder), and
+    * an **exit-fork duplicate**, a geometrically identical copy of the
+      claiming road that ``Road.set_all_lane_links`` skips precisely because
+      the 1:1 record has no room for it.
+
+    Read off the converter's own ``Road`` objects rather than derived from
+    the sidecar's ``chain_merged_roads`` / ``exit_fork_duplicate_roads``: a
+    chain road that owns no lanelet at all exposes its lane id nowhere in
+    the 1:1 record, so a sidecar-only derivation silently drops it (32 of
+    300 chain roads on one customer map).  Here the lane id is simply asked
+    for.
+
+    This is a read-only pass.  It must stay one: the same
+    ``get_lanelet_to_lane_mapping()`` it calls also feeds the lane-link
+    resolution that decides the emitted XODR, and this record is not
+    supposed to change a single byte of it.
+
+    Returns:
+        Extra pairs only, per lanelet, sorted and without duplicates.
+        Empty for a map with no in-junction forks.
+    """
+    extras: dict[int, set[tuple[int, int]]] = {}
+
+    def add(lanelet_id: int, pair: tuple[int, int]) -> None:
+        if primary.get(lanelet_id) != pair:
+            extras.setdefault(lanelet_id, set()).add(pair)
+
+    for road in sorted(roads, key=lambda r: r.id):
+        # Covers the exit-fork duplicates: their lanes carry real lanelet
+        # ids, and it is only the record that skipped them.  For an ordinary
+        # road every pair here already *is* the primary one, so ``add``
+        # filters it out and nothing is recorded.
+        for lanelet_id, lane_id in road.get_lanelet_to_lane_mapping().items():
+            add(lanelet_id, (road.id, lane_id))
+
+        # Covers a chain-merged road's *whole* path, not just the part it
+        # owns: the shared prefix is what the claiming branch took and every
+        # other branch drives through it just the same.
+        source_ids = getattr(road, "chain_source_lanelet_ids", None)
+        if source_ids and (chain_lane_id := road._chain_lane_id()) is not None:
+            for lanelet_id in source_ids:
+                add(lanelet_id, (road.id, chain_lane_id))
+
+    return {lid: sorted(pairs) for lid, pairs in sorted(extras.items())}
 
 
 def _compute_all_candidates(
@@ -2011,6 +2102,9 @@ def validate_and_save_mapping(
         skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
         chain_merged_roads=_chain_merged_road_lanelets(roads) or None,
         exit_fork_duplicate_roads=_exit_fork_duplicate_roads(roads) or None,
+        lanelet_additional_road_lanes=(
+            _additional_road_lanes(roads, lanelet_to_road_and_lane) or None
+        ),
         traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
