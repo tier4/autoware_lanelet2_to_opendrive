@@ -448,6 +448,21 @@ class Arc(GeometryBase):
         )
 
 
+def line_or_arc_from_spline_window(
+    spline: "Splines",
+    s_start: float,
+    s_end: float,
+    curvature_hint: float = 0.0,
+) -> GeometryBase:
+    """Emit a classified straight run as one plan-view record.
+
+    Placeholder: hands the window to :meth:`Line.from_spline_window`, which
+    anchors on the spline tangent at ``s_start`` and so says nothing about
+    where the record arrives.
+    """
+    return Line.from_spline_window(spline, s_start, s_end)
+
+
 @dataclass
 class Spiral(GeometryBase):
     """Spiral/clothoid geometry."""
