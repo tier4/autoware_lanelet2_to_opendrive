@@ -27,28 +27,6 @@ FIXTURE = (Path(__file__).parent / "data" / "walkway_mini.osm").resolve()
 
 EXAMPLE_PRESETS = sorted(path.stem for path in CONF_MAP.glob("example*.yaml"))
 
-KNOWN_BROKEN = {
-    # PreprocessOperation.from_hydra_config(cfg.map) is called unconditionally,
-    # before has_preprocessing is even computed, and re-validates an origin it
-    # does not need: this preset declares lat_lon, which the projection
-    # resolver reads successfully (it derives grid 56HLJ), but the second
-    # validation looks for mgrs_code/origin under cfg.map and exits 1.
-    "example_latlon",
-}
-
-
-def _param(preset: str) -> "pytest.ParameterSet":
-    marks = (
-        [
-            pytest.mark.xfail(
-                strict=True, reason="origin re-validated at the wrong level"
-            )
-        ]
-        if preset in KNOWN_BROKEN
-        else []
-    )
-    return pytest.param(preset, marks=marks)
-
 
 def test_the_example_presets_are_discovered() -> None:
     """Guard the parametrisation: an empty glob would vacuously pass."""
@@ -58,7 +36,7 @@ def test_the_example_presets_are_discovered() -> None:
     )
 
 
-@pytest.mark.parametrize("preset", [_param(p) for p in EXAMPLE_PRESETS])
+@pytest.mark.parametrize("preset", EXAMPLE_PRESETS)
 def test_an_example_preset_converts(preset: str, tmp_path: Path) -> None:
     """Each example preset must produce an .xodr from the shared fixture."""
     out = tmp_path / f"{preset}.xodr"
