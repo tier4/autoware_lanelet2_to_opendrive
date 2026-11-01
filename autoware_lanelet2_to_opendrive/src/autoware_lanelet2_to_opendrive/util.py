@@ -2,6 +2,8 @@
 
 import logging
 from typing import (
+    Callable,
+    FrozenSet,
     Set,
     List,
     Tuple,
@@ -563,6 +565,419 @@ def split_groups_by_divergent_connections(
     )
 
 
+#: Lanelet subtypes that become OpenDRIVE lanes on a regular (non-junction)
+#: road.  This is the candidate pool for :meth:`Road.construct_from_lanelet_map`
+#: and therefore the set of lanelets that can appear in the conversion-time
+#: ``lanelet_id -> (road_id, lane_id)`` mapping.  The geometric cross-validation
+#: pass in :mod:`road_lanelet_geo_mapping` shares this list so that both sides
+#: search the same population; a subtype present in only one of them produces
+#: a spurious mismatch.  See ``Lane.construct_from_lanelet`` for the
+#: subtype -> ``LaneType`` mapping.
+CONVERTIBLE_LANELET_SUBTYPES: List[str] = [
+    "road",
+    "highway",
+    "walkway",
+    "pedestrian_lane",
+    "road_shoulder",
+    "bicycle_lane",
+]
+
+#: Lanelet subtypes that carry vehicle traffic and are therefore vertices of
+#: the ``Participants.Vehicle`` routing graph used for lateral grouping.
+VEHICLE_LANELET_SUBTYPES: FrozenSet[str] = frozenset({"road", "highway"})
+
+#: Non-vehicle lanelet subtypes that belong to the driving road beside them
+#: and become extra OpenDRIVE lanes of that road rather than roads of their
+#: own.
+#:
+#: These subtypes are not vertices of the ``Participants.Vehicle`` routing
+#: graph, so ``routing_graph.left``/``right``/``adjacentLeft``/
+#: ``adjacentRight`` always return ``None`` for them and
+#: :func:`find_adjacent_groups` can never put them in the same lateral group
+#: as the road they belong to.  The Lanelet2 map specification requires such
+#: a lanelet to *share its boundary linestring* with that road lanelet, so
+#: the shared linestring — not the routing graph — is the signal used to
+#: group them (see :func:`build_boundary_lateral_adjacency` and
+#: :func:`attach_boundary_adjacent_lanelets`).
+#:
+#: ``walkway`` is deliberately NOT in this list.  Measured on the two
+#: reference maps, 100% of ``road_shoulder`` / ``pedestrian_lane`` /
+#: ``bicycle_lane`` lanelets share a boundary linestring with a road
+#: lanelet, whereas 0% of ``walkway`` lanelets do (nishishinjuku 8/8,
+#: odaiba 180/180 detached).  Walkways are genuinely standalone footpaths
+#: and keep their existing one-lane-road handling.
+BOUNDARY_ATTACHED_LANELET_SUBTYPES: List[str] = [
+    "road_shoulder",
+    "pedestrian_lane",
+    "bicycle_lane",
+]
+
+#: Subtypes that may take part in a shared-boundary lateral edge.  Anything
+#: outside this set (``walkway``, ``crosswalk``, unknown subtypes) is never
+#: attached and never used as an attachment anchor.
+_BOUNDARY_ATTACHABLE_SUBTYPES: FrozenSet[str] = VEHICLE_LANELET_SUBTYPES | frozenset(
+    BOUNDARY_ATTACHED_LANELET_SUBTYPES
+)
+
+
+def lanelet_subtype(lanelet: lanelet2.core.Lanelet) -> str:
+    """Return a lanelet's ``subtype`` attribute, or ``""`` when absent."""
+    attributes = lanelet.attributes
+    if attributes and "subtype" in attributes:
+        return str(attributes["subtype"])
+    return ""
+
+
+def is_boundary_attached_lanelet(lanelet: lanelet2.core.Lanelet) -> bool:
+    """Return True when ``lanelet`` is a non-vehicle lane of a driving road.
+
+    See :data:`BOUNDARY_ATTACHED_LANELET_SUBTYPES`.
+    """
+    return lanelet_subtype(lanelet) in BOUNDARY_ATTACHED_LANELET_SUBTYPES
+
+
+def build_boundary_lateral_adjacency(
+    lanelets: LaneletInput,
+) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
+    """Derive lateral adjacency from *shared boundary linestrings*.
+
+    This is the routing-graph-independent counterpart of the left/right
+    lookups in :func:`find_adjacent_groups`.  Two lanelets are laterally
+    adjacent when one's ``rightBound`` **is** the other's ``leftBound`` —
+    the same linestring, in the same orientation.  That is exactly
+    ``lanelet2.geometry.leftOf``, which is used here as the authoritative
+    check; a linestring-id index only narrows the candidate pairs so the
+    pass stays O(n) on maps with tens of thousands of lanelets.
+
+    Only pairs in which **at least one** side is a
+    :data:`BOUNDARY_ATTACHED_LANELET_SUBTYPES` lanelet are reported, and
+    both sides must be in :data:`_BOUNDARY_ATTACHABLE_SUBTYPES`.  Road ↔
+    road adjacency therefore stays entirely with the routing graph, whose
+    lane-change semantics this function does not model; and anti-parallel
+    neighbours (two lanelets sharing a linestring in opposite orientation,
+    e.g. opposing carriageways that share their centre line) are rejected
+    by ``leftOf``, so they are never merged into one road.
+
+    Args:
+        lanelets: Collection of lanelets to index.
+
+    Returns:
+        ``(left_of, right_of)``.  ``left_of[i]`` is the set of ids of
+        lanelets immediately to the LEFT of lanelet ``i``; ``right_of[i]``
+        the ids immediately to its RIGHT.  Ids absent from a map have no
+        neighbour on that side.
+    """
+    from lanelet2.geometry import leftOf
+
+    lanelet_list = to_lanelet_list(lanelets)
+
+    # Candidate index: a pair can only be adjacent when one lanelet's
+    # leftBound and the other's rightBound are the same linestring id.
+    by_left_bound: Dict[int, List[lanelet2.core.Lanelet]] = {}
+    by_right_bound: Dict[int, List[lanelet2.core.Lanelet]] = {}
+    for lanelet in lanelet_list:
+        if lanelet_subtype(lanelet) not in _BOUNDARY_ATTACHABLE_SUBTYPES:
+            continue
+        by_left_bound.setdefault(lanelet.leftBound.id, []).append(lanelet)
+        by_right_bound.setdefault(lanelet.rightBound.id, []).append(lanelet)
+
+    left_of: Dict[int, Set[int]] = {}
+    right_of: Dict[int, Set[int]] = {}
+    for linestring_id, right_side in by_left_bound.items():
+        left_side = by_right_bound.get(linestring_id)
+        if not left_side:
+            continue
+        for right_lanelet in right_side:
+            for left_lanelet in left_side:
+                if left_lanelet.id == right_lanelet.id:
+                    continue
+                if not (
+                    is_boundary_attached_lanelet(left_lanelet)
+                    or is_boundary_attached_lanelet(right_lanelet)
+                ):
+                    continue
+                # Authoritative orientation-aware check: rejects the case
+                # where the shared linestring is referenced inverted by one
+                # of the two lanelets (anti-parallel neighbours).
+                if not leftOf(left_lanelet, right_lanelet):
+                    continue
+                left_of.setdefault(right_lanelet.id, set()).add(left_lanelet.id)
+                right_of.setdefault(left_lanelet.id, set()).add(right_lanelet.id)
+
+    return left_of, right_of
+
+
+#: Subtypes whose longitudinal succession is derived from shared boundary
+#: geometry rather than from the ``Participants.Vehicle`` routing graph.
+#:
+#: These are exactly the lanelets that carry no vehicle traffic and are
+#: therefore not vertices of that graph, so ``routing_graph.previous`` and
+#: ``routing_graph.following`` return empty for them and their OpenDRIVE
+#: lanes are emitted with no ``<link>`` at all.  Measured on the two
+#: reference maps, that was 11 of 11 non-vehicle lanes on nishishinjuku and
+#: 4,405 of 4,405 on odaiba.  See
+#: :func:`build_boundary_longitudinal_adjacency`.
+#:
+#: ``walkway`` is included for completeness -- a walkway that did share a
+#: boundary with another walkway would be linked -- but neither reference
+#: map contains such a pair: all 8 nishishinjuku and all 180 odaiba
+#: walkways share no linestring and no boundary endpoint with any lanelet.
+_LONGITUDINAL_GEOMETRY_SUBTYPES: FrozenSet[str] = frozenset(
+    BOUNDARY_ATTACHED_LANELET_SUBTYPES
+) | frozenset({"walkway"})
+
+
+def build_boundary_longitudinal_adjacency(
+    lanelets: LaneletInput,
+) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
+    """Derive longitudinal succession from *shared boundary endpoints*.
+
+    This is the longitudinal counterpart of
+    :func:`build_boundary_lateral_adjacency`, and exists for the same
+    reason: the non-vehicle subtypes are not vertices of a
+    ``Participants.Vehicle`` routing graph, so ``routing_graph.previous`` /
+    ``routing_graph.following`` return nothing for them and their lanes are
+    emitted with no ``<link>``.  A ``Participants.Pedestrian`` graph is not
+    an alternative -- on nishishinjuku it yields no edge for any subtype,
+    walkway and crosswalk included.
+
+    Lanelet ``a`` is followed by ``b`` when ``a``'s end cross-section *is*
+    ``b``'s start cross-section: same left boundary point and same right
+    boundary point.  That is exactly ``lanelet2.geometry.follows``, which is
+    used here as the authoritative check; a boundary-point-id index only
+    narrows the candidate pairs so the pass stays O(n) on maps with tens of
+    thousands of lanelets.
+
+    Both sides must be in :data:`_LONGITUDINAL_GEOMETRY_SUBTYPES`.  Vehicle
+    lanelets are therefore never an endpoint of an edge reported here, and
+    the routing graph remains the sole source of succession for them --
+    which is what keeps this pass from changing any vehicle route.
+
+    Args:
+        lanelets: Collection of lanelets to index.
+
+    Returns:
+        ``(previous_of, following_of)``.  ``previous_of[i]`` is the set of
+        ids of lanelets that end where lanelet ``i`` begins;
+        ``following_of[i]`` the ids that begin where ``i`` ends.  Ids absent
+        from a map have no neighbour on that side.
+    """
+    from lanelet2.geometry import follows
+
+    lanelet_list = [
+        lanelet
+        for lanelet in to_lanelet_list(lanelets)
+        if lanelet_subtype(lanelet) in _LONGITUDINAL_GEOMETRY_SUBTYPES
+    ]
+
+    # Candidate index: a pair can only be in succession when the preceding
+    # lanelet's end cross-section and the following one's start
+    # cross-section are built from the same two boundary points.
+    def _cross_section(
+        lanelet: lanelet2.core.Lanelet, at_end: bool
+    ) -> Optional[Tuple[int, int]]:
+        left, right = lanelet.leftBound, lanelet.rightBound
+        if len(left) == 0 or len(right) == 0:
+            return None
+        index = -1 if at_end else 0
+        return (left[index].id, right[index].id)
+
+    by_start: Dict[Tuple[int, int], List[lanelet2.core.Lanelet]] = {}
+    for lanelet in lanelet_list:
+        start = _cross_section(lanelet, at_end=False)
+        if start is not None:
+            by_start.setdefault(start, []).append(lanelet)
+
+    previous_of: Dict[int, Set[int]] = {}
+    following_of: Dict[int, Set[int]] = {}
+    for lanelet in lanelet_list:
+        end = _cross_section(lanelet, at_end=True)
+        if end is None:
+            continue
+        for candidate in by_start.get(end, ()):
+            if candidate.id == lanelet.id:
+                continue
+            # Authoritative orientation-aware check.  A lanelet whose own
+            # start and end cross-sections coincide (a degenerate loop)
+            # would otherwise report itself as its own neighbour through a
+            # third lanelet.
+            if not follows(lanelet, candidate):
+                continue
+            following_of.setdefault(lanelet.id, set()).add(candidate.id)
+            previous_of.setdefault(candidate.id, set()).add(lanelet.id)
+
+    return previous_of, following_of
+
+
+#: ``(previous_of, following_of)`` as returned by
+#: :func:`build_boundary_longitudinal_adjacency`.
+LongitudinalSuccession = Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]
+
+
+def resolve_lane_link_neighbours(
+    lanelet: lanelet2.core.Lanelet,
+    routing_lookup: Callable[[lanelet2.core.Lanelet], Iterable[lanelet2.core.Lanelet]],
+    succession: Optional[LongitudinalSuccession],
+    direction: ConnectionDirection,
+    lanelet_map: lanelet2.core.LaneletMap,
+) -> List[lanelet2.core.Lanelet]:
+    """Pick the source of a lane's predecessors or successors.
+
+    Vehicle lanelets keep the routing graph untouched.  A lanelet in
+    :data:`_LONGITUDINAL_GEOMETRY_SUBTYPES` is not a vertex of a
+    ``Participants.Vehicle`` graph, so ``routing_lookup`` returns nothing
+    for it and its OpenDRIVE lane was emitted with no ``<link>`` at all;
+    for those, the succession derived from shared boundary geometry is used
+    instead.
+
+    This function only chooses the neighbour list.  Every consistency check
+    the caller applies afterwards -- the road-link guard of issue #202, the
+    junction branches, and the target-lane validation -- runs unchanged on
+    the result, which is what keeps the emitted links schema-valid.
+
+    Args:
+        lanelet: The lanelet whose neighbours are wanted.
+        routing_lookup: ``routing_graph.previous`` or ``.following``.
+        succession: Precomputed geometric succession, or ``None`` to keep
+            the routing graph for every lanelet.
+        direction: Which side of ``succession`` to read.
+        lanelet_map: Map the neighbour ids are resolved against.
+
+    Returns:
+        The neighbouring lanelets, ordered by id when they come from
+        ``succession`` so the emitted link is reproducible run to run.
+    """
+    if succession is None or (
+        lanelet_subtype(lanelet) not in _LONGITUDINAL_GEOMETRY_SUBTYPES
+    ):
+        return list(routing_lookup(lanelet))
+
+    previous_of, following_of = succession
+    side = previous_of if direction is ConnectionDirection.PREVIOUS else following_of
+    neighbours = []
+    for neighbour_id in sorted(side.get(lanelet.id, ())):
+        try:
+            neighbours.append(lanelet_map.laneletLayer.get(neighbour_id))
+        except Exception:
+            continue
+    return neighbours
+
+
+@dataclass(frozen=True)
+class BoundaryAttachmentResult:
+    """Outcome of :func:`attach_boundary_adjacent_lanelets`."""
+
+    #: The input groups, each possibly grown by attached lanelets.
+    groups: List[Set[lanelet2.core.Lanelet]]
+    #: Attachable lanelets that reached no group and keep their previous
+    #: standalone-road handling.
+    unattached: Set[lanelet2.core.Lanelet]
+    #: Ids of lanelets that bordered more than one group and were resolved
+    #: by the deterministic tie-break.
+    ambiguous_ids: List[int]
+
+
+def attach_boundary_adjacent_lanelets(
+    groups: List[Set[lanelet2.core.Lanelet]],
+    attachable: Set[lanelet2.core.Lanelet],
+) -> BoundaryAttachmentResult:
+    """Fold non-vehicle lanelets into the lateral group they border.
+
+    ``groups`` are the vehicle-routing lateral groups (already refined by
+    :func:`split_groups_by_divergent_connections`).  Every lanelet in
+    ``attachable`` that shares a boundary linestring with a member of some
+    group — directly, or through a chain of other attachable lanelets, e.g.
+    ``road | bicycle_lane | pedestrian_lane`` — joins that group and
+    becomes an extra lane of the resulting OpenDRIVE road.
+
+    Deterministic rules, in order:
+
+    1. **A lanelet joins exactly one group; groups are never merged.**
+       A lanelet that borders two different groups (e.g. a shoulder
+       between two carriageways that the routing graph keeps apart) would
+       otherwise fuse them into a single road whose reference line spans
+       both.  Instead it joins one of them and is reported as ambiguous.
+    2. **Nearest group wins**, measured in shared-boundary hops, so a
+       lanelet directly touching a road never attaches through a longer
+       chain.
+    3. **Ties break on the group's smallest lanelet id**, which is
+       independent of set iteration order, so the result is reproducible
+       run to run.
+    4. **A lanelet that reaches no group stays unattached** and is
+       returned to the caller, which keeps its existing behaviour (its own
+       single-lane road).  Nothing is dropped.
+
+    Args:
+        groups: Lateral groups of vehicle lanelets.  Mutated in place by
+            adding attached lanelets; also returned in the result.
+        attachable: Candidate lanelets, normally the
+            :data:`BOUNDARY_ATTACHED_LANELET_SUBTYPES` lanelets of the map.
+
+    Returns:
+        A :class:`BoundaryAttachmentResult`.
+    """
+    if not attachable:
+        return BoundaryAttachmentResult(
+            groups=groups, unattached=set(), ambiguous_ids=[]
+        )
+
+    grouped_lanelets = [lanelet for group in groups for lanelet in group]
+    left_of, right_of = build_boundary_lateral_adjacency(
+        grouped_lanelets + list(attachable)
+    )
+    neighbours: Dict[int, Set[int]] = {}
+    for side in (left_of, right_of):
+        for lanelet_id, others in side.items():
+            neighbours.setdefault(lanelet_id, set()).update(others)
+
+    # Group ordering key: the smallest member id.  Groups are disjoint, so
+    # this is unique and independent of iteration order.
+    group_key: Dict[int, int] = {}
+    assigned_group: Dict[int, int] = {}
+    for gid, group in enumerate(groups):
+        member_ids = [lanelet.id for lanelet in group]
+        group_key[gid] = min(member_ids) if member_ids else gid
+        for lanelet_id in member_ids:
+            assigned_group[lanelet_id] = gid
+
+    pending: Dict[int, lanelet2.core.Lanelet] = {
+        lanelet.id: lanelet
+        for lanelet in attachable
+        if lanelet.id not in assigned_group
+    }
+    ambiguous_ids: List[int] = []
+
+    # Breadth-first rounds.  Every decision in a round reads the assignment
+    # snapshot from the end of the previous round, so rule 2 (nearest group
+    # wins) holds and the outcome does not depend on iteration order.
+    while pending:
+        round_assignment: Dict[int, int] = {}
+        for lanelet_id in sorted(pending):
+            candidates = {
+                assigned_group[neighbour_id]
+                for neighbour_id in neighbours.get(lanelet_id, ())
+                if neighbour_id in assigned_group
+            }
+            if not candidates:
+                continue
+            if len(candidates) > 1:
+                ambiguous_ids.append(lanelet_id)
+            round_assignment[lanelet_id] = min(
+                candidates, key=lambda gid: group_key[gid]
+            )
+        if not round_assignment:
+            break
+        for lanelet_id, gid in round_assignment.items():
+            assigned_group[lanelet_id] = gid
+            groups[gid].add(pending.pop(lanelet_id))
+
+    return BoundaryAttachmentResult(
+        groups=groups,
+        unattached=set(pending.values()),
+        ambiguous_ids=sorted(ambiguous_ids),
+    )
+
+
 def split_junction_groups_by_connections(
     lanelet_map: lanelet2.core.LaneletMap,
     groups: List[Set[lanelet2.core.Lanelet]],
@@ -868,6 +1283,15 @@ def sort_adjacent_groups(
 ) -> List[lanelet2.core.Lanelet]:
     """Sort lanelets from left to right by following their adjacent relationships.
 
+    Lateral neighbours come from the ``Participants.Vehicle`` routing graph.
+    When that graph yields nothing — which it always does for the
+    non-vehicle subtypes in :data:`BOUNDARY_ATTACHED_LANELET_SUBTYPES`,
+    because they are not vertices of it — the shared-boundary relation from
+    :func:`build_boundary_lateral_adjacency` is consulted instead, so a
+    group grown by :func:`attach_boundary_adjacent_lanelets` can still be
+    ordered.  The fallback index is built only when the set actually
+    contains such a lanelet, so pure vehicle groups are untouched.
+
     Args:
         lanelet_map: The lanelet2 map containing the lanelets
         target_lanelets: Set of lanelets to sort
@@ -889,6 +1313,33 @@ def sort_adjacent_groups(
     if routing_graph is None:
         routing_graph = create_routing_graph(lanelet_map)
 
+    # Shared-boundary fallback, built only when it can possibly matter.
+    boundary_left: Dict[int, Set[int]] = {}
+    boundary_right: Dict[int, Set[int]] = {}
+    lanelets_by_id: Dict[int, lanelet2.core.Lanelet] = {}
+    if any(is_boundary_attached_lanelet(lanelet) for lanelet in lanelet_set):
+        boundary_left, boundary_right = build_boundary_lateral_adjacency(lanelet_set)
+        lanelets_by_id = {lanelet.id: lanelet for lanelet in lanelet_set}
+
+    def _boundary_neighbor(
+        side: Dict[int, Set[int]],
+        lanelet: lanelet2.core.Lanelet,
+        candidates: Set[lanelet2.core.Lanelet],
+    ) -> Optional[lanelet2.core.Lanelet]:
+        """Return the shared-boundary neighbour of ``lanelet`` on ``side``.
+
+        Ties (a lanelet with several neighbours on one side, e.g. where a
+        long shoulder abuts two consecutive road lanelets) resolve to the
+        smallest lanelet id so the ordering is reproducible.
+        """
+        best: Optional[lanelet2.core.Lanelet] = None
+        for neighbour_id in sorted(side.get(lanelet.id, ())):
+            neighbour = lanelets_by_id.get(neighbour_id)
+            if neighbour is not None and neighbour in candidates:
+                best = neighbour
+                break
+        return best
+
     def _get_left_neighbor(
         lanelet: lanelet2.core.Lanelet,
     ) -> Optional[lanelet2.core.Lanelet]:
@@ -897,7 +1348,7 @@ def sort_adjacent_groups(
             neighbor = get_left(lanelet)
             if neighbor and neighbor in lanelet_set:
                 return neighbor
-        return None
+        return _boundary_neighbor(boundary_left, lanelet, lanelet_set)
 
     def _get_right_neighbor(
         lanelet: lanelet2.core.Lanelet,
@@ -908,19 +1359,24 @@ def sort_adjacent_groups(
             neighbor = get_right(lanelet)
             if neighbor and neighbor in remaining:
                 return neighbor
-        return None
+        return _boundary_neighbor(boundary_right, lanelet, remaining)
 
     # Find the leftmost lanelet by traversing left until no more left neighbors
     def find_leftmost_lanelet(
         start_lanelet: lanelet2.core.Lanelet,
     ) -> lanelet2.core.Lanelet:
         current = start_lanelet
+        # ``seen`` guards against a cyclic lateral relation.  The routing
+        # graph cannot produce one, but the shared-boundary fallback is a
+        # purely geometric relation on arbitrary map data, so a ring of
+        # lanelets would otherwise spin here forever.
+        seen = {current.id}
         while True:
             left_neighbor = _get_left_neighbor(current)
-            if left_neighbor:
-                current = left_neighbor
-            else:
+            if left_neighbor is None or left_neighbor.id in seen:
                 break
+            seen.add(left_neighbor.id)
+            current = left_neighbor
         return current
 
     # Start with any lanelet from the set

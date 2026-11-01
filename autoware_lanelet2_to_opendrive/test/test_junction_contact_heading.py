@@ -530,7 +530,11 @@ def test_pinned_junction_contacts_agree_on_heading(nishishinjuku_xodr):
     # declined contact is the incoming road and which of its ends the
     # connection meets; what the guard acts on is the angle. Both are
     # pinned.
-    EXPECTED_DECLINED_DPSI_DEG = {(300, "start"): 40.25}
+    # Incoming road 295, not 300: grouping the non-vehicle lanelets into
+    # the roads they border changes the road partition, so the regular
+    # roads are renumbered. The contact the guard declines, and the
+    # 40.25 deg it declines it for, are unchanged.
+    EXPECTED_DECLINED_DPSI_DEG = {(295, "start"): 40.25}
     declined_keys = {(i, p) for _, i, p, _ in declined}
     assert declined_keys == set(EXPECTED_DECLINED_DPSI_DEG), (
         "the set of contacts beyond the "
