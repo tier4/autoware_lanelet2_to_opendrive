@@ -53,7 +53,14 @@ class TestArcFromSplineWindow:
         arc = Arc.from_spline_window(
             spline, s_start=0.0, s_end=10.0, curvature=1.0 / 50.0
         )
-        assert arc.curvature == pytest.approx(1.0 / 50.0)
+        # The curvature is derived from the window the *fitted* spline spans,
+        # not echoed back from the argument: the arc is the one that also
+        # ends on the spline point of s_end, which is what makes consecutive
+        # records meet. The fit of 80 samples of a radius-50 circle spans a
+        # slightly different chord per unit arc length than the ideal circle,
+        # so the derived value lands within a tenth of a percent of 1/50
+        # rather than on it. ``curvature`` now only picks the turn direction.
+        assert arc.curvature == pytest.approx(1.0 / 50.0, rel=1e-2)
         assert arc.length == pytest.approx(10.0)
         assert arc.x == pytest.approx(50.0, abs=1e-3)
         assert arc.y == pytest.approx(0.0, abs=1e-3)
@@ -62,13 +69,32 @@ class TestArcFromSplineWindow:
         # spline approximation of a perfect circle.
         assert arc.hdg == pytest.approx(np.pi / 2.0, abs=2e-2)
 
+    def test_arc_ends_on_the_spline_point_of_the_window(self):
+        """Why the curvature is derived rather than echoed."""
+        import math
+
+        spline = _circle_spline(radius=50.0, arc=np.pi / 2.0)
+        s_start, s_end = 0.0, 10.0
+        arc = Arc.from_spline_window(
+            spline, s_start=s_start, s_end=s_end, curvature=1.0 / 50.0
+        )
+        radius = 1.0 / arc.curvature
+        turn = arc.curvature * arc.length
+        end = (
+            arc.x + radius * (math.sin(arc.hdg + turn) - math.sin(arc.hdg)),
+            arc.y - radius * (math.cos(arc.hdg + turn) - math.cos(arc.hdg)),
+        )
+        want = spline.evaluate(s_end, derivative=0)
+        assert math.dist(end, (float(want[0]), float(want[1]))) < 1e-9
+
     def test_emits_arc_xml(self):
         spline = _circle_spline()
         arc = Arc.from_spline_window(spline, s_start=0.0, s_end=5.0, curvature=0.02)
         xml = arc.to_xml()
         arc_elem = xml.find("arc")
         assert arc_elem is not None
-        assert float(arc_elem.get("curvature")) == pytest.approx(0.02)
+        # Derived, as above: close to the argument but not it.
+        assert float(arc_elem.get("curvature")) == pytest.approx(0.02, rel=1e-2)
 
 
 class TestParamPoly3FromSplineWindow:
