@@ -2,7 +2,7 @@ import lanelet2
 import numpy as np
 from typing import Optional, List, Tuple, Union
 
-from .config import DEFAULT_CONFIG
+from .config import DEFAULT_CONFIG, CoordinateOffset
 from .types import Point2D, Point3D
 
 
@@ -284,18 +284,29 @@ def line_line_intersection_typed(
 
 def compute_point_layer_bounds(
     lanelet_map: lanelet2.core.LaneletMap,
+    offset: CoordinateOffset = CoordinateOffset(),
 ) -> Tuple[float, float, float, float]:
     """Return (min_x, min_y, max_x, max_y) over all Point3d in pointLayer.
 
     The values are the axis-aligned bounding box of every projected point
-    already loaded into the lanelet2 map. They map onto OpenDRIVE
-    ``<header>`` attributes as: ``west=min_x``, ``south=min_y``,
+    already loaded into the lanelet2 map, with ``offset`` subtracted so that
+    they are in the same frame as the exported geometry. They map onto
+    OpenDRIVE ``<header>`` attributes as: ``west=min_x``, ``south=min_y``,
     ``east=max_x``, ``north=max_y``.
+
+    The offset must be the one the conversion exports with -- the same value
+    :func:`~.util.extract_points` subtracts for every boundary. Omitting it
+    leaves the header describing the projected frame while every
+    ``<geometry>`` describes the local one, which for an MGRS origin with an
+    offset puts the two tens of kilometres apart.
 
     Parameters
     ----------
     lanelet_map : lanelet2.core.LaneletMap
         Map whose ``pointLayer`` will be scanned.
+    offset : CoordinateOffset
+        Offset subtracted from the scanned coordinates. Defaults to no
+        offset, which is correct only when the export applies none.
 
     Returns
     -------
@@ -327,4 +338,11 @@ def compute_point_layer_bounds(
             min_y = p.y
         if p.y > max_y:
             max_y = p.y
-    return min_x, min_y, max_x, max_y
+    # A pure translation, so it is applied to the four extremes rather than
+    # to every point.
+    return (
+        min_x - offset.x,
+        min_y - offset.y,
+        max_x - offset.x,
+        max_y - offset.y,
+    )

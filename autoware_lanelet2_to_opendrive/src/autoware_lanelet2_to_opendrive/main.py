@@ -1059,7 +1059,9 @@ class _Lanelet2ToOpenDRIVEConverter:
         # Bounding box of the projected map — populates the OpenDRIVE
         # ``<header>`` ``@north/@south/@east/@west`` attributes used by
         # esmini, RoadRunner, and asam-qc-opendrive (issue #465).
-        min_x, min_y, max_x, max_y = compute_point_layer_bounds(self.lanelet_map)
+        min_x, min_y, max_x, max_y = compute_point_layer_bounds(
+            self.lanelet_map, offset=self.offset
+        )
 
         # Create header
         header = Header(

@@ -18,7 +18,6 @@ import subprocess
 from pathlib import Path
 
 import lxml.etree as ET
-import pytest
 
 FIXTURE = (Path(__file__).parent / "data" / "walkway_mini.osm").resolve()
 
@@ -69,10 +68,6 @@ def test_header_bounding_box_reflects_map_extent(tmp_path: Path) -> None:
     assert west < east, f"west ({west}) must be < east ({east})"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="header bounds are computed before the offset is subtracted (#465)",
-)
 def test_header_box_contains_the_emitted_geometry(tmp_path: Path) -> None:
     """The header box must contain the coordinates in its own file.
 
@@ -105,8 +100,16 @@ def test_header_box_contains_the_emitted_geometry(tmp_path: Path) -> None:
     ]
     assert points, "no <geometry> records in the output; the fixture did not convert"
 
+    # The header comes from the pointLayer and the geometry from a spline fit
+    # of those same points, so at an extreme the two agree only to float
+    # precision -- the observed excursion is 2e-8 m. A micrometre of slack
+    # keeps that out while leaving the metres-to-kilometres frame error this
+    # test exists for firmly outside.
+    tol = 1e-6
     outside = [
-        (x, y) for x, y in points if not (west <= x <= east and south <= y <= north)
+        (x, y)
+        for x, y in points
+        if not (west - tol <= x <= east + tol and south - tol <= y <= north + tol)
     ]
     assert not outside, (
         f"{len(outside)} of {len(points)} geometry points lie outside the header"
