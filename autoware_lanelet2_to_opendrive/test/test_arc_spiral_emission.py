@@ -119,3 +119,35 @@ def test_short_spline_becomes_single_straight_segment():
     assert geoms[0].length == pytest.approx(0.3, rel=1e-3)
     assert geoms[0].bU == pytest.approx(1.0, rel=1e-3)
     assert (geoms[0].cU, geoms[0].dU, geoms[0].cV, geoms[0].dV) == (0.0, 0.0, 0.0, 0.0)
+
+
+def test_shipped_conversion_emits_line_and_arc_primitives(nishishinjuku_xodr):
+    """The default conversion classifies its plan view, not just fits it.
+
+    Every geometry record used to be a ``<paramPoly3>``, including the
+    stretches that are exactly straight or exactly circular. OpenDRIVE has
+    primitives for those, every published map uses them, and a consumer that
+    reasons about road shape -- a lane-keeping controller, a curvature
+    profile, a human reading the file -- gets a worse description from a
+    cubic fit of a straight line than from ``<line>``.
+
+    The counts are deliberately loose: what is pinned is that the classifier
+    runs by default and finds both primitives on a real map, not how many of
+    each a particular fit produces.
+    """
+    root = ET.parse(str(nishishinjuku_xodr)).getroot()
+
+    lines = root.findall(".//planView/geometry/line")
+    arcs = root.findall(".//planView/geometry/arc")
+    poly3 = root.findall(".//planView/geometry/paramPoly3")
+    total = len(lines) + len(arcs) + len(poly3)
+
+    assert total > 0, "no plan-view geometry at all; the fixture is wrong"
+    assert lines, (
+        f"no <line> in {total} geometry records: the arc/line classifier is "
+        f"disabled, so a straight road is emitted as a cubic fit of itself"
+    )
+    assert arcs, (
+        f"no <arc> in {total} geometry records: the arc/line classifier is "
+        f"disabled, so a circular road is emitted as a cubic fit of itself"
+    )
