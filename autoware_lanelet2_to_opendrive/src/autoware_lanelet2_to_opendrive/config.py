@@ -20,7 +20,17 @@ class GeometryConstants:
             diverging/merging road's reference-line endpoint and each candidate
             regular road's mirrored endpoint. Sanity gate for issue #291.
         divergence_min_segment_length: Floor (m) on synthetic divergence/merge
-            connecting-road geometry length. Issue #291.
+            connecting-road geometry length. Issue #291. These connectors
+            stand for a *logically zero-length* transition; the floor exists
+            only because OpenDRIVE consumers such as CARLA reject
+            zero-length geometry. It must therefore stay strictly BELOW the
+            1 cm tolerance of
+            ``lane_smoothness.contact_point_no_horizontal_gaps``: the
+            stub's far end is displaced from its near end by exactly this
+            length, so a floor of 0.01 m makes even a perfectly anchored
+            stub fail that contact by exactly the tolerance (the checker
+            compares with ``<``, not ``<=``). Measured on nishishinjuku,
+            137 of 139 stubs sat exactly at a 0.01 m floor.
         divergence_default_lane_width: Default width (m) emitted on synthetic
             divergence/merge connecting-road lanes so the rendered XODR
             ``<width>`` element is always present. Issue #291.
@@ -46,7 +56,7 @@ class GeometryConstants:
     epsilon: float = 1e-10
     point_distance_threshold: float = 0.001
     divergence_endpoint_tolerance: float = 0.5
-    divergence_min_segment_length: float = 0.01
+    divergence_min_segment_length: float = 0.005
     divergence_default_lane_width: float = 3.5
     sidewalk_height: float = 0.15
     spatial_grid_min_cell_size: float = 1.0

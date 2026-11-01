@@ -408,6 +408,13 @@ class ReferenceLine:
             end_vel=end_vel,
             num_control_points=None,
             hard_constraint_weight=spline_hard_weight,
+            # A road reference line's endpoints are a contract with the
+            # neighbouring roads, not just two more points to fit: the
+            # ASAM rule lane_smoothness.contact_point_no_horizontal_gaps
+            # compares lane borders reconstructed from them and allows
+            # 1 cm. The weighted solve leaves 1-3 cm there, which is the
+            # whole of the gap on plain road-to-road joints. Pin them.
+            exact_endpoints=True,
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)

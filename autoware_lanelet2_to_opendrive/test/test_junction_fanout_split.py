@@ -30,24 +30,29 @@ from autoware_lanelet2_to_opendrive.qc_validate import (
 )
 
 # ERROR counts the qc-framework bundle reports on these two fixtures today,
-# per checker.  Both entries are pre-existing converter findings that the
-# bundle could not report until the output started passing the ASAM schema
-# check (a failing schema check skips all 21 semantic/geometry/smoothness
-# checkers, so `validate()` used to return 0 here vacuously):
+# per checker.  One entry remains on this base.
 #
-#   * road.geometry.contact_point -- a road reference line that does not start
-#     at its predecessor's/successor's contact point.
-#   * lane_smoothness.contact_point_no_horizontal_gaps -- a >1 cm horizontal
-#     gap between two connected drivable lanes.
+# ``lane_smoothness.contact_point_no_horizontal_gaps`` used to report 2: the
+# road reference lines were fitted with the endpoints as a *weighted* term,
+# so consecutive roads' reference lines ended 1-3 cm apart and the lane
+# borders reconstructed from them could not meet.  Pinning the endpoints
+# exactly (``Splines(exact_endpoints=True)``) removes it here, and on 13 of
+# the 343 joints on Nishi-Shinjuku.
 #
-# These two fixtures are the minimal reproducers for the same two findings
-# that dominate the full Nishi-Shinjuku map.  Pinning the exact per-checker
-# counts keeps the test sensitive: a regression in any OTHER checker shows up
-# as a new key, and fixing either finding shows up as a count change that must
-# be reflected here.
+# ``road.geometry.contact_point`` still reports 1, and it is an upstream
+# false positive rather than a converter defect: the checker's junction
+# guard tests ``@junction == 1`` instead of ``!= -1``, so it runs on a road
+# that belongs to a junction, which the rule explicitly does not cover.
+# Fixing that belongs in the bundle, not here: it is tracked against
+# ``tier4/qc-opendrive``.  Until that lands the finding stays pinned at 1 so
+# the count keeps its meaning.
+#
+# Keep pinning the exact per-checker counts rather than asserting "no
+# errors": a regression in any checker then shows up as a new key with the
+# count attached, and any future known-broken finding has to be written
+# down here deliberately.
 _KNOWN_QC_FINDINGS = {
     "check_asam_xodr_road_geometry_contact_point": 1,
-    "check_asam_xodr_lane_smoothness_contact_point_no_horizontal_gaps": 2,
 }
 
 DATA = Path(__file__).parent / "data"
@@ -195,7 +200,7 @@ def test_junction_connections_cover_every_incoming_lane(
 
 @BOTH
 def test_fixture_passes_qc_validate(tmp_path: Path, fixture: Path) -> None:
-    """qc-framework must report only the two known, pre-existing findings.
+    """qc-framework must report only the known, pre-existing findings.
 
     The schema checker in particular must be clean: it is the precondition
     for every other checker in the bundle.
