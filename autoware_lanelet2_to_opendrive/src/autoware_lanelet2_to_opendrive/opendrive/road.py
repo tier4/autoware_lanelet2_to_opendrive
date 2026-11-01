@@ -2161,11 +2161,6 @@ class Road:
                     junction_id,
                     _MAX_JUNCTION_CHAIN_PATHS,
                 )
-                tqdm.write(
-                    f"Warning: junction {junction_id} exceeds "
-                    f"{_MAX_JUNCTION_CHAIN_PATHS} in-junction paths; "
-                    "in-junction forks will lose branches"
-                )
 
             # Merge only where the representation forces it. A stage that
             # belongs to exactly one end-to-end path is already expressible
@@ -2201,11 +2196,6 @@ class Road:
                     "for this junction, so in-junction forks lose every "
                     "branch but one.",
                     junction_id,
-                )
-                tqdm.write(
-                    f"Warning: junction {junction_id} mixes chained and "
-                    "unchained lanelets in one lateral group; in-junction "
-                    "forks will lose branches"
                 )
                 chain_paths = []
                 chain_member_ids = set()
@@ -2436,10 +2426,13 @@ class Road:
                     end_hdg_override=end_hdg_override,
                 )
             except Exception as exc:  # noqa: BLE001 - mirrors legacy handling
-                tqdm.write(
-                    "Warning: Failed to create chain connecting road in "
-                    f"junction {junction_id} for lanelets "
-                    f"{[ll.id for ll in path]}: {exc}"
+                logger.warning(
+                    "Failed to create chain connecting road in junction %d "
+                    "for lanelets %s: %s",
+                    junction_id,
+                    [ll.id for ll in path],
+                    exc,
+                    exc_info=True,
                 )
                 continue
 
