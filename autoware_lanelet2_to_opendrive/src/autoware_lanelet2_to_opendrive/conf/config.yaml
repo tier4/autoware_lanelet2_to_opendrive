@@ -35,6 +35,15 @@ preflight: true
 # which takes precedence over this global value.
 strict_mapping_validation: false
 
+# After conversion the emitted XODR is run through the ASAM QC checks and the
+# mapping cross-validation, which print their own FINAL RESULT banner and
+# return an error count. When false (default) a non-zero count is logged as a
+# warning and the output is kept; when true it aborts the run.
+# Can be overridden per map (map.strict_analysis) or per target
+# (target.strict_analysis); map takes precedence over target, which takes
+# precedence over this global value.
+strict_analysis: false
+
 # Measure how far each emitted road's reference line sits from the Lanelet2
 # boundary it was generated from, and report the counts past each severity
 # level. The figures are written to .mapping.json as
