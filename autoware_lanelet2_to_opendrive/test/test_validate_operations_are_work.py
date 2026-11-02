@@ -19,8 +19,6 @@ that runs says so either way, and "lanelet not found" needs no map content.
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     OPERATION_TYPES,
     PreprocessOperation,
@@ -38,7 +36,6 @@ def test_every_operation_type_counts_as_work() -> None:
         assert config.has_operations, f"{name} is not counted as preprocessing work"
 
 
-@pytest.mark.xfail(strict=True, reason="validate_operations is not counted as work")
 def test_a_validate_only_config_runs_the_validation(tmp_path: Path) -> None:
     """The conversion must report the validation it was asked to perform."""
     operation = ValidateOperation(first_lanelet_id=1, second_lanelet_id=2)
