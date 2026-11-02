@@ -43,7 +43,6 @@ def _pool(boundaries):
     return arrays, bboxes
 
 
-@pytest.mark.xfail(strict=True, reason="the grid reports no dimensions")
 def test_the_grid_reports_its_cell_size_and_occupancy(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -66,7 +65,6 @@ def test_the_grid_reports_its_cell_size_and_occupancy(
     assert "3" in message, f"the boundary count is not in the message: {message}"
 
 
-@pytest.mark.xfail(strict=True, reason="the grid reports no dimensions")
 def test_the_message_names_the_occupancy_not_just_the_size(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
