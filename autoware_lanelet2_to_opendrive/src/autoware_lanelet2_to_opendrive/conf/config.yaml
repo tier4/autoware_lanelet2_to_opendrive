@@ -35,6 +35,16 @@ preflight: true
 # which takes precedence over this global value.
 strict_mapping_validation: false
 
+# The resolved origin is compared against the map's own node lat/lon: the
+# configured MGRS square must be one the map lies in, or -- for a frame with
+# no grid -- the origin must sit within a degree of the map's bounding box. A
+# mismatch means every emitted coordinate is in the wrong frame, so it aborts
+# the run. Set to false to proceed anyway.
+# Can be overridden per map (map.check_origin_against_map) or per target
+# (target.check_origin_against_map); map takes precedence over target, which
+# takes precedence over this global value.
+check_origin_against_map: true
+
 # After conversion the emitted XODR is run through the ASAM QC checks and the
 # mapping cross-validation, which print their own FINAL RESULT banner and
 # return an error count. When false (default) a non-zero count is logged as a

@@ -21,7 +21,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import lanelet2
 import lxml.etree as ET
@@ -53,6 +53,14 @@ _TRANSVERSE_MERCATOR = "TransverseMercator"
 
 #: An MGRS code's leading 100 km grid square designator, e.g. ``"54SUE"``.
 _GRID_SQUARE_RE = re.compile(r"^(\d+[A-Z]{3})")
+
+_ORIGIN_MARGIN_DEG = 1.0
+"""How far outside the map a lat/lon origin may sit, in degrees.
+
+About 110 km of latitude. Wide enough for an origin placed at a site datum
+rather than inside the mapped area, narrow enough that another city fails.
+Only used for a frame that carries no grid, since a grid is checked exactly.
+"""
 
 
 def _grid_square(mgrs_code: str) -> str:
@@ -440,6 +448,124 @@ def resolve_projection_from_osm(input_map_path: Path) -> Optional[ResolvedProjec
     )
 
 
+def _node_lat_lon_bounds(
+    input_map_path: Path,
+) -> Optional[Tuple[float, float, float, float]]:
+    """The lat/lon bounding box of the map's nodes, or ``None`` if unreadable.
+
+    Same streaming read and same tolerance as
+    :func:`_mgrs_grid_squares_in_osm`; only needed for a frame that carries
+    no grid square to compare against.
+    """
+    lats: List[float] = []
+    lons: List[float] = []
+    try:
+        for _event, element in ET.iterparse(
+            str(input_map_path),
+            events=("end",),
+            tag="node",
+            resolve_entities=False,
+            no_network=True,
+            recover=True,
+        ):
+            latitude = element.get("lat")
+            longitude = element.get("lon")
+            element.clear()
+            if latitude is None or longitude is None:
+                continue
+            try:
+                lats.append(float(latitude))
+                lons.append(float(longitude))
+            except ValueError:
+                continue
+    except (OSError, ET.LxmlError, ValueError):
+        return None
+
+    if not lats:
+        return None
+    return (min(lats), min(lons), max(lats), max(lons))
+
+
+def verify_origin_matches_map(
+    resolved: ResolvedProjection, input_map_path: Path
+) -> None:
+    """Fail when the resolved frame does not belong to this map.
+
+    A frame derived from the map's own nodes cannot be wrong about the map.
+    A ``map_projector_info.yaml`` can: it is a file next to the map, and a
+    copy left behind from another one resolves without complaint, after
+    which the conversion completes with every coordinate in the wrong frame
+    and the ``geoReference`` as the only symptom.
+
+    * With an MGRS grid: the declared square must be one the map's nodes
+      fall in, compared as 100 km squares so that a higher-precision code
+      matches the square it names.
+    * Without one (Transverse Mercator): the origin must sit within
+      :data:`_ORIGIN_MARGIN_DEG` of the map's bounding box.
+
+    A map whose nodes cannot be read is accepted: it says nothing about the
+    frame either way, and a check that can fail a map it never read is worse
+    than no check.
+
+    Raises:
+        ValueError: The frame belongs to a different part of the world.
+    """
+    if resolved.mgrs_code:
+        squares = _mgrs_grid_squares_in_osm(input_map_path)
+        if squares and _grid_square(resolved.mgrs_code) not in squares:
+            raise ValueError(
+                f"Declared grid {resolved.mgrs_code!r} is not a grid "
+                f"{Path(input_map_path).name} lies in: its nodes fall in "
+                f"{sorted(squares)}. Fix the declared origin, or set "
+                "check_origin_against_map=false to proceed anyway."
+            )
+        return
+
+    if resolved.origin_lat is None or resolved.origin_lon is None:
+        return
+
+    bounds = _node_lat_lon_bounds(input_map_path)
+    if bounds is None:
+        return
+    min_lat, min_lon, max_lat, max_lon = bounds
+    within_lat = (
+        min_lat - _ORIGIN_MARGIN_DEG
+        <= resolved.origin_lat
+        <= max_lat + _ORIGIN_MARGIN_DEG
+    )
+    within_lon = (
+        min_lon - _ORIGIN_MARGIN_DEG
+        <= resolved.origin_lon
+        <= max_lon + _ORIGIN_MARGIN_DEG
+    )
+    if not (within_lat and within_lon):
+        raise ValueError(
+            f"Origin ({resolved.origin_lat}, {resolved.origin_lon}) lies "
+            f"outside {Path(input_map_path).name}, which spans lat "
+            f"{min_lat:.5f}..{max_lat:.5f}, lon {min_lon:.5f}..{max_lon:.5f} "
+            f"(margin {_ORIGIN_MARGIN_DEG} deg). Fix the declared origin, or "
+            "set check_origin_against_map=false to proceed anyway."
+        )
+
+
+def _check_origin_against_map(cfg: DictConfig) -> bool:
+    """Whether to verify a declared frame against the map's own nodes.
+
+    Precedence map > target > global, matching the other per-map overrides.
+    ``or`` cannot be used because the value is a boolean and ``False`` is a
+    meaningful setting.
+    """
+    return bool(
+        cfg.get("map", {}).get(
+            "check_origin_against_map",
+            cfg.get("target", {}).get(
+                "check_origin_against_map",
+                cfg.get("check_origin_against_map", True),
+            ),
+        )
+    )
+
+
 def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
     """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
 
@@ -481,6 +607,10 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
         resolved = resolve_projection_from_map_info(input_map_path)
         if resolved is not None:
             logger.info("Using %s as the origin source", info_path)
+            # Only this path can be wrong about the map: step 2 derives the
+            # frame from the map's own nodes, so it cannot disagree with them.
+            if _check_origin_against_map(cfg):
+                verify_origin_matches_map(resolved, Path(input_map_path))
             return resolved
         declared = MapProjectorInfo.from_yaml(info_path).projector_type
         raise ValueError(
