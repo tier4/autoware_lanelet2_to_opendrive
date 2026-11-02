@@ -395,6 +395,8 @@ class TestNoDuplicateRoadIds:
                             f"main.py:{inner.lineno} exits on a duplicate "
                             "road id; see above."
                         )
+
+
 class TestLaneWidthPlausibility:
     """Test suite for the output-side lane-width plausibility check.
 
