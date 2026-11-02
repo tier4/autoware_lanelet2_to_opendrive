@@ -1,7 +1,6 @@
 """Tests for lane predecessor and successor link functionality."""
 
 import lanelet2
-import pytest
 from autoware_lanelet2_to_opendrive.conversion_config import LaneLinksContext
 from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint, ElementType
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
@@ -411,14 +410,12 @@ def test_closest_lane_breaks_a_tie_on_the_sorted_order():
     assert Road._find_closest_lane(-2, sorted([-1, -3])) == -3
 
 
-@pytest.mark.xfail(strict=True, reason="the closest-lane fallback invents a lane")
 def test_closest_lane_does_not_cross_the_reference_line():
     """A target road with lanes only on the other side has no continuation."""
     assert Road._find_closest_lane(-1, [1, 2]) is None
     assert Road._find_closest_lane(2, [-1, -2]) is None
 
 
-@pytest.mark.xfail(strict=True, reason="the closest-lane fallback invents a lane")
 def test_closest_lane_invents_nothing_when_the_target_road_has_no_lanes():
     """Returning a lane id here would be a link to a lane that does not exist."""
     assert Road._find_closest_lane(-1, []) is None
