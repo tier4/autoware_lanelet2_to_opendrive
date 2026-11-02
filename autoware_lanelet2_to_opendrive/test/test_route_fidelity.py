@@ -24,7 +24,6 @@ written naively:
 
 from pathlib import Path
 
-import pytest
 
 from autoware_lanelet2_to_opendrive.route_fidelity import EmittedNetwork, measure
 
@@ -167,7 +166,6 @@ def test_shipped_conversion_preserves_the_stated_successions(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="no dangling-link check exists")
 def test_a_lane_link_naming_a_lane_that_does_not_exist_is_found(
     tmp_path: Path,
 ) -> None:
