@@ -1813,8 +1813,35 @@ def preprocess_and_convert_with_hydra(
 
 
 def _fail_on_analysis_errors(error_count: int, *, strict: bool) -> None:
-    """Act on the post-conversion analysis result."""
-    return None
+    """Act on the post-conversion analysis result.
+
+    ``run_analysis`` prints its own ``FINAL RESULT`` banner and returns the
+    number of errors it found. The banner goes to stdout, so a caller reading
+    the log, or checking the exit status, has only this to go on.
+
+    Args:
+        error_count: What ``run_analysis`` returned.
+        strict: Abort the run instead of warning. Resolved from
+            ``strict_analysis`` (map > target > global).
+
+    Raises:
+        RuntimeError: ``strict`` is set and the analysis found errors.
+    """
+    if error_count <= 0:
+        return
+
+    if strict:
+        raise RuntimeError(
+            f"Post-conversion analysis found {error_count} error(s). "
+            "The .xodr and .mapping.json were written; set "
+            "strict_analysis=false to keep them and only warn."
+        )
+
+    logger.warning(
+        "Post-conversion analysis found %d error(s); output kept. "
+        "Set strict_analysis=true to fail instead.",
+        error_count,
+    )
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")

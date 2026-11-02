@@ -27,7 +27,6 @@ def test_a_clean_analysis_says_nothing() -> None:
     _act(0, strict=True)
 
 
-@pytest.mark.xfail(strict=True, reason="convert discards the analysis result")
 def test_analysis_errors_are_reported_when_not_strict(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -43,7 +42,6 @@ def test_analysis_errors_are_reported_when_not_strict(
     )
 
 
-@pytest.mark.xfail(strict=True, reason="convert discards the analysis result")
 def test_analysis_errors_abort_the_run_when_strict() -> None:
     """Strict must fail the process, as `analyze` already does."""
     with pytest.raises(RuntimeError, match="3"):
