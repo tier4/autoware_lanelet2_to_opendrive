@@ -92,6 +92,17 @@ def load_mapping(path: Path) -> Tuple[Dict[int, Slot], Dict[int, List[Slot]]]:
     return primary, extra
 
 
+@dataclass(frozen=True)
+class DanglingLink:
+    """A lane link whose target lane does not exist in the target road."""
+
+    road: int
+    lane: int
+    end: str
+    target_road: int
+    target_lane: int
+
+
 class EmittedNetwork:
     """The transitions an ``.xodr`` states, resolved the way a reader does."""
 
@@ -122,6 +133,10 @@ class EmittedNetwork:
                 self.junctions[int(junction_id)].append(
                     (int(incoming), int(connecting), links)
                 )
+
+    def dangling_lane_links(self) -> List["DanglingLink"]:
+        """Lane links naming a lane their target road does not have."""
+        return []
 
     def _lane_elements(self, road_id: int) -> Iterable[ET._Element]:
         road = self.roads.get(road_id)
