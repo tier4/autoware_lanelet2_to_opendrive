@@ -74,6 +74,16 @@ def _curving_spline(radius: float = 60.0, arc: float = 0.9, n: int = 120) -> Spl
     )
 
 
+def _straight_spline(length: float = 60.0, n: int = 121) -> Splines:
+    """Exactly straight, so the chord equals the arc length.
+
+    That is the one input for which the derived half turn is exactly zero,
+    and so the derived curvature exactly ``0.0``.
+    """
+    x = np.linspace(0.0, length, n)
+    return Splines(np.column_stack([x, np.zeros(n), np.zeros(n)]))
+
+
 def _record_end_xy(record) -> tuple:
     """Where the record itself ends, read the way a reader reads it."""
     if isinstance(record, Arc) and abs(record.curvature) > 1e-12:
@@ -232,4 +242,70 @@ def test_record_s_values_are_contiguous() -> None:
         f"the record s-domain steps by {worst:.3e} m at {where}, so every s "
         "past it -- the road's own @length included -- names a point the plan "
         "view does not reach"
+    )
+
+
+def test_a_zero_curvature_run_is_not_emitted_as_an_arc(monkeypatch) -> None:
+    """An ``<arc curvature="0">`` is a straight line written as a circle.
+
+    ``arc_through_spline_window`` derives the curvature from the window's own
+    chord, and ``_solve_half_turn`` returns exactly zero once the chord is
+    numerically not shorter than the arc length. That is reachable on real
+    output: the spline's ``s`` is an arc-length table, so a window whose
+    fitted curvature is above ``line_curvature_tol`` can still span a chord
+    that rounds up to its own length. Eight planView records on the 36k
+    lanelet customer map come out that way.
+
+    The result cannot be read. An arc's radius is ``1 / curvature``, so a
+    zero divides by zero: ASAM's own
+    ``lane.smoothness.contact_point_no_horizontal_gaps`` checker raises
+    ZeroDivisionError on that output and then reports nothing at all for the
+    whole map, and ``road.geometry.contact_point`` aborts beside it. Two of
+    26 checkers go silent over eight records.
+
+    The classifier's choice is not under test here. What is under test is
+    what the emitter does when the curvature it derives for an arc run turns
+    out to be zero -- which no tolerance on the classifier can prevent,
+    because the two quantities are measured differently.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive import geometry_classifier
+
+    spline = _straight_spline()
+    s_end = 10.0
+
+    # The ingredient, straight from the emitter's own constructor.
+    degenerate = Arc.from_spline_window(spline, 0.0, s_end, curvature=1e-3)
+    assert degenerate.curvature == 0.0, (
+        "this window is not degenerate, so the test would pass for the wrong " "reason"
+    )
+
+    monkeypatch.setattr(
+        geometry_classifier,
+        "classify_spline",
+        lambda *args, **kwargs: [ArcRun(s_start=0.0, s_end=s_end, curvature=1e-3)],
+    )
+
+    records = _build_planview_geometries(
+        spline,
+        parampoly3_config=ParamPoly3Config(),
+        arcspiral_config=ArcSpiralConfig(enabled=True),
+    )
+
+    zero_arcs = [
+        record
+        for record in records
+        if isinstance(record, Arc) and record.curvature == 0.0
+    ]
+    assert not zero_arcs, (
+        f"{len(zero_arcs)} of {len(records)} record(s) emitted as "
+        '<arc curvature="0">; a zero curvature is an infinite radius, which '
+        "is a <line>, and a reader taking 1 / curvature divides by zero"
+    )
+
+    # The demotion must not cost the continuity the rest of this file buys.
+    assert records, "the emitter produced no record for the window"
+    gap = math.dist(_record_end_xy(records[-1]), _spline_xy(spline, s_end))
+    assert gap < CONTINUITY_TOLERANCE_M, (
+        f"the record emitted in the arc's place ends {gap:.3e} m from the "
+        f"spline point at s={s_end}"
     )

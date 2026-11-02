@@ -355,9 +355,30 @@ def _build_planview_geometries(
         if isinstance(run, LineRun):
             out.append(Line.from_spline_window(spline, run.s_start, run.s_end))
         elif isinstance(run, ArcRun):
-            out.append(
-                Arc.from_spline_window(spline, run.s_start, run.s_end, run.curvature)
-            )
+            arc = Arc.from_spline_window(spline, run.s_start, run.s_end, run.curvature)
+            if arc.curvature == 0.0:
+                # A zero curvature is an infinite radius, which is a
+                # <line>. The curvature a record carries is derived from
+                # the window's chord, not taken from the classifier's
+                # kappa, and `_solve_half_turn` returns exactly zero once
+                # that chord is numerically not shorter than the arc
+                # length -- so a window the classifier accepted as an arc
+                # can still come out straight. Retuning the classifier
+                # cannot close this: the kappa it measures comes from the
+                # fitted derivative and the chord from the arc-length
+                # table, and the two disagree by more than the tolerance
+                # that decides the primitive.
+                #
+                # Emitting it as <arc curvature="0.0"> is not readable.
+                # An arc's radius is 1 / curvature, so ASAM's own
+                # lane.smoothness.contact_point_no_horizontal_gaps raises
+                # ZeroDivisionError on the file and reports nothing for
+                # the whole map, taking road.geometry.contact_point with
+                # it -- 2 of 26 checkers silenced by 8 records out of
+                # 124,000 on the customer map.
+                out.append(Line.from_spline_window(spline, run.s_start, run.s_end))
+            else:
+                out.append(arc)
         elif isinstance(run, ParamPoly3Run):
             # Re-use existing per-window splitting (CARLA min length).
             out.extend(_emit_paramPoly3_run(spline, run, pp3_cfg))
