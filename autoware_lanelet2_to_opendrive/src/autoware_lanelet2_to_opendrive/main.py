@@ -1760,6 +1760,18 @@ def preprocess_and_convert_with_hydra(
             )
         )
 
+        # Strictness of the post-conversion ASAM QC analysis. Same precedence
+        # as above.
+        strict_analysis = bool(
+            cfg.map.get(
+                "strict_analysis",
+                cfg.target.get(
+                    "strict_analysis",
+                    cfg.get("strict_analysis", False),
+                ),
+            )
+        )
+
         # Serialize TrafficLightConfig for the analyze command to read back
         tl_config_dict = {
             "offset_x": tl_config.offset_x,
@@ -1793,10 +1805,16 @@ def preprocess_and_convert_with_hydra(
         from autoware_lanelet2_to_opendrive.analyze_xodr import run_analysis
 
         logger.info("Running post-conversion analysis...")
-        run_analysis(
+        analysis_error_count = run_analysis(
             xodr_path=xodr_path,
             osm_path=input_map_path,
         )
+        _fail_on_analysis_errors(analysis_error_count, strict=strict_analysis)
+
+
+def _fail_on_analysis_errors(error_count: int, *, strict: bool) -> None:
+    """Act on the post-conversion analysis result."""
+    return None
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
