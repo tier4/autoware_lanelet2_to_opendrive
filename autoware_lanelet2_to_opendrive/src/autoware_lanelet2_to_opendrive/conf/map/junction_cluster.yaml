@@ -10,12 +10,11 @@
 # is laid out for it and reading it as right-hand traffic would invert the
 # relationship between each lanelet and its neighbours.
 
-# MGRS grid for map projection (REQUIRED)
-mgrs_grid: 54SUE
-offset:
-  x: 81655.73
-  y: 50137.43
-  z: 0
+# No origin keys: the coordinate frame comes from a map_projector_info.yaml
+# next to the .osm map, or failing that from the map's own node coordinates.
+# The fixture is built at the same origin the other urban fixtures use, so
+# deriving it from the nodes gives the same grid square the removed
+# 'mgrs_grid: 54SUE' named.
 
 traffic_rule: "LHT"
 

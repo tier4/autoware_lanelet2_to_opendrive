@@ -493,8 +493,8 @@ def test_converted_junction_fixture_satisfies_invariants(fanout_xodr: Path) -> N
     assert not violations, format_violations(violations)
 
 
-#: The one invariant Nishi-Shinjuku still breaks, tracked separately so the
-#: others stay enforced on it.  See
+#: The invariant Nishi-Shinjuku used to break, still named here because the
+#: two tests below measure it on its own.  See
 #: :func:`test_nishishinjuku_linked_endpoints_still_gap`.
 _KNOWN_NISHISHINJUKU_VIOLATION = "linked_endpoints_apart"
 
@@ -507,27 +507,33 @@ def test_nishishinjuku_output_satisfies_invariants(nishishinjuku_xodr: Path) -> 
     would be checked instead of the current converter, and in a fresh clone
     the check would simply not run.
 
-    ``linked_endpoints_apart`` is excluded and asserted separately, so that
-    the one invariant this map is known to break does not mask a regression
-    in any of the others.
+    Every invariant is enforced, ``linked_endpoints_apart`` included.  It
+    used to be excluded here and asserted separately, because this map broke
+    it; it no longer does (see :data:`_KNOWN_GAP_VIOLATIONS`), so excluding
+    it would only hide a reappearance.
     """
-    violations = [
-        v
-        for v in check_invariants(nishishinjuku_xodr)
-        if v.code != _KNOWN_NISHISHINJUKU_VIOLATION
-    ]
+    violations = check_invariants(nishishinjuku_xodr)
     assert not violations, format_violations(violations)
 
 
-#: What ``linked_endpoints_apart`` measures on Nishi-Shinjuku today: 22
-#: violations over 15 distinct joins (a join is reported from both sides when
-#: both ends name each other), the worst three at 0.071 m.  Both figures are
-#: ceilings in :func:`test_nishishinjuku_linked_endpoints_do_not_get_worse`,
-#: not just prose: an ``xfail`` is satisfied by a single violation, so without
-#: them a change that turned 22 sub-decimetre gaps into 300 gaps and one 50 m
-#: disconnection would leave this file entirely green.
-_KNOWN_GAP_VIOLATIONS = 22
-_KNOWN_GAP_WORST_M = 0.071
+#: What ``linked_endpoints_apart`` measures on Nishi-Shinjuku.  It used to be
+#: 22 violations over 15 distinct joins (a join is reported from both sides
+#: when both ends name each other), the worst three at 0.071 m.  With the
+#: junction endpoint work merged it is **zero**: measured over all 215 joins
+#: with the tolerance dropped to 0, the worst gap is 0.005 m against the 0.01
+#: m tolerance.
+#:
+#: Both figures are ceilings in
+#: :func:`test_nishishinjuku_linked_endpoints_do_not_get_worse`, not just
+#: prose: an ``xfail`` is satisfied by a single violation, so without them a
+#: change that turned 22 sub-decimetre gaps into 300 gaps and one 50 m
+#: disconnection would leave this file entirely green.  Now that the count is
+#: 0 the magnitude ceiling can no longer fire on its own -- the count
+#: assertion reaches a reappearing gap first.  Pinning the worst gap *within*
+#: tolerance, which is where a regression shows up first, would need
+#: ``check_invariants`` to take the tolerance as a parameter.
+_KNOWN_GAP_VIOLATIONS = 0
+_KNOWN_GAP_WORST_M = 0.005
 
 
 def _endpoint_gaps(xodr: Path) -> List[Violation]:
@@ -578,26 +584,19 @@ def test_nishishinjuku_linked_endpoints_do_not_get_worse(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "linked road endpoints on Nishi-Shinjuku are still up to 0.071 m "
-        "apart against a 0.01 m tolerance (22 violations over 15 joins); the "
-        "junction endpoint work is what closes this"
-    ),
-)
 def test_nishishinjuku_linked_endpoints_still_gap(nishishinjuku_xodr: Path) -> None:
-    """Pin the gap this map has, so closing it is visible as a change.
+    """The gaps this map used to have are closed; hold them closed.
 
-    Measured on the current converter: 22 violations over 15 distinct joins
-    past the 1 cm tolerance, the worst three at 0.071 m.  Marked ``strict``,
-    so the day the gaps close this test fails and the marker has to go -- the
-    defect cannot be fixed silently.
+    This was a ``strict`` ``xfail`` pinning 22 violations over 15 distinct
+    joins past the 1 cm tolerance, the worst three at 0.071 m, with the note
+    that "the day the gaps close this test fails and the marker has to go --
+    the defect cannot be fixed silently".  With the junction endpoint work
+    merged the day came: it reports zero violations, so the marker is gone
+    and the assertion stands on its own.
 
-    An ``xfail`` is satisfied by *any* violation, so this test alone would not
-    notice the gap getting worse.
-    :func:`test_nishishinjuku_linked_endpoints_do_not_get_worse` is the other
-    half, and it is deliberately not marked ``xfail``.
+    The worst gap over all 215 joins is now 0.005 m, measured by dropping
+    ``LINKED_ENDPOINT_TOLERANCE_M`` to 0 -- a 14x improvement on 0.071 m, and
+    inside the tolerance rather than seven times it.
     """
     violations = _endpoint_gaps(nishishinjuku_xodr)
     assert not violations, format_violations(violations)

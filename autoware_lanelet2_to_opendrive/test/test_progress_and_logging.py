@@ -15,18 +15,36 @@ from typing import Any, Dict
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 
 
-class _ExplodingRoad:
-    """The smallest thing ``set_all_lane_links`` will walk over.
+class _EmptyMap:
+    """A lanelet map with no lanelets.
 
-    ``set_lane_links`` raises, which is the case the production code catches
-    and reports. Nothing here needs a real Lanelet2 map: the map and the
-    routing graph are only put into the context object that
-    ``set_lane_links`` is handed, and this one never looks at it.
+    ``set_all_lane_links`` builds a boundary-adjacency index over the whole
+    ``laneletLayer`` before it reaches the per-road loop, so ``None`` no
+    longer gets that far. An empty layer makes every map-wide pass a no-op,
+    which is what this test wants: it is about the per-road exception, not
+    about any map.
     """
 
-    def __init__(self, road_id: int) -> None:
-        self.id = road_id
-        self.lanes = None
+    def __init__(self) -> None:
+        self.laneletLayer: list = []
+
+
+class _ExplodingRoad(Road):
+    """A real ``Road`` whose lane-link resolution raises.
+
+    ``set_lane_links`` raising is the case the production code catches and
+    reports; everything else about this road has to be ordinary. It subclasses
+    ``Road`` rather than standing in for it because ``set_all_lane_links``
+    reads a growing set of attributes before it reaches the call that raises
+    (``exit_fork_duplicate``, ``chain_source_lanelet_ids``, ...), each added
+    by a different branch. A hand-rolled fake has to be taught each one, and
+    is taught it by a failing test on somebody else's branch; a subclass gets
+    ``Road``'s own defaults for free.
+
+    Nothing here needs a real Lanelet2 map: the map and the routing graph are
+    only put into the context object ``set_lane_links`` is handed, and this
+    one never looks at it.
+    """
 
     def get_lanelet_to_lane_mapping(self) -> Dict[int, int]:
         return {}
@@ -45,12 +63,12 @@ def test_lane_link_failure_is_reported_through_logging(
     report has to be observable; today it goes to stderr via ``tqdm.write``
     and leaves no record a handler can see.
     """
-    road = _ExplodingRoad(road_id=4242)
+    road = _ExplodingRoad(id=4242)
 
     with caplog.at_level(logging.WARNING):
         mapping = Road.set_all_lane_links(
-            lanelet_map=None,
-            roads=[road],  # type: ignore[list-item]
+            lanelet_map=_EmptyMap(),  # type: ignore[arg-type]
+            roads=[road],
             routing_graph=object(),  # not None, so no graph is constructed
         )
 

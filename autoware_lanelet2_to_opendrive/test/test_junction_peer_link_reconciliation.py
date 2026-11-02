@@ -16,11 +16,8 @@ reports: 20 findings on Nishishinjuku before the fix.
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 
 import lxml.etree as ET
-import pytest
 
 from autoware_lanelet2_to_opendrive.direct_junction_completion import (
     _dangling_road_link_peer,
@@ -157,39 +154,13 @@ def test_ignores_a_connecting_road_as_the_peer():
 # --- end-to-end regression --------------------------------------------------
 
 
-@pytest.fixture(scope="session")
-def nishishinjuku_xodr(tmp_path_factory) -> Path:
-    """Convert the Nishishinjuku fixture once per session and return the XODR.
-
-    Only an end-to-end conversion exercises the pass this fix lives in. As in
-    ``test_outgoing_junction_links.py``, the output goes to a fresh temp
-    directory so the assertions can never read an XODR left behind by an
-    earlier checkout.
-    """
-    fixture = Path(
-        "autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm"
-    ).resolve()
-    if not fixture.is_file():
-        pytest.skip(f"{fixture} not available; cannot build XODR")
-
-    xodr_path = tmp_path_factory.mktemp("junction_peer_links") / "nishishinjuku.xodr"
-    cmd = [
-        "uv",
-        "run",
-        "convert",
-        "map=nishishinjuku",
-        "target=carla",
-        f"input_map_path={fixture}",
-        f"output_map_path={xodr_path}",
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError as exc:
-        pytest.skip(f"converter unavailable: {exc}")
-
-    if not xodr_path.is_file():
-        pytest.fail(f"converter exited successfully but {xodr_path} was not produced")
-    return xodr_path
+# The conversion comes from the session-scoped ``nishishinjuku_xodr`` fixture
+# in ``conftest.py``. This module used to carry its own copy, which skipped
+# when the source map or the converter was missing -- the construct
+# ``test_fixture_dependent_tests_never_skip`` exists to refuse, because a
+# test that needs the artifact must run or fail rather than disappear from
+# the count. The shared fixture fails instead, and converts once per
+# invocation for every module that asks.
 
 
 def _lane_sections(road):
