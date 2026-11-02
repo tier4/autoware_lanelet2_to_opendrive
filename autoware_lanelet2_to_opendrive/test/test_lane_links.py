@@ -1,6 +1,7 @@
 """Tests for lane predecessor and successor link functionality."""
 
 import lanelet2
+import pytest
 from autoware_lanelet2_to_opendrive.conversion_config import LaneLinksContext
 from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint, ElementType
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
@@ -377,3 +378,47 @@ def test_lane_predecessor_outside_the_linked_road_is_not_emitted():
     connecting.set_lane_links(context)
 
     assert _links(connecting)[-3] == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# _find_closest_lane
+#
+# The fallback that rescues a link when the target road has fewer lanes than
+# the source. It had no tests at all, and two of the three cases below are
+# about what it must *not* invent: a lane id's sign is which side of the
+# reference line it sits on, so a lane on the other side travels the other
+# way and cannot be the continuation of this one.
+#
+# Neither of the two unreachable cases is observed on the shipped maps --
+# every one of the 711 roads of the nishishinjuku output carries positive ids
+# only, so no search ever sees a mixed or empty candidate set. They are
+# pinned because the function is a public-shaped static method whose only
+# stated contract is a docstring example.
+# ---------------------------------------------------------------------------
+
+
+def test_closest_lane_takes_the_nearest_lane_on_the_same_side():
+    """The documented case: three lanes merging into two."""
+    assert Road._find_closest_lane(-3, [-1, -2]) == -2
+    assert Road._find_closest_lane(3, [1, 2]) == 2
+
+
+def test_closest_lane_breaks_a_tie_on_the_sorted_order():
+    """Equidistant candidates resolve to the first, so the output is stable."""
+    assert Road._find_closest_lane(-2, [-3, -1]) == Road._find_closest_lane(
+        -2, [-3, -1]
+    )
+    assert Road._find_closest_lane(-2, sorted([-1, -3])) == -3
+
+
+@pytest.mark.xfail(strict=True, reason="the closest-lane fallback invents a lane")
+def test_closest_lane_does_not_cross_the_reference_line():
+    """A target road with lanes only on the other side has no continuation."""
+    assert Road._find_closest_lane(-1, [1, 2]) is None
+    assert Road._find_closest_lane(2, [-1, -2]) is None
+
+
+@pytest.mark.xfail(strict=True, reason="the closest-lane fallback invents a lane")
+def test_closest_lane_invents_nothing_when_the_target_road_has_no_lanes():
+    """Returning a lane id here would be a link to a lane that does not exist."""
+    assert Road._find_closest_lane(-1, []) is None
