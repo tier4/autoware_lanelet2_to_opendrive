@@ -1512,18 +1512,11 @@ def preprocess_and_convert_with_hydra(
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
 
-    # Check if any preprocessing operations are configured
-    has_preprocessing = any(
-        [
-            config.merge_operations,
-            config.remove_operations,
-            config.replace_operations,
-            config.move_point_operations,
-            config.delete_point_operations,
-            config.remove_lanelet_operations,
-            config.remove_turn_direction_operations,
-        ]
-    )
+    # Check if any preprocessing operations are configured. Derived from
+    # OPERATION_TYPES rather than restated here: the list this replaced had
+    # fallen out of step with it and omitted validate_operations, so a
+    # validate-only config ran no preprocessing at all.
+    has_preprocessing = config.has_operations
 
     # TransverseMercator is not yet supported together with preprocessing:
     # the preprocessing pipeline's coordinate handling has only been
