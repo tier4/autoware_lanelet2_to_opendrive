@@ -570,8 +570,19 @@ class SignalsAndControllers:
 
         try:
             if reference_line is None:
+                # The road's own rule, not ReferenceLine's RHT default: the
+                # `s` computed here is written next to a planView fitted with
+                # `road.rule`, and the two rules select different boundaries,
+                # so a default measures the signal along a curve the road does
+                # not have.
                 reference_line = ReferenceLine.construct_from_lanelet_groups(
-                    lanelet_map, lanelets, routing_graph=routing_graph, offset=offset
+                    lanelet_map,
+                    lanelets,
+                    routing_graph=routing_graph,
+                    offset=offset,
+                    traffic_rule=(
+                        road.rule.value if road is not None and road.rule else None
+                    ),
                 )
                 # Only successful fits are cached, so a road whose fit raises
                 # still warns and falls back once per signal — identical to
