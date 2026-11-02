@@ -372,7 +372,6 @@ def test_the_traffic_rule_changes_the_reference_line(lanelet_map):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="signal s is measured along an RHT fit")
 def test_signal_position_uses_the_road_s_own_traffic_rule(lanelet_map):
     """A signal's ``s`` must be measured along its own road's reference line.
 
