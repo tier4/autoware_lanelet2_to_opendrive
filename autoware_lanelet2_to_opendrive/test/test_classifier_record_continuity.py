@@ -245,11 +245,6 @@ def test_record_s_values_are_contiguous() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the emitter passes a derived curvature of 0.0 straight into "
-    "<arc>, which aborts two of the 26 ASAM checkers",
-)
 def test_a_zero_curvature_run_is_not_emitted_as_an_arc(monkeypatch) -> None:
     """An ``<arc curvature="0">`` is a straight line written as a circle.
 
