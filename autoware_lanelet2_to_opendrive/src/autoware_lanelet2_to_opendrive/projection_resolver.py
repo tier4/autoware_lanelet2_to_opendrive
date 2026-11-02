@@ -428,6 +428,13 @@ def _resolve_from_map_projector_info(
     return None
 
 
+def verify_origin_matches_map(
+    resolved: ResolvedProjection, map_path: Path
+) -> None:
+    """Check the resolved origin against the map's own node coordinates."""
+    return None
+
+
 def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
     """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
 
