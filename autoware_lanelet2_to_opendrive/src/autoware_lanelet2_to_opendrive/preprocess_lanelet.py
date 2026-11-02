@@ -338,11 +338,23 @@ class PreprocessOperation:
         """Validate that origin is specified correctly after initialization."""
         self._validate_origin()
 
+    @property
+    def has_operations(self) -> bool:
+        """Whether any preprocessing operation is configured.
+
+        Reads every key in :data:`OPERATION_TYPES`, so a newly added
+        operation is counted here without a second list having to be kept in
+        step.
+        """
+        return any(getattr(self, name, None) for name in OPERATION_TYPES)
+
     def _validate_origin(self) -> None:
         """Validate the origin specification, which is optional.
 
         Only the ambiguous case is rejected. Declaring neither is fine: the
-        origin never reaches the coordinates (see the class docstring).
+        origin never reaches the coordinates (see the class docstring) --
+        which subsumes the narrower "only when an operation needs one" rule
+        the other branch arrived at.
 
         Raises:
             ValueError: If both mgrs_code and origin are specified.
