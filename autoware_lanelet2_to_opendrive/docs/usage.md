@@ -5,7 +5,7 @@ to convert Lanelet2 maps to OpenDRIVE format.
 
 ## Console Scripts
 
-The package registers five console scripts (see `[project.scripts]` in
+The package registers six console scripts (see `[project.scripts]` in
 [`pyproject.toml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/pyproject.toml)):
 
 | Script | Purpose |
@@ -14,6 +14,7 @@ The package registers five console scripts (see `[project.scripts]` in
 | `preprocess-lanelet` | Run preprocessing operations only (argparse CLI) |
 | `analyze` | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | Run ASAM QC checker on an existing `.xodr` |
+| `route-fidelity` | Check the `.xodr` states the lane successions the map states |
 | `carla-import-test` | Smoke-test loading the `.xodr` in a running CARLA server |
 
 Run them via `uv run <script>` (or `<script>` directly inside an active venv).
@@ -299,6 +300,32 @@ cross-check).
 ```
 qc-validate <xodr_file> [--output FILE] [--no-default-ignores] [...]
 ```
+
+## `route-fidelity`
+
+Compares the lane-to-lane successions the source Lanelet2 map states with the
+transitions the emitted `.xodr` states. `analyze` cross-checks that each
+lanelet reached *a* road; this checks that the *connections between* them
+survived, which is what a planner reads.
+
+```
+route-fidelity <map.osm> <file.xodr> [mapping.json] [--json]
+```
+
+The mapping argument is the conversion's `*.mapping.json` sidecar; it
+defaults to the `.xodr` path with `.mapping.json` in place of its suffix,
+which is where `convert` writes it.
+
+The report separates three things a bare "lost routes" count conflates:
+
+- **missing** -- a succession the map states that the file does not. These are
+  the losses.
+- **internal** -- both lanelets were emitted as the same `(road, lane)`, so
+  there is no boundary to carry a link. Not a loss.
+- **walked through** -- a road with no backing lanelet, i.e. a synthetic
+  connector inserted where the map states a succession directly. These are
+  followed rather than counted, because counting them reports every connector
+  as a transition the map never stated.
 
 ## `carla-import-test`
 

@@ -548,7 +548,7 @@ against a fresh geometric reprojection. The relevant public API:
 
 ## Console scripts
 
-The package exposes five `[project.scripts]` entry points (run via
+The package exposes six `[project.scripts]` entry points (run via
 `uv run <name>` or directly inside an active venv):
 
 | Script | Module | Purpose |
@@ -557,6 +557,7 @@ The package exposes five `[project.scripts]` entry points (run via
 | `preprocess-lanelet` | `autoware_lanelet2_to_opendrive.preprocess_lanelet:main` | Apply preprocessing operations and write a new `.osm` (argparse CLI) |
 | `analyze` | `autoware_lanelet2_to_opendrive.analyze_xodr:main` | ASAM QC + geometric cross-validation of the persisted lanelet → road mapping |
 | `qc-validate` | `autoware_lanelet2_to_opendrive.qc_validate:main` | ASAM QC checker only — useful when no source `.osm` is available |
+| `route-fidelity` | `autoware_lanelet2_to_opendrive.route_fidelity:main` | Compare the lane successions the map states with the transitions emitted |
 | `carla-import-test` | `autoware_lanelet2_to_opendrive.carla_import_test:main` | Smoke-test importing the `.xodr` into a running CARLA server |
 
 See [Usage Guide](usage.md) for full flag reference.
