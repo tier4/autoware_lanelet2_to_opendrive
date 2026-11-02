@@ -1,22 +1,23 @@
 """The resolved origin must belong to the map it is resolved for.
 
-Nothing compares the origin against the map. A preset copied to a new map,
-or a `map_projector_info.yaml` left behind from another one, resolves without
-complaint and the conversion runs to completion: every coordinate is written
-in a frame that is wrong by whole MGRS squares, and the only visible symptom
-is the `geoReference` -- which no gate we own reads.
+Nothing compared the origin against the map. A preset copied to a new map, or
+a `map_projector_info.yaml` left behind from another one, resolved without
+complaint and the conversion ran to completion: every coordinate written in a
+frame that is wrong by whole MGRS squares, with the `geoReference` as the only
+symptom, and no gate we own reads it.
 
-The map's node lat/lon is the one thing always present (the `mgrs_code` tag
-is optional), so the check is built on it: the configured grid must be a grid
-the map's own nodes fall in.
+The map's node lat/lon is the basis, because it is the one thing always
+present -- the `mgrs_code` tag is optional, so it is not consulted.
 """
 
 from pathlib import Path
 
+import lanelet2
 import pytest
 from omegaconf import OmegaConf
 
 from autoware_lanelet2_to_opendrive.projection_resolver import (
+    ResolvedProjection,
     resolve_projection,
     verify_origin_matches_map,
 )
@@ -41,8 +42,20 @@ def _osm(tmp_path: Path, name: str, points) -> Path:
     return path
 
 
-def _resolved(map_dict, map_path: Path):
-    return resolve_projection(OmegaConf.create({"map": map_dict}), map_path)
+def _resolved(map_dict, map_path: Path, *, check: bool = False):
+    """Resolve, with the automatic check off unless a test wants it.
+
+    The tests that exercise :func:`verify_origin_matches_map` directly need a
+    resolved frame to hand it, which they cannot get while resolution itself
+    rejects the mismatch.
+    """
+    cfg = OmegaConf.create({"map": dict(map_dict, check_origin_against_map=check)})
+    return resolve_projection(cfg, map_path)
+
+
+# ---------------------------------------------------------------------------
+# The check itself
+# ---------------------------------------------------------------------------
 
 
 def test_an_origin_in_the_map_s_own_grid_is_accepted(tmp_path: Path) -> None:
@@ -65,7 +78,6 @@ def test_a_higher_precision_grid_is_compared_on_its_prefix(tmp_path: Path) -> No
     verify_origin_matches_map(resolved, osm)
 
 
-@pytest.mark.xfail(strict=True, reason="nothing compares the origin with the map")
 def test_an_origin_from_another_square_is_rejected(tmp_path: Path) -> None:
     """A grid the map's nodes do not fall in must stop the conversion."""
     osm = _osm(tmp_path, "tokyo.osm", [TOKYO])
@@ -76,28 +88,40 @@ def test_an_origin_from_another_square_is_rejected(tmp_path: Path) -> None:
         verify_origin_matches_map(resolved, osm)
 
 
-@pytest.mark.xfail(strict=True, reason="nothing compares the origin with the map")
-def test_a_lat_lon_origin_far_from_the_map_is_rejected(tmp_path: Path) -> None:
-    """Without a grid the origin itself has to sit near the map."""
+def test_a_lat_lon_origin_is_checked_through_the_grid_it_resolves_to(
+    tmp_path: Path,
+) -> None:
+    """Under the MGRS projector a ``lat_lon`` origin still yields a grid."""
     osm = _osm(tmp_path, "tokyo.osm", [TOKYO])
     with pytest.warns(DeprecationWarning):
         resolved = _resolved(
             {"lat_lon": {"latitude": OSAKA[0], "longitude": OSAKA[1]}}, osm
         )
 
-    with pytest.raises(ValueError, match="34.69"):
+    assert resolved.mgrs_code == "53SNU"
+    with pytest.raises(ValueError, match="53SNU"):
         verify_origin_matches_map(resolved, osm)
 
 
-def test_a_lat_lon_origin_inside_the_map_is_accepted(tmp_path: Path) -> None:
-    """The ordinary case: the origin is a point of the map."""
-    osm = _osm(tmp_path, "tokyo.osm", [TOKYO, (35.69, 139.70)])
-    with pytest.warns(DeprecationWarning):
-        resolved = _resolved(
-            {"lat_lon": {"latitude": TOKYO[0], "longitude": TOKYO[1]}}, osm
+def test_an_origin_without_a_grid_is_checked_on_its_coordinates(
+    tmp_path: Path,
+) -> None:
+    """The Transverse Mercator frame carries no grid, only the origin itself."""
+    osm = _osm(tmp_path, "tokyo.osm", [TOKYO])
+
+    def _frame(lat: float, lon: float) -> ResolvedProjection:
+        return ResolvedProjection(
+            origin=lanelet2.io.Origin(lat, lon),
+            mgrs_code=None,
+            origin_lat=lat,
+            origin_lon=lon,
+            scale_factor=0.9996,
+            projector_type="TransverseMercator",
         )
 
-    verify_origin_matches_map(resolved, osm)
+    verify_origin_matches_map(_frame(*TOKYO), osm)
+    with pytest.raises(ValueError, match="135.5"):
+        verify_origin_matches_map(_frame(*OSAKA), osm)
 
 
 def test_a_map_with_no_readable_nodes_is_not_rejected(tmp_path: Path) -> None:
@@ -122,3 +146,30 @@ def test_the_shipped_fixture_passes_its_own_preset() -> None:
         resolved = _resolved({"mgrs_grid": "54SUE"}, fixture)
 
     verify_origin_matches_map(resolved, fixture)
+
+
+# ---------------------------------------------------------------------------
+# Wiring
+# ---------------------------------------------------------------------------
+
+
+def test_resolution_itself_rejects_a_mismatched_origin(tmp_path: Path) -> None:
+    """The check runs during resolution, before anything is converted."""
+    osm = _osm(tmp_path, "tokyo.osm", [TOKYO])
+    cfg = OmegaConf.create({"map": {"mgrs_grid": "53SNU"}})
+
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="53SNU"):
+        resolve_projection(cfg, osm)
+
+
+def test_the_check_can_be_turned_off(tmp_path: Path) -> None:
+    """`check_origin_against_map=false` resolves the mismatch anyway."""
+    osm = _osm(tmp_path, "tokyo.osm", [TOKYO])
+    cfg = OmegaConf.create(
+        {"map": {"mgrs_grid": "53SNU", "check_origin_against_map": False}}
+    )
+
+    with pytest.warns(DeprecationWarning):
+        resolved = resolve_projection(cfg, osm)
+
+    assert resolved.mgrs_code == "53SNU"
