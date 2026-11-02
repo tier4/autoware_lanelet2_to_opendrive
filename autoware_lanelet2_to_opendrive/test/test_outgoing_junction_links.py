@@ -9,6 +9,7 @@ the routing graph to restore the missing junction predecessor link.
 """
 
 import lxml.etree as ET
+import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.enums import ElementType
 from autoware_lanelet2_to_opendrive.opendrive.road import (
@@ -172,6 +173,76 @@ def test_no_driving_road_is_emitted_topologically_orphaned(nishishinjuku_xodr):
     assert orphans == [], (
         f"drivable non-junction roads emitted with no predecessor/successor "
         f"link: {orphans}"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="9 drivable roads on Nishishinjuku claim a junction that names "
+    "them in no <connection> and carry no <link>, so nothing in the file "
+    "reaches them; the fix is a design decision, see the docstring",
+)
+def test_no_driving_road_is_unreachable(nishishinjuku_xodr):
+    """The invariant above, without the exclusion that hides its own population.
+
+    ``test_no_driving_road_is_emitted_topologically_orphaned`` skips every
+    road whose ``junction`` is not ``-1``. That exclusion is reasonable on its
+    face -- a connecting road is reached through its junction, not through a
+    road link -- but it is only true when a ``<connection>`` names the road.
+    A road that claims a junction and appears in no connection is reached
+    through neither, and the filter removes exactly that population from the
+    check. The invariant therefore reads as satisfied while the roads it
+    exists to forbid are present.
+
+    A road is reachable here if it carries a road ``<link>`` with at least one
+    side, or some junction's ``<connection>`` names it as a ``connectingRoad``.
+
+    Measured: **9 drivable roads on Nishishinjuku** (380, 381, 409, 420, 436,
+    445, 696, 697, 698) and **70 on the 36,249-lanelet customer map**
+    (11.1-132.6 m each, p50 42.7 m, 67 with a driving lane, no lane ``<link>``
+    at all) satisfy neither. On the customer map 462 of 8,200 connecting roads
+    (5.6%, 18.3 km) appear in no connection; those 70 are the ones that also
+    have no road link.
+
+    The cause is largely the source map and is not ours: by Lanelet2's own
+    definition of connectivity -- a predecessor's boundary end points being
+    this lanelet's start points -- 95 of the 107 lanelets behind those 70
+    roads share their start points with nothing, so there is no incoming
+    movement to emit a connection from.
+
+    What to *do* is a design decision, which is why this is an xfail and not
+    a fix:
+
+    * Writing ``junction="-1"`` is **not** an option. It satisfies this test's
+      letter and breaks the test above: these roads become drivable
+      non-junction roads with no links, which is the shape #494 Part A
+      forbids. Measured -- it turns the 9 above into 9 failures there.
+    * Not emitting them keeps both invariants but silently drops real
+      pavement from the map, and removes its lanelets from the mapping.
+    * Emitting a connection needs an incoming road, which for 95 of 107 does
+      not exist.
+    """
+    tree = ET.parse(str(nishishinjuku_xodr))
+
+    backed = {
+        connection.get("connectingRoad")
+        for connection in tree.iterfind(".//junction/connection")
+    }
+
+    unreachable = []
+    for road in tree.iterfind(".//road"):
+        if not _is_driving_road(road):
+            continue
+        link = road.find("link")
+        has_link = link is not None and (
+            link.find("predecessor") is not None or link.find("successor") is not None
+        )
+        if has_link or road.get("id") in backed:
+            continue
+        unreachable.append(road.get("id"))
+
+    assert unreachable == [], (
+        "drivable roads that no <link> and no <connection> reaches: " f"{unreachable}"
     )
 
 
