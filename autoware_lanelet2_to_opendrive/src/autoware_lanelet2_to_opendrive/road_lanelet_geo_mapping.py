@@ -482,7 +482,44 @@ def _build_boundary_grid(
             for cell_y in range(int(box[1] // cell_size), int(box[3] // cell_size) + 1):
                 cells.setdefault((cell_x, cell_y), []).append(position)
 
-    return _BoundaryGrid(cell_size=cell_size, cells=cells, lids=lids, boxes=boxes)
+    grid = _BoundaryGrid(cell_size=cell_size, cells=cells, lids=lids, boxes=boxes)
+    _log_grid_dimensions(grid)
+    return grid
+
+
+def _log_grid_dimensions(grid: _BoundaryGrid) -> None:
+    """Report how coarse the grid turned out.
+
+    The cell is the largest bounding-box extent in the pool, so one long
+    boundary sizes it for everything -- and the cell size decides how many
+    boundaries a query returns. The occupancy is reported alongside it
+    because the size on its own does not say whether the grid separates
+    anything: a pool that lands in one cell is a linear scan wearing a grid.
+
+    The work the candidates feed into is bounded by the querying road's own
+    bounding box, so a coarse grid does not show up as a slowdown until the
+    map's extent grows -- at which point it arrives as a cliff. This line is
+    what makes that visible beforehand.
+    """
+    if not grid.lids:
+        logger.info("Boundary grid: empty pool")
+        return
+
+    extent_x = max(box[2] for box in grid.boxes) - min(box[0] for box in grid.boxes)
+    extent_y = max(box[3] for box in grid.boxes) - min(box[1] for box in grid.boxes)
+    entries = sum(len(positions) for positions in grid.cells.values())
+    per_cell = entries / len(grid.cells) if grid.cells else 0.0
+
+    logger.info(
+        "Boundary grid: %d boundaries, cell %.1f m, %d cell(s) occupied over a "
+        "%.0f x %.0f m extent, %.1f boundaries per occupied cell",
+        len(grid.lids),
+        grid.cell_size,
+        len(grid.cells),
+        extent_x,
+        extent_y,
+        per_cell,
+    )
 
 
 def _grid_candidate_positions(
