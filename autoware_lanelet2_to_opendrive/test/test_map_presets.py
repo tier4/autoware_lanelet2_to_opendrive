@@ -3,7 +3,7 @@
 ``conf/map/example*.yaml`` exist to be copied by someone starting a new map,
 so a preset that cannot complete a conversion is worse than no preset: it is
 a worked example of something that does not work. Nothing in the suite ran
-them, and one of the three does not survive startup.
+them, and one of them does not survive startup.
 
 The fixture is ``walkway_mini.osm`` because it is the smallest map in the
 tree and this test is about the configuration, not the geometry. The
@@ -27,12 +27,21 @@ FIXTURE = (Path(__file__).parent / "data" / "walkway_mini.osm").resolve()
 
 EXAMPLE_PRESETS = sorted(path.stem for path in CONF_MAP.glob("example*.yaml"))
 
+# The presets a copy-and-edit starting point cannot do without: one plain and
+# one carrying an offset. They are named rather than counted because a count
+# is a second place to remember. A preset added for a new projection would
+# have to bump it, and a preset retired would turn this guard red while
+# nothing was wrong -- which is what happened when the legacy origin keys
+# went away and took ``example_latlon.yaml`` with them.
+REQUIRED_PRESETS = ("example", "example_mgrs_offset")
+
 
 def test_the_example_presets_are_discovered() -> None:
     """Guard the parametrisation: an empty glob would vacuously pass."""
-    assert len(EXAMPLE_PRESETS) >= 3, (
-        f"expected at least three example presets under {CONF_MAP},"
-        f" found {EXAMPLE_PRESETS}"
+    missing = [preset for preset in REQUIRED_PRESETS if preset not in EXAMPLE_PRESETS]
+    assert not missing, (
+        f"expected the example presets {list(REQUIRED_PRESETS)} under {CONF_MAP},"
+        f" found {EXAMPLE_PRESETS}, missing {missing}"
     )
 
 
