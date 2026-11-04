@@ -14,6 +14,7 @@ from typing import (
     Literal,
     Hashable,
     Mapping,
+    Sequence,
 )
 from enum import Enum
 from dataclasses import dataclass
@@ -634,6 +635,50 @@ def is_boundary_attached_lanelet(lanelet: lanelet2.core.Lanelet) -> bool:
     See :data:`BOUNDARY_ATTACHED_LANELET_SUBTYPES`.
     """
     return lanelet_subtype(lanelet) in BOUNDARY_ATTACHED_LANELET_SUBTYPES
+
+
+def reference_lanelet_index(
+    sorted_lanelets: Sequence[lanelet2.core.Lanelet],
+    *,
+    is_lht: bool,
+) -> int:
+    """Index of the lanelet whose boundary becomes the road reference line.
+
+    ``sorted_lanelets`` is left-to-right, as returned by
+    :func:`sort_adjacent_groups`. The reference line is the outer boundary of
+    the group's outermost lanelet: its ``rightBound`` at the right-hand end
+    for LHT, its ``leftBound`` at the left-hand end for RHT.
+
+    "Outermost" skips the lanelets
+    :func:`attach_boundary_adjacent_lanelets` put into the group, because
+    whether such a lanelet is present is a property of the map at that place
+    and not of the route. A footway that runs beside a carriageway for part
+    of its length would otherwise carry the reference line where it exists
+    and hand it back where it stops, moving the reference line sideways by
+    its own width at a contact the vehicle ``road -> road`` link says is
+    continuous -- the ``road.geometry.contact_point`` error. The boundary
+    between the carriageway and whatever is beyond it does not move that way.
+
+    A group with no vehicle lanelet at all -- a footpath emitted as its own
+    road -- has no carriageway edge to prefer, so it keeps the outermost
+    lanelet of any subtype.
+
+    The lanelets outside the returned index lie on the other side of the
+    reference line and become lanes with the opposite sign (see
+    :meth:`LaneSection.construct_from_lanelet_groups`).
+    """
+    if not sorted_lanelets:
+        raise ValueError("sorted_lanelets must not be empty")
+
+    order = (
+        range(len(sorted_lanelets) - 1, -1, -1)
+        if is_lht
+        else range(len(sorted_lanelets))
+    )
+    for index in order:
+        if not is_boundary_attached_lanelet(sorted_lanelets[index]):
+            return index
+    return len(sorted_lanelets) - 1 if is_lht else 0
 
 
 def build_boundary_lateral_adjacency(

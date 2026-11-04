@@ -181,27 +181,52 @@ class LaneSection:
         # Create lanes and collect them for road mark assignment
         lanes_built: List["Lane"] = []
 
-        # For RHT: lanes are in the right section with negative IDs (-1, -2, ...)
-        #   sorted_lanelets[0] = innermost (adjacent to reference line) → lane -1
-        # For LHT: lanes are in the left section with positive IDs (+1, +2, ...)
-        #   sorted_lanelets[-1] = innermost (adjacent to reference line) → lane +1
-        #   Iteration is reversed so the innermost lanelet gets the smallest positive ID.
-        is_lht = traffic_rule_normalized == "LHT"
-        lanelets_ordered = (
-            list(reversed(sorted_lanelets)) if is_lht else sorted_lanelets
-        )
+        # The reference line is the outer boundary of the lanelet at
+        # ``reference_index`` — the outermost VEHICLE lanelet, not simply
+        # the outermost one (see ``util.reference_lanelet_index``).  Lane ids
+        # count outward from the reference line in both directions, which is
+        # the OpenDRIVE convention: positive to its left, negative to its
+        # right.
+        #
+        # For RHT the lanes inward of the reference line are to its right and
+        # take negative ids (-1, -2, ...); for LHT they are to its left and
+        # take positive ids (+1, +2, ...).  A lanelet BEYOND the reference
+        # index — one that ``attach_boundary_adjacent_lanelets`` put into
+        # the group and that sorts outside the carriageway — lies on the
+        # other side of the reference line and takes the opposite sign.  When
+        # there is no such lanelet the outer side is empty and every lane
+        # keeps the id it had before this rule existed.
+        from ..util import reference_lanelet_index
 
-        # The OUTERMOST lanelet is the one whose anchor boundary became the
-        # reference line.  For RHT that is sorted_lanelets[0] (leftmost) and
-        # in lanelets_ordered it is at index 0.  For LHT the rightmost
-        # lanelet is the reference; lanelets_ordered is reversed, so it is
-        # also at index 0.  Only this lanelet's anchor boundary endpoints
-        # are pinned to the regular-road overrides — inner lanelets share
-        # boundaries with neighbours and must keep their original positions
-        # so cumulative widths still close on the outer side.
-        for i, lanelet in enumerate(lanelets_ordered):
-            lane_id = (i + 1) if is_lht else -(i + 1)
-            is_outermost = i == 0
+        is_lht = traffic_rule_normalized == "LHT"
+        reference_index = reference_lanelet_index(sorted_lanelets, is_lht=is_lht)
+        inner_side = (
+            range(reference_index, -1, -1)
+            if is_lht
+            else range(reference_index, len(sorted_lanelets))
+        )
+        outer_side = (
+            range(reference_index + 1, len(sorted_lanelets))
+            if is_lht
+            else range(reference_index - 1, -1, -1)
+        )
+        inner_sign = 1 if is_lht else -1
+        lanes_ordered: List[Tuple[lanelet2.core.Lanelet, int]] = [
+            (sorted_lanelets[index], inner_sign * (rank + 1))
+            for rank, index in enumerate(inner_side)
+        ] + [
+            (sorted_lanelets[index], -inner_sign * (rank + 1))
+            for rank, index in enumerate(outer_side)
+        ]
+
+        # Only the reference lanelet's anchor boundary IS the reference line,
+        # so only its endpoints are pinned to the regular-road overrides —
+        # every other lanelet shares boundaries with neighbours and must keep
+        # its original positions so cumulative widths still close on the
+        # outer side.
+        reference_lanelet_id = sorted_lanelets[reference_index].id
+        for lanelet, lane_id in lanes_ordered:
+            is_reference = lanelet.id == reference_lanelet_id
             lane = Lane.construct_from_lanelet(
                 lanelet_map,
                 lanelet,
@@ -209,11 +234,11 @@ class LaneSection:
                 rule=traffic_rule_normalized,
                 width_config=width_config,
                 reference_line_spline=reference_line_spline,
-                anchor_start_override=(start_xyz_override if is_outermost else None),
-                anchor_end_override=(end_xyz_override if is_outermost else None),
+                anchor_start_override=(start_xyz_override if is_reference else None),
+                anchor_end_override=(end_xyz_override if is_reference else None),
                 offset=offset,
             )
-            if is_lht:
+            if lane_id > 0:
                 lane_section._add_left_lane(lane)
             else:
                 lane_section._add_right_lane(lane)
@@ -223,12 +248,15 @@ class LaneSection:
         # with the routing-graph-derived lane-change permission.
         #
         # In OpenDRIVE, the road mark on a lane describes its INNER (center-side) boundary:
-        #   RHT – lane -(i+1) road mark = boundary between lane -i and lane -(i+1)
-        #   LHT – lane +(i+1) road mark = boundary between lane +i and lane +(i+1)
+        #   lane -(k+1) road mark = boundary between lane -k and lane -(k+1)
+        #   lane +(k+1) road mark = boundary between lane +k and lane +(k+1)
         #
-        # The inner boundary LineString for lanelet i is:
-        #   RHT – leftBound  (shared with lanelet i-1 or with reference line)
-        #   LHT – rightBound (shared with lanelet i-1 or with reference line)
+        # Which LineString that is follows the lane's SIDE of the reference
+        # line, not the road's traffic rule: a lane to the left of the
+        # reference line has its inner boundary on its right, and a lane to
+        # the right has it on its left.  With every lane on one side — the
+        # only case before an attached lanelet could cross over — this is
+        # rightBound for LHT and leftBound for RHT, as before.
         # Its type/subtype/color/lane_change attributes drive the roadMark
         # type, weight, and colour via ``road_mark_from_linestring_attrs``.
         #
@@ -239,9 +267,8 @@ class LaneSection:
         # References:
         #   - docs/spec-mapping/lanelet2-autoware-profile.md §"Boundary marking types"
         #   - docs/spec-mapping/opendrive-14-carla-profile.md §"Road marks"
-        for i, lane in enumerate(lanes_built):
-            lanelet_here = lanelets_ordered[i]
-            if is_lht:
+        for lane, (lanelet_here, lane_id) in zip(lanes_built, lanes_ordered):
+            if lane_id > 0:
                 can_change = routing_graph.left(lanelet_here) is not None
                 inner_bound = lanelet_here.rightBound
             else:
