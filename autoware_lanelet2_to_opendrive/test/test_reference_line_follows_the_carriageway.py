@@ -86,10 +86,6 @@ def carriageway_with_a_footway_on_the_reference_side():
     return lanelet_map, outer_lane, inner_lane, footway
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the reference boundary is chosen without looking at the subtype",
-)
 def test_the_reference_line_sits_on_the_carriageway_edge(
     carriageway_with_a_footway_on_the_reference_side,
 ):
@@ -112,10 +108,6 @@ def test_the_reference_line_sits_on_the_carriageway_edge(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the reference boundary is chosen without looking at the subtype",
-)
 def test_a_lanelet_beyond_the_reference_line_becomes_a_lane_on_its_other_side(
     carriageway_with_a_footway_on_the_reference_side,
 ):
