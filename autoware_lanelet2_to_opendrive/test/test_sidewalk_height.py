@@ -55,10 +55,16 @@ def test_rht_walkway_with_inner_curbstone_emits_height() -> None:
 
 
 def test_lht_walkway_with_inner_road_border_emits_height() -> None:
-    """LHT + walkway + rightBound type=road_border → one height entry."""
+    """A lane LEFT of the reference line reads its rightBound as the inner side.
+
+    ``lane_id=+1`` is what an LHT road emits for a lane on that side; the pair
+    ``lane_id=-1, rule="LHT"`` this test used to pass is one the converter
+    never produces, and the inner side now follows the lane's side of the
+    reference line rather than the road's traffic rule.
+    """
     lanelet_map, lanelet = _make_lanelet("walkway", right_type="road_border")
 
-    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule="LHT")
+    lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=1, rule="LHT")
 
     assert len(lane.heights) == 1
     assert lane.heights[0].inner == pytest.approx(0.15)
@@ -103,7 +109,11 @@ def test_road_shoulder_with_inner_curb_emits_height() -> None:
 
 
 def test_default_rule_is_rht() -> None:
-    """rule=None is treated as RHT (same convention as width anchoring)."""
+    """``rule`` does not pick the inner side; the lane id does.
+
+    A negative lane id is right of the reference line, so its inner boundary
+    is its leftBound whatever ``rule`` says -- including ``None``.
+    """
     lanelet_map, lanelet = _make_lanelet("walkway", left_type="curbstone")
 
     lane = Lane.construct_from_lanelet(lanelet_map, lanelet, lane_id=-1, rule=None)

@@ -467,6 +467,14 @@ class Road:
     # correct rendered lane edge rather than the regular road's reference
     # line — see :meth:`evaluate_lane_anchor_xyz` and #437.
     sorted_lanelet_ids: Optional[List[int]] = None
+    # Position in :attr:`sorted_lanelet_ids` of the lanelet whose outer
+    # boundary IS this road's reference line, as decided by
+    # ``util.reference_lanelet_index``.  Lanelets beyond it carry lane ids of
+    # the opposite sign, so the lane-aware pin arithmetic in
+    # :meth:`evaluate_lane_anchor_pose` needs it to map an index to a lane.
+    # ``None`` means the outermost lanelet of any subtype, which is what the
+    # choice was before attached non-vehicle lanes could sort outside it.
+    reference_lanelet_index: Optional[int] = None
 
     def evaluate_lane_anchor_pose(
         self,
@@ -490,15 +498,16 @@ class Road:
 
         ``sorted_index`` is the 0-based position in
         :attr:`sorted_lanelet_ids` (left-to-right).  The anchor boundary is
-        ``leftBound`` for RHT roads and ``rightBound`` for LHT roads — the
-        side that joins the reference line for the outermost lanelet.
+        the one facing the reference line, which depends on the lane's side
+        of it: ``rightBound`` for a lane to its left (positive id),
+        ``leftBound`` for a lane to its right (negative id).
 
-        For ``sorted_index == 0`` (RHT) or ``sorted_index == n-1`` (LHT)
-        this is the reference line itself (lateral offset ``t = 0``) and
-        the result equals :attr:`reference_start_xyz` /
-        :attr:`reference_end_xyz`.  For other indices the result is offset
-        laterally by the cumulative width of the lanes between the anchor
-        and the reference line — the lane-aware pin target used when a
+        At ``sorted_index == reference_lanelet_index`` the anchor is the
+        reference line itself (lateral offset ``t = 0``) and the result
+        equals :attr:`reference_start_xyz` / :attr:`reference_end_xyz`.  For
+        other indices the result is offset laterally by the cumulative width
+        of the lanes between the anchor and the reference line, positive
+        towards the left — the lane-aware pin target used when a
         connecting road joins a non-outermost lane of a regular road
         (see #437).
 
@@ -528,13 +537,41 @@ class Road:
 
         lane_section = self.lanes.lane_sections[0]
         is_lht = self.rule == TrafficRule.LHT
-        t = 0.0
+
+        # Lane ids count outward from the reference line in both directions.
+        # ``reference_index`` is where the reference line sits in the
+        # left-to-right order; the lanelets on its inner side take the sign
+        # of the traffic rule's own side and the ones beyond it take the
+        # opposite sign. With the reference line at the outermost lanelet
+        # — ``None``, and what the choice was before an attached
+        # non-vehicle lane could sort outside it — the outer side is empty
+        # and this reduces to ``n - k`` for LHT and ``-(k + 1)`` for RHT.
+        reference_index = self.reference_lanelet_index
+        if reference_index is None:
+            reference_index = n - 1 if is_lht else 0
+        if not (0 <= reference_index < n):
+            return None
+
         if is_lht:
-            # LHT: lanelets at ``sorted_index k`` carry lane id ``n - k``.
-            # The anchor (rightBound) of lane ``n - k`` sits at
-            # ``t = + sum(widths of lanes 1 .. n - k - 1)`` — the widths of
-            # the lanelets to its right (more rightward in sorted order).
-            target_lane_id = n - sorted_index
+            inward = sorted_index <= reference_index
+            rank = (
+                reference_index - sorted_index
+                if inward
+                else sorted_index - reference_index - 1
+            )
+        else:
+            inward = sorted_index >= reference_index
+            rank = (
+                sorted_index - reference_index
+                if inward
+                else reference_index - sorted_index - 1
+            )
+        target_lane_id = (rank + 1) * (1 if (inward == is_lht) else -1)
+
+        # The anchor of lane ``L`` sits at the cumulative width of the lanes
+        # between it and the reference line, measured on its own side.
+        t = 0.0
+        if target_lane_id > 0:
             for lane_id in range(1, target_lane_id):
                 lane = lane_section.left_lanes.get(lane_id)
                 if lane is None:
@@ -544,12 +581,8 @@ class Road:
                     return None
                 t += w
         else:
-            # RHT: lanelets at ``sorted_index k`` carry lane id ``-(k + 1)``.
-            # The anchor (leftBound) of lane ``-(k + 1)`` sits at
-            # ``t = - sum(widths of lanes -1 .. -k)`` — the widths of the
-            # lanelets to its left in sorted order.
-            for j in range(1, sorted_index + 1):
-                lane = lane_section.right_lanes.get(-j)
+            for lane_id in range(-1, target_lane_id, -1):
+                lane = lane_section.right_lanes.get(lane_id)
                 if lane is None:
                     return None
                 w = _evaluate_lane_width(lane, s)
@@ -1326,18 +1359,25 @@ class Road:
                 z_end,
             )
 
-        from ..util import sort_adjacent_groups
+        from ..util import (
+            reference_lanelet_index as reference_lanelet_index_of,
+            sort_adjacent_groups,
+        )
 
         try:
             sorted_lls = sort_adjacent_groups(
                 lanelet_map, set(lanelet_list), routing_graph
             )
             sorted_lanelet_ids: Optional[List[int]] = [ll.id for ll in sorted_lls]
+            reference_lanelet_index: Optional[int] = reference_lanelet_index_of(
+                sorted_lls, is_lht=(rule_enum == TrafficRule.LHT)
+            )
         except ValueError:
             # Non-adjacent lanelet group — leaves lane-aware pinning
             # disabled for this road; the junction phase falls back to
             # the natural lanelet boundary for any incoming connection.
             sorted_lanelet_ids = None
+            reference_lanelet_index = None
 
         road = Road(
             id=road_id,
@@ -1353,6 +1393,7 @@ class Road:
             reference_start_xyz=rendered_start_xyz,
             reference_end_xyz=rendered_end_xyz,
             sorted_lanelet_ids=sorted_lanelet_ids,
+            reference_lanelet_index=reference_lanelet_index,
         )
 
         return road

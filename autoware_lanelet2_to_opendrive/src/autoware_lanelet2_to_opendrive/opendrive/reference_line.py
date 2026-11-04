@@ -206,20 +206,32 @@ class ReferenceLine:
                 f"Invalid traffic_rule: '{traffic_rule}'. Must be 'RHT' or 'LHT'."
             )
 
-        # Select reference lanelet and boundary based on traffic rule
+        # Select reference lanelet and boundary based on traffic rule.
+        # ``reference_lanelet_index`` picks the outermost VEHICLE lanelet, not
+        # simply the outermost one: a lanelet attached by
+        # ``attach_boundary_adjacent_lanelets`` is present or absent according
+        # to the map at that place, so letting it carry the reference line
+        # moves the line sideways wherever it starts or stops. Lanelets
+        # outside the returned index lie on the other side of the reference
+        # line and ``LaneSection`` gives them the opposite lane-id sign.
+        from ..util import reference_lanelet_index
+
+        reference_index = reference_lanelet_index(
+            sorted_lanelets, is_lht=traffic_rule_normalized == "LHT"
+        )
+        reference_lanelet = sorted_lanelets[reference_index]
         if traffic_rule_normalized == "RHT":
-            # RHT: Use leftmost lanelet's left boundary.
-            # All lanes extend to the right (negative IDs) from this line.
-            reference_lanelet = sorted_lanelets[0]
+            # RHT: use the reference lanelet's left boundary.
+            # The lanes inward of it extend to the right (negative IDs).
             border = "left"
             boundary = reference_lanelet.leftBound
         else:  # LHT
-            # LHT: Use rightmost (innermost) lanelet's right boundary.
-            # In LHT, traffic is on the left side of the road.  The innermost lane is
-            # adjacent to the road centre divider, whose edge is the rightBound of the
-            # rightmost lanelet.  All lanes extend to the left (positive IDs) from
-            # this line, matching the OpenDRIVE convention for LHT roads.
-            reference_lanelet = sorted_lanelets[-1]
+            # LHT: use the reference lanelet's right boundary.
+            # In LHT, traffic is on the left side of the road.  The innermost
+            # lane is adjacent to the road centre divider, whose edge is the
+            # rightBound of the rightmost carriageway lanelet.  The lanes
+            # inward of it extend to the left (positive IDs), matching the
+            # OpenDRIVE convention for LHT roads.
             border = "right"
             boundary = reference_lanelet.rightBound
 
@@ -438,10 +450,9 @@ class ReferenceLine:
         )
 
         # Derive the center-lane road mark from the boundary LineString used
-        # for this reference line. For RHT the reference is the leftmost
-        # lanelet's leftBound; for LHT it is the rightmost lanelet's
-        # rightBound. Fall back to solid/white when no attributes are
-        # available.
+        # for this reference line. For RHT the reference is the outermost
+        # vehicle lanelet's leftBound; for LHT its rightBound. Fall back to
+        # solid/white when no attributes are available.
         try:
             boundary_attrs = dict(boundary.attributes)
         except (AttributeError, TypeError):  # pragma: no cover - defensive
