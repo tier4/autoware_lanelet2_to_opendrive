@@ -31,6 +31,7 @@ from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     _grid_candidate_positions,
     _RoadCandidates,
     _REPORT_METRIC_NAME,
+    _accuracy_report_key,
     _resolve_conflicts,
     _sample_reference_line_from_road,
     _directed_mean_distance,
@@ -730,6 +731,42 @@ def _straight_road_xml(
     )
 
 
+def _make_lanelet_of_subtype(left, right, subtype: str):
+    """Lanelet carrying an explicit ``subtype`` attribute."""
+    import lanelet2
+
+    lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), left, right)
+    lanelet.attributes["subtype"] = subtype
+    return lanelet
+
+
+def _two_sided_road_xml(
+    road_id: int,
+    y: float,
+    length: float,
+    left_lane_ids: list[int],
+    right_lane_ids: list[int],
+) -> str:
+    """XODR ``<road>`` with lanes on both sides of its reference line.
+
+    This is the cross-section the carriageway reference line produces: the
+    reference line follows the outermost *vehicle* lanelet, so an attached
+    shoulder or footway beside it lands on the other side and takes a
+    negative id under LHT.
+    """
+    left = "".join(f"<lane id='{lid}' type='driving'/>" for lid in left_lane_ids)
+    right = "".join(f"<lane id='{lid}' type='sidewalk'/>" for lid in right_lane_ids)
+    return (
+        f"<road id='{road_id}' junction='-1'><planView>"
+        f"<geometry s='0.0' x='0.0' y='{y}' hdg='0.0' length='{length}'>"
+        f"<line/></geometry></planView>"
+        f"<lanes><laneSection s='0.0'>"
+        f"<left>{left}</left><right>{right}</right>"
+        f"</laneSection></lanes>"
+        f"</road>"
+    )
+
+
 def _parse_roads(*road_xml: str) -> list[Road]:
     import lxml.etree as ET
 
@@ -737,6 +774,53 @@ def _parse_roads(*road_xml: str) -> list[Road]:
         Path("unused.xodr"),
         xodr_root=ET.fromstring("<OpenDRIVE>" + "".join(road_xml) + "</OpenDRIVE>"),
     )
+
+
+class TestAccuracyReportKey:
+    """``_accuracy_report_key`` must name the lanelet that was measured.
+
+    The reference line is a boundary of exactly one lanelet of the walk, and
+    the accuracy figure is only meaningful against that one.  The walk does
+    not start there on a road with an attached shoulder or footway, so the
+    key cannot be the walk start.
+
+    It must also not name a lanelet another road was already filed under.
+    The report is a plain dict keyed by lanelet, so a collision does not
+    merge the two figures: it deletes one.  The walk start could not collide
+    -- it is the lanelet Phase 1 matched and Phase 2 made unique per road --
+    but the reference-lane lanelet sits *inside* the walk, and the walk
+    covers the whole cross-section, which two roads can overlap on.
+    """
+
+    #: LHT cross-section, outermost first, as the walk emits it: an attached
+    #: footway at lane -1, the carriageway at lane +1, an inner lane at +2.
+    #: ``(lanelet id, road id, lane id)``.
+    LHT_WALK = [(10, 1, -1), (11, 1, 1), (12, 1, 2)]
+    #: The RHT mirror: the reference lane is -1 there.
+    RHT_WALK = [(20, 2, 1), (21, 2, -1), (22, 2, -2)]
+
+    def test_the_reference_lane_is_preferred_over_the_walk_start(self) -> None:
+        """The lanelet whose boundary *is* the reference line wins."""
+        assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken=()) == 11
+        assert _accuracy_report_key(self.RHT_WALK, is_rht=True, taken=()) == 21
+
+    def test_an_already_measured_reference_lane_falls_back_to_the_walk_start(
+        self,
+    ) -> None:
+        """A second road keeps its old, pessimistic key rather than vanishing.
+
+        Both keys stay in play, so both roads are reported.  The fallback
+        figure is the one the road carried before the key was moved to the
+        reference lane -- too pessimistic, but present.  Measured on the
+        customer map, moving the key lost 5 of 17,473 roads this way.
+        """
+        assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken={11}) == 10
+        assert _accuracy_report_key(self.RHT_WALK, is_rht=True, taken={21}) == 20
+
+    def test_a_walk_short_of_the_reference_lane_uses_the_walk_start(self) -> None:
+        """No reference lane in the walk: the figure stays where it was."""
+        short = [(30, 3, -2), (31, 3, -3)]
+        assert _accuracy_report_key(short, is_rht=True, taken=()) == 30
 
 
 class TestBuildMappingAccuracyReport:
@@ -841,6 +925,68 @@ class TestBuildMappingAccuracyReport:
         # (the Phase-1 pick), and measured against lanelet 1's boundary.
         assert set(distances) == {lanelet_1.id}
         assert distances[lanelet_1.id].max_m == pytest.approx(2.6, abs=1e-6)
+
+    def _two_sided_cross_section(self):
+        """LHT cross-section with a footway attached beside the carriageway.
+
+        Mirrors the real map: two ``road`` lanelets side by side and a
+        ``pedestrian_lane`` sharing the outer carriageway boundary.  Under
+        LHT the road reference line is the outermost *vehicle* lanelet's
+        right boundary, so it runs at y = 0 -- between the carriageway and
+        the footway -- and the footway sits on the negative side.
+
+        Returns ``(lanelet_map, carriageway, inner, footway)``.
+        """
+        import lanelet2
+
+        inner_left = _make_linestring(7.0, self.DENSE_X)
+        shared_inner = _make_linestring(3.5, self.DENSE_X)
+        reference = _make_linestring(0.0, self.DENSE_X)
+        footway_right = _make_linestring(-2.0, self.DENSE_X)
+
+        inner = _make_lanelet(inner_left, shared_inner)
+        carriageway = _make_lanelet(shared_inner, reference)
+        footway = _make_lanelet_of_subtype(reference, footway_right, "pedestrian_lane")
+
+        lanelet_map = lanelet2.core.LaneletMap()
+        for lanelet in (inner, carriageway, footway):
+            lanelet_map.add(lanelet)
+        return lanelet_map, carriageway, inner, footway
+
+    def test_accuracy_is_measured_against_the_reference_lane_not_the_walk_start(
+        self,
+    ) -> None:
+        """A two-sided road must not be charged the attached lane's width.
+
+        Phase 1 correctly matches the road's reference line to the
+        carriageway lanelet, whose right boundary it *is*.  The adjacency
+        walk then starts from the footway, because that is the outermost
+        lanelet of the whole cross-section and the walk runs inward -- which
+        is right for the lane ids and wrong for the accuracy key.  Measuring
+        the reference line against the footway's own right boundary charges
+        the road the footway's full width (2 m here) for geometry that is
+        exact.
+        """
+        lanelet_map, carriageway, inner, footway = self._two_sided_cross_section()
+
+        roads = _parse_roads(_two_sided_road_xml(1, 0.0, 20.0, [1, 2], [-1]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        # The lane ids themselves are already right: the walk covers the
+        # whole cross-section from the footway inward.
+        assert mapping.lanelet_to_road_and_lane == {
+            footway.id: (1, -1),
+            carriageway.id: (1, 1),
+            inner.id: (1, 2),
+        }
+
+        distances = mapping.reference_match_distances
+        assert distances is not None
+        # One boundary per road, and it must be the one the reference line
+        # was generated from -- the lane-1 lanelet's right boundary.
+        assert set(distances) == {carriageway.id}
+        assert distances[carriageway.id].max_m == pytest.approx(0.0, abs=1e-6)
+        assert distances[carriageway.id].mean_m == pytest.approx(0.0, abs=1e-6)
 
     def test_a_localised_spike_is_reported_by_the_max(self) -> None:
         """One bad vertex on an otherwise exact road must not be averaged away.
