@@ -737,11 +737,6 @@ class TestAccuracyReportKey:
     #: The RHT mirror: the reference lane is -1 there.
     RHT_WALK = [(20, 2, 1), (21, 2, -1), (22, 2, -2)]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the key is the walk start, which on a two-sided road is the "
-        "attached lane and not the lanelet the reference line came from",
-    )
     def test_the_reference_lane_is_preferred_over_the_walk_start(self) -> None:
         """The lanelet whose boundary *is* the reference line wins."""
         assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken=()) == 11
@@ -883,11 +878,6 @@ class TestBuildMappingAccuracyReport:
             lanelet_map.add(lanelet)
         return lanelet_map, carriageway, inner, footway
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the road is charged the attached footway's full 2 m width, "
-        "because the figure is keyed by the lanelet the walk started from",
-    )
     def test_accuracy_is_measured_against_the_reference_lane_not_the_walk_start(
         self,
     ) -> None:
