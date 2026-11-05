@@ -19,7 +19,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Container, Optional
 
 import numpy as np
 from tqdm import tqdm
@@ -582,6 +582,24 @@ def _polyline_length(pts: np.ndarray) -> float:
 #: whichever level won — they are all recomputed with this single metric, and
 #: the name is carried in the summary so it cannot be mistaken for another.
 _REPORT_METRIC_NAME: str = "symmetric_point_to_segment_max"
+
+
+def _accuracy_report_key(
+    walk_result: list[tuple[int, int, int]],
+    is_rht: bool,
+    taken: "Container[int]",
+) -> int:
+    """Lanelet the road's positional accuracy should be reported under.
+
+    ``walk_result`` is the adjacency walk's output as
+    ``(lanelet id, road id, lane id)``, outermost lane first.  ``taken``
+    holds the lanelets already reported on, so that two roads cannot be
+    filed under one key.
+
+    Returns the lanelet the walk started from, which is what the report has
+    always been keyed by.
+    """
+    return walk_result[0][0]
 
 
 def _polyline_direction(pts: np.ndarray) -> np.ndarray:
@@ -1687,11 +1705,16 @@ def build_mapping(
         # Commit walk results
         _commit(walk_result)
 
-        # Record accuracy under the lanelet the walk actually started from:
-        # the pre-walk above may have corrected the reference away from
+        # Record accuracy under the lanelet ``_accuracy_report_key`` names.
+        # Today that is the lanelet the walk actually started from: the
+        # pre-walk above may have corrected the reference away from
         # ``best_lid``, and the distance belongs to the lanelet that was used.
         if walk_result:
-            _record_reference_accuracy(walk_result[0][0], rc, rescued=False)
+            _record_reference_accuracy(
+                _accuracy_report_key(walk_result, rc.is_rht, reference_match_distances),
+                rc,
+                rescued=False,
+            )
 
     # -- Rescue pass: attempt to assign dropped roads -----------------------
     # Roads that had candidates in Phase 1 but were dropped in Phase 2
