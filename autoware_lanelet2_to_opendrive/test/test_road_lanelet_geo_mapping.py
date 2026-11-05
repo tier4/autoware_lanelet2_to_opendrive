@@ -749,12 +749,6 @@ class TestAccuracyReportKey:
         assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken=()) == 11
         assert _accuracy_report_key(self.RHT_WALK, is_rht=True, taken=()) == 21
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the reference-lane lanelet is returned even when another "
-        "road is already filed under it, and the second write deletes the "
-        "first road's figure",
-    )
     def test_an_already_measured_reference_lane_falls_back_to_the_walk_start(
         self,
     ) -> None:

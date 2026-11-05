@@ -607,15 +607,23 @@ def _accuracy_report_key(
     Measuring the reference line against that lanelet's own boundary charges
     the road the attached lane's full width for geometry that is exact.
 
-    Falls back to the walk start when the walk never reached the reference
-    lane, which leaves the figure where it used to be rather than dropping
-    the road from the report altogether.
+    Falls back to the walk start in two cases, which leaves the figure where
+    it used to be rather than dropping the road from the report altogether:
+    when the walk never reached the reference lane, and when another road has
+    already been filed under that lanelet.
+
+    The second case is why ``taken`` exists.  The walk start cannot collide
+    -- it is the lanelet Phase 1 matched and Phase 2 made unique per road --
+    but the reference-lane lanelet sits *inside* the walk, and the walk
+    covers the whole cross-section, which two roads can overlap on.  The
+    report is a plain dict keyed by lanelet, so a collision does not merge
+    the two figures: it deletes one.
     """
     reference_lane_id = -1 if is_rht else 1
     start = walk_result[0][0]
     for lanelet_id, _road_id, lane_id in walk_result:
         if lane_id == reference_lane_id:
-            return lanelet_id
+            return start if lanelet_id in taken else lanelet_id
     return start
 
 
@@ -1607,11 +1615,31 @@ def build_mapping(
         boundary = boundaries.get(lanelet_id)
         if boundary is None:
             return
-        reference_match_distances[lanelet_id] = ReferenceMatchDistance(
+        record = ReferenceMatchDistance(
             max_m=_symmetric_max_polyline_distance(rc.ref_line, boundary),
             mean_m=_symmetric_mean_polyline_distance(rc.ref_line, boundary),
             boundary_length_m=_polyline_length(boundary),
         )
+        # ``_accuracy_report_key`` keeps roads off each other's keys, and the
+        # rescue pass writes the lanelet it matched, which is unmatched by
+        # definition.  If a collision happens anyway, keep the larger figure
+        # and say so: a plain assignment would drop one road from the counts
+        # silently, and silently lowering a total is how this report has been
+        # wrong before.
+        previous = reference_match_distances.get(lanelet_id)
+        if previous is not None:
+            logger.warning(
+                "Reference accuracy collision on lanelet %d: road %d reports "
+                "max %.3f m where %.3f m was already recorded; keeping the "
+                "larger. One road is missing from the accuracy counts.",
+                lanelet_id,
+                rc.road_id,
+                record.max_m,
+                previous.max_m,
+            )
+            if previous.max_m >= record.max_m:
+                return
+        reference_match_distances[lanelet_id] = record
         if rescued:
             rescued_reference_lanelets.add(lanelet_id)
 
