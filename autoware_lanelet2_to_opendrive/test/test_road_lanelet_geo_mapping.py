@@ -728,6 +728,13 @@ class TestAccuracyReportKey:
     the accuracy figure is only meaningful against that one.  The walk does
     not start there on a road with an attached shoulder or footway, so the
     key cannot be the walk start.
+
+    It must also not name a lanelet another road was already filed under.
+    The report is a plain dict keyed by lanelet, so a collision does not
+    merge the two figures: it deletes one.  The walk start could not collide
+    -- it is the lanelet Phase 1 matched and Phase 2 made unique per road --
+    but the reference-lane lanelet sits *inside* the walk, and the walk
+    covers the whole cross-section, which two roads can overlap on.
     """
 
     #: LHT cross-section, outermost first, as the walk emits it: an attached
@@ -741,6 +748,25 @@ class TestAccuracyReportKey:
         """The lanelet whose boundary *is* the reference line wins."""
         assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken=()) == 11
         assert _accuracy_report_key(self.RHT_WALK, is_rht=True, taken=()) == 21
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="the reference-lane lanelet is returned even when another "
+        "road is already filed under it, and the second write deletes the "
+        "first road's figure",
+    )
+    def test_an_already_measured_reference_lane_falls_back_to_the_walk_start(
+        self,
+    ) -> None:
+        """A second road keeps its old, pessimistic key rather than vanishing.
+
+        Both keys stay in play, so both roads are reported.  The fallback
+        figure is the one the road carried before the key was moved to the
+        reference lane -- too pessimistic, but present.  Measured on the
+        customer map, moving the key lost 5 of 17,473 roads this way.
+        """
+        assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken={11}) == 10
+        assert _accuracy_report_key(self.RHT_WALK, is_rht=True, taken={21}) == 20
 
     def test_a_walk_short_of_the_reference_lane_uses_the_walk_start(self) -> None:
         """No reference lane in the walk: the figure stays where it was."""
