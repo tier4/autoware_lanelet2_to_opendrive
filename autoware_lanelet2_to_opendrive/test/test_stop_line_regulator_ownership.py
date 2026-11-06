@@ -38,7 +38,6 @@ from collections import defaultdict
 from pathlib import Path
 
 import lxml.etree as ET
-import pytest
 
 from autoware_lanelet2_to_opendrive.analyze_xodr import _STOP_LINE_OBJECT_NAME_RE
 
@@ -113,10 +112,6 @@ def _roads_of_lanelet(mapping_path: Path) -> dict[int, set[int]]:
     return out
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="find_nearest_road_for_linestring ignores the regulatory relation",
-)
 def test_every_regulated_stop_line_hangs_off_its_regulators_road(
     nishishinjuku_xodr: Path,
 ) -> None:
