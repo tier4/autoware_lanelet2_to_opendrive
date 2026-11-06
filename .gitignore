@@ -25,3 +25,17 @@ site/
 
 # Lanelet2-to-OpenDRIVE mapping cache (auto-generated next to .xodr)
 *.mapping.json
+
+# Claude Code session state. `.claude/skills/` is shared and tracked; this is
+# the per-session working directory beside it (notes, task state) and must
+# never be committed.
+#
+# It is listed here for a concrete reason: CLAUDE.md's canonical commit
+# sequence starts with `git add -A`, and that is only safe if every untracked
+# directory in the tree is either meant to be committed or ignored.
+.claude/state/
+
+# Local measurement probes. Throwaway scripts written against a specific
+# output, kept out of the tree for the same reason: `git add -A` must not
+# sweep them in.
+_lcprobe/
