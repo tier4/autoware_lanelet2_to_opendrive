@@ -772,7 +772,7 @@ def choose_road_for_regulated_stop_line(
     of the customer map's stop lines from outside the carriageway to inside
     it, and moves none the other way.
     """
-    best: Optional[Tuple[float, "Road"]] = None
+    best: Optional[Tuple[Tuple[int, float], "Road"]] = None
     seen: set = set()
     for road in candidate_roads:
         if road.id in seen:
@@ -783,10 +783,63 @@ def choose_road_for_regulated_stop_line(
         )
         if obj is None:
             continue
-        score = abs(obj.t)
+        # A road that actually *contains* the line beats one that merely has
+        # it on the right side. Without this, two candidates whose |t| differs
+        # by a tenth of a millimetre -- the same stop line seen from two
+        # roads of the same approach -- are separated by |t| alone, and the
+        # narrower road wins while holding the line past its outer edge.
+        # Measured 2026-11-06 on a 6,672-lanelet map: 9 stop lines, |t| about
+        # 4.6 m on each candidate, fixed by this and none broken.
+        extent = _driving_extent_at_s(road, obj.s, positive=obj.t >= 0.0)
+        outside = extent <= 0.0 or abs(obj.t) > extent
+        score = (1 if outside else 0, abs(obj.t))
         if best is None or score < best[0]:
             best = (score, road)
     return best[1] if best is not None else None
+
+
+def _driving_extent_at_s(road: "Road", s: float, *, positive: bool) -> float:
+    """``|t|`` of the outer edge of the contiguous driving lanes at ``s``.
+
+    ``Road.get_half_width_at_s`` answers a different question -- half of the
+    *innermost* driving lane, for placing a signal at that lane's centre --
+    so it cannot say whether a given ``t`` is still on the carriageway. This
+    accumulates the widths outward from the reference line and stops at the
+    first lane that is not a driving lane, which is what "the carriageway
+    ends here" means: on this converter's output a shoulder typically sits
+    outside the driving lanes (ids ``-1, 0, 1, 2, 3`` with 1 and 2 driving).
+
+    Returns 0.0 when the road has no lane geometry or no driving lane on that
+    side, which callers must read as "cannot say", never as "zero wide".
+    """
+    # Deferred: road.py imports this module only under TYPE_CHECKING, so the
+    # dependency is one-directional and importing it here is safe, but doing
+    # it at module level would make the cycle real.
+    from .enums import LaneType
+    from .road import _evaluate_lane_width
+
+    lanes = getattr(road, "lanes", None)
+    if lanes is None or not lanes.lane_sections:
+        return 0.0
+
+    section = lanes.lane_sections[0]
+    for candidate in lanes.lane_sections:
+        if candidate.s_offset <= s:
+            section = candidate
+        else:
+            break
+
+    container = section.left_lanes if positive else section.right_lanes
+    total = 0.0
+    for lane_id in sorted(container, key=abs):
+        lane = container[lane_id]
+        if lane.lane_type != LaneType.DRIVING:
+            break
+        width = _evaluate_lane_width(lane, s - section.s_offset)
+        if width is None:
+            break
+        total += width
+    return total
 
 
 def _stop_line_on_the_driving_side(

@@ -91,7 +91,12 @@ def _make_mock_linestring(
 
     ls = MagicMock()
     ls.id = ls_id
-    ls.__iter__ = MagicMock(return_value=iter(mock_points_3d))
+    # A fresh iterator per call: the real `LineString3d` can be walked more
+    # than once, and `StopLineObject.construct_from_linestring` does walk it
+    # twice -- once for the 2D centroid and once for the 3D z. A single
+    # `iter(...)` as the return value is consumed by the first walk, and the
+    # second then sees an empty, 1-dimensional array.
+    ls.__iter__ = MagicMock(side_effect=lambda: iter(mock_points_3d))
     ls.__len__ = MagicMock(return_value=len(mock_points_3d))
     return ls
 
@@ -347,6 +352,94 @@ def test_road_sample_point_index_matches_sequential_scan():
 
             assert actual_road is expected_road
             assert actual_dist == expected_dist
+
+
+def _real_road(road_id: int, *, y: float, driving_width: float, shoulder: float = 0.5):
+    """A real LHT Road along +x at height ``y``: lane 1 driving, lane 2 shoulder."""
+    from autoware_lanelet2_to_opendrive.opendrive.elevation import (
+        Elevation,
+        ElevationProfile,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.enums import LaneType, TrafficRule
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3, PlanView
+    from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+    from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
+    from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+    from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
+    from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+    section = LaneSection(s_offset=0.0)
+    for lane_id, lane_type, lane_width in (
+        (1, LaneType.DRIVING, driving_width),
+        (2, LaneType.SHOULDER, shoulder),
+    ):
+        lane = Lane(lane_id=lane_id, lane_type=lane_type)
+        lane.widths.append(LaneWidth(s_offset=0.0, a=lane_width, b=0.0, c=0.0, d=0.0))
+        section.left_lanes[lane_id] = lane
+
+    return Road(
+        id=road_id,
+        length=100.0,
+        junction=-1,
+        rule=TrafficRule.LHT,
+        plan_view=PlanView(
+            geometries=[
+                ParamPoly3(
+                    s=0.0,
+                    x=0.0,
+                    y=y,
+                    hdg=0.0,
+                    length=100.0,
+                    aU=0.0,
+                    bU=100.0,
+                    cU=0.0,
+                    dU=0.0,
+                    aV=0.0,
+                    bV=0.0,
+                    cV=0.0,
+                    dV=0.0,
+                )
+            ]
+        ),
+        elevation_profile=ElevationProfile(
+            elevations=[Elevation(s=0.0, a=0.0, b=0.0, c=0.0, d=0.0)]
+        ),
+        lanes=Lanes(lane_sections=[section]),
+    )
+
+
+def test_the_regulator_road_that_contains_the_line_beats_a_marginally_closer_one():
+    """Containment first, then `|t|` -- otherwise a tenth of a millimetre decides.
+
+    Both roads of one approach see the same stop line, so their `|t|` differ
+    by almost nothing while their carriageways differ by metres. Ranking on
+    `|t|` alone then hands the line to whichever road's reference line is a
+    hair closer, even when that road's driving lanes end short of it.
+
+    Measured 2026-11-06 on a 6,672-lanelet map, after the ownership fix: 9
+    stop lines sat past their road's outer edge with `|t|` about 4.6355 m,
+    while another road the same regulatory element names held them inside at
+    4.6356 m -- a difference of 0.1 mm. Nishi-Shinjuku has no such case, so
+    this is the only red available for it.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        choose_road_for_regulated_stop_line,
+    )
+
+    # The line sits 4.0 m to the left of both reference lines (+t for LHT).
+    line = _make_mock_linestring(900, [(49.9, 4.0), (50.1, 4.0)])
+    narrow = _real_road(1, y=0.0, driving_width=3.0)  # |t| 4.000, outside
+    wide = _real_road(2, y=-0.0001, driving_width=7.0)  # |t| 4.0001, inside
+
+    chosen = choose_road_for_regulated_stop_line(
+        line, [narrow, wide], width=0.1, carla_format=False
+    )
+
+    assert chosen is not None
+    assert chosen.id == 2, (
+        "the road whose driving lanes reach the line must win, even though "
+        "the other road's reference line is 0.1 mm closer"
+    )
 
 
 def test_roads_within_agrees_with_nearest_and_then_ranks_the_runners_up():
