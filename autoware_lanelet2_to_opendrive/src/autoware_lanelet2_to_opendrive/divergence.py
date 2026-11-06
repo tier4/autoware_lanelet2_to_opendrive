@@ -461,10 +461,35 @@ def _make_zero_length_connecting_road(
             raw_length,
         )
 
+    # A separation below the length floor carries no shape, and a cubic
+    # through it invents one. With both tangents nearly parallel -- which is
+    # the normal case, since these two anchors are one contact point rendered
+    # twice -- the Hermite comes out as
+    #
+    #     bU : cU : dU = 1 : -3 : 2,   u(1) = 0
+    #
+    # so the curve runs out and returns to its own start. ``@length`` is its
+    # arc length, so the road has extent while its reference line has none,
+    # and a consumer sampling along ``s`` reads headings that reverse: this is
+    # the shape behind CARLA's 160 heading flips (max 179.96 deg). Measured
+    # on 2026-11-06 over the whole output, 424 of the 455 records whose
+    # tangent reverses against their own displacement are synthetic
+    # connectors in a junction, 486 of them on roads under 10 cm, and 499 of
+    # 553 turn through less than 5 degrees -- stubs with nothing to
+    # interpolate rather than curves bending.
+    #
+    # The floor, not ``geometry.epsilon``: at 1e-10 a separation of a
+    # micrometre took the cubic branch, and the cubic also left ``@length``
+    # below the floor this function promises to apply.
+    #
+    # Above the floor the Hermite stays, reversal included: a chord of 2 cm
+    # between tangents 175 degrees apart *has* to double back, so there the
+    # reversal is faithful to the request and the fix is upstream -- give the
+    # junction real extent instead of asking for a U-turn in 2 cm.
     can_curve = (
         start_heading is not None
         and end_heading is not None
-        and raw_length > DEFAULT_CONFIG.geometry.epsilon
+        and raw_length >= min_segment_length
     )
     if can_curve:
         # ``tangent_scale`` at the floor rather than the chord: these anchors
@@ -479,13 +504,19 @@ def _make_zero_length_connecting_road(
             tangent_scale=min_segment_length,
         )
     else:
-        # Degraded: one or both neighbour tangents are unavailable, which
-        # happens only when a neighbour has no rendered plan view.  A
-        # straight segment is all that is left.  Prefer the start tangent
-        # over the anchor vector -- at this scale the vector between two
-        # anchors that are meant to coincide is numerical noise, measured at
-        # a median 88.9 deg from the incoming road's own tangent over the
-        # 296 Odaiba connectors that used to take it.
+        # Degraded, for either of two reasons: a neighbour tangent is
+        # unavailable (which happens only when a neighbour has no rendered
+        # plan view), or the two anchors are closer together than the length
+        # floor, where there is no shape to meet both tangents with -- see
+        # above.  A straight segment of the floor length is all that is left,
+        # and it is the better answer of the two: it carries the floor as
+        # real extent instead of as arc length spent returning to its start.
+        #
+        # Prefer the start tangent over the anchor vector -- at this scale
+        # the vector between two anchors that are meant to coincide is
+        # numerical noise, measured at a median 88.9 deg from the incoming
+        # road's own tangent over the 296 Odaiba connectors that used to take
+        # it.
         if start_heading is not None:
             heading = start_heading
         else:

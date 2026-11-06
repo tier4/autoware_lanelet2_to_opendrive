@@ -28,7 +28,11 @@ from autoware_lanelet2_to_opendrive.opendrive.enums import (
     LaneType,
     TrafficRule,
 )
-from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3, PlanView
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    ParamPoly3,
+    PlanView,
+    end_param,
+)
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
@@ -951,6 +955,93 @@ def test_coincident_anchors_raise_rather_than_guess():
     geometry = stub.plan_view.geometries[0]
     assert geometry.hdg == pytest.approx(0.3)
     assert geometry.length == pytest.approx(0.01)
+
+
+def _local_offset(geometry, p):
+    """``(u, v)`` of the record at parameter ``p``, in its own start frame."""
+    u = geometry.bU * p + geometry.cU * p * p + geometry.dU * p**3
+    v = geometry.bV * p + geometry.cV * p * p + geometry.dV * p**3
+    return geometry.aU + u, geometry.aV + v
+
+
+def _tangent_opposes_displacement(geometry, samples=201):
+    """Does the record's tangent ever point against its own net displacement?
+
+    The convention-free statement of "doubles back". Measuring ``du/dp``
+    alone does not say it: in the record's own start frame a cubic Hermite
+    has ``du/dp (p=1) = scale * cos(d_psi)``, so *every* connector turning
+    through more than 90 degrees has a negative ``du/dp`` at its end
+    whatever its geometry, and no tangent scaling can change that.
+
+    The parameter range comes from ``end_param``: it is ``1`` for a
+    ``pRange="normalized"`` record and ``length`` for an ``"arcLength"`` one,
+    and reading ``p = 1`` for both reports a straight 1 cm stub as a 1 m one.
+    """
+    p_end = end_param(geometry)
+    u1, v1 = _local_offset(geometry, p_end)
+    norm = math.hypot(u1, v1)
+    if norm == 0.0:
+        return True  # it ends exactly where it started: no displacement at all
+    nx, ny = u1 / norm, v1 / norm
+    for index in range(samples):
+        p = p_end * index / (samples - 1)
+        du = geometry.bU + 2 * geometry.cU * p + 3 * geometry.dU * p * p
+        dv = geometry.bV + 2 * geometry.cV * p + 3 * geometry.dV * p * p
+        if du * nx + dv * ny < 0.0:
+            return True
+    return False
+
+
+@pytest.mark.parametrize("separation", [1e-6, 1e-5, 1e-3, 5e-3])
+def test_anchors_closer_than_the_floor_do_not_make_the_connector_double_back(
+    separation,
+):
+    """A sub-floor separation carries no shape, and a cubic invents one.
+
+    ``test_coincident_anchors_raise_rather_than_guess`` covers the exactly
+    equal case. The population on a real map is the *almost* equal one:
+    ``can_curve`` only asks that the anchors differ by more than
+    ``geometry.epsilon`` (1e-10), so two renderings of one contact point a
+    fraction of a millimetre apart take the cubic branch, and with both
+    tangents nearly parallel that cubic is
+
+        bU : cU : dU = 1 : -3 : 2,   u(1) = 0
+
+    -- it runs out and comes back to its own start. ``@length`` is the arc
+    length, so the road has extent while its reference line has none, and a
+    consumer sampling along ``s`` gets headings that reverse. That is the
+    shape behind CARLA's 160 heading flips (max 179.96 deg).
+
+    Measured on 2026-11-06 over the integration tree's output: of the
+    ``paramPoly3`` records whose tangent reverses against their own
+    displacement, 424 of 455 on the customer map (46 of 50 on
+    Nishi-Shinjuku) are synthetic connectors inside a junction, 486 of them
+    on roads under 10 cm long, and 499 of 553 turn through **less than 5
+    degrees**. So this is not a curve bending; it is a stub with nothing to
+    interpolate.
+
+    ``_validate_segment`` cannot catch it: it checks length, finiteness and
+    heading, not monotonicity.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (separation, 0.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.0,
+        end_heading=math.radians(1.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+
+    assert not _tangent_opposes_displacement(geometry), (
+        f"the connector doubles back on itself: bU={geometry.bU:.6g} "
+        f"cU={geometry.cU:.6g} dU={geometry.dU:.6g}"
+    )
+    displacement = math.hypot(*_local_offset(geometry, end_param(geometry)))
+    assert displacement == pytest.approx(0.01, rel=1e-9), (
+        "the connector must carry the length floor as real extent, not as "
+        f"arc length spent returning to its start (displacement {displacement:.6g} m)"
+    )
+    assert stub.length == pytest.approx(geometry.length)
 
 
 def _width_road(road_id, *, width, length=10.0, heading=0.0, x=0.0, y=0.0):
