@@ -1294,20 +1294,6 @@ def run_junction_lanelet_validation(
 # ---------------------------------------------------------------------------
 
 
-#: Invariant codes that are reported but do not fail the analysis.
-#:
-#: ``xodr_invariants`` says of ``linked_endpoints_apart`` that it is the one
-#: check in the set which is not at zero: on Nishi-Shinjuku it fires 22 times
-#: over 15 joins with a worst gap of 0.071 m, a fit residual that the
-#: reference-line anchoring work will close, and its test pins it under
-#: ``xfail(strict=True)`` with a ceiling rather than hiding it. A gate that
-#: failed every map on arrival would be read as noise and then ignored -- the
-#: module's own docstring warns about exactly that -- so this one is printed
-#: as a finding and left out of the verdict. Everything else in the set was
-#: measured at zero before it was added, dangling lane links included.
-_INVARIANTS_REPORTED_NOT_ENFORCED = frozenset({"linked_endpoints_apart"})
-
-
 def run_structural_invariant_validation(xodr_path: Path) -> bool:
     """Report this repository's own structural invariants over the document.
 
@@ -1318,10 +1304,16 @@ def run_structural_invariant_validation(xodr_path: Path) -> bool:
     crash look random. Running the checker here puts every conversion behind
     it, not only the maps that have a test of their own.
 
+    Every invariant counts, ``linked_endpoints_apart`` included. It carried an
+    exemption here at first, on the strength of that module's own docstring
+    ("22 violations over 15 joins on Nishi-Shinjuku, worst 0.071 m"); the
+    prose is stale. Measured 2026-11-06, a Nishi-Shinjuku conversion violates
+    nothing at all, and ``test_xodr_structural_invariants`` already pins
+    ``_KNOWN_GAP_VIOLATIONS = 0`` with the note that excluding the code
+    "would only hide a reappearance".
+
     Returns:
-        True when the document satisfies every enforced invariant. The codes
-        in :data:`_INVARIANTS_REPORTED_NOT_ENFORCED` are printed but do not
-        change the verdict.
+        True when the document satisfies every invariant.
     """
     from autoware_lanelet2_to_opendrive.xodr_invariants import (
         check_invariants,
@@ -1336,31 +1328,12 @@ def run_structural_invariant_validation(xodr_path: Path) -> bool:
         print(f"  Structural invariants: could not be checked ({exc})")
         return True
 
-    enforced = [
-        violation
-        for violation in violations
-        if violation.code not in _INVARIANTS_REPORTED_NOT_ENFORCED
-    ]
-    reported = [
-        violation
-        for violation in violations
-        if violation.code in _INVARIANTS_REPORTED_NOT_ENFORCED
-    ]
-
-    if reported:
-        codes = sorted({violation.code for violation in reported})
-        print(
-            f"  Structural invariants: {len(reported)} known finding(s) "
-            f"reported, not enforced: {', '.join(codes)}"
-        )
-        print(format_violations(reported))
-
-    if not enforced:
+    if not violations:
         print("  Structural invariants: PASSED")
         return True
 
-    print(format_violations(enforced))
-    print(f"  Structural invariants: FAILED ({len(enforced)} violation(s))")
+    print(format_violations(violations))
+    print(f"  Structural invariants: FAILED ({len(violations)} violation(s))")
     return False
 
 
