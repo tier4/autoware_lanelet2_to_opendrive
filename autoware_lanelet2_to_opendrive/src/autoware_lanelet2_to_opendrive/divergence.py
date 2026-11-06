@@ -165,6 +165,7 @@ def sanity_gate_passes(
     site: DivergenceSite,
     inputs: SanityGateInputs,
     endpoint_tolerance: float,
+    expected_separation: float = 0.0,
 ) -> Tuple[bool, str]:
     """Return ``(passed, reason)``.
 
