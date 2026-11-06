@@ -482,7 +482,10 @@ class RoadSamplePointIndex:
             slot = int(road_slots[idx])
             if slot not in best or dist < best[slot]:
                 best[slot] = dist
-                order.setdefault(slot, idx)
+                # The index of each road's *closest* point, so an exact tie
+                # between two roads breaks on the sample the sequential scan
+                # would have been holding when it met it.
+                order[slot] = idx
         return [
             (self._roads[slot], best[slot])
             for slot in sorted(best, key=lambda s: (best[s], order[s]))
