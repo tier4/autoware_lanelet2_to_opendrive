@@ -349,6 +349,40 @@ def test_road_sample_point_index_matches_sequential_scan():
             assert actual_dist == expected_dist
 
 
+def test_roads_within_agrees_with_nearest_and_then_ranks_the_runners_up():
+    """The runners-up exist because "which road" is the wrong question.
+
+    A stop line placed off a road's reference line has a side, and the
+    nearest road may hold it on the wrong side of itself while a road just
+    behind holds it inside. ``choose_nearest_road_on_the_driving_side`` walks
+    this list and takes the first road that carries the line, so the first
+    element must be exactly what :meth:`nearest` returns -- otherwise the
+    fallback would silently change which road an already-correct stop line
+    lands on.
+    """
+    roads = [
+        _make_mock_road(road_id=0, wx=0.0, wy=0.0),
+        _make_mock_road(road_id=1, wx=30.0, wy=-4.0, s=10.0),
+        _make_mock_road(road_id=2, wx=-15.0, wy=25.0, s=20.0),
+    ]
+    index = RoadSamplePointIndex(roads)
+
+    for px in (-20.0, -3.5, 0.0, 7.25, 31.0):
+        for py in (-10.0, 0.0, 4.75, 26.0):
+            found = index.roads_within(px, py, 1e9)
+            nearest_road, nearest_dist = index.nearest(px, py)
+
+            assert found[0][0] is nearest_road
+            assert found[0][1] == nearest_dist
+            # Every road appears once, in non-decreasing distance order.
+            assert len(found) == len({id(road) for road, _d in found})
+            assert [d for _r, d in found] == sorted(d for _r, d in found)
+
+    # The radius excludes, rather than returning everything sorted.
+    assert index.roads_within(0.0, 0.0, 1.0) == [(roads[0], 0.0)]
+    assert index.roads_within(1000.0, 1000.0, 1.0) == []
+
+
 def test_road_sample_point_index_tie_goes_to_the_first_road():
     """Coincident sample points must resolve to the earlier road, as before."""
     first = _make_mock_road(road_id=0, wx=0.0, wy=0.0)
