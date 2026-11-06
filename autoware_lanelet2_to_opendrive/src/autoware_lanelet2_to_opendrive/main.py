@@ -905,6 +905,7 @@ class _Lanelet2ToOpenDRIVEConverter:
         """
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
             StopLineObject,
+            choose_nearest_road_on_the_driving_side,
             choose_road_for_regulated_stop_line,
             find_nearest_road_for_linestring,
         )
@@ -978,8 +979,21 @@ class _Lanelet2ToOpenDRIVEConverter:
             )
             if best_road is None:
                 # Either the map regulates this line from no lanelet, or no
-                # regulating lanelet's road carries it. The nearest road stays
-                # the answer there, as before.
+                # regulating lanelet's road carries it. Geometry is then the
+                # only statement available, but "nearest" is still not the
+                # whole of it: a road has a side, and the nearest road may
+                # hold the line outside its own carriageway while a road just
+                # behind it holds it inside. Take the nearest road that does
+                # carry it, and only then the nearest road at all.
+                best_road = choose_nearest_road_on_the_driving_side(
+                    ls,
+                    all_roads,
+                    width=self.config.stopline.width,
+                    carla_format=self.config.stopline.carla_stop_line,
+                    offset=self.offset,
+                    road_index=road_index,
+                )
+            if best_road is None:
                 best_road = find_nearest_road_for_linestring(
                     ls, all_roads, offset=self.offset, road_index=road_index
                 )
