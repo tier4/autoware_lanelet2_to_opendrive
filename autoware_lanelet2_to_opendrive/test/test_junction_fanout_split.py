@@ -30,7 +30,7 @@ from autoware_lanelet2_to_opendrive.qc_validate import (
 )
 
 # ERROR counts the qc-framework bundle reports on these two fixtures today,
-# per checker.  One entry remains on this base.
+# per checker.  **None** remain on this base.
 #
 # ``lane_smoothness.contact_point_no_horizontal_gaps`` used to report 2: the
 # road reference lines were fitted with the endpoints as a *weighted* term,
@@ -39,21 +39,20 @@ from autoware_lanelet2_to_opendrive.qc_validate import (
 # exactly (``Splines(exact_endpoints=True)``) removes it here, and on 13 of
 # the 343 joints on Nishi-Shinjuku.
 #
-# ``road.geometry.contact_point`` still reports 1, and it is an upstream
-# false positive rather than a converter defect: the checker's junction
-# guard tests ``@junction == 1`` instead of ``!= -1``, so it runs on a road
-# that belongs to a junction, which the rule explicitly does not cover.
-# Fixing that belongs in the bundle, not here: it is tracked against
-# ``tier4/qc-opendrive``.  Until that lands the finding stays pinned at 1 so
-# the count keeps its meaning.
+# ``road.geometry.contact_point`` used to report 1 here, and it was an
+# upstream false positive rather than a converter defect: the checker's
+# junction guard tested ``@junction == 1`` instead of ``!= -1``, so it ran on
+# a road that belongs to a junction, which the rule explicitly does not
+# cover.  That fix landed in ``tier4/qc-opendrive`` and arrived here with the
+# bundle bump this branch is based on, so the finding is gone and the pin
+# goes with it: the suite reported ``assert {} == {'check_asam_..._contact_
+# point': 1}`` until this entry was removed.
 #
 # Keep pinning the exact per-checker counts rather than asserting "no
 # errors": a regression in any checker then shows up as a new key with the
 # count attached, and any future known-broken finding has to be written
 # down here deliberately.
-_KNOWN_QC_FINDINGS = {
-    "check_asam_xodr_road_geometry_contact_point": 1,
-}
+_KNOWN_QC_FINDINGS: dict[str, int] = {}
 
 DATA = Path(__file__).parent / "data"
 FAN_OUT = (DATA / "junction_fanout_mini.osm").resolve()
