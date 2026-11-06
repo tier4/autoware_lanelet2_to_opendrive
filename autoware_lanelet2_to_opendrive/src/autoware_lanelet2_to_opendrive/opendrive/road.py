@@ -460,6 +460,14 @@ class Road:
     # correct rendered lane edge rather than the regular road's reference
     # line — see :meth:`evaluate_lane_anchor_xyz` and #437.
     sorted_lanelet_ids: Optional[List[int]] = None
+    # Metres the junction carve took off each end of this road, as actually
+    # applied -- a road that could not spare the length is rebuilt uncarved
+    # and keeps 0.0 here.  The junction phase needs it because the carve
+    # moves this road's anchor away from its neighbour's on purpose, and the
+    # sanity gate reads any separation between those two anchors as
+    # reconstruction error unless it is told what the carve made.
+    carved_start: float = 0.0
+    carved_end: float = 0.0
     # True for a connecting road this converter synthesised rather
     # than built from a lanelet -- the divergence/merge stubs of
     # #291/#493.  The geo-mapping phase must skip these: a road with
@@ -1299,6 +1307,8 @@ class Road:
             reference_start_xyz=rendered_start_xyz,
             reference_end_xyz=rendered_end_xyz,
             sorted_lanelet_ids=sorted_lanelet_ids,
+            carved_start=trim_start,
+            carved_end=trim_end,
         )
 
         return road

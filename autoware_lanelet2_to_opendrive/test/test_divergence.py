@@ -3,7 +3,6 @@
 import inspect
 from unittest.mock import MagicMock
 
-import pytest
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
@@ -326,11 +325,17 @@ def _build_road_stub(
             "plan_view",
             "sorted_lanelet_ids",
             "evaluate_lane_anchor_xyz",
+            "carved_start",
+            "carved_end",
         ]
     )
     r.id = road_id
     r.reference_start_xyz = start_xyz
     r.reference_end_xyz = end_xyz
+    # Uncarved, which is what these two tests describe: the anchors are two
+    # renderings of the same point and the gate holds them to coincidence.
+    r.carved_start = 0.0
+    r.carved_end = 0.0
     # Lane-aware anchor metadata is intentionally absent so the driver
     # falls back to the road reference endpoint (the synthesiser tests
     # the per-lane override path through the integration suite, not here).
@@ -436,11 +441,6 @@ def test_apply_divergence_synthesis_falls_back_on_gate_failure(monkeypatch):
     assert kwargs["element_id"] == 186
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the carve opens a hole the gate then refuses to fill; see "
-    ".claude/state/notes/carve-junction-out-of-incoming-road.md section 9.2-N",
-)
 def test_sanity_gate_accepts_the_separation_the_carve_deliberately_made():
     """A carved end's anchors are a known distance apart, not coincident.
 
@@ -459,7 +459,9 @@ def test_sanity_gate_accepts_the_separation_the_carve_deliberately_made():
 
     The gate must therefore measure the separation against what the carve
     deliberately made, keeping the tolerance for the reconstruction error it
-    was written to catch.
+    was written to catch.  It is per candidate, not per site: a candidate too
+    short to spare the length is rebuilt uncarved and is still held to plain
+    coincidence.
     """
     inputs = SanityGateInputs(
         endpoint_road=(0.0, 0.0, 0.0),
@@ -473,7 +475,10 @@ def test_sanity_gate_accepts_the_separation_the_carve_deliberately_made():
     )
 
     ok, reason = sanity_gate_passes(
-        _site(), inputs, endpoint_tolerance=0.5, expected_separation=1.0
+        _site(),
+        inputs,
+        endpoint_tolerance=0.5,
+        expected_separation={186: 1.0, 187: 1.0, 188: 1.0},
     )
     assert ok is True, reason
     assert reason == ""
@@ -499,7 +504,10 @@ def test_sanity_gate_still_rejects_an_implausible_pairing_at_a_carved_end():
     )
 
     ok, reason = sanity_gate_passes(
-        _site(), inputs, endpoint_tolerance=0.5, expected_separation=1.0
+        _site(),
+        inputs,
+        endpoint_tolerance=0.5,
+        expected_separation={186: 1.0, 187: 1.0, 188: 1.0},
     )
     assert ok is False
     assert "endpoint" in reason
