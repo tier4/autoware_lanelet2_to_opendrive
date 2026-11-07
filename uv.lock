@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.10.*"
 
 [manifest]
@@ -45,21 +45,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/3e/38/7859ff46355f76f8d
 [[package]]
 name = "asam-qc-baselib"
 version = "1.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/tier4/qc-baselib-py.git?rev=integration%2Fall-fixes#6ab1d727eb237e4afa84ee7c87e1e9b6619d7da0" }
 dependencies = [
     { name = "lxml" },
     { name = "pydantic" },
     { name = "pydantic-xml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b6/e0/2044f84431841b229c97408a83383c8a4244ce66e88868ccdab8e28e543b/asam_qc_baselib-1.1.0.tar.gz", hash = "sha256:bd78d66a4ebb160cda577640829c11a47a648de88a67e13fdc9dcb71a91ff23e", size = 20577, upload-time = "2026-02-19T09:49:53.8Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/55/0fe9a6980943acb68eab23dc02c22df6b55aecdd18b70844f6d2696b8b23/asam_qc_baselib-1.1.0-py3-none-any.whl", hash = "sha256:d6ec12d85e3af8ee8d4f1dce8ccd48759897ed4ff865f66f32369eee4f0f62c9", size = 28031, upload-time = "2026-02-19T09:49:52.745Z" },
-]
 
 [[package]]
 name = "asam-qc-opendrive"
 version = "1.0.0"
-source = { git = "https://github.com/tier4/qc-opendrive.git?rev=f8b186ba7408f56d26ef6552643cc09d43c0d253#f8b186ba7408f56d26ef6552643cc09d43c0d253" }
+source = { git = "https://github.com/tier4/qc-opendrive.git?rev=5cbf000285642cf3f079291d6eca9e533421e3e0#5cbf000285642cf3f079291d6eca9e533421e3e0" }
 dependencies = [
     { name = "asam-qc-baselib" },
     { name = "lxml" },
@@ -94,7 +90,7 @@ carla = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asam-qc-opendrive", git = "https://github.com/tier4/qc-opendrive.git?rev=f8b186ba7408f56d26ef6552643cc09d43c0d253" },
+    { name = "asam-qc-opendrive", git = "https://github.com/tier4/qc-opendrive.git?rev=5cbf000285642cf3f079291d6eca9e533421e3e0" },
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "lanelet2-python-api-for-autoware", git = "https://github.com/tier4/lanelet2_python_api_for_autoware?rev=bfe2846deeca7fd09b1c1fb623c6f53c3609b681" },
     { name = "lxml", specifier = ">=5.2.2" },

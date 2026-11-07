@@ -5,8 +5,16 @@ members = [
 
 [tool.uv.sources]
 lanelet2-python-api-for-autoware = { git = "https://github.com/tier4/lanelet2_python_api_for_autoware", rev = "bfe2846deeca7fd09b1c1fb623c6f53c3609b681" }
-# Use tier4 fork with relaxed numpy upper bound (upstream PR: asam-ev/qc-opendrive#138)
-asam-qc-opendrive = { git = "https://github.com/tier4/qc-opendrive.git", rev = "f8b186ba7408f56d26ef6552643cc09d43c0d253" }
+# Use the tier4 fork's integration branch, which carries the relaxed numpy
+# upper bound (upstream PR: asam-ev/qc-opendrive#138) plus the checker fixes
+# that are still open as tier4/qc-opendrive#5-#8. Two of those decide whether
+# road.geometry.contact_point reports 6 failures or the 644 it actually has:
+# the check aborts on a road with no <link> (optional per the schema, and 475
+# of our roads omit it), and its junction exemption tests `junction == 1`
+# instead of utils.road_belongs_to_junction, so it evaluates 8,195 roads it
+# should skip. Pinned by commit, not by branch name, so the resolution stays
+# reproducible; move back to a tag once the fixes are merged and released.
+asam-qc-opendrive = { git = "https://github.com/tier4/qc-opendrive.git", rev = "5cbf000285642cf3f079291d6eca9e533421e3e0" }
 
 [dependency-groups]
 dev = [
