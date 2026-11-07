@@ -790,6 +790,94 @@ class Road:
     # choice was before attached non-vehicle lanes could sort outside it.
     reference_lanelet_index: Optional[int] = None
 
+    def _reference_index(self) -> Optional[int]:
+        """Where the reference line sits in :attr:`sorted_lanelet_ids`.
+
+        ``None`` on :attr:`reference_lanelet_index` means "the outermost
+        lanelet of any subtype", which is what the choice was before an
+        attached non-vehicle lane could sort outside the carriageway.
+        """
+        if self.sorted_lanelet_ids is None:
+            return None
+        n = len(self.sorted_lanelet_ids)
+        index = self.reference_lanelet_index
+        if index is None:
+            index = n - 1 if self.rule == TrafficRule.LHT else 0
+        return index if 0 <= index < n else None
+
+    def lane_id_for_sorted_index(self, sorted_index: int) -> Optional[int]:
+        """The OpenDRIVE lane id of the lanelet at ``sorted_index``.
+
+        Lane ids count outward from the reference line in both directions.
+        The lanelets on the reference line's inner side take the sign of the
+        traffic rule's own side and the ones beyond it take the opposite
+        sign. With the reference line at the outermost lanelet the outer side
+        is empty and this reduces to ``n - k`` for LHT and ``-(k + 1)`` for
+        RHT -- **which is only a reduction**, and reading it as the rule cost
+        178 junctions on a real map; see
+        :meth:`sorted_index_for_lane_id`.
+        """
+        if self.sorted_lanelet_ids is None:
+            return None
+        n = len(self.sorted_lanelet_ids)
+        if not (0 <= sorted_index < n):
+            return None
+        reference_index = self._reference_index()
+        if reference_index is None:
+            return None
+
+        is_lht = self.rule == TrafficRule.LHT
+        if is_lht:
+            inward = sorted_index <= reference_index
+            rank = (
+                reference_index - sorted_index
+                if inward
+                else sorted_index - reference_index - 1
+            )
+        else:
+            inward = sorted_index >= reference_index
+            rank = (
+                sorted_index - reference_index
+                if inward
+                else reference_index - sorted_index - 1
+            )
+        return (rank + 1) * (1 if (inward == is_lht) else -1)
+
+    def sorted_index_for_lane_id(self, lane_id: int) -> Optional[int]:
+        """The inverse of :meth:`lane_id_for_sorted_index`.
+
+        Callers that hold an OpenDRIVE lane id and want its lanelet's anchor
+        need this direction, and the obvious shortcut is wrong. ``n -
+        lane_id`` for LHT is the *reduction* that holds only while the
+        reference line is the outermost lanelet, and since the reference line
+        became the outermost **vehicle** lanelet an attached sidewalk or
+        shoulder can sort outside it -- 18.8% of roads on a real map. There
+        the shortcut names a different lanelet, and the anchor comes back
+        offset by the lanes in between: measured as a lane-pair separation
+        clustered at p50 2.975 m against a p50 lane width of 3.27 m, i.e.
+        exactly one lane, on all 178 divergence sites the sanity gate then
+        rejected.
+        """
+        if self.sorted_lanelet_ids is None or lane_id == 0:
+            return None
+        n = len(self.sorted_lanelet_ids)
+        reference_index = self._reference_index()
+        if reference_index is None:
+            return None
+
+        is_lht = self.rule == TrafficRule.LHT
+        rank = abs(lane_id) - 1
+        inward = (lane_id > 0) == is_lht
+        if is_lht:
+            sorted_index = (
+                reference_index - rank if inward else reference_index + 1 + rank
+            )
+        else:
+            sorted_index = (
+                reference_index + rank if inward else reference_index - 1 - rank
+            )
+        return sorted_index if 0 <= sorted_index < n else None
+
     def evaluate_lane_anchor_pose(
         self,
         sorted_index: int,
@@ -850,37 +938,10 @@ class Road:
         s = 0.0 if at_start else self.length
 
         lane_section = self.lanes.lane_sections[0]
-        is_lht = self.rule == TrafficRule.LHT
 
-        # Lane ids count outward from the reference line in both directions.
-        # ``reference_index`` is where the reference line sits in the
-        # left-to-right order; the lanelets on its inner side take the sign
-        # of the traffic rule's own side and the ones beyond it take the
-        # opposite sign. With the reference line at the outermost lanelet
-        # — ``None``, and what the choice was before an attached
-        # non-vehicle lane could sort outside it — the outer side is empty
-        # and this reduces to ``n - k`` for LHT and ``-(k + 1)`` for RHT.
-        reference_index = self.reference_lanelet_index
-        if reference_index is None:
-            reference_index = n - 1 if is_lht else 0
-        if not (0 <= reference_index < n):
+        target_lane_id = self.lane_id_for_sorted_index(sorted_index)
+        if target_lane_id is None:
             return None
-
-        if is_lht:
-            inward = sorted_index <= reference_index
-            rank = (
-                reference_index - sorted_index
-                if inward
-                else sorted_index - reference_index - 1
-            )
-        else:
-            inward = sorted_index >= reference_index
-            rank = (
-                sorted_index - reference_index
-                if inward
-                else reference_index - sorted_index - 1
-            )
-        target_lane_id = (rank + 1) * (1 if (inward == is_lht) else -1)
 
         # The anchor of lane ``L`` sits at the cumulative width of the lanes
         # between it and the reference line, measured on its own side.

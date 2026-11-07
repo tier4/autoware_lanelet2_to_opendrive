@@ -120,12 +120,9 @@ def _connector_anchor(
     lane_id: int,
     *,
     at_start: bool,
-    traffic_rule: TrafficRule,
 ) -> Optional[XYZ]:
     """Where the stub meets the shared connector, on its own lane edge."""
-    anchor = _lane_anchor_xyz(
-        connector, lane_id, at_start=at_start, traffic_rule=traffic_rule
-    )
+    anchor = _lane_anchor_xyz(connector, lane_id, at_start=at_start)
     if anchor is not None:
         return anchor
     return connector.reference_start_xyz if at_start else connector.reference_end_xyz
@@ -134,13 +131,9 @@ def _connector_anchor(
 def _incoming_anchor(
     incoming: Road,
     lane_id: int,
-    *,
-    traffic_rule: TrafficRule,
 ) -> Optional[XYZ]:
     """Where the stub leaves the incoming road, on its own lane edge."""
-    anchor = _lane_anchor_xyz(
-        incoming, lane_id, at_start=False, traffic_rule=traffic_rule
-    )
+    anchor = _lane_anchor_xyz(incoming, lane_id, at_start=False)
     if anchor is not None:
         return anchor
     return incoming.reference_end_xyz
@@ -278,12 +271,8 @@ def _make_stub(
     lane_link = connection.lane_links[0]
 
     at_start = connection.contact_point == ContactPoint.START
-    incoming_xyz = _incoming_anchor(
-        incoming, lane_link.from_lane, traffic_rule=traffic_rule
-    )
-    connector_xyz = _connector_anchor(
-        connector, lane_link.to_lane, at_start=at_start, traffic_rule=traffic_rule
-    )
+    incoming_xyz = _incoming_anchor(incoming, lane_link.from_lane)
+    connector_xyz = _connector_anchor(connector, lane_link.to_lane, at_start=at_start)
     if incoming_xyz is None or connector_xyz is None:
         log.warning(
             "Junction %d: no endpoint geometry for the stub from road %d "

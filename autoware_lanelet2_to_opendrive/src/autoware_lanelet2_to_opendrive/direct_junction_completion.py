@@ -152,14 +152,10 @@ def _materialise_direct_connector(
         min_segment_length: minimum planView length for the stub geometry.
         context: short label used in the "no endpoint geometry" warning.
     """
-    start_xyz = _lane_anchor_xyz(
-        in_road, in_lane, at_start=False, traffic_rule=traffic_rule
-    )
+    start_xyz = _lane_anchor_xyz(in_road, in_lane, at_start=False)
     if start_xyz is None:
         start_xyz = in_road.reference_end_xyz
-    end_xyz = _lane_anchor_xyz(
-        out_road, out_lane, at_start=True, traffic_rule=traffic_rule
-    )
+    end_xyz = _lane_anchor_xyz(out_road, out_lane, at_start=True)
     if end_xyz is None:
         end_xyz = out_road.reference_start_xyz
     if start_xyz is None or end_xyz is None:
