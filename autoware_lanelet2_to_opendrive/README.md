@@ -34,7 +34,7 @@ This pulls `lanelet2-python-api-for-autoware`, which builds from source against 
 
 ## Quick usage
 
-The package registers six console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
+The package registers eight console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
 
 | Command | Framework | Purpose |
 |---------|-----------|---------|

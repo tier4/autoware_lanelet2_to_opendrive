@@ -5,7 +5,7 @@ to convert Lanelet2 maps to OpenDRIVE format.
 
 ## Console Scripts
 
-The package registers six console scripts (see `[project.scripts]` in
+The package registers eight console scripts (see `[project.scripts]` in
 [`pyproject.toml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/pyproject.toml)):
 
 | Script | Purpose |
