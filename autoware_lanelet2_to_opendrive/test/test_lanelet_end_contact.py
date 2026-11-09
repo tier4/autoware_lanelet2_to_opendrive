@@ -23,7 +23,6 @@ perpendicular. One traced pair of roads emitted reference lines 88.98 deg
 apart at a contact whose two lanelets hold the same two node objects.
 """
 
-import pytest
 from lanelet2.core import Lanelet, LaneletMap, LineString3d, Point3d, getId
 
 from autoware_lanelet2_to_opendrive.util import lanelet_end_has_contact
@@ -73,12 +72,6 @@ def test_a_forward_neighbour_is_found() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="lanelet_end_has_contact asks laneletLayer.findUsages for the "
-    "forward linestring only, so a neighbour holding the inverted view is "
-    "missed and a shared end reads as isolated",
-)
 def test_an_inverted_neighbour_is_found() -> None:
     """A neighbour holding the inverted view shares the same node objects and
     the same cut, so the end is shared and has to read as shared."""
