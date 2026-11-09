@@ -16,6 +16,7 @@ The package registers six console scripts (see `[project.scripts]` in
 | `analyze` | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | Run ASAM QC checker on an existing `.xodr` |
 | `route-fidelity` | Check the `.xodr` states the lane successions the map states |
+| `xodr-digest` | Extract a normalized structure digest of an `.xodr`, for diff-based review |
 | `carla-import-test` | Smoke-test loading the `.xodr` in a running CARLA server |
 
 Run them via `uv run <script>` (or `<script>` directly inside an active venv).
@@ -362,6 +363,29 @@ The report separates three things a bare "lost routes" count conflates:
   connector inserted where the map states a succession directly. These are
   followed rather than counted, because counting them reports every connector
   as a transition the map never stated.
+## `xodr-digest`
+
+The repository keeps no byte-exact golden `.xodr` files: conversion output is
+gitignored and regenerated on every run, and floating-point formatting, element
+ordering and the header's `date` attribute all vary between runs even when the
+semantic content is unchanged. Plain byte diffing therefore cannot show that a
+change touched only the intended part of the output.
+
+`xodr-digest` produces a normalized JSON digest instead: coordinates are rounded
+to millimetre precision, `date` and the generator-version comment are dropped,
+and roads and junctions are sorted by `id`.
+
+```
+xodr-digest <xodr_file> [--output FILE]
+```
+
+Diffing two digests shows which of the fields the digest extracts changed. It
+does **not** show that nothing else changed: a digest diff is a claim about the
+extracted fields and only about those. Anything the digest never reads is
+invisible to it regardless of whether it changed in the `.xodr` itself -- which
+is not hypothetical, since an earlier revision extracted no lane-width metrics
+and reported as unchanged two roads whose sampled lane width had moved from
+about 3.0 m to about 31.5 m.
 
 ## `carla-import-test`
 

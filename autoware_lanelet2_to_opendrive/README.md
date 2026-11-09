@@ -44,6 +44,7 @@ The package registers six console scripts (see `[project.scripts]` in [`pyprojec
 | `analyze` | argparse | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | argparse | Run the ASAM QC checker on an existing `.xodr` |
 | `route-fidelity` | argparse | Check the `.xodr` states the lane successions the map states |
+| `xodr-digest` | argparse | Extract a normalized structure digest of an `.xodr`, for diff-based review |
 | `carla-import-test` | argparse | Smoke-test loading the `.xodr` in a running CARLA server |
 
 Run them via `uv run <script>` (or `<script>` directly inside an active venv).
