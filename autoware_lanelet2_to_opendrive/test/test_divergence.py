@@ -1,7 +1,11 @@
 """Tests for divergence/merge synthesis (issue #291)."""
 
 import inspect
+import logging
+import math
 from unittest.mock import MagicMock
+
+import pytest
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
@@ -10,6 +14,9 @@ from autoware_lanelet2_to_opendrive.divergence import (
     DivergenceSynthesisResult,
     SanityGateInputs,
     SynthesisOutput,
+    _directed_edges_for_site,
+    _make_zero_length_connecting_road,
+    _synthesise_junction_for_edges,
     apply_divergence_synthesis,
     collect_divergence_sites,
     sanity_gate_passes,
@@ -18,8 +25,18 @@ from autoware_lanelet2_to_opendrive.divergence import (
 from autoware_lanelet2_to_opendrive.opendrive.enums import (
     ContactPoint,
     ElementType,
+    LaneType,
     TrafficRule,
 )
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    ParamPoly3,
+    PlanView,
+    end_param,
+)
+from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
+from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
     _resolve_candidate_road_ids,
@@ -389,7 +406,12 @@ def test_apply_divergence_synthesis_happy_path_emits_objects_and_patches_link(
     assert roads_by_id[185].add_successor.called
 
 
-def test_apply_divergence_synthesis_falls_back_on_gate_failure(monkeypatch):
+def test_apply_divergence_synthesis_falls_back_to_nearest_candidate(monkeypatch):
+    """A failed gate links the nearest candidate, never an arbitrary one.
+
+    Candidate 186 comes first but is 99 m away; linking to it would emit a
+    connector pointing in an almost arbitrary direction.
+    """
     sites = [
         DivergenceSite(
             road_id=185,
@@ -424,11 +446,811 @@ def test_apply_divergence_synthesis_falls_back_on_gate_failure(monkeypatch):
         min_segment_length=0.01,
     )
 
-    # No synthetic junction emitted; source road took the first candidate as its
-    # road-level successor (single-road fallback).
+    # No synthetic junction emitted; source road took the nearest candidate as
+    # its road-level successor (single-road fallback).
     assert result.junctions == []
     assert result.connecting_roads == []
     roads_by_id[185].add_successor.assert_called_once()
     args, kwargs = roads_by_id[185].add_successor.call_args
     assert kwargs["element_type"] == ElementType.ROAD
-    assert kwargs["element_id"] == 186
+    assert kwargs["element_id"] == 187
+
+
+def _lane_anchor_road_stub(
+    road_id: int,
+    *,
+    start_xyz=(0.0, 0.0, 0.0),
+    end_xyz=(0.0, 0.0, 0.0),
+    sorted_lanelet_ids=None,
+    anchors=None,
+):
+    """Road stub whose ``evaluate_lane_anchor_xyz`` returns scripted anchors.
+
+    ``anchors`` maps ``(sorted_index, at_start)`` to the rendered lane anchor,
+    i.e. the point the synthetic connector actually terminates on.
+    """
+    road = _build_road_stub(road_id, start_xyz=start_xyz, end_xyz=end_xyz)
+    road.sorted_lanelet_ids = sorted_lanelet_ids or [road_id]
+    scripted = anchors or {}
+
+    def evaluate_lane_anchor_xyz(sorted_index: int, at_start: bool):
+        return scripted[(sorted_index, at_start)]
+
+    road.evaluate_lane_anchor_xyz.side_effect = evaluate_lane_anchor_xyz
+    return road
+
+
+def _connector_edges(connecting_roads):
+    """Collect ``(incoming_road, from_lane, outgoing_road, to_lane)`` per connector."""
+    edges = set()
+    for road in connecting_roads:
+        lane_section = road.lanes.lane_sections[0]
+        lanes = {**lane_section.left_lanes, **lane_section.right_lanes}
+        lane = next(lane for lane in lanes.values() if lane.lane_id != 0)
+        edges.add(
+            (
+                road.link.predecessor.element_id,
+                lane.predecessor.id,
+                road.link.successor.element_id,
+                lane.successor.id,
+            )
+        )
+    return edges
+
+
+def test_sanity_gate_accepts_split_candidate_on_a_non_reference_lane():
+    """A candidate attached to lane -2 is offset by a lane width by design."""
+    site = DivergenceSite(
+        road_id=50,
+        side=DivergenceSide.SUCCESSOR,
+        candidate_road_ids=[51, 52],
+    )
+    # Candidate 52 leaves the source's second lane, so its reference start is
+    # one lane width away from the source's reference end.
+    reference_only = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={51: (0.0, 0.0, 0.0), 52: (0.0, -3.2, 0.0)},
+        lane_pairs=[(-1, 51, -1), (-2, 52, -1)],
+        all_successor_lanelet_road_ids={51, 52},
+    )
+    ok, reason = sanity_gate_passes(site, reference_only, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "endpoint" in reason
+
+    lane_aware = SanityGateInputs(
+        endpoint_road=reference_only.endpoint_road,
+        endpoints_candidates=reference_only.endpoints_candidates,
+        lane_pairs=reference_only.lane_pairs,
+        all_successor_lanelet_road_ids=reference_only.all_successor_lanelet_road_ids,
+        # The rendered lane anchors coincide, which is what actually matters.
+        lane_pair_endpoint_distances={(-1, 51, -1): 0.0, (-2, 52, -1): 0.01},
+    )
+    ok, reason = sanity_gate_passes(site, lane_aware, endpoint_tolerance=0.5)
+    assert ok is True
+    assert reason == ""
+
+
+def test_sanity_gate_rejects_genuinely_distant_lane_anchor():
+    """Lane-aware gating still rejects anchors that are really far apart."""
+    site = DivergenceSite(
+        road_id=50,
+        side=DivergenceSide.SUCCESSOR,
+        candidate_road_ids=[51, 52],
+    )
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={51: (0.0, 0.0, 0.0), 52: (0.0, -3.2, 0.0)},
+        lane_pairs=[(-1, 51, -1), (-2, 52, -1)],
+        all_successor_lanelet_road_ids={51, 52},
+        lane_pair_endpoint_distances={(-1, 51, -1): 0.0, (-2, 52, -1): 4.0},
+    )
+    ok, reason = sanity_gate_passes(site, inputs, endpoint_tolerance=0.5)
+    assert ok is False
+    assert "lane-aware endpoint distance" in reason
+
+
+def test_apply_divergence_synthesis_fork_keeps_every_branch(monkeypatch):
+    """A 1->2 fork on a regular road keeps both branches.
+
+    Source lane -1 forks into roads 51 and 52 while lane -2 continues into
+    road 53, whose reference start is a lane width away. Gating on reference
+    endpoints rejected the whole site and dropped both fork branches.
+    """
+    sites = [
+        DivergenceSite(
+            road_id=50,
+            side=DivergenceSide.SUCCESSOR,
+            candidate_road_ids=[51, 52, 53],
+        )
+    ]
+    roads_by_id = {
+        50: _lane_anchor_road_stub(
+            50,
+            end_xyz=(0.0, 0.0, 0.0),
+            sorted_lanelet_ids=[5001, 5002],
+            anchors={(0, False): (0.0, 0.0, 0.0), (1, False): (0.0, -3.2, 0.0)},
+        ),
+        51: _lane_anchor_road_stub(
+            51, start_xyz=(0.0, 0.0, 0.0), anchors={(0, True): (0.0, 0.0, 0.0)}
+        ),
+        52: _lane_anchor_road_stub(
+            52, start_xyz=(0.0, 0.0, 0.0), anchors={(0, True): (0.0, 0.0, 0.0)}
+        ),
+        53: _lane_anchor_road_stub(
+            53, start_xyz=(0.0, -3.2, 0.0), anchors={(0, True): (0.0, -3.2, 0.0)}
+        ),
+    }
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lambda *_a, **_kw: (
+            [(-1, 51, -1), (-1, 52, -1), (-2, 53, -1)],
+            {51, 52, 53},
+        ),
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert len(result.junctions) == 1
+    assert _connector_edges(result.connecting_roads) == {
+        (50, -1, 51, -1),
+        (50, -1, 52, -1),
+        (50, -2, 53, -1),
+    }
+    _, kwargs = roads_by_id[50].add_successor.call_args
+    assert kwargs["element_type"] == ElementType.JUNCTION
+    for candidate_id in (51, 52, 53):
+        _, kwargs = roads_by_id[candidate_id].add_predecessor.call_args
+        assert kwargs["element_type"] == ElementType.JUNCTION
+
+
+def test_apply_divergence_synthesis_merge_keeps_every_branch(monkeypatch):
+    """A 2->1 merge keeps both branches.
+
+    Road 11 merges into the source's lane -2, whose anchor is one lane width
+    away from the source's reference start.
+    """
+    sites = [
+        DivergenceSite(
+            road_id=42,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=[10, 11],
+        )
+    ]
+    roads_by_id = {
+        42: _lane_anchor_road_stub(
+            42,
+            start_xyz=(0.0, 0.0, 0.0),
+            sorted_lanelet_ids=[4201, 4202],
+            anchors={(0, True): (0.0, 0.0, 0.0), (1, True): (3.2, 0.0, 0.0)},
+        ),
+        10: _lane_anchor_road_stub(
+            10, end_xyz=(0.0, 0.0, 0.0), anchors={(0, False): (0.0, 0.0, 0.0)}
+        ),
+        11: _lane_anchor_road_stub(
+            11, end_xyz=(3.2, 0.0, 0.0), anchors={(0, False): (3.2, 0.0, 0.0)}
+        ),
+    }
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lambda *_a, **_kw: ([(-1, 10, -1), (-2, 11, -1)], {10, 11}),
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert len(result.junctions) == 1
+    assert _connector_edges(result.connecting_roads) == {
+        (10, -1, 42, -1),
+        (11, -1, 42, -2),
+    }
+    _, kwargs = roads_by_id[42].add_predecessor.call_args
+    assert kwargs["element_type"] == ElementType.JUNCTION
+    assert kwargs["element_id"] == 2000
+    roads_by_id[10].add_successor.assert_called_once()
+    roads_by_id[11].add_successor.assert_called_once()
+
+
+def test_apply_divergence_synthesis_unions_merge_and_split_of_one_boundary(
+    monkeypatch,
+):
+    """Both sites of one N->M boundary share a single junction."""
+    sites = [
+        DivergenceSite(
+            road_id=31,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=[28, 29],
+        ),
+        DivergenceSite(
+            road_id=29,
+            side=DivergenceSide.SUCCESSOR,
+            candidate_road_ids=[31, 32],
+        ),
+    ]
+    roads_by_id = {
+        28: _lane_anchor_road_stub(
+            28, end_xyz=(0.0, 3.0, 0.0), anchors={(0, False): (0.0, 3.0, 0.0)}
+        ),
+        29: _lane_anchor_road_stub(
+            29, end_xyz=(0.0, 0.0, 0.0), anchors={(0, False): (0.0, 0.0, 0.0)}
+        ),
+        31: _lane_anchor_road_stub(
+            31,
+            start_xyz=(0.0, 0.0, 0.0),
+            sorted_lanelet_ids=[3101, 3102],
+            anchors={(0, True): (0.0, 0.0, 0.0), (1, True): (0.0, 3.0, 0.0)},
+        ),
+        32: _lane_anchor_road_stub(
+            32, start_xyz=(0.0, 0.0, 0.0), anchors={(0, True): (0.0, 0.0, 0.0)}
+        ),
+    }
+
+    def lane_pairs_for_site(site, *_a, **_kw):
+        if site.road_id == 31:
+            return [(-1, 29, -1), (-2, 28, -1)], {28, 29}
+        if site.road_id == 29:
+            return [(-1, 31, -1), (-1, 32, -1)], {31, 32}
+        raise AssertionError(f"unexpected site {site}")
+
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lane_pairs_for_site,
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert len(result.junctions) == 1
+    junction_id = result.junctions[0].id
+    assert len(result.junctions[0].connections) == 3
+    assert _connector_edges(result.connecting_roads) == {
+        (29, -1, 31, -1),
+        (28, -1, 31, -2),
+        (29, -1, 32, -1),
+    }
+    assert all(road.junction == junction_id for road in result.connecting_roads)
+    for road_id in (31, 32):
+        _, kwargs = roads_by_id[road_id].add_predecessor.call_args
+        assert kwargs["element_id"] == junction_id
+    for road_id in (28, 29):
+        _, kwargs = roads_by_id[road_id].add_successor.call_args
+        assert kwargs["element_id"] == junction_id
+
+
+def test_apply_divergence_synthesis_emits_nothing_when_no_candidate_is_close(
+    monkeypatch,
+):
+    """No candidate within tolerance means no link at all, not an arbitrary one."""
+    sites = [
+        DivergenceSite(
+            road_id=42,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=[10, 11],
+        )
+    ]
+    roads_by_id = {
+        42: _lane_anchor_road_stub(
+            42, start_xyz=(0.0, 0.0, 0.0), anchors={(0, True): (0.0, 0.0, 0.0)}
+        ),
+        10: _lane_anchor_road_stub(
+            10, end_xyz=(5.0, 0.0, 0.0), anchors={(0, False): (5.0, 0.0, 0.0)}
+        ),
+        11: _lane_anchor_road_stub(
+            11, end_xyz=(9.0, 0.0, 0.0), anchors={(0, False): (9.0, 0.0, 0.0)}
+        ),
+    }
+    monkeypatch.setattr(
+        "autoware_lanelet2_to_opendrive.divergence._lane_pairs_for_site",
+        lambda *_a, **_kw: ([(-1, 10, -1), (-1, 11, -1)], {10, 11}),
+    )
+
+    result = apply_divergence_synthesis(
+        sites=sites,
+        roads_by_id=roads_by_id,
+        lanelet_map=MagicMock(),
+        routing_graph=MagicMock(),
+        lanelet_to_road=MagicMock(),
+        traffic_rule=TrafficRule.RHT,
+        starting_connecting_road_id=200,
+        starting_junction_id=2000,
+        endpoint_tolerance=0.5,
+        min_segment_length=0.01,
+    )
+
+    assert result.junctions == []
+    assert result.connecting_roads == []
+    roads_by_id[42].add_predecessor.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Synthetic zero-length connectors must reproduce the cross-section they
+# bridge, not a nominal one. The checker that cares is
+# ``lane_smoothness.contact_point_no_horizontal_gaps``: at every contact it
+# compares *both* lane borders of the two lanes and wants at least two of the
+# four pairings inside 1 cm. Getting the reference line right is therefore
+# only half of it -- the heading (which orients the lane normal) and the lane
+# width (which places the outer border) decide the other half.
+# ---------------------------------------------------------------------------
+
+
+def _stub_between(
+    start_xyz, end_xyz, *, min_segment_length, start_heading, end_heading=None
+):
+    return _make_zero_length_connecting_road(
+        road_id=900,
+        junction_id=9000,
+        incoming_road_id=1,
+        outgoing_road_id=2,
+        incoming_contact=ContactPoint.END,
+        outgoing_contact=ContactPoint.START,
+        start_xyz=start_xyz,
+        end_xyz=end_xyz,
+        min_segment_length=min_segment_length,
+        traffic_rule=TrafficRule.RHT,
+        from_lane=-1,
+        to_lane=-1,
+        start_heading=start_heading,
+        end_heading=end_heading,
+    )
+
+
+def _end_pose(geometry):
+    """``(x, y, heading)`` at p=1 of a normalized paramPoly3."""
+    du = geometry.bU + 2 * geometry.cU + 3 * geometry.dU
+    dv = geometry.bV + 2 * geometry.cV + 3 * geometry.dV
+    u = geometry.bU + geometry.cU + geometry.dU
+    v = geometry.bV + geometry.cV + geometry.dV
+    cos_h, sin_h = math.cos(geometry.hdg), math.sin(geometry.hdg)
+    return (
+        geometry.x + u * cos_h - v * sin_h,
+        geometry.y + u * sin_h + v * cos_h,
+        geometry.hdg + math.atan2(dv, du),
+    )
+
+
+# These four tests replace three that pinned the *previous* rule: the
+# connector took its heading from the ``start_xyz -> end_xyz`` vector when
+# that vector was at least ``min_segment_length`` long, and from the
+# incoming road's tangent below it.  That rule is gone -- a curve meeting
+# both tangents has no selection to make -- so the coverage is rewritten
+# onto the new contract rather than deleted.
+
+
+def test_both_tangents_give_a_curve_meeting_each_of_them():
+    """The contract D5 rests on: both endpoints matched in position *and*
+    tangent, so neither contact's lane borders fan out."""
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (0.5, 0.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.25,
+        end_heading=-0.4,
+    )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.pRange == "normalized"
+    assert geometry.hdg == pytest.approx(0.25)
+
+    x1, y1, h1 = _end_pose(geometry)
+    assert (x1, y1) == pytest.approx((0.5, 0.0), abs=1e-12)
+    assert h1 == pytest.approx(-0.4)
+
+
+def test_length_is_the_arc_length_not_the_chord():
+    """``@length`` must be what the coefficients describe.
+
+    The road's s-domain is written against it -- elevation and the tapered
+    lane widths -- and ``road.geometry.parampoly3.normalized_range``
+    compares the two.  A curve is longer than its chord, and quoting the
+    chord made the checker evaluate the lane borders short of the road's
+    real end: measured as 61 gap findings against 20, i.e. worse than not
+    curving at all.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.0,
+        end_heading=math.radians(60.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+    chord = 1.0
+    assert geometry.length > chord
+    assert geometry.length == pytest.approx(geometry.arc_length(), rel=1e-12)
+    # The road and its geometry must agree, or every profile keyed on the
+    # road's s is written against a different curve.
+    assert stub.length == pytest.approx(geometry.length)
+
+
+def test_without_the_far_tangent_the_connector_stays_straight():
+    """One tangent is not enough to bend towards anything."""
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (0.0, 0.004, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.25,
+        end_heading=None,
+    )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.pRange == "arcLength"
+    assert geometry.hdg == pytest.approx(0.25)
+    assert geometry.length == pytest.approx(0.01)
+    assert (geometry.cV, geometry.dV) == (0.0, 0.0)
+
+
+def test_with_no_tangent_at_all_it_falls_back_to_the_anchor_vector(caplog):
+    """The last resort, and it must say so.
+
+    Reached only when a neighbour has no rendered plan view.  The anchor
+    vector is a poor direction -- a median 88.9 deg from the incoming
+    road's own tangent over the 296 Odaiba connectors that used to take it
+    -- so taking it is worth a warning rather than a silent default.
+    """
+    with caplog.at_level(logging.WARNING):
+        stub = _stub_between(
+            (0.0, 0.0, 0.0),
+            (0.0, 0.5, 0.0),
+            min_segment_length=0.01,
+            start_heading=None,
+            end_heading=None,
+        )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.hdg == pytest.approx(math.pi / 2)
+    assert geometry.length == pytest.approx(0.5)
+    assert any("anchor vector" in r.message for r in caplog.records)
+
+
+def test_coincident_anchors_raise_rather_than_guess():
+    """There is no curve between a point and itself.
+
+    ``ParamPoly3.hermite`` refuses instead of inventing a direction; the
+    connector builder is the one that decides what to draw.
+
+    What it draws changed: it used to be a straight segment along the start
+    heading, and is now the floor-length curve meeting **both** tangents,
+    drawn from the start anchor along the bisector of the two headings. The
+    straight version satisfies only one tangent, so the lane borders at the
+    losing end miss by ``2 * w * sin(d_psi / 2)`` -- 0.3 m at a 5 degree turn
+    with a 3.5 m lane, against a 1 cm tolerance. Measured on a
+    6,672-lanelet map, the straight stub cost +199 findings of
+    ``lane_smoothness.contact_point_no_horizontal_gaps`` (425 -> 624) with
+    every other checker unmoved.
+    """
+    with pytest.raises(ValueError, match="coincide"):
+        ParamPoly3.hermite(
+            start_xy=(1.0, 2.0),
+            start_heading=0.3,
+            end_xy=(1.0, 2.0),
+            end_heading=0.3,
+        )
+
+    # ...and the builder does not propagate it.
+    stub = _stub_between(
+        (1.0, 2.0, 0.0),
+        (1.0, 2.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.3,
+        end_heading=1.2,
+    )
+    geometry = stub.plan_view.geometries[0]
+    assert geometry.hdg == pytest.approx(0.3)
+    # `@length` is the arc length of a curve whose chord is the floor, so it
+    # is at least the floor and the two agree with each other.
+    assert geometry.length >= 0.01
+    assert geometry.length == pytest.approx(geometry.arc_length(), rel=1e-12)
+    assert not _tangent_opposes_displacement(geometry)
+    _x1, _y1, end_heading = _end_pose(geometry)
+    assert end_heading == pytest.approx(1.2)
+
+
+def _local_offset(geometry, p):
+    """``(u, v)`` of the record at parameter ``p``, in its own start frame."""
+    u = geometry.bU * p + geometry.cU * p * p + geometry.dU * p**3
+    v = geometry.bV * p + geometry.cV * p * p + geometry.dV * p**3
+    return geometry.aU + u, geometry.aV + v
+
+
+def _tangent_opposes_displacement(geometry, samples=201):
+    """Does the record's tangent ever point against its own net displacement?
+
+    The convention-free statement of "doubles back". Measuring ``du/dp``
+    alone does not say it: in the record's own start frame a cubic Hermite
+    has ``du/dp (p=1) = scale * cos(d_psi)``, so *every* connector turning
+    through more than 90 degrees has a negative ``du/dp`` at its end
+    whatever its geometry, and no tangent scaling can change that.
+
+    The parameter range comes from ``end_param``: it is ``1`` for a
+    ``pRange="normalized"`` record and ``length`` for an ``"arcLength"`` one,
+    and reading ``p = 1`` for both reports a straight 1 cm stub as a 1 m one.
+    """
+    p_end = end_param(geometry)
+    u1, v1 = _local_offset(geometry, p_end)
+    norm = math.hypot(u1, v1)
+    if norm == 0.0:
+        return True  # it ends exactly where it started: no displacement at all
+    nx, ny = u1 / norm, v1 / norm
+    for index in range(samples):
+        p = p_end * index / (samples - 1)
+        du = geometry.bU + 2 * geometry.cU * p + 3 * geometry.dU * p * p
+        dv = geometry.bV + 2 * geometry.cV * p + 3 * geometry.dV * p * p
+        if du * nx + dv * ny < 0.0:
+            return True
+    return False
+
+
+@pytest.mark.parametrize("separation", [1e-6, 1e-5, 1e-3, 5e-3])
+def test_anchors_closer_than_the_floor_do_not_make_the_connector_double_back(
+    separation,
+):
+    """A sub-floor separation carries no shape, and a cubic invents one.
+
+    ``test_coincident_anchors_raise_rather_than_guess`` covers the exactly
+    equal case. The population on a real map is the *almost* equal one:
+    ``can_curve`` only asks that the anchors differ by more than
+    ``geometry.epsilon`` (1e-10), so two renderings of one contact point a
+    fraction of a millimetre apart take the cubic branch, and with both
+    tangents nearly parallel that cubic is
+
+        bU : cU : dU = 1 : -3 : 2,   u(1) = 0
+
+    -- it runs out and comes back to its own start. ``@length`` is the arc
+    length, so the road has extent while its reference line has none, and a
+    consumer sampling along ``s`` gets headings that reverse. That is the
+    shape behind CARLA's 160 heading flips (max 179.96 deg).
+
+    Measured on 2026-11-06 over the integration tree's output: of the
+    ``paramPoly3`` records whose tangent reverses against their own
+    displacement, 424 of 455 on the customer map (46 of 50 on
+    Nishi-Shinjuku) are synthetic connectors inside a junction, 486 of them
+    on roads under 10 cm long, and 499 of 553 turn through **less than 5
+    degrees**. So this is not a curve bending; it is a stub with nothing to
+    interpolate.
+
+    ``_validate_segment`` cannot catch it: it checks length, finiteness and
+    heading, not monotonicity.
+
+    The negative separation is the other half of the population, and the
+    floor alone does not cover it: with the floor in place 95 records still
+    reversed, and their ``u(1) / |tangent|`` has p50 **-0.995** -- the far
+    anchor sits a floor's length *behind* the near one along the start
+    tangent, which no cubic can honour without doubling back. So the Hermite
+    is checked after it is built, and a reversing one is replaced.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (separation, 0.0, 0.0),
+        min_segment_length=0.005,
+        start_heading=0.0,
+        end_heading=math.radians(1.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+
+    assert not _tangent_opposes_displacement(geometry), (
+        f"the connector doubles back on itself: bU={geometry.bU:.6g} "
+        f"cU={geometry.cU:.6g} dU={geometry.dU:.6g}"
+    )
+    # Both tangents are known here, so both must still be met: a stub that
+    # carries only the start heading misses the far neighbour's lane borders
+    # by 2 * w * sin(d_psi / 2), which is 0.3 m at a 5 degree turn with a
+    # 3.5 m lane against a 1 cm tolerance -- measured as +199 findings of
+    # lane_smoothness.contact_point_no_horizontal_gaps on a real map.
+    _x1, _y1, end_heading = _end_pose(geometry)
+    assert end_heading == pytest.approx(math.radians(1.0), abs=1e-9), (
+        "the far neighbour's tangent must still be met; a straight stub "
+        "trades the fold for a lane-border gap"
+    )
+    displacement = math.hypot(*_local_offset(geometry, end_param(geometry)))
+    assert displacement == pytest.approx(0.005, rel=1e-9), (
+        "the connector must carry the length floor as real extent, not as "
+        f"arc length spent returning to its start (displacement {displacement:.6g} m)"
+    )
+    assert stub.length == pytest.approx(geometry.length)
+
+
+def test_a_chord_beyond_the_merge_tolerance_keeps_its_exact_endpoints():
+    """Position continuity outranks heading once the anchors are really apart.
+
+    The replacement draws the floor-length curve from the *near* anchor, so it
+    abandons the far one by up to ``raw separation + floor``. Inside the 1 cm
+    contact tolerance no consumer can tell; beyond it the abandoned distance
+    is a gap in the road network.
+
+    Measured: with the gate missing, two connectors whose anchors were 19 mm
+    apart became 5 mm stubs ending 23 mm from their successor's start, and
+    `linked_endpoints_apart` went from 2 violations to 4 on the customer map.
+    A 2 cm reversed stub is a heading artifact in 2 cm of road; a 23 mm hole
+    is a break. So this input keeps its endpoints and its reversal, and the
+    reversal is then a finding about the input -- the incoming road's tangent
+    points away from where the outgoing road starts.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (-0.02, 0.0, 0.0),
+        min_segment_length=0.005,
+        start_heading=0.0,
+        end_heading=math.radians(1.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+
+    assert geometry.pRange == "normalized", "the Hermite must stand"
+    x1, y1, _h1 = _end_pose(geometry)
+    assert (x1, y1) == pytest.approx(
+        (-0.02, 0.0), abs=1e-12
+    ), "the far anchor must still be met, so the contact stays closed"
+    assert _tangent_opposes_displacement(geometry), (
+        "and the reversal is accepted here -- if this input did not reverse, "
+        "the test would not be pinning the trade-off it is named for"
+    )
+
+
+def test_a_real_chord_keeps_its_curve_even_when_it_ends_facing_backwards():
+    """The guard rail on the reversal check: a hairpin is not a defect.
+
+    A curve with a genuine chord may legitimately end with its tangent
+    opposing that chord -- that is what a U-turn ramp does. The reversal
+    check must therefore not reach it, or a real manoeuvre would collapse to
+    a floor-length stub. ``_ANCHOR_RESIDUAL_WARN_M`` (5 m) is the line: below
+    it the two anchors are one contact point rendered twice, above it the
+    separation contradicts this function's premise and the geometry is
+    whatever the caller actually asked for.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (10.0, 0.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.0,
+        end_heading=math.radians(175.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+
+    assert geometry.pRange == "normalized", "the Hermite must stand"
+    assert _tangent_opposes_displacement(geometry), (
+        "this input really does double back -- if it did not, the test would "
+        "not be exercising the guard rail"
+    )
+    x1, y1, end_heading = _end_pose(geometry)
+    assert (x1, y1) == pytest.approx((10.0, 0.0), abs=1e-9), (
+        "the far anchor must still be met: 10 m of connector must not become "
+        "a 1 cm stub"
+    )
+    assert end_heading == pytest.approx(math.radians(175.0))
+    assert stub.length >= 10.0
+
+
+def _width_road(road_id, *, width, length=10.0, heading=0.0, x=0.0, y=0.0):
+    """A one-lane RHT road whose lane has a known constant width."""
+    lane = Lane(lane_id=-1, lane_type=LaneType.DRIVING)
+    lane.widths.append(LaneWidth(s_offset=0.0, a=width, b=0.0, c=0.0, d=0.0))
+    lane_section = LaneSection(s_offset=0.0)
+    lane_section.right_lanes[-1] = lane
+    return Road(
+        id=road_id,
+        length=length,
+        rule=TrafficRule.RHT,
+        lanes=Lanes(lane_sections=[lane_section]),
+        plan_view=PlanView(
+            geometries=[
+                ParamPoly3(
+                    s=0.0,
+                    x=x,
+                    y=y,
+                    hdg=heading,
+                    length=length,
+                    aU=0.0,
+                    bU=1.0,
+                    cU=0.0,
+                    dU=0.0,
+                    aV=0.0,
+                    bV=0.0,
+                    cV=0.0,
+                    dV=0.0,
+                    pRange="arcLength",
+                )
+            ]
+        ),
+        sorted_lanelet_ids=[1],
+    )
+
+
+def test_synthesised_connector_tapers_between_the_widths_it_bridges():
+    """The stub reproduces both neighbours' widths, not the nominal 3.5 m.
+
+    A constant nominal width leaves the stub's outer border up to a metre
+    from the border of the road on either side, which the horizontal-gap
+    checker reads as a gap even when the reference lines meet exactly.
+    """
+    incoming = _width_road(1, width=3.0)
+    outgoing = _width_road(2, width=4.25, x=10.0)
+    edges = _directed_edges_for_site(
+        site=DivergenceSite(
+            road_id=1,
+            side=DivergenceSide.SUCCESSOR,
+            candidate_road_ids=(2,),
+        ),
+        inputs=SanityGateInputs(
+            endpoint_road=(10.0, 0.0, 0.0),
+            endpoints_candidates={2: (10.0, 0.0, 0.0)},
+            lane_pairs=[(-1, 2, -1)],
+            all_successor_lanelet_road_ids={2},
+        ),
+        traffic_rule=TrafficRule.RHT,
+        fallback_heading=0.0,
+        roads_by_id={1: incoming, 2: outgoing},
+    )
+    assert [(e.start_lane_width, e.end_lane_width) for e in edges] == [(3.0, 4.25)]
+
+    out = _synthesise_junction_for_edges(
+        junction_name="divergence_1",
+        edges=edges,
+        starting_connecting_road_id=300,
+        junction_id=3000,
+        traffic_rule=TrafficRule.RHT,
+        min_segment_length=0.005,
+        lane_width=DEFAULT_CONFIG.geometry.divergence_default_lane_width,
+    )
+    stub = out.connecting_roads[0]
+    width = stub.lanes.lane_sections[0].right_lanes[-1].widths[0]
+    assert width.a == pytest.approx(3.0)
+    assert width.a + width.b * stub.length == pytest.approx(4.25)
+
+
+def test_merge_connector_takes_the_heading_of_the_road_it_leaves():
+    """On a merge the incoming road is the *candidate*, not the site's road.
+
+    The stub's near contact is with the road it leaves, so that road's end
+    tangent -- not the merged road's start tangent -- is what keeps the
+    stub's lane borders on top of the borders it continues.  The edge now
+    carries the far tangent too, so the connector can meet both.
+    """
+    candidate = _width_road(1, width=3.0, heading=0.75)
+    merged = _width_road(2, width=3.0, heading=0.0, x=10.0)
+    edges = _directed_edges_for_site(
+        site=DivergenceSite(
+            road_id=2,
+            side=DivergenceSide.PREDECESSOR,
+            candidate_road_ids=(1,),
+        ),
+        inputs=SanityGateInputs(
+            endpoint_road=(10.0, 0.0, 0.0),
+            endpoints_candidates={1: (10.0, 0.0, 0.0)},
+            lane_pairs=[(-1, 1, -1)],
+            all_successor_lanelet_road_ids={1},
+        ),
+        traffic_rule=TrafficRule.RHT,
+        fallback_heading=0.0,
+        roads_by_id={1: candidate, 2: merged},
+    )
+    assert len(edges) == 1
+    assert edges[0].incoming_road_id == 1
+    assert edges[0].start_heading == pytest.approx(0.75)
+    # The merged road's own start tangent is the far end of the connector.
+    assert edges[0].end_heading == pytest.approx(0.0)

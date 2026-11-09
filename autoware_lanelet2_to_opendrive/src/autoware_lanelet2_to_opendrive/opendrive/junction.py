@@ -290,6 +290,8 @@ def _enumerate_lane_pairs(
     junction_to_predecessors: Dict[int, List[int]],
     lanelet_to_road_id: Dict[int, int],
     road_id_to_lanelet_to_lane: Dict[int, Dict[int, int]],
+    chain_entry_roads: Optional[Dict[int, List[tuple[int, int]]]] = None,
+    chain_interior_lanelet_ids: Optional[Set[int]] = None,
 ) -> Dict[tuple[int, int], List[tuple[int, int]]]:
     """Enumerate lane-id pairs for each (incoming_road, connecting_road) pair.
 
@@ -297,14 +299,19 @@ def _enumerate_lane_pairs(
     one ``(incoming_lane_id, connecting_lane_id)`` entry per direct
     lane-level predecessor edge implied by ``junction_to_predecessors``.
 
-    A predecessor that is itself a connecting lanelet of the same
-    junction (a *chained* connector) is resolved transitively: its
-    in-junction predecessor chain is walked until lanelets outside the
-    junction are reached, and those external lanelets' roads become the
-    ``incomingRoad``.  Dropping these edges previously left the connecting
-    road out of the ``<connection>`` table entirely (#492); pointing
-    ``incomingRoad`` at the upstream connecting road instead crashes
-    CARLA's OpenDRIVE parser (#500) — so the external road is used.
+    Only *direct* predecessor edges are enumerated. A predecessor that is
+    itself a connecting lanelet of the same junction (a *chained*
+    connector) yields no entry: the later stage of a chain is entered
+    through the earlier stage, never straight from outside the junction.
+    Walking back through the chain to reach a non-junction
+    ``incomingRoad`` (the earlier #492/#500 behaviour) advertised every
+    stage of the chain as directly reachable from the external road, so a
+    consumer could enter the second connector and skip the first — a
+    physical jump of one connector length.  The chain stays traversable
+    through the connecting roads' own ``<link><predecessor>`` /
+    ``<successor>`` elements, which :meth:`Road.set_connecting_road_links`
+    sets to the neighbouring in-junction road exactly for this case; the
+    external road keeps its ``<connection>`` to the head of the chain.
 
     Args:
         junction_to_predecessors: ``junction_lanelet_id -> [predecessor
@@ -312,6 +319,16 @@ def _enumerate_lane_pairs(
             predecessors only, lane changes excluded).
         lanelet_to_road_id: Global ``lanelet_id -> road_id`` mapping.
         road_id_to_lanelet_to_lane: ``road_id -> (lanelet_id -> lane_id)``.
+        chain_entry_roads: ``entry lanelet id -> [(connecting road id,
+            connecting lane id), ...]`` for chain-merged connecting roads.
+            A fork inside the junction produces several merged roads that
+            share their entry lanelet, and each one needs its own
+            ``<connection>`` row — the lanelet-to-road map can name only one
+            of them, so the entries are supplied explicitly.
+        chain_interior_lanelet_ids: junction lanelets that a chain-merged
+            road traverses *after* its first stage. They are reached inside
+            that road, never from outside the junction, so they contribute
+            no connection of their own.
 
     Returns:
         ``(incoming_road_id, connecting_road_id) -> [(incoming_lane_id,
@@ -320,49 +337,46 @@ def _enumerate_lane_pairs(
         is deterministic.
     """
 
-    def _resolve_incoming_lanelets(prev_id: int, visited: Set[int]) -> List[int]:
-        """Resolve a predecessor to its external (non-junction) lanelet(s).
-
-        A predecessor that is itself a connecting lanelet of this junction
-        — a key in ``junction_to_predecessors`` — is a chained connector;
-        its in-junction predecessor chain is walked until lanelets outside
-        the junction are reached.  Returns those external lanelet ids so
-        the ``<connection>`` resolves to a non-junction ``incomingRoad``
-        (a connecting-road ``incomingRoad`` crashes CARLA's parser, #500).
-        """
-        if prev_id not in junction_to_predecessors:
-            return [prev_id]  # outside the junction — a real incoming lanelet
-        if prev_id in visited:
-            return []  # cycle guard for malformed routing graphs
-        visited.add(prev_id)
-        resolved: List[int] = []
-        for upstream_id in junction_to_predecessors[prev_id]:
-            resolved.extend(_resolve_incoming_lanelets(upstream_id, visited))
-        return resolved
-
     pairs: Dict[tuple[int, int], Set[tuple[int, int]]] = defaultdict(set)
+    chain_entry_roads = chain_entry_roads or {}
+    chain_interior_lanelet_ids = chain_interior_lanelet_ids or set()
 
     for connecting_lanelet_id, predecessor_ids in junction_to_predecessors.items():
-        connecting_road_id = lanelet_to_road_id.get(connecting_lanelet_id)
-        if connecting_road_id is None:
-            continue
-        connecting_lane_id = road_id_to_lanelet_to_lane.get(connecting_road_id, {}).get(
-            connecting_lanelet_id
-        )
-        if connecting_lane_id is None:
+        if connecting_lanelet_id in chain_interior_lanelet_ids:
+            # A later stage of a chain-merged maneuver: it is driven through
+            # inside its connecting road, so it is entered neither from
+            # outside the junction nor through a <connection> of its own.
             continue
 
-        for prev_id in predecessor_ids:
-            for incoming_lanelet_id in _resolve_incoming_lanelets(prev_id, set()):
-                incoming_road_id = lanelet_to_road_id.get(incoming_lanelet_id)
-                if incoming_road_id is None:
-                    continue
-                incoming_lane_id = road_id_to_lanelet_to_lane.get(
-                    incoming_road_id, {}
-                ).get(incoming_lanelet_id)
-                if incoming_lane_id is None:
-                    continue
+        targets = chain_entry_roads.get(connecting_lanelet_id)
+        if targets is None:
+            connecting_road_id = lanelet_to_road_id.get(connecting_lanelet_id)
+            if connecting_road_id is None:
+                continue
+            connecting_lane_id = road_id_to_lanelet_to_lane.get(
+                connecting_road_id, {}
+            ).get(connecting_lanelet_id)
+            if connecting_lane_id is None:
+                continue
+            targets = [(connecting_road_id, connecting_lane_id)]
 
+        for incoming_lanelet_id in predecessor_ids:
+            if incoming_lanelet_id in junction_to_predecessors:
+                # Chained connector: this connecting lanelet is entered from
+                # an earlier stage inside the same junction, not from any
+                # road outside it. Emitting a link here would let a consumer
+                # skip that earlier stage.
+                continue
+            incoming_road_id = lanelet_to_road_id.get(incoming_lanelet_id)
+            if incoming_road_id is None:
+                continue
+            incoming_lane_id = road_id_to_lanelet_to_lane.get(incoming_road_id, {}).get(
+                incoming_lanelet_id
+            )
+            if incoming_lane_id is None:
+                continue
+
+            for connecting_road_id, connecting_lane_id in targets:
                 pairs[(incoming_road_id, connecting_road_id)].add(
                     (incoming_lane_id, connecting_lane_id)
                 )
@@ -665,10 +679,7 @@ class Junction:
         # one of its lanelets.  ``Road.get_lanelet_to_lane_mapping()``
         # walks every lane section, so for large maps it would otherwise
         # be O(total_roads) per junction even though most roads never
-        # participate.  In-junction predecessors are kept here so the
-        # intermediate connecting roads on a chained connector's
-        # predecessor chain have their lane mappings available when
-        # ``_enumerate_lane_pairs`` walks that chain (#492).
+        # participate.
         participating_road_ids: Set[int] = set()
         for connecting_lid, prev_ids in junction_to_predecessors.items():
             connecting_rid = lanelet_to_road_id.get(connecting_lid)
@@ -685,6 +696,48 @@ class Junction:
             if rid in road_id_to_road
         }
 
+        # Chain-merged connecting roads span a whole in-junction maneuver.
+        # Several of them can share their entry lanelet (the branches of an
+        # in-junction fork), and the lanelet-to-road map can name only one,
+        # so the (road, lane) targets of each entry are collected explicitly
+        # from the roads themselves.  The stages after the first are driven
+        # through inside the merged road and get no connection of their own.
+        chain_entry_roads: Dict[int, List[tuple[int, int]]] = defaultdict(list)
+        chain_interior_lanelet_ids: Set[int] = set()
+        connecting_road_id_set = set(connecting_road_ids)
+        for road in roads or ():
+            path = getattr(road, "chain_source_lanelet_ids", None)
+            if not path or road.id not in connecting_road_id_set:
+                continue
+            lane_id = road._chain_lane_id()
+            if lane_id is None:
+                continue
+            chain_entry_roads[path[0]].append((road.id, lane_id))
+            chain_interior_lanelet_ids.update(path[1:])
+        # The exit-side mirror: a lateral group whose lanes leave the
+        # junction into several outside roads is emitted once per outside
+        # road.  Those copies share every source lanelet, so the
+        # lanelet-to-road map names one of them and the rest would get no
+        # <connection> at all -- and a connecting road reachable through
+        # neither a connection nor a road link is dead. Register every copy
+        # explicitly, the claiming one included, so the entry's target list
+        # is the complete set rather than a mix of the two sources.
+        for road in roads or ():
+            if road.id not in connecting_road_id_set:
+                continue
+            if getattr(road, "exit_fork_successor_road_id", None) is None:
+                continue
+            if getattr(road, "chain_source_lanelet_ids", None):
+                continue  # already registered above, by its path's entry
+            for lanelet_id, lane_id in road.get_lanelet_to_lane_mapping().items():
+                chain_entry_roads[lanelet_id].append((road.id, lane_id))
+        # A lanelet that is the entry of one merged road and an interior
+        # stage of another cannot exist: the enumeration starts a path only
+        # at a lanelet with no in-junction predecessor.
+        chain_interior_lanelet_ids -= set(chain_entry_roads)
+        for targets in chain_entry_roads.values():
+            targets.sort()
+
         # #439: enumerate every (incoming_lane, connecting_lane) pair the
         # lane-level routing graph implies for each (incoming_road,
         # connecting_road) — multi-lane merges/splits no longer collapse to
@@ -693,6 +746,8 @@ class Junction:
             junction_to_predecessors=junction_to_predecessors,
             lanelet_to_road_id=lanelet_to_road_id,
             road_id_to_lanelet_to_lane=road_id_to_lanelet_to_lane,
+            chain_entry_roads=dict(chain_entry_roads),
+            chain_interior_lanelet_ids=chain_interior_lanelet_ids,
         )
 
         # ContactPoint is fixed to START of the connecting road;
@@ -700,14 +755,43 @@ class Junction:
         # and out of scope for #439.
         connections = _build_connections_from_lane_pairs(lane_pairs_per_connection)
 
+        # A connecting road reached only from another connecting road of the
+        # same junction is a later stage of an in-junction chain. It is
+        # entered through its road-level <link><predecessor> (set by
+        # ``Road.set_connecting_road_links``), never from outside the
+        # junction, so its absence from the <connection> table is expected
+        # and must not be reported as an orphan.
+        #
+        # Chain-merged roads are exempt from this rule by construction: the
+        # merge exists precisely so that they run from outside the junction
+        # to outside it, and every one of them gets a <connection> above.
+        chain_stage_road_ids: Set[int] = set()
+        merged_road_ids = {
+            road.id
+            for road in roads or ()
+            if getattr(road, "chain_source_lanelet_ids", None)
+        }
+        for connecting_lid, prev_ids in junction_to_predecessors.items():
+            if connecting_lid in chain_interior_lanelet_ids:
+                continue
+            chain_road_id = lanelet_to_road_id.get(connecting_lid)
+            if chain_road_id is None or chain_road_id in merged_road_ids:
+                continue
+            if not prev_ids:
+                continue
+            if all(prev_id in junction_to_predecessors for prev_id in prev_ids):
+                chain_stage_road_ids.add(chain_road_id)
+
         # #492: every connecting road must appear as the connectingRoad of
-        # a <connection>; one left out is topologically unreachable — no
-        # road-level <link> and referenced by no connection.  Warn so a
-        # regression, or a genuinely disconnected turn lanelet in the
-        # source map, is visible instead of silently emitting orphan
-        # junction geometry.
+        # a <connection>; one left out (chain stages aside) is topologically
+        # unreachable — no road-level <link> and referenced by no
+        # connection.  Warn so a regression, or a genuinely disconnected
+        # turn lanelet in the source map, is visible instead of silently
+        # emitting orphan junction geometry.
         uncovered = sorted(
-            set(connecting_road_ids) - {c.connecting_road for c in connections}
+            set(connecting_road_ids)
+            - {c.connecting_road for c in connections}
+            - chain_stage_road_ids
         )
         if uncovered:
             # The connecting lanelet has no routing-graph predecessor, so no

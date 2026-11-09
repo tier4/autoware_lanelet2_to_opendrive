@@ -15,7 +15,7 @@ import logging
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
@@ -47,6 +47,7 @@ from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import (
 )
 from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
+    _evaluate_lane_width,
     _evaluate_planview_endpoint_with_heading,
 )
 from autoware_lanelet2_to_opendrive.opendrive.road_links import (
@@ -60,6 +61,16 @@ from autoware_lanelet2_to_opendrive.util import (
 )
 
 log = logging.getLogger(__name__)
+
+#: A synthetic connector bridges two roads' renderings of the *same*
+#: contact point, so the distance between its anchors is a residual
+#: error rather than a displacement.  Above this the precondition is
+#: contradicted and the connector is papering over an upstream defect.
+#: Diagnostic only -- it changes no behaviour, so nothing flips on a
+#: borderline value.  Set an order of magnitude above the largest
+#: residual observed (1.23 m max over 2,565 Odaiba connectors, p50
+#: 5.0 mm).
+_ANCHOR_RESIDUAL_WARN_M = 5.0
 
 
 class DivergenceSide(Enum):
@@ -138,16 +149,78 @@ class SanityGateInputs:
             successor (or predecessor) lanelet of the source road resolves
             to. Must be a subset of ``set(candidate_road_ids)`` for the
             "group exhaustiveness" check to pass.
+        lane_pair_endpoint_distances: optional ``lane_pair -> distance`` map
+            holding the gap between the rendered source and candidate lane
+            anchors of each entry in ``lane_pairs``. When supplied for every
+            lane pair, endpoint coincidence is validated at lane level
+            instead of against the road reference endpoints.
     """
 
     endpoint_road: Tuple[float, float, float]
     endpoints_candidates: Dict[int, Tuple[float, float, float]]
     lane_pairs: List[Tuple[int, int, int]]
     all_successor_lanelet_road_ids: Set[int]
+    lane_pair_endpoint_distances: Dict[Tuple[int, int, int], float] | None = None
 
 
 def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
     return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+
+
+def _complete_lane_pair_distances(
+    inputs: SanityGateInputs,
+) -> Dict[Tuple[int, int, int], float] | None:
+    """Return the lane-pair distance map only when it covers every lane pair.
+
+    A partially populated map cannot be used for gating because the entries
+    it lacks would silently escape the endpoint check; the caller then falls
+    back to the road-reference comparison.
+    """
+    distances = inputs.lane_pair_endpoint_distances
+    if distances is None or not inputs.lane_pairs:
+        return None
+    if any(lane_pair not in distances for lane_pair in inputs.lane_pairs):
+        return None
+    return distances
+
+
+def _nearest_candidate_within_tolerance(
+    site: DivergenceSite,
+    inputs: SanityGateInputs,
+    endpoint_tolerance: float,
+) -> Tuple[int | None, float]:
+    """Pick the geometrically closest candidate for the single-link fallback.
+
+    Returns ``(candidate_road_id, distance)``; ``candidate_road_id`` is
+    ``None`` when no candidate is within ``endpoint_tolerance``. Distances
+    come from the rendered lane anchors when available (the closest lane pair
+    of that candidate) and from the road reference endpoints otherwise.
+    Linking to an arbitrary candidate would emit a connector whose heading can
+    be almost reversed, so an out-of-tolerance site emits nothing instead.
+    """
+    distances = inputs.lane_pair_endpoint_distances or {}
+    best_id: int | None = None
+    best_distance = math.inf
+    for cand_id in site.candidate_road_ids:
+        candidate_distance = min(
+            (
+                distances[lane_pair]
+                for lane_pair in inputs.lane_pairs
+                if lane_pair[1] == cand_id and lane_pair in distances
+            ),
+            default=math.inf,
+        )
+        if candidate_distance == math.inf:
+            cand_endpoint = inputs.endpoints_candidates.get(cand_id)
+            if cand_endpoint is None:
+                continue
+            candidate_distance = _distance(inputs.endpoint_road, cand_endpoint)
+        if candidate_distance < best_distance:
+            best_distance = candidate_distance
+            best_id = cand_id
+    if best_id is None or best_distance > endpoint_tolerance:
+        return None, best_distance
+    return best_id, best_distance
 
 
 def sanity_gate_passes(
@@ -164,16 +237,36 @@ def sanity_gate_passes(
     candidate_set = set(site.candidate_road_ids)
 
     # 1. Endpoint coincidence.
+    #
+    # Prefer the rendered per-lane anchors when the caller supplied one for
+    # every recovered lane pair. In a multi-lane split or merge a candidate
+    # attached to a non-reference lane is legitimately offset from the source
+    # road's reference endpoint by one or more lane widths, so comparing
+    # reference endpoints would reject a perfectly valid site and drop the
+    # branch. Reference-endpoint coincidence stays as the fallback for
+    # callers without lane-anchor metadata.
     for cand_id in site.candidate_road_ids:
-        cand_endpoint = inputs.endpoints_candidates.get(cand_id)
-        if cand_endpoint is None:
+        if inputs.endpoints_candidates.get(cand_id) is None:
             return False, f"missing endpoint for candidate road {cand_id}"
-        if _distance(inputs.endpoint_road, cand_endpoint) > endpoint_tolerance:
-            return (
-                False,
-                f"endpoint distance for candidate {cand_id} exceeds "
-                f"{endpoint_tolerance:.3f} m",
-            )
+
+    lane_pair_distances = _complete_lane_pair_distances(inputs)
+    if lane_pair_distances is not None:
+        for lane_pair in inputs.lane_pairs:
+            if lane_pair_distances[lane_pair] > endpoint_tolerance:
+                return (
+                    False,
+                    f"lane-aware endpoint distance for lane pair {lane_pair} "
+                    f"exceeds {endpoint_tolerance:.3f} m",
+                )
+    else:
+        for cand_id in site.candidate_road_ids:
+            cand_endpoint = inputs.endpoints_candidates[cand_id]
+            if _distance(inputs.endpoint_road, cand_endpoint) > endpoint_tolerance:
+                return (
+                    False,
+                    f"endpoint distance for candidate {cand_id} exceeds "
+                    f"{endpoint_tolerance:.3f} m",
+                )
 
     # 2. Lane uniqueness: each (candidate_road, candidate_lane) appears at most once.
     seen_targets: Set[Tuple[int, int]] = set()
@@ -224,6 +317,101 @@ class SynthesisOutput:
     deferred_link_patch: Tuple[str, int, int]
 
 
+@dataclass(frozen=True)
+class _DirectedLaneEdge:
+    """One canonical directed lane connection across a split/merge boundary.
+
+    Both a predecessor-side merge site and a successor-side split site of the
+    same N->M boundary describe the very same set of lane connections; the
+    directed edge is the representation they agree on, so the two sites can
+    be recognised as one junction instead of two conflicting ones.
+    """
+
+    incoming_road_id: int
+    incoming_lane_id: int
+    outgoing_road_id: int
+    outgoing_lane_id: int
+    start_xyz: Tuple[float, float, float]
+    end_xyz: Tuple[float, float, float]
+    # Tangent of the *incoming* road where the connector leaves it. The
+    # connector stands for a zero-length transition, so this — not the
+    # residual between the two anchors — is the direction its rendered
+    # segment must take.
+    start_heading: Optional[float]
+    end_heading: Optional[float]
+    # Width of the incoming / outgoing lane at the respective contact, so
+    # the connector can reproduce the cross-section it bridges instead of
+    # a nominal constant. ``None`` when the neighbour carries no width.
+    start_lane_width: float | None = None
+    end_lane_width: float | None = None
+
+    @property
+    def key(self) -> Tuple[int, int, int, int]:
+        """Identity of the edge, ignoring the rendered geometry."""
+        return (
+            self.incoming_road_id,
+            self.incoming_lane_id,
+            self.outgoing_road_id,
+            self.outgoing_lane_id,
+        )
+
+
+@dataclass(frozen=True)
+class _ReadyDivergenceSite:
+    """A site that cleared the sanity gate, normalised to directed lane edges."""
+
+    site: DivergenceSite
+    edges: List[_DirectedLaneEdge]
+
+
+@dataclass(frozen=True)
+class _ReadyDivergenceGroup:
+    """One canonical split/merge boundary ready for junction synthesis."""
+
+    name: str
+    edges: List[_DirectedLaneEdge]
+
+
+@dataclass(frozen=True)
+class _BoundarySynthesisOutput:
+    """Synthetic junction plus connecting roads for one canonical boundary."""
+
+    junction: Junction
+    connecting_roads: List[Road]
+
+
+def _reverses_on_itself(geometry: ParamPoly3, samples: Optional[int] = None) -> bool:
+    """Does the record's tangent ever point against its own net displacement?
+
+    The convention-free statement of "doubles back". ``du/dp < 0`` does not
+    say it: in the record's own start frame a cubic Hermite has
+    ``du/dp (p=1) = scale * cos(d_psi)``, so **every** connector turning
+    through more than 90 degrees has a negative ``du/dp`` at its end whatever
+    its geometry, and no tangent scaling changes that. Measured over a
+    6,672-lanelet map's output, 553 records had a negative ``du/dp``
+    somewhere while 455 reversed in this sense, and 13 of the difference were
+    simply turning hard.
+
+    A record whose net displacement is zero reverses by definition: it ends
+    where it started.
+    """
+    if samples is None:
+        samples = DEFAULT_CONFIG.geometry.divergence_reversal_check_samples
+    u1 = geometry.bU + geometry.cU + geometry.dU
+    v1 = geometry.bV + geometry.cV + geometry.dV
+    norm = math.hypot(u1, v1)
+    if norm <= DEFAULT_CONFIG.geometry.epsilon:
+        return True
+    nx, ny = u1 / norm, v1 / norm
+    for index in range(samples):
+        p = index / (samples - 1)
+        du = geometry.bU + 2.0 * geometry.cU * p + 3.0 * geometry.dU * p * p
+        dv = geometry.bV + 2.0 * geometry.cV * p + 3.0 * geometry.dV * p * p
+        if du * nx + dv * ny < 0.0:
+            return True
+    return False
+
+
 def _make_zero_length_connecting_road(
     road_id: int,
     junction_id: int,
@@ -237,53 +425,253 @@ def _make_zero_length_connecting_road(
     traffic_rule: TrafficRule,
     from_lane: int,
     to_lane: int,
-    fallback_heading: float = 0.0,
+    start_heading: Optional[float] = None,
+    end_heading: Optional[float] = None,
     lane_width: float = 3.5,
 ) -> Road:
     """Build a single-segment single-lane connecting road floored at ``min_segment_length``.
 
-    The geometry is a :class:`ParamPoly3` segment whose length is the
-    planar distance between ``start_xyz`` and ``end_xyz``, lifted to at
-    least ``min_segment_length`` so OpenDRIVE consumers that reject
-    zero-length geometry (e.g. CARLA) still accept it.  ParamPoly3 is
-    used (rather than :class:`Line`) because downstream samplers in this
-    converter — ``road_lanelet_geo_mapping``, ``analyze_xodr``,
-    ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc. directly without
-    a geometry-type guard. For a straight segment the coefficients
-    reduce to ``u(p) = p``, ``v(p) = 0``.  When ``start_xyz`` and
-    ``end_xyz`` coincide the heading falls back to ``fallback_heading``
-    (typically the source road's reference-line tangent) so the
-    connector aligns with the linked roads instead of pointing along
-    the world X axis.  The lane carries lane-level predecessor/successor
-    links from ``from_lane`` to ``to_lane`` and a constant ``lane_width``
-    so the eventual XML always emits a ``<width>`` element.
+    ParamPoly3 is used (rather than :class:`Line` or :class:`Arc`) because
+    downstream samplers in this converter — ``road_lanelet_geo_mapping``,
+    ``analyze_xodr``, ``objects`` — read ``aU``/``bU``/``aV``/``bV``/etc.
+    directly without a geometry-type guard.
+
+    Geometry
+    --------
+    Given both neighbour tangents the segment is a **cubic Hermite**
+    meeting each neighbour in position *and* tangent.  A straight segment
+    carries a single heading and can satisfy only one of the two, so
+    wherever the roads being bridged leave and arrive on different
+    bearings the lane borders at the losing end miss by
+    ``2 * w * sin(dpsi / 2)``.
+
+    This replaces a rule that chose the heading from the
+    ``start_xyz -> end_xyz`` vector when that vector was at least
+    ``min_segment_length`` long, and from the incoming tangent below it.
+    The rule is gone rather than retuned, because the choice it was making
+    does not arise for a curve that meets both tangents.  Its premise was
+    sound and worth recording: these two anchors are the incoming and
+    outgoing roads' renderings of **one** contact point, so their
+    separation is a residual error and the vector between them is not a
+    direction.  Measured over the 296 Odaiba connectors that took the
+    vector, its heading sat a **median 88.9 deg** from the incoming road's
+    own tangent, with a maximum of 179.99 deg — not noisy, uniformly
+    distributed.
+
+    ``@length`` is the integrated arc length of the cubic, not the chord.
+    Once the curve bends the two differ, and
+    ``road.geometry.parampoly3.normalized_range`` compares them.
+
+    Without both tangents — only when a neighbour has no rendered plan
+    view — the segment degrades to a straight one along ``start_heading``,
+    or along the anchor vector with a warning if even that is unavailable.
+
+    The lane carries lane-level predecessor/successor links from
+    ``from_lane`` to ``to_lane`` and a constant ``lane_width`` so the
+    eventual XML always emits a ``<width>`` element.  Callers that know
+    the widths of the lanes being bridged should follow up with
+    :func:`_taper_stub_width` so the stub reproduces the neighbours'
+    cross-section rather than a nominal one.
     """
     dx = end_xyz[0] - start_xyz[0]
     dy = end_xyz[1] - start_xyz[1]
     raw_length = math.sqrt(dx * dx + dy * dy)
     length = max(raw_length, min_segment_length)
-    heading = math.atan2(dy, dx) if raw_length > 1e-9 else fallback_heading
 
-    plan_view = PlanView(
-        geometries=[
-            ParamPoly3(
-                s=0.0,
-                x=start_xyz[0],
-                y=start_xyz[1],
-                hdg=heading,
-                length=length,
-                aU=0.0,
-                bU=1.0,
-                cU=0.0,
-                dU=0.0,
-                aV=0.0,
-                bV=0.0,
-                cV=0.0,
-                dV=0.0,
-                pRange="arcLength",
-            )
-        ]
+    if raw_length > _ANCHOR_RESIDUAL_WARN_M:
+        # The anchors are the two roads' renderings of one contact point, so
+        # a separation this large contradicts the precondition rather than
+        # describing a real displacement.  Name the roads so it is
+        # actionable; do not change behaviour on it.
+        log.warning(
+            "Connector %d bridges roads %d -> %d whose anchors are %.3f m "
+            "apart; these are meant to be the same point, so the geometry "
+            "below is bridging an upstream error.",
+            road_id,
+            incoming_road_id,
+            outgoing_road_id,
+            raw_length,
+        )
+
+    # A separation that is not a real chord carries no shape, and a cubic
+    # through it invents one. With both tangents nearly parallel -- which is
+    # the normal case, since these two anchors are one contact point rendered
+    # twice -- the Hermite comes out as
+    #
+    #     bU : cU : dU = 1 : -3 : 2,   u(1) = 0
+    #
+    # so the curve runs out and returns to its own start. ``@length`` is its
+    # arc length, so the road has extent while its reference line has none,
+    # and a consumer sampling along ``s`` reads headings that reverse: this is
+    # the shape behind CARLA's 160 heading flips (max 179.96 deg). Measured
+    # on 2026-11-06 over the whole output, 424 of the 455 records whose
+    # tangent reverses against their own displacement are synthetic
+    # connectors in a junction, 486 of them on roads under 10 cm, and 499 of
+    # 553 turn through less than 5 degrees -- stubs with nothing to
+    # interpolate rather than curves bending.
+    #
+    # Two conditions, because a separation above the floor is not enough.
+    # Measured over a 6,672-lanelet map's output with the floor alone in
+    # place, 95 records still reversed, and their ``u(1) / |tangent|`` has
+    # p50 **-0.995**: the far anchor sits a floor's length *behind* the near
+    # one along the start tangent. A curve from A to a point behind A, with
+    # the start tangent pointing forward, has to double back whatever its
+    # coefficients. So the Hermite is built and then **checked**, and a
+    # reversing one is not used.
+    can_curve = (
+        start_heading is not None
+        and end_heading is not None
+        and raw_length >= min_segment_length
     )
+    # The replacement may only move the far end inside the contact tolerance.
+    # Its far end sits ``min_segment_length`` from the near anchor, and the
+    # true contact is ``raw_length`` away, so the displacement is at most the
+    # sum: beyond the tolerance that is a gap in the road network rather than
+    # a rendering difference, and position continuity outranks heading.
+    #
+    # Measured: without this gate, two connectors whose anchors were 0.019 m
+    # apart -- a real chord, not a residual -- became 0.005 m stubs ending
+    # 0.023 m from their successor's start, and `linked_endpoints_apart` went
+    # from 2 violations to 4. A short reversed stub is a heading artifact; a
+    # 23 mm hole is a break.
+    anchors_are_one_point = (
+        raw_length + min_segment_length
+        <= DEFAULT_CONFIG.geometry.divergence_anchor_merge_tolerance
+    )
+    geometry = None
+    if can_curve:
+        # ``tangent_scale`` at the floor rather than the chord: these anchors
+        # are millimetres apart, and a cubic whose tangent magnitudes are
+        # scaled to a 5 mm chord cannot turn through a large angle without
+        # doubling back on itself.
+        candidate = ParamPoly3.hermite(
+            start_xy=(start_xyz[0], start_xyz[1]),
+            start_heading=start_heading,
+            end_xy=(end_xyz[0], end_xyz[1]),
+            end_heading=end_heading,
+            tangent_scale=min_segment_length,
+        )
+        # The reversal check applies only where the two anchors are one
+        # point to within the contact tolerance (see
+        # ``anchors_are_one_point`` above). With a real chord the curve keeps its exact endpoints even
+        # when it ends facing backwards: that is what a hairpin does, and
+        # collapsing one to a floor-length stub would both destroy a real
+        # manoeuvre and open a gap at its far contact.
+        if anchors_are_one_point and _reverses_on_itself(candidate):
+            log.debug(
+                "Connector %d's Hermite between roads %d -> %d reverses on "
+                "itself (anchors %.4f m apart); drawing the floor-length "
+                "curve along the tangent bisector instead.",
+                road_id,
+                incoming_road_id,
+                outgoing_road_id,
+                raw_length,
+            )
+        else:
+            geometry = candidate
+    if (
+        geometry is None
+        and start_heading is not None
+        and end_heading is not None
+        and anchors_are_one_point
+        # A zero or negative floor leaves no chord to draw along, and
+        # ``ParamPoly3.hermite`` rightly refuses two coincident anchors; the
+        # straight branch below handles that degenerate configuration.
+        and min_segment_length > DEFAULT_CONFIG.geometry.epsilon
+    ):
+        # No usable chord -- either below the floor, or one that would make
+        # the cubic reverse -- but both tangents are known, and they are the
+        # real constraint, so
+        # draw the floor-length curve that meets both: from the start anchor
+        # along the **bisector** of the two headings, which is the direction
+        # that leaves the cubic monotone (for a turn of d_psi the end tangent
+        # then makes a positive angle with the net displacement for every
+        # |d_psi| < 180 deg).
+        #
+        # Its far end lands `min_segment_length` from the neighbour's
+        # endpoint rather than on it -- but so does a straight stub of the
+        # same length, and that one also *misses the end heading*, so its
+        # lane borders at the losing end are out by `2 * w * sin(d_psi / 2)`:
+        # 0.3 m at a 5 degree turn with a 3.5 m lane, against a 1 cm
+        # tolerance. Measured on a 6,672-lanelet map, the straight stub cost
+        # +199 findings of
+        # `lane_smoothness.contact_point_no_horizontal_gaps` (425 -> 624)
+        # while every other checker stayed put.
+        turn = math.atan2(
+            math.sin(end_heading - start_heading),
+            math.cos(end_heading - start_heading),
+        )
+        bisector = start_heading + 0.5 * turn
+        geometry = ParamPoly3.hermite(
+            start_xy=(start_xyz[0], start_xyz[1]),
+            start_heading=start_heading,
+            # The floor, not ``length``: ``raw_length`` here is a residual
+            # error between two renderings of one point, not an extent
+            # anybody asked for, so spending it as chord would push the far
+            # end further from the neighbour's endpoint than necessary.
+            #
+            # ``reference_end_xyz`` below stays the *logical* contact point,
+            # ``end_xyz``, as it already did for the straight branch, which
+            # also ends a floor's length from it: the callers that read it
+            # (``shared_connecting_roads``, ``direct_junction_completion``)
+            # want the point the roads are meant to meet at, not the rendered
+            # end of a stub that is deliberately a few millimetres long.
+            end_xy=(
+                start_xyz[0] + min_segment_length * math.cos(bisector),
+                start_xyz[1] + min_segment_length * math.sin(bisector),
+            ),
+            end_heading=end_heading,
+            tangent_scale=min_segment_length,
+        )
+    if geometry is None:
+        # Degraded: a neighbour tangent is unavailable, which happens only
+        # when that neighbour has no rendered plan view. With one tangent or
+        # none there is no curve to meet both of them, so a straight segment
+        # of the floor length is all that is left,
+        # carrying the floor as real extent.
+        #
+        # Prefer the start tangent over the anchor vector -- at this scale
+        # the vector between two anchors that are meant to coincide is
+        # numerical noise, measured at a median 88.9 deg from the incoming
+        # road's own tangent over the 296 Odaiba connectors that used to take
+        # it.
+        if start_heading is not None:
+            heading = start_heading
+        else:
+            heading = math.atan2(dy, dx)
+            log.warning(
+                "Connector %d has no neighbour tangent available; falling "
+                "back to the anchor vector, whose direction is unreliable "
+                "at separations of this scale (%.4f m).",
+                road_id,
+                raw_length,
+            )
+        geometry = ParamPoly3(
+            s=0.0,
+            x=start_xyz[0],
+            y=start_xyz[1],
+            hdg=heading,
+            length=length,
+            aU=0.0,
+            bU=1.0,
+            cU=0.0,
+            dU=0.0,
+            aV=0.0,
+            bV=0.0,
+            cV=0.0,
+            dV=0.0,
+            pRange="arcLength",
+        )
+
+    plan_view = PlanView(geometries=[geometry])
+
+    # The road's s-domain is the geometry's arc length, not the chord.  A
+    # curve is longer than the straight line it replaces, and every profile
+    # below -- elevation, and the lane widths the caller tapers -- is written
+    # against ``length``.  Leaving the chord here makes the checker evaluate
+    # the lane borders short of the road's real end, which reads as a
+    # contact gap rather than as the bookkeeping error it is.
+    length = geometry.length
 
     # Linear elevation profile so the connector matches the linked roads'
     # z at both endpoints. Without this the synthesised road serializes
@@ -362,6 +750,299 @@ def _make_zero_length_connecting_road(
         link=link,
         reference_start_xyz=start_xyz,
         reference_end_xyz=end_xyz,
+    )
+
+
+def _lane_width_at(road: Road | None, lane_id: int, *, at_start: bool) -> float | None:
+    """Width of ``lane_id`` at the start or end of ``road``.
+
+    ``None`` whenever the road carries no usable lane geometry, mirroring
+    ``_evaluate_lane_width``'s own ``None`` semantics so callers fall back
+    to a nominal width instead of silently collapsing a lane to zero.
+    Attributes are read through ``getattr`` for the same reason
+    :func:`_lane_anchor_xyz` does: mock road stubs in the unit tests omit
+    them from their ``spec``.
+    """
+    if road is None:
+        return None
+    lanes = getattr(road, "lanes", None)
+    if lanes is None or not lanes.lane_sections:
+        return None
+    lane_section = lanes.lane_sections[0 if at_start else -1]
+    lane = lane_section.left_lanes.get(lane_id) or lane_section.right_lanes.get(lane_id)
+    if lane is None:
+        return None
+    length = getattr(road, "length", None)
+    if not at_start and not isinstance(length, (int, float)):
+        return None
+    return _evaluate_lane_width(lane, 0.0 if at_start else float(length))
+
+
+def _lane_width_at_end(road: Road | None, lane_id: int) -> float | None:
+    """Width of ``lane_id`` where ``road`` ends."""
+    return _lane_width_at(road, lane_id, at_start=False)
+
+
+def _taper_stub_width(
+    stub: Road, start_width: float | None, end_width: float | None
+) -> None:
+    """Interpolate the stub's lane width between the lanes it joins.
+
+    A nominal constant width (``divergence_default_lane_width``, 3.5 m)
+    leaves the stub's *outer* lane border up to a metre away from the
+    border of the road on either side, which
+    ``lane_smoothness.contact_point_no_horizontal_gaps`` reads as a gap
+    even where the reference lines meet exactly: that checker compares
+    both the inner and the outer border of the two lanes at the contact
+    and wants at least two of the four pairings inside 1 cm.  A linear
+    taper reproduces both neighbours' widths at the respective contact
+    points, so together with the anchored start point and the incoming
+    road's end tangent the whole cross-section is reproduced, not just
+    the reference line.
+
+    No-op when either width is unknown, so the caller's nominal constant
+    survives rather than being replaced by a worse guess.
+    """
+    if start_width is None or end_width is None or stub.lanes is None:
+        return
+    if stub.length <= 0.0:
+        return
+    lane_section = stub.lanes.lane_sections[0]
+    lanes = list(lane_section.left_lanes.values()) + list(
+        lane_section.right_lanes.values()
+    )
+    for lane in lanes:
+        lane.widths = [
+            LaneWidth(
+                s_offset=0.0,
+                a=start_width,
+                b=(end_width - start_width) / stub.length,
+                c=0.0,
+                d=0.0,
+            )
+        ]
+
+
+def _directed_edges_for_site(
+    site: DivergenceSite,
+    inputs: SanityGateInputs,
+    traffic_rule: TrafficRule,
+    fallback_heading: float,
+    lane_pair_endpoints: (
+        Dict[
+            Tuple[int, int, int],
+            Tuple[
+                Tuple[float, float, float] | None,
+                Tuple[float, float, float] | None,
+            ],
+        ]
+        | None
+    ) = None,
+    roads_by_id: Dict[int, Road] | None = None,
+) -> List[_DirectedLaneEdge]:
+    """Normalise a predecessor/successor site into directed lane edges.
+
+    Lane pairs are visited in source-lane order (descending for RHT,
+    ascending for LHT) so the connecting-road IDs derived from them stay
+    deterministic. ``lane_pair_endpoints`` overrides the road reference
+    endpoints with the rendered per-lane anchors when the caller has them.
+
+    ``roads_by_id`` lets each edge carry the cross-section of the pair it
+    bridges: the *incoming* road's end tangent (rather than the site's
+    source road, which on a merge site is the outgoing one) and the two
+    lane widths at the contacts. Omitted by callers that hold mock roads,
+    which then keep the site-level ``fallback_heading`` and a nominal
+    width.
+    """
+    is_lht = traffic_rule == TrafficRule.LHT
+    sorted_pairs = sorted(inputs.lane_pairs, key=lambda t: (t[0] if is_lht else -t[0]))
+
+    edges: List[_DirectedLaneEdge] = []
+    for src_lane, cand_road_id, cand_lane in sorted_pairs:
+        if site.is_divergence:
+            incoming_road_id, incoming_lane_id = site.road_id, src_lane
+            outgoing_road_id, outgoing_lane_id = cand_road_id, cand_lane
+            start_xyz = inputs.endpoint_road
+            end_xyz = inputs.endpoints_candidates[cand_road_id]
+        else:
+            incoming_road_id, incoming_lane_id = cand_road_id, cand_lane
+            outgoing_road_id, outgoing_lane_id = site.road_id, src_lane
+            start_xyz = inputs.endpoints_candidates[cand_road_id]
+            end_xyz = inputs.endpoint_road
+
+        if lane_pair_endpoints is not None:
+            anchored = lane_pair_endpoints.get((src_lane, cand_road_id, cand_lane))
+            if anchored is not None:
+                anchored_start, anchored_end = anchored
+                if anchored_start is not None:
+                    start_xyz = anchored_start
+                if anchored_end is not None:
+                    end_xyz = anchored_end
+
+        incoming_road = (roads_by_id or {}).get(incoming_road_id)
+        outgoing_road = (roads_by_id or {}).get(outgoing_road_id)
+
+        # Both tangents: the connector is a curve meeting each neighbour,
+        # so it needs the bearing it leaves on *and* the one it arrives on.
+        edge_start_heading = fallback_heading
+        if incoming_road is not None and incoming_road.plan_view is not None:
+            endpoint = _evaluate_planview_endpoint_with_heading(
+                incoming_road.plan_view, at_start=False
+            )
+            if endpoint is not None:
+                edge_start_heading = endpoint[2]
+
+        edge_end_heading = None
+        if outgoing_road is not None and outgoing_road.plan_view is not None:
+            endpoint = _evaluate_planview_endpoint_with_heading(
+                outgoing_road.plan_view, at_start=True
+            )
+            if endpoint is not None:
+                edge_end_heading = endpoint[2]
+
+        edges.append(
+            _DirectedLaneEdge(
+                incoming_road_id=incoming_road_id,
+                incoming_lane_id=incoming_lane_id,
+                outgoing_road_id=outgoing_road_id,
+                outgoing_lane_id=outgoing_lane_id,
+                start_xyz=start_xyz,
+                end_xyz=end_xyz,
+                start_heading=edge_start_heading,
+                end_heading=edge_end_heading,
+                start_lane_width=_lane_width_at_end(incoming_road, incoming_lane_id),
+                end_lane_width=_lane_width_at(
+                    outgoing_road, outgoing_lane_id, at_start=True
+                ),
+            )
+        )
+    return edges
+
+
+def _group_overlapping_ready_sites(
+    ready_sites: List[_ReadyDivergenceSite],
+) -> List[_ReadyDivergenceGroup]:
+    """Merge sites that describe the same physical boundary into one group.
+
+    An N->M boundary is discovered twice: once as a predecessor-side merge on
+    the downstream road and once as a successor-side split on an upstream
+    road. Emitting two junctions for it would make the two road-level links
+    disagree, so sites sharing at least one directed lane edge are unioned
+    and synthesised as a single junction.
+    """
+    if not ready_sites:
+        return []
+
+    parent = list(range(len(ready_sites)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    edge_owner: Dict[Tuple[int, int, int, int], int] = {}
+    for index, ready in enumerate(ready_sites):
+        for edge in ready.edges:
+            union(index, edge_owner.setdefault(edge.key, index))
+
+    grouped_indices: Dict[int, List[int]] = {}
+    for index in range(len(ready_sites)):
+        grouped_indices.setdefault(find(index), []).append(index)
+
+    groups: List[_ReadyDivergenceGroup] = []
+    for indices in grouped_indices.values():
+        # Deduplicate shared edges, keeping the shortest rendered connector.
+        edges_by_key: Dict[Tuple[int, int, int, int], _DirectedLaneEdge] = {}
+        for index in indices:
+            for edge in ready_sites[index].edges:
+                previous = edges_by_key.get(edge.key)
+                if previous is None or _distance(
+                    edge.start_xyz, edge.end_xyz
+                ) < _distance(previous.start_xyz, previous.end_xyz):
+                    edges_by_key[edge.key] = edge
+        groups.append(
+            _ReadyDivergenceGroup(
+                name=f"divergence_{ready_sites[indices[0]].site.road_id}",
+                edges=list(edges_by_key.values()),
+            )
+        )
+    return groups
+
+
+def _synthesise_junction_for_edges(
+    junction_name: str,
+    edges: List[_DirectedLaneEdge],
+    starting_connecting_road_id: int,
+    junction_id: int,
+    traffic_rule: TrafficRule,
+    min_segment_length: float,
+    lane_width: float,
+) -> _BoundarySynthesisOutput:
+    """Emit one zero-length connecting road per directed lane edge.
+
+    One ``<lane><link><successor>`` per lane is an OpenDRIVE invariant, so a
+    fork can only keep all of its branches when every branch owns its own
+    connector inside the junction.
+    """
+    junction = Junction(id=junction_id, name=junction_name, connections=[])
+    connecting_roads: List[Road] = []
+    connecting_lane_id = 1 if traffic_rule == TrafficRule.LHT else -1
+    next_road_id = starting_connecting_road_id
+
+    for edge in edges:
+        connector = _make_zero_length_connecting_road(
+            road_id=next_road_id,
+            junction_id=junction.id,
+            incoming_road_id=edge.incoming_road_id,
+            outgoing_road_id=edge.outgoing_road_id,
+            incoming_contact=ContactPoint.END,
+            outgoing_contact=ContactPoint.START,
+            start_xyz=edge.start_xyz,
+            end_xyz=edge.end_xyz,
+            min_segment_length=min_segment_length,
+            traffic_rule=traffic_rule,
+            from_lane=edge.incoming_lane_id,
+            to_lane=edge.outgoing_lane_id,
+            start_heading=edge.start_heading,
+            end_heading=edge.end_heading,
+            lane_width=(
+                edge.start_lane_width
+                if edge.start_lane_width is not None
+                else lane_width
+            ),
+        )
+        # ``start_xyz`` anchors the connector on the incoming lane's inner
+        # border and ``fallback_heading`` orients its normal at that lane's
+        # outer border; the taper puts the outer border at the right
+        # distance, at this end and at the other one. Together they
+        # reproduce the cross-section the connector bridges, which is what
+        # ``contact_point_no_horizontal_gaps`` compares.
+        _taper_stub_width(connector, edge.start_lane_width, edge.end_lane_width)
+        connecting_roads.append(connector)
+        junction.connections.append(
+            Connection(
+                id=len(junction.connections),
+                incoming_road=edge.incoming_road_id,
+                connecting_road=next_road_id,
+                contact_point=ContactPoint.START,
+                lane_links=[
+                    JunctionLaneLink(
+                        from_lane=edge.incoming_lane_id,
+                        to_lane=connecting_lane_id,
+                    )
+                ],
+            )
+        )
+        next_road_id += 1
+
+    return _BoundarySynthesisOutput(
+        junction=junction, connecting_roads=connecting_roads
     )
 
 
@@ -466,7 +1147,13 @@ def synthesise_junction_for_site(
             traffic_rule=traffic_rule,
             from_lane=from_lane,
             to_lane=to_lane,
-            fallback_heading=fallback_heading,
+            # This path has the source road's tangent but never resolved the
+            # far neighbour's, so the connector degrades to a straight
+            # segment along the start heading -- the behaviour this call
+            # site has always had.  ``_emit_connectors_for_edges`` is the
+            # path that supplies both and gets the curve.
+            start_heading=fallback_heading,
+            end_heading=None,
             lane_width=lane_width,
         )
 
@@ -619,16 +1306,21 @@ def apply_divergence_synthesis(
 ) -> DivergenceSynthesisResult:
     """Run detection -> sanity gate -> synthesis for every site.
 
-    Sites that fail the gate fall back to the existing "first candidate
-    wins" road-level link (logged as a WARNING). Sites that pass are
-    synthesised; the returned ``DivergenceSynthesisResult`` is fed into
-    the caller's ``junctions`` and ``connecting_roads`` lists.
+    Sites that pass the gate are normalised to directed lane edges; sites
+    describing the same N->M boundary are unioned so they share one junction,
+    which then carries one zero-length connector per directed lane edge and
+    therefore keeps every branch of a fork. Sites that fail the gate fall
+    back to a road-level link towards the geometrically nearest candidate,
+    and emit nothing at all when no candidate is within ``endpoint_tolerance``
+    (both logged as a WARNING). The returned ``DivergenceSynthesisResult`` is
+    fed into the caller's ``junctions`` and ``connecting_roads`` lists.
     """
     next_road_id = starting_connecting_road_id
     next_junction_id = starting_junction_id
 
     out_junctions: List[Junction] = []
     out_connecting_roads: List[Road] = []
+    ready_sites: List[_ReadyDivergenceSite] = []
 
     for site in sites:
         source_road = roads_by_id.get(site.road_id)
@@ -666,49 +1358,6 @@ def apply_divergence_synthesis(
         lane_pairs, neighbour_road_ids = _lane_pairs_for_site(
             site, roads_by_id, lanelet_map, routing_graph, lanelet_to_road
         )
-
-        gate_inputs = SanityGateInputs(
-            endpoint_road=endpoint_road,
-            endpoints_candidates=endpoints_candidates,
-            lane_pairs=lane_pairs,
-            all_successor_lanelet_road_ids=neighbour_road_ids,
-        )
-        ok, reason = sanity_gate_passes(site, gate_inputs, endpoint_tolerance)
-        if not ok:
-            log.warning(
-                "divergence: sanity gate failed for road %d (%s side): %s; "
-                "falling back to first-candidate link",
-                site.road_id,
-                site.side.value,
-                reason,
-            )
-            first_candidate = site.candidate_road_ids[0]
-            if site.is_divergence:
-                source_road.add_successor(
-                    element_id=first_candidate,
-                    element_type=ElementType.ROAD,
-                    contact_point=ContactPoint.START,
-                )
-            else:
-                source_road.add_predecessor(
-                    element_id=first_candidate,
-                    element_type=ElementType.ROAD,
-                    contact_point=ContactPoint.END,
-                )
-            continue
-
-        # Source road tangent at the divergence/merge endpoint becomes the
-        # heading fallback when start_xyz and end_xyz coincide (#291 review).
-        source_plan_view = getattr(source_road, "plan_view", None)
-        fallback_heading = 0.0
-        if source_plan_view is not None:
-            endpoint_with_heading = _evaluate_planview_endpoint_with_heading(
-                source_plan_view,
-                at_start=not site.is_divergence,
-            )
-            if endpoint_with_heading is not None:
-                fallback_heading = endpoint_with_heading[2]
-
         # Per-pair lane-aware anchor endpoints. For divergence the source
         # side uses ``Road.evaluate_lane_anchor_xyz(lane_index, at_start=
         # False)`` so each connector terminates on the lane edge of the
@@ -719,6 +1368,9 @@ def apply_divergence_synthesis(
         # lanes, plan_view), we fall back to the road's reference
         # endpoint by leaving the entry as ``None`` — the synthesiser
         # then uses ``inputs.endpoint_road`` / ``endpoints_candidates``.
+        # The distance between the two rendered anchors is what the sanity
+        # gate validates, so a candidate attached to a non-reference lane is
+        # judged on its own lane rather than on the reference line.
         lane_pair_endpoints: Dict[
             Tuple[int, int, int],
             Tuple[
@@ -726,6 +1378,7 @@ def apply_divergence_synthesis(
                 Tuple[float, float, float] | None,
             ],
         ] = {}
+        lane_pair_endpoint_distances: Dict[Tuple[int, int, int], float] = {}
         for src_lane, cand_road_id, cand_lane in lane_pairs:
             cand_road = roads_by_id.get(cand_road_id)
             if site.is_divergence:
@@ -748,17 +1401,92 @@ def apply_divergence_synthesis(
                 start_anchor,
                 end_anchor,
             )
+            if start_anchor is not None and end_anchor is not None:
+                lane_pair_endpoint_distances[(src_lane, cand_road_id, cand_lane)] = (
+                    _distance(start_anchor, end_anchor)
+                )
 
-        synthesis = synthesise_junction_for_site(
-            site=site,
-            inputs=gate_inputs,
+        gate_inputs = SanityGateInputs(
+            endpoint_road=endpoint_road,
+            endpoints_candidates=endpoints_candidates,
+            lane_pairs=lane_pairs,
+            all_successor_lanelet_road_ids=neighbour_road_ids,
+            lane_pair_endpoint_distances=lane_pair_endpoint_distances or None,
+        )
+        ok, reason = sanity_gate_passes(site, gate_inputs, endpoint_tolerance)
+        if not ok:
+            nearest_id, nearest_distance = _nearest_candidate_within_tolerance(
+                site, gate_inputs, endpoint_tolerance
+            )
+            if nearest_id is None:
+                log.warning(
+                    "divergence: sanity gate failed for road %d (%s side): %s; "
+                    "no candidate within %.3f m (nearest %.3f m), emitting no link",
+                    site.road_id,
+                    site.side.value,
+                    reason,
+                    endpoint_tolerance,
+                    nearest_distance,
+                )
+                continue
+            log.warning(
+                "divergence: sanity gate failed for road %d (%s side): %s; "
+                "falling back to nearest-candidate link %d (%.3f m)",
+                site.road_id,
+                site.side.value,
+                reason,
+                nearest_id,
+                nearest_distance,
+            )
+            if site.is_divergence:
+                source_road.add_successor(
+                    element_id=nearest_id,
+                    element_type=ElementType.ROAD,
+                    contact_point=ContactPoint.START,
+                )
+            else:
+                source_road.add_predecessor(
+                    element_id=nearest_id,
+                    element_type=ElementType.ROAD,
+                    contact_point=ContactPoint.END,
+                )
+            continue
+
+        # Source road tangent at the divergence/merge endpoint becomes the
+        # heading fallback when start_xyz and end_xyz coincide (#291 review).
+        source_plan_view = getattr(source_road, "plan_view", None)
+        fallback_heading = 0.0
+        if source_plan_view is not None:
+            endpoint_with_heading = _evaluate_planview_endpoint_with_heading(
+                source_plan_view,
+                at_start=not site.is_divergence,
+            )
+            if endpoint_with_heading is not None:
+                fallback_heading = endpoint_with_heading[2]
+
+        ready_sites.append(
+            _ReadyDivergenceSite(
+                site=site,
+                edges=_directed_edges_for_site(
+                    site=site,
+                    inputs=gate_inputs,
+                    traffic_rule=traffic_rule,
+                    fallback_heading=fallback_heading,
+                    lane_pair_endpoints=lane_pair_endpoints,
+                    roads_by_id=roads_by_id,
+                ),
+            )
+        )
+
+    for group in _group_overlapping_ready_sites(ready_sites):
+        synthesis = _synthesise_junction_for_edges(
+            junction_name=group.name,
+            edges=group.edges,
             starting_connecting_road_id=next_road_id,
             junction_id=next_junction_id,
             traffic_rule=traffic_rule,
             min_segment_length=min_segment_length,
-            fallback_heading=fallback_heading,
             lane_width=DEFAULT_CONFIG.geometry.divergence_default_lane_width,
-            lane_pair_endpoints=lane_pair_endpoints,
         )
 
         out_junctions.append(synthesis.junction)
@@ -766,36 +1494,23 @@ def apply_divergence_synthesis(
         next_road_id += len(synthesis.connecting_roads)
         next_junction_id += 1
 
-        side, _src, jid = synthesis.deferred_link_patch
-        if side == "successor":
-            source_road.add_successor(
-                element_id=jid,
-                element_type=ElementType.JUNCTION,
-                contact_point=None,
-            )
-        else:
-            source_road.add_predecessor(
-                element_id=jid,
-                element_type=ElementType.JUNCTION,
-                contact_point=None,
-            )
-
-        # Mirror-side patch on each candidate so both sides agree on the
-        # junction link (#291 review). Without this the candidates retain
-        # their direct road->road links from construct_from_lanelet_map and
-        # the topology becomes inconsistent.
-        for cand_id in site.candidate_road_ids:
-            cand_road = roads_by_id.get(cand_id)
-            if cand_road is None:
-                continue
-            if site.is_divergence:
-                cand_road.add_predecessor(
+        # Both sides of the boundary must name the junction, otherwise the
+        # roads keep the direct road->road links that
+        # ``construct_from_lanelet_map`` left behind and the topology becomes
+        # inconsistent (#291 review).
+        jid = synthesis.junction.id
+        for road_id in sorted({edge.incoming_road_id for edge in group.edges}):
+            incoming_road = roads_by_id.get(road_id)
+            if incoming_road is not None:
+                incoming_road.add_successor(
                     element_id=jid,
                     element_type=ElementType.JUNCTION,
                     contact_point=None,
                 )
-            else:
-                cand_road.add_successor(
+        for road_id in sorted({edge.outgoing_road_id for edge in group.edges}):
+            outgoing_road = roads_by_id.get(road_id)
+            if outgoing_road is not None:
+                outgoing_road.add_predecessor(
                     element_id=jid,
                     element_type=ElementType.JUNCTION,
                     contact_point=None,
