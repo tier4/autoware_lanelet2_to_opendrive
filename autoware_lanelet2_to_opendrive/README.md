@@ -32,7 +32,7 @@ This pulls `lanelet2-python-api-for-autoware`, which builds from source against 
 
 ## Quick usage
 
-The package registers five console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
+The package registers six console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
 
 | Command | Framework | Purpose |
 |---------|-----------|---------|
@@ -40,6 +40,7 @@ The package registers five console scripts (see `[project.scripts]` in [`pyproje
 | `preprocess-lanelet` | argparse | Run preprocessing operations only |
 | `analyze` | argparse | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | argparse | Run the ASAM QC checker on an existing `.xodr` |
+| `xodr-digest` | argparse | Extract a normalized structure digest of an `.xodr`, for diff-based review |
 | `carla-import-test` | argparse | Smoke-test loading the `.xodr` in a running CARLA server |
 
 Run them via `uv run <script>` (or `<script>` directly inside an active venv).
