@@ -1,9 +1,8 @@
 name: Link Checker
 
 on:
-  # Run on pull requests
+  # Run on pull requests. No `branches:` filter -- see the note in ci.yml.
   pull_request:
-    branches: [master, main, develop]
   # Run weekly on Sundays at 00:00 UTC
   schedule:
     - cron: '0 0 * * 0'
