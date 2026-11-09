@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import lanelet2
 import lxml.etree as ET
@@ -434,6 +434,63 @@ class RoadSamplePointIndex:
 
         return self._roads[int(road_slots[winner])], best_dist
 
+    def roads_within(
+        self, x: float, y: float, radius: float
+    ) -> List[Tuple["Road", float]]:
+        """Every road with a sample point within ``radius``, nearest first.
+
+        :meth:`nearest` answers "which road", which is the wrong question
+        when the nearest road turns out not to carry the object: an object
+        placed off a road's reference line has a side, and the nearest road
+        may have the object on the wrong side of it. The caller then needs
+        the runners-up, in the same order, to take the first road that does
+        carry it.
+
+        Each road appears once, keyed on its closest sample point, ranked
+        with the ``math.hypot`` distance :meth:`nearest` selects on -- so the
+        first element of a non-empty result is exactly the road that method
+        returns. Ties break on the index order the sequential scan visited,
+        as there.
+
+        Args:
+            x: World-space x coordinate.
+            y: World-space y coordinate.
+            radius: Maximum distance in metres.
+
+        Returns:
+            ``[(road, distance), ...]`` sorted by distance; empty when no
+            road has a sample point inside the radius.
+        """
+        xs, ys, road_slots = self._sampled()
+        if xs.size == 0:
+            return []
+
+        dx = xs - x
+        dy = ys - y
+        np.hypot(dx, dy, out=dx)
+        # NaN must never pass the radius test, as it never won in `nearest`.
+        dx[np.isnan(dx)] = np.inf
+
+        best: Dict[int, float] = {}
+        order: Dict[int, int] = {}
+        for candidate in np.flatnonzero(dx <= radius):
+            idx = int(candidate)
+            # Re-measured with the scan's own function; the coarse mask above
+            # uses `np.hypot`, which can differ by about one ulp, so a point
+            # exactly on the radius may be admitted or rejected by that much.
+            dist = math.hypot(x - float(xs[idx]), y - float(ys[idx]))
+            slot = int(road_slots[idx])
+            if slot not in best or dist < best[slot]:
+                best[slot] = dist
+                # The index of each road's *closest* point, so an exact tie
+                # between two roads breaks on the sample the sequential scan
+                # would have been holding when it met it.
+                order[slot] = idx
+        return [
+            (self._roads[slot], best[slot])
+            for slot in sorted(best, key=lambda s: (best[s], order[s]))
+        ]
+
 
 def _nearest_road_to_point(
     centroid: np.ndarray,
@@ -683,6 +740,205 @@ class StopLineObject:
                 f"Failed to construct StopLineObject from linestring {linestring.id}: {e}"
             )
             return None
+
+
+def choose_road_for_regulated_stop_line(
+    linestring: lanelet2.core.LineString3d,
+    candidate_roads: List["Road"],
+    width: float,
+    carla_format: bool = False,
+    offset: CoordinateOffset = CoordinateOffset(),
+) -> Optional["Road"]:
+    """Pick, among the roads the map says stop at this line, the right one.
+
+    Nearest is not owner. Lanelet2 states the owner: a lanelet refers to a
+    ``regulatory_element`` and that element names the stop line as its
+    ``ref_line``, so the roads those lanelets became are the candidates.
+    ``candidate_roads`` is that set, and it usually holds more than one --
+    a shared approach, or the connecting roads of the junction beyond -- so
+    one of them has to be chosen.
+
+    The choice is made on which carriageway actually contains the line.
+    ``Road.get_half_width_at_s`` returns a half-width whose **sign** is the
+    side the driving lanes lie on (positive for LHT, negative for RHT), so a
+    ``t`` of the opposite sign puts the line outside that road's carriageway
+    altogether; among the roads that do contain it, the smallest ``|t|`` is
+    the one it sits closest to the inner lane of, which is the approach rather
+    than a connector further along.
+
+    Returns ``None`` when no candidate contains the line, leaving the caller
+    to fall back to :func:`find_nearest_road_for_linestring`. Measured on
+    2026-11-06: following the regulator moves 28 of Nishishinjuku's and 423
+    of the customer map's stop lines from outside the carriageway to inside
+    it, and moves none the other way.
+    """
+    best: Optional[Tuple[Tuple[int, float], "Road"]] = None
+    seen: set = set()
+    for road in candidate_roads:
+        if road.id in seen:
+            continue
+        seen.add(road.id)
+        obj = _stop_line_on_the_driving_side(
+            linestring, road, width=width, carla_format=carla_format, offset=offset
+        )
+        if obj is None:
+            continue
+        # A road that actually *contains* the line beats one that merely has
+        # it on the right side. Without this, two candidates whose |t| differs
+        # by a tenth of a millimetre -- the same stop line seen from two
+        # roads of the same approach -- are separated by |t| alone, and the
+        # narrower road wins while holding the line past its outer edge.
+        # Measured 2026-11-06 on a 6,672-lanelet map: 9 stop lines, |t| about
+        # 4.6 m on each candidate, fixed by this and none broken.
+        extent = _driving_extent_at_s(road, obj.s, positive=obj.t >= 0.0)
+        outside = extent <= 0.0 or abs(obj.t) > extent
+        score = (1 if outside else 0, abs(obj.t))
+        if best is None or score < best[0]:
+            best = (score, road)
+    return best[1] if best is not None else None
+
+
+def _driving_extent_at_s(road: "Road", s: float, *, positive: bool) -> float:
+    """``|t|`` of the outer edge of the contiguous driving lanes at ``s``.
+
+    ``Road.get_half_width_at_s`` answers a different question -- half of the
+    *innermost* driving lane, for placing a signal at that lane's centre --
+    so it cannot say whether a given ``t`` is still on the carriageway. This
+    accumulates the widths outward from the reference line and stops at the
+    first lane that is not a driving lane, which is what "the carriageway
+    ends here" means: on this converter's output a shoulder typically sits
+    outside the driving lanes (ids ``-1, 0, 1, 2, 3`` with 1 and 2 driving).
+
+    Returns 0.0 when the road has no lane geometry or no driving lane on that
+    side, which callers must read as "cannot say", never as "zero wide".
+    """
+    # Deferred: road.py imports this module only under TYPE_CHECKING, so the
+    # dependency is one-directional and importing it here is safe, but doing
+    # it at module level would make the cycle real.
+    from .enums import LaneType
+    from .road import _evaluate_lane_width
+
+    lanes = getattr(road, "lanes", None)
+    if lanes is None or not lanes.lane_sections:
+        return 0.0
+
+    section = lanes.lane_sections[0]
+    for candidate in lanes.lane_sections:
+        if candidate.s_offset <= s:
+            section = candidate
+        else:
+            break
+
+    container = section.left_lanes if positive else section.right_lanes
+    total = 0.0
+    for lane_id in sorted(container, key=abs):
+        lane = container[lane_id]
+        if lane.lane_type != LaneType.DRIVING:
+            break
+        width = _evaluate_lane_width(lane, s - section.s_offset)
+        if width is None:
+            break
+        total += width
+    return total
+
+
+def _stop_line_on_the_driving_side(
+    linestring: lanelet2.core.LineString3d,
+    road: "Road",
+    *,
+    width: float,
+    carla_format: bool = False,
+    offset: CoordinateOffset = CoordinateOffset(),
+) -> Optional["StopLineObject"]:
+    """The stop line placed on ``road``, or None if that road does not carry it.
+
+    ``Road.get_half_width_at_s`` returns a half-width whose **sign** is the
+    side the driving lanes lie on, so a ``t`` of the opposite sign puts the
+    line on the far side of this road's reference line from every lane that
+    could stop at it -- outside the carriageway by construction.
+
+    Args:
+        linestring: The stop line.
+        road: The road to try.
+        width: Emitted object width.
+        carla_format: Emit CARLA's stencil form.
+        offset: Coordinate offset to subtract from the linestring's points.
+
+    Returns:
+        The placed object when this road's driving lanes are on the side the
+        line falls, otherwise None.
+    """
+    obj = StopLineObject.construct_from_linestring(
+        linestring=linestring,
+        road=road,
+        object_id=linestring.id,
+        width=width,
+        carla_format=carla_format,
+        offset=offset,
+    )
+    if obj is None:
+        return None
+    side = road.get_half_width_at_s(obj.s)
+    if side == 0.0 or obj.t * side < 0.0:
+        return None
+    return obj
+
+
+def choose_nearest_road_on_the_driving_side(
+    linestring: lanelet2.core.LineString3d,
+    all_roads: List["Road"],
+    width: float,
+    carla_format: bool = False,
+    offset: CoordinateOffset = CoordinateOffset(),
+    threshold_m: float = _NEAREST_ROAD_THRESHOLD_M,
+    road_index: Optional[RoadSamplePointIndex] = None,
+) -> Optional["Road"]:
+    """The nearest road that puts this stop line inside its own carriageway.
+
+    This is the fallback for a stop line **no lanelet regulates**, where
+    :func:`choose_road_for_regulated_stop_line` has no candidates to work
+    with: 30 of 196 stop lines on Nishi-Shinjuku and 243 of 1,464 on a
+    6,672-lanelet real map are referenced by no ``regulatory_element``, so
+    there is no owner to follow and the only available statement is geometry.
+
+    The ranking is the one :func:`find_nearest_road_for_linestring` already
+    used -- distance from the line's centroid to the road's reference line --
+    merely filtered by side, so the result can only move a line from a road
+    that does not carry it to the nearest one that does. Measured 2026-11-06,
+    every such line has one: 14 of 14 on Nishi-Shinjuku and 123 of 123 on the
+    real map, at a median 1.5 m.
+
+    Args:
+        linestring: The stop line.
+        all_roads: Candidate roads, used only when ``road_index`` is omitted.
+        width: Emitted object width.
+        carla_format: Emit CARLA's stencil form.
+        offset: Coordinate offset to subtract from the linestring's points.
+        threshold_m: Maximum distance to consider, as for the nearest search.
+        road_index: Pre-built index over ``all_roads``.
+
+    Returns:
+        The nearest road carrying the line, or None when no road within the
+        threshold does -- leaving the caller on
+        :func:`find_nearest_road_for_linestring`.
+    """
+    pts = extract_points(linestring, dimensions=2, offset=offset)
+    if len(pts) == 0:
+        return None
+    centroid = np.mean(pts, axis=0)
+
+    index = road_index if road_index is not None else RoadSamplePointIndex(all_roads)
+    for road, _distance in index.roads_within(
+        float(centroid[0]), float(centroid[1]), threshold_m
+    ):
+        if (
+            _stop_line_on_the_driving_side(
+                linestring, road, width=width, carla_format=carla_format, offset=offset
+            )
+            is not None
+        ):
+            return road
+    return None
 
 
 def find_nearest_road_for_linestring(

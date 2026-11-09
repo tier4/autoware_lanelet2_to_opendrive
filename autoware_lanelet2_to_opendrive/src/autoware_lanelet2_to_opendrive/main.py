@@ -657,6 +657,36 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return stop_line_to_tl_ids
 
+    def _build_stop_line_regulating_lanelets(self) -> Dict[int, Set[int]]:
+        """Which lanelets stop at which stop line, per the source map.
+
+        A lanelet refers to a ``regulatory_element`` and that element names
+        the line as its ``ref_line``, so this is the map's own statement of
+        which lanes a stop line governs -- the relation
+        ``find_nearest_road_for_linestring`` cannot see. Every subtype that
+        carries a ``ref_line`` counts (traffic_light, traffic_sign, crosswalk,
+        road_marking, ...), because the question here is only which lanes stop
+        there.
+
+        ``laneletLayer`` is walked rather than ``findUsages``, which returns
+        nothing for a lanelet holding an inverted linestring.
+
+        Returns:
+            ``{stop line linestring id: {lanelet ids}}``.
+        """
+        out: Dict[int, Set[int]] = {}
+        for lanelet in self.lanelet_map.laneletLayer:
+            for reg_elem in lanelet.regulatoryElements:
+                try:
+                    params = reg_elem.parameters
+                    if "ref_line" not in params:
+                        continue
+                    for ref_line in params["ref_line"]:
+                        out.setdefault(ref_line.id, set()).add(lanelet.id)
+                except Exception:
+                    continue
+        return out
+
     def _build_stop_sign_stop_line_ids(self) -> Set[int]:
         """Build a set of stop line linestring IDs associated with stop signs.
 
@@ -816,6 +846,8 @@ class _Lanelet2ToOpenDRIVEConverter:
         """
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
             StopLineObject,
+            choose_nearest_road_on_the_driving_side,
+            choose_road_for_regulated_stop_line,
             find_nearest_road_for_linestring,
         )
         from autoware_lanelet2_to_opendrive.opendrive.signal import (
@@ -853,6 +885,20 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_marking_294_count = 0
         signal_country = self.config.signal.country
 
+        # The map says which lanes stop at which line; nearest does not.
+        # Attaching the object to the nearest road put 43 of Nishishinjuku's
+        # 196 stop lines and 554 of the customer map's 1,464 outside the
+        # carriageway of the road carrying them, because every driving lane
+        # here has a positive id and the chosen road's reference line was on
+        # the far side of the line.
+        regulating_lanelets = self._build_stop_line_regulating_lanelets()
+        roads_of_lanelet: Dict[int, List[Road]] = {}
+        for road in all_roads:
+            for lanelet_id in (road.sorted_lanelet_ids or []) + (
+                road.chain_source_lanelet_ids or []
+            ):
+                roads_of_lanelet.setdefault(lanelet_id, []).append(road)
+
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
                 continue
@@ -860,9 +906,38 @@ class _Lanelet2ToOpenDRIVEConverter:
                 continue
             stop_line_ids_seen.add(ls.id)
 
-            best_road = find_nearest_road_for_linestring(
-                ls, all_roads, offset=self.offset, road_index=road_index
+            candidate_roads = [
+                road
+                for lanelet_id in regulating_lanelets.get(ls.id, ())
+                for road in roads_of_lanelet.get(lanelet_id, ())
+            ]
+            best_road = choose_road_for_regulated_stop_line(
+                ls,
+                candidate_roads,
+                width=self.config.stopline.width,
+                carla_format=self.config.stopline.carla_stop_line,
+                offset=self.offset,
             )
+            if best_road is None:
+                # Either the map regulates this line from no lanelet, or no
+                # regulating lanelet's road carries it. Geometry is then the
+                # only statement available, but "nearest" is still not the
+                # whole of it: a road has a side, and the nearest road may
+                # hold the line outside its own carriageway while a road just
+                # behind it holds it inside. Take the nearest road that does
+                # carry it, and only then the nearest road at all.
+                best_road = choose_nearest_road_on_the_driving_side(
+                    ls,
+                    all_roads,
+                    width=self.config.stopline.width,
+                    carla_format=self.config.stopline.carla_stop_line,
+                    offset=self.offset,
+                    road_index=road_index,
+                )
+            if best_road is None:
+                best_road = find_nearest_road_for_linestring(
+                    ls, all_roads, offset=self.offset, road_index=road_index
+                )
             if best_road is None:
                 skipped_stop_lines[ls.id] = SkippedStopLineEntry(
                     reason="no_nearest_road"
