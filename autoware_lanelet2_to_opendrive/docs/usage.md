@@ -236,7 +236,7 @@ each is also overridable from the command line.
 | | `default_segment_length` | `1.0` m | Target segment length |
 | | `max_segments` / `min_segments` | 100 / 1 | Caps on segment count per road |
 | | `coefficient_epsilon` | `1e-8` | Round small coefficients to zero |
-| `arcspiral` | `enabled` | `false` | Emit `<line>` / `<arc>` / `<paramPoly3>` mix |
+| `arcspiral` | `enabled` | `true` | Emit `<line>` / `<arc>` / `<paramPoly3>` mix instead of a `paramPoly3` chain |
 | | `arc_enabled` | `true` | Detect constant-curvature arcs |
 | | `min_line_length` | 10.0 m | Reject shorter line runs |
 | | `arc_position_tol` | `0.001` m | Maximum deviation between the analytic primitive and the fitted spline over the window it replaces |
