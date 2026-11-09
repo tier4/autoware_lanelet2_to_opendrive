@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [ master, main, develop ]
+  # No `branches:` filter: a pull request's checks must not depend on which
+  # branch it targets. Stacked work is based on an integration branch or on
+  # another pull request's head, and a filter naming only the long-lived
+  # branches means every such pull request reports no checks at all.
   pull_request:
-    branches: [ master, main, develop ]
 
 jobs:
   test:
