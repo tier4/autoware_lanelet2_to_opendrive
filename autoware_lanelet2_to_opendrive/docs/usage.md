@@ -229,7 +229,9 @@ each is also overridable from the command line.
 | | `coefficient_epsilon` | `1e-8` | Round small coefficients to zero |
 | `arcspiral` | `enabled` | `false` | Emit `<line>` / `<arc>` / `<paramPoly3>` mix |
 | | `arc_enabled` | `true` | Detect constant-curvature arcs |
-| | `min_line_length` | 5.0 m | Reject shorter line runs |
+| | `min_line_length` | 10.0 m | Reject shorter line runs |
+| | `arc_position_tol` | `0.001` m | Maximum deviation between the analytic primitive and the fitted spline over the window it replaces |
+| | `line_curvature_tol` | `1e-5` | Median signed curvature below which a window is a straight run |
 | `stopline` | `width` | `0.1` m | Painted stop-line width |
 | | `carla_stop_line` | `false` | Emit `<object type="-1" name="Stencil_STOP">` instead of the conforming `<object type="roadMark" name="stop_line_<id>">` |
 | `traffic_light` | `offset_x/y/z`, `hdg_offset` | 0 / 0 / 0 / π/2 | CARLA actor placement |
