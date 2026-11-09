@@ -46,6 +46,7 @@ conf/
 | `output_map_path` | no | Output `.xodr` (defaults to `<input>.xodr`) |
 | `dry_run` | no | Validate only, no save (default `false`) |
 | `verbose` | no | Enable debug logging (default `false`) |
+| `check_origin_against_map` | no | The resolved origin must contain the map's own nodes; a mismatch aborts the run (default `true`, overridable per map or target) |
 | `map=<name>` | no | Selects `conf/map/<name>.yaml` (default `example`) |
 | `target=<name>` | no | Selects `conf/target/<name>.yaml` (default `default`) |
 
