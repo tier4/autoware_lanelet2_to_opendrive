@@ -125,8 +125,11 @@ class ArcSpiralConfig:
     reserved for follow-up issue #466b and is currently a no-op.
 
     Attributes:
-        enabled: Master switch. False (default) preserves byte-exact
-            paramPoly3 output for backward compatibility.
+        enabled: Master switch. True (default): the reference line is
+            classified into <line> / <arc> / <paramPoly3> primitives, which
+            is how every published OpenDRIVE map describes a straight or
+            circular road. False restores the all-paramPoly3 output, which
+            is byte-exact against releases up to the one that flipped this.
         arc_enabled: Detect constant-curvature arcs.
         spiral_enabled: Reserved (no-op until #466b lands).
         line_curvature_tol: median signed curvature below this (in
@@ -155,7 +158,7 @@ class ArcSpiralConfig:
         min_arc_length: Minimum arc-run length to accept (m).
     """
 
-    enabled: bool = False
+    enabled: bool = True
     arc_enabled: bool = True
     spiral_enabled: bool = False
     line_curvature_tol: float = 1e-5
