@@ -16,7 +16,7 @@ import re
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import lanelet2
 import mgrs as mgrs_lib
@@ -51,6 +51,15 @@ _TRANSVERSE_MERCATOR = "TransverseMercator"
 # DeprecationWarning is already de-duplicated per call site by the warnings
 # module's default filters).
 _legacy_origin_keys_logged = False
+
+
+_ORIGIN_MARGIN_DEG = 1.0
+"""How far outside the map a lat/lon origin may sit, in degrees.
+
+About 110 km of latitude. Wide enough for an origin placed at a site datum
+rather than inside the mapped area, narrow enough that a different city
+fails.
+"""
 
 
 def _warn_legacy_origin_keys(stacklevel: int) -> None:
@@ -428,6 +437,142 @@ def _resolve_from_map_projector_info(
     return None
 
 
+def _map_lat_lon_bounds(
+    map_path: Path,
+) -> Optional[Tuple[float, float, float, float]]:
+    """The lat/lon bounding box of the map's nodes, or ``None`` if unreadable.
+
+    Read with the XML parser in recovering mode rather than by loading the
+    map: a Lanelet2 ``.osm`` that lanelet2 loads is not always well-formed to
+    a stricter parser, and loading it needs the very projector being checked.
+
+    Returns:
+        ``(min_lat, min_lon, max_lat, max_lon)``, or ``None`` when no node
+        carried a readable lat/lon.
+    """
+    import lxml.etree as ET
+
+    lats: List[float] = []
+    lons: List[float] = []
+    try:
+        parser = ET.XMLParser(recover=True)
+        tree = ET.parse(str(map_path), parser)
+        root = tree.getroot()
+        if root is None:
+            return None
+        for node in root.iter("node"):
+            lat, lon = node.get("lat"), node.get("lon")
+            if lat is None or lon is None:
+                continue
+            try:
+                lats.append(float(lat))
+                lons.append(float(lon))
+            except ValueError:
+                continue
+    except (OSError, ET.XMLSyntaxError):
+        return None
+
+    if not lats:
+        return None
+    return (min(lats), min(lons), max(lats), max(lons))
+
+
+def _mgrs_grids_of(
+    bounds: Tuple[float, float, float, float],
+) -> Set[str]:
+    """The 100 km MGRS squares the bounding box's corners and centre fall in.
+
+    The corners as well as the centre, because a map may straddle a square
+    boundary and then no single probe answers for the whole map.
+    """
+    min_lat, min_lon, max_lat, max_lon = bounds
+    probes = [
+        (min_lat, min_lon),
+        (min_lat, max_lon),
+        (max_lat, min_lon),
+        (max_lat, max_lon),
+        ((min_lat + max_lat) / 2.0, (min_lon + max_lon) / 2.0),
+    ]
+    grids: Set[str] = set()
+    for lat, lon in probes:
+        projector = MGRSProjector(lanelet2.io.Origin(lat, lon))
+        projector.forward(lanelet2.core.GPSPoint(lat, lon, 0.0))
+        grid = projector.getProjectedMGRSGrid()
+        if grid:
+            grids.add(grid)
+    return grids
+
+
+def verify_origin_matches_map(resolved: ResolvedProjection, map_path: Path) -> None:
+    """Fail when the resolved origin does not belong to this map.
+
+    Nothing else compares the two. A preset copied to a new map, or a
+    ``map_projector_info.yaml`` left behind from another one, resolves
+    without complaint and the conversion completes with every coordinate in
+    the wrong frame.
+
+    The map's node lat/lon is the basis, because it is the one thing always
+    present -- the ``mgrs_code`` tag is optional, so it is not consulted.
+
+    * With an MGRS grid: the configured square must be one the map's own
+      nodes fall in. Compared on the shorter of the two prefixes, so a
+      higher-precision code such as ``54SUE815501`` matches the square
+      ``54SUE`` it names.
+    * Otherwise: the origin itself must lie within the map's bounding box
+      expanded by :data:`_ORIGIN_MARGIN_DEG`.
+
+    A map whose nodes cannot be read is accepted: it says nothing about the
+    origin either way, and a check that can fail a map it never read is
+    worse than no check.
+
+    Raises:
+        ValueError: The origin belongs to a different part of the world.
+    """
+    bounds = _map_lat_lon_bounds(map_path)
+    if bounds is None:
+        logger.debug(
+            "No node lat/lon read from %s; origin not checked against the map",
+            map_path,
+        )
+        return
+
+    min_lat, min_lon, max_lat, max_lon = bounds
+
+    if resolved.mgrs_code:
+        grids = _mgrs_grids_of(bounds)
+        length = min([len(resolved.mgrs_code)] + [len(grid) for grid in grids])
+        if grids and resolved.mgrs_code[:length] not in {
+            grid[:length] for grid in grids
+        }:
+            raise ValueError(
+                f"Origin grid {resolved.mgrs_code!r} is not a grid this map "
+                f"lies in. {map_path.name} spans lat {min_lat:.5f}..{max_lat:.5f},"
+                f" lon {min_lon:.5f}..{max_lon:.5f}, which is MGRS"
+                f" {sorted(grids)}. Fix the origin, or set"
+                " check_origin_against_map=false to proceed anyway."
+            )
+        return
+
+    if resolved.origin_lat is None or resolved.origin_lon is None:
+        return
+
+    if not (
+        min_lat - _ORIGIN_MARGIN_DEG
+        <= resolved.origin_lat
+        <= max_lat + _ORIGIN_MARGIN_DEG
+        and min_lon - _ORIGIN_MARGIN_DEG
+        <= resolved.origin_lon
+        <= max_lon + _ORIGIN_MARGIN_DEG
+    ):
+        raise ValueError(
+            f"Origin ({resolved.origin_lat}, {resolved.origin_lon}) lies"
+            f" outside {map_path.name}, which spans lat"
+            f" {min_lat:.5f}..{max_lat:.5f}, lon {min_lon:.5f}..{max_lon:.5f}"
+            f" (margin {_ORIGIN_MARGIN_DEG} deg). Fix the origin, or set"
+            " check_origin_against_map=false to proceed anyway."
+        )
+
+
 def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProjection:
     """Resolve the coordinate frame, preferring ``map_projector_info.yaml``.
 
@@ -454,6 +599,7 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
         ValueError: If the projector-info file is malformed, or the explicit
             origin keys are missing/invalid on the fallback path.
     """
+    resolved: Optional[ResolvedProjection] = None
     info_path = Path(input_map_path).parent / MAP_PROJECTOR_INFO_FILENAME
     if info_path.is_file():
         info = MapProjectorInfo.from_yaml(info_path)
@@ -464,15 +610,39 @@ def resolve_projection(cfg: DictConfig, input_map_path: Path) -> ResolvedProject
                 "if any, are ignored)",
                 info_path,
             )
-            return resolved
-        logger.warning(
-            "projector_type %r in %s is not supported yet; the explicit origin "
-            "keys ('mgrs_grid'/'lat_lon') remain required for this map",
-            info.projector_type,
-            info_path,
-        )
-        return _resolve_from_explicit_keys(cfg)
+        else:
+            logger.warning(
+                "projector_type %r in %s is not supported yet; the explicit "
+                "origin keys ('mgrs_grid'/'lat_lon') remain required for this "
+                "map",
+                info.projector_type,
+                info_path,
+            )
+            resolved = _resolve_from_explicit_keys(cfg)
+    else:
+        resolved = _resolve_from_explicit_keys(cfg)
+        _warn_legacy_origin_keys(stacklevel=3)
 
-    resolved = _resolve_from_explicit_keys(cfg)
-    _warn_legacy_origin_keys(stacklevel=3)
+    # Whichever source won, it has to belong to this map. A yaml left behind
+    # from another map is as wrong as a copied preset.
+    if _check_origin_against_map(cfg):
+        verify_origin_matches_map(resolved, Path(input_map_path))
     return resolved
+
+
+def _check_origin_against_map(cfg: DictConfig) -> bool:
+    """Whether to verify the resolved origin against the map's own nodes.
+
+    Precedence map > target > global, matching the other per-map overrides.
+    ``or`` cannot be used because the value is a boolean and ``False`` is a
+    meaningful setting.
+    """
+    return bool(
+        cfg.get("map", {}).get(
+            "check_origin_against_map",
+            cfg.get("target", {}).get(
+                "check_origin_against_map",
+                cfg.get("check_origin_against_map", True),
+            ),
+        )
+    )
