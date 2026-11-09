@@ -380,6 +380,38 @@ class _BoundarySynthesisOutput:
     connecting_roads: List[Road]
 
 
+def _reverses_on_itself(geometry: ParamPoly3, samples: Optional[int] = None) -> bool:
+    """Does the record's tangent ever point against its own net displacement?
+
+    The convention-free statement of "doubles back". ``du/dp < 0`` does not
+    say it: in the record's own start frame a cubic Hermite has
+    ``du/dp (p=1) = scale * cos(d_psi)``, so **every** connector turning
+    through more than 90 degrees has a negative ``du/dp`` at its end whatever
+    its geometry, and no tangent scaling changes that. Measured over a
+    6,672-lanelet map's output, 553 records had a negative ``du/dp``
+    somewhere while 455 reversed in this sense, and 13 of the difference were
+    simply turning hard.
+
+    A record whose net displacement is zero reverses by definition: it ends
+    where it started.
+    """
+    if samples is None:
+        samples = DEFAULT_CONFIG.geometry.divergence_reversal_check_samples
+    u1 = geometry.bU + geometry.cU + geometry.dU
+    v1 = geometry.bV + geometry.cV + geometry.dV
+    norm = math.hypot(u1, v1)
+    if norm <= DEFAULT_CONFIG.geometry.epsilon:
+        return True
+    nx, ny = u1 / norm, v1 / norm
+    for index in range(samples):
+        p = index / (samples - 1)
+        du = geometry.bU + 2.0 * geometry.cU * p + 3.0 * geometry.dU * p * p
+        dv = geometry.bV + 2.0 * geometry.cV * p + 3.0 * geometry.dV * p * p
+        if du * nx + dv * ny < 0.0:
+            return True
+    return False
+
+
 def _make_zero_length_connecting_road(
     road_id: int,
     junction_id: int,
@@ -461,31 +493,148 @@ def _make_zero_length_connecting_road(
             raw_length,
         )
 
+    # A separation that is not a real chord carries no shape, and a cubic
+    # through it invents one. With both tangents nearly parallel -- which is
+    # the normal case, since these two anchors are one contact point rendered
+    # twice -- the Hermite comes out as
+    #
+    #     bU : cU : dU = 1 : -3 : 2,   u(1) = 0
+    #
+    # so the curve runs out and returns to its own start. ``@length`` is its
+    # arc length, so the road has extent while its reference line has none,
+    # and a consumer sampling along ``s`` reads headings that reverse: this is
+    # the shape behind CARLA's 160 heading flips (max 179.96 deg). Measured
+    # on 2026-11-06 over the whole output, 424 of the 455 records whose
+    # tangent reverses against their own displacement are synthetic
+    # connectors in a junction, 486 of them on roads under 10 cm, and 499 of
+    # 553 turn through less than 5 degrees -- stubs with nothing to
+    # interpolate rather than curves bending.
+    #
+    # Two conditions, because a separation above the floor is not enough.
+    # Measured over a 6,672-lanelet map's output with the floor alone in
+    # place, 95 records still reversed, and their ``u(1) / |tangent|`` has
+    # p50 **-0.995**: the far anchor sits a floor's length *behind* the near
+    # one along the start tangent. A curve from A to a point behind A, with
+    # the start tangent pointing forward, has to double back whatever its
+    # coefficients. So the Hermite is built and then **checked**, and a
+    # reversing one is not used.
     can_curve = (
         start_heading is not None
         and end_heading is not None
-        and raw_length > DEFAULT_CONFIG.geometry.epsilon
+        and raw_length >= min_segment_length
     )
+    # The replacement may only move the far end inside the contact tolerance.
+    # Its far end sits ``min_segment_length`` from the near anchor, and the
+    # true contact is ``raw_length`` away, so the displacement is at most the
+    # sum: beyond the tolerance that is a gap in the road network rather than
+    # a rendering difference, and position continuity outranks heading.
+    #
+    # Measured: without this gate, two connectors whose anchors were 0.019 m
+    # apart -- a real chord, not a residual -- became 0.005 m stubs ending
+    # 0.023 m from their successor's start, and `linked_endpoints_apart` went
+    # from 2 violations to 4. A short reversed stub is a heading artifact; a
+    # 23 mm hole is a break.
+    anchors_are_one_point = (
+        raw_length + min_segment_length
+        <= DEFAULT_CONFIG.geometry.divergence_anchor_merge_tolerance
+    )
+    geometry = None
     if can_curve:
         # ``tangent_scale`` at the floor rather than the chord: these anchors
         # are millimetres apart, and a cubic whose tangent magnitudes are
         # scaled to a 5 mm chord cannot turn through a large angle without
         # doubling back on itself.
-        geometry = ParamPoly3.hermite(
+        candidate = ParamPoly3.hermite(
             start_xy=(start_xyz[0], start_xyz[1]),
             start_heading=start_heading,
             end_xy=(end_xyz[0], end_xyz[1]),
             end_heading=end_heading,
             tangent_scale=min_segment_length,
         )
-    else:
-        # Degraded: one or both neighbour tangents are unavailable, which
-        # happens only when a neighbour has no rendered plan view.  A
-        # straight segment is all that is left.  Prefer the start tangent
-        # over the anchor vector -- at this scale the vector between two
-        # anchors that are meant to coincide is numerical noise, measured at
-        # a median 88.9 deg from the incoming road's own tangent over the
-        # 296 Odaiba connectors that used to take it.
+        # The reversal check applies only where the two anchors are one
+        # point to within the contact tolerance (see
+        # ``anchors_are_one_point`` above). With a real chord the curve keeps its exact endpoints even
+        # when it ends facing backwards: that is what a hairpin does, and
+        # collapsing one to a floor-length stub would both destroy a real
+        # manoeuvre and open a gap at its far contact.
+        if anchors_are_one_point and _reverses_on_itself(candidate):
+            log.debug(
+                "Connector %d's Hermite between roads %d -> %d reverses on "
+                "itself (anchors %.4f m apart); drawing the floor-length "
+                "curve along the tangent bisector instead.",
+                road_id,
+                incoming_road_id,
+                outgoing_road_id,
+                raw_length,
+            )
+        else:
+            geometry = candidate
+    if (
+        geometry is None
+        and start_heading is not None
+        and end_heading is not None
+        and anchors_are_one_point
+        # A zero or negative floor leaves no chord to draw along, and
+        # ``ParamPoly3.hermite`` rightly refuses two coincident anchors; the
+        # straight branch below handles that degenerate configuration.
+        and min_segment_length > DEFAULT_CONFIG.geometry.epsilon
+    ):
+        # No usable chord -- either below the floor, or one that would make
+        # the cubic reverse -- but both tangents are known, and they are the
+        # real constraint, so
+        # draw the floor-length curve that meets both: from the start anchor
+        # along the **bisector** of the two headings, which is the direction
+        # that leaves the cubic monotone (for a turn of d_psi the end tangent
+        # then makes a positive angle with the net displacement for every
+        # |d_psi| < 180 deg).
+        #
+        # Its far end lands `min_segment_length` from the neighbour's
+        # endpoint rather than on it -- but so does a straight stub of the
+        # same length, and that one also *misses the end heading*, so its
+        # lane borders at the losing end are out by `2 * w * sin(d_psi / 2)`:
+        # 0.3 m at a 5 degree turn with a 3.5 m lane, against a 1 cm
+        # tolerance. Measured on a 6,672-lanelet map, the straight stub cost
+        # +199 findings of
+        # `lane_smoothness.contact_point_no_horizontal_gaps` (425 -> 624)
+        # while every other checker stayed put.
+        turn = math.atan2(
+            math.sin(end_heading - start_heading),
+            math.cos(end_heading - start_heading),
+        )
+        bisector = start_heading + 0.5 * turn
+        geometry = ParamPoly3.hermite(
+            start_xy=(start_xyz[0], start_xyz[1]),
+            start_heading=start_heading,
+            # The floor, not ``length``: ``raw_length`` here is a residual
+            # error between two renderings of one point, not an extent
+            # anybody asked for, so spending it as chord would push the far
+            # end further from the neighbour's endpoint than necessary.
+            #
+            # ``reference_end_xyz`` below stays the *logical* contact point,
+            # ``end_xyz``, as it already did for the straight branch, which
+            # also ends a floor's length from it: the callers that read it
+            # (``shared_connecting_roads``, ``direct_junction_completion``)
+            # want the point the roads are meant to meet at, not the rendered
+            # end of a stub that is deliberately a few millimetres long.
+            end_xy=(
+                start_xyz[0] + min_segment_length * math.cos(bisector),
+                start_xyz[1] + min_segment_length * math.sin(bisector),
+            ),
+            end_heading=end_heading,
+            tangent_scale=min_segment_length,
+        )
+    if geometry is None:
+        # Degraded: a neighbour tangent is unavailable, which happens only
+        # when that neighbour has no rendered plan view. With one tangent or
+        # none there is no curve to meet both of them, so a straight segment
+        # of the floor length is all that is left,
+        # carrying the floor as real extent.
+        #
+        # Prefer the start tangent over the anchor vector -- at this scale
+        # the vector between two anchors that are meant to coincide is
+        # numerical noise, measured at a median 88.9 deg from the incoming
+        # road's own tangent over the 296 Odaiba connectors that used to take
+        # it.
         if start_heading is not None:
             heading = start_heading
         else:

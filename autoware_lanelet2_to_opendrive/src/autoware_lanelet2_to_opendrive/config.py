@@ -24,6 +24,26 @@ class GeometryConstants:
         divergence_default_lane_width: Default width (m) emitted on synthetic
             divergence/merge connecting-road lanes so the rendered XODR
             ``<width>`` element is always present. Issue #291.
+        divergence_anchor_merge_tolerance: Distance (m) within which a
+            synthetic connector's two anchors may be treated as one point,
+            i.e. the far one may be abandoned to draw a connector that does
+            not double back. It is the 1 cm contact tolerance of
+            ``lane_smoothness.contact_point_no_horizontal_gaps`` and of
+            ``xodr_invariants.linked_endpoints_apart``: inside it no consumer
+            can tell the far end moved, outside it the move is a gap in the
+            road network and position continuity outranks heading. The
+            replacement's far end sits ``divergence_min_segment_length`` from
+            the near anchor, so the test is ``raw separation + floor <=
+            this``. Measured: dropping it reported two roads 0.023 m apart
+            that had been within tolerance, because their separation (0.019 m)
+            was a real chord rather than a rendering residual.
+        divergence_reversal_check_samples: Number of parameter samples used to
+            test whether a synthetic connector's cubic doubles back on its own
+            net displacement. The test is a sign check on a quadratic, so the
+            density only has to be fine enough to catch a short negative
+            interval; 65 samples resolve one of 1/64 of the curve, and the
+            reversals measured on real maps span most of the range (the
+            recorded shape is negative over 58% to 82% of it).
         sidewalk_height: Height (m) emitted on ``lane[type=sidewalk]`` and
             ``lane[type=shoulder]`` when the inner boundary LineString has
             ``type=curbstone`` or ``type=road_border``. Both ``inner`` and
@@ -48,6 +68,8 @@ class GeometryConstants:
     divergence_endpoint_tolerance: float = 0.5
     divergence_min_segment_length: float = 0.01
     divergence_default_lane_width: float = 3.5
+    divergence_reversal_check_samples: int = 65
+    divergence_anchor_merge_tolerance: float = 0.01
     sidewalk_height: float = 0.15
     spatial_grid_min_cell_size: float = 1.0
     nearest_road_rerank_ulps: float = 8.0

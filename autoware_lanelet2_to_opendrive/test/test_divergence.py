@@ -28,7 +28,11 @@ from autoware_lanelet2_to_opendrive.opendrive.enums import (
     LaneType,
     TrafficRule,
 )
-from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3, PlanView
+from autoware_lanelet2_to_opendrive.opendrive.geometry import (
+    ParamPoly3,
+    PlanView,
+    end_param,
+)
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
 from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
@@ -929,8 +933,17 @@ def test_coincident_anchors_raise_rather_than_guess():
     """There is no curve between a point and itself.
 
     ``ParamPoly3.hermite`` refuses instead of inventing a direction; the
-    connector builder is the one that decides what to draw, and it draws a
-    straight segment along the start heading.
+    connector builder is the one that decides what to draw.
+
+    What it draws changed: it used to be a straight segment along the start
+    heading, and is now the floor-length curve meeting **both** tangents,
+    drawn from the start anchor along the bisector of the two headings. The
+    straight version satisfies only one tangent, so the lane borders at the
+    losing end miss by ``2 * w * sin(d_psi / 2)`` -- 0.3 m at a 5 degree turn
+    with a 3.5 m lane, against a 1 cm tolerance. Measured on a
+    6,672-lanelet map, the straight stub cost +199 findings of
+    ``lane_smoothness.contact_point_no_horizontal_gaps`` (425 -> 624) with
+    every other checker unmoved.
     """
     with pytest.raises(ValueError, match="coincide"):
         ParamPoly3.hermite(
@@ -950,7 +963,187 @@ def test_coincident_anchors_raise_rather_than_guess():
     )
     geometry = stub.plan_view.geometries[0]
     assert geometry.hdg == pytest.approx(0.3)
-    assert geometry.length == pytest.approx(0.01)
+    # `@length` is the arc length of a curve whose chord is the floor, so it
+    # is at least the floor and the two agree with each other.
+    assert geometry.length >= 0.01
+    assert geometry.length == pytest.approx(geometry.arc_length(), rel=1e-12)
+    assert not _tangent_opposes_displacement(geometry)
+    _x1, _y1, end_heading = _end_pose(geometry)
+    assert end_heading == pytest.approx(1.2)
+
+
+def _local_offset(geometry, p):
+    """``(u, v)`` of the record at parameter ``p``, in its own start frame."""
+    u = geometry.bU * p + geometry.cU * p * p + geometry.dU * p**3
+    v = geometry.bV * p + geometry.cV * p * p + geometry.dV * p**3
+    return geometry.aU + u, geometry.aV + v
+
+
+def _tangent_opposes_displacement(geometry, samples=201):
+    """Does the record's tangent ever point against its own net displacement?
+
+    The convention-free statement of "doubles back". Measuring ``du/dp``
+    alone does not say it: in the record's own start frame a cubic Hermite
+    has ``du/dp (p=1) = scale * cos(d_psi)``, so *every* connector turning
+    through more than 90 degrees has a negative ``du/dp`` at its end
+    whatever its geometry, and no tangent scaling can change that.
+
+    The parameter range comes from ``end_param``: it is ``1`` for a
+    ``pRange="normalized"`` record and ``length`` for an ``"arcLength"`` one,
+    and reading ``p = 1`` for both reports a straight 1 cm stub as a 1 m one.
+    """
+    p_end = end_param(geometry)
+    u1, v1 = _local_offset(geometry, p_end)
+    norm = math.hypot(u1, v1)
+    if norm == 0.0:
+        return True  # it ends exactly where it started: no displacement at all
+    nx, ny = u1 / norm, v1 / norm
+    for index in range(samples):
+        p = p_end * index / (samples - 1)
+        du = geometry.bU + 2 * geometry.cU * p + 3 * geometry.dU * p * p
+        dv = geometry.bV + 2 * geometry.cV * p + 3 * geometry.dV * p * p
+        if du * nx + dv * ny < 0.0:
+            return True
+    return False
+
+
+@pytest.mark.parametrize("separation", [1e-6, 1e-5, 1e-3, 5e-3])
+def test_anchors_closer_than_the_floor_do_not_make_the_connector_double_back(
+    separation,
+):
+    """A sub-floor separation carries no shape, and a cubic invents one.
+
+    ``test_coincident_anchors_raise_rather_than_guess`` covers the exactly
+    equal case. The population on a real map is the *almost* equal one:
+    ``can_curve`` only asks that the anchors differ by more than
+    ``geometry.epsilon`` (1e-10), so two renderings of one contact point a
+    fraction of a millimetre apart take the cubic branch, and with both
+    tangents nearly parallel that cubic is
+
+        bU : cU : dU = 1 : -3 : 2,   u(1) = 0
+
+    -- it runs out and comes back to its own start. ``@length`` is the arc
+    length, so the road has extent while its reference line has none, and a
+    consumer sampling along ``s`` gets headings that reverse. That is the
+    shape behind CARLA's 160 heading flips (max 179.96 deg).
+
+    Measured on 2026-11-06 over the integration tree's output: of the
+    ``paramPoly3`` records whose tangent reverses against their own
+    displacement, 424 of 455 on the customer map (46 of 50 on
+    Nishi-Shinjuku) are synthetic connectors inside a junction, 486 of them
+    on roads under 10 cm long, and 499 of 553 turn through **less than 5
+    degrees**. So this is not a curve bending; it is a stub with nothing to
+    interpolate.
+
+    ``_validate_segment`` cannot catch it: it checks length, finiteness and
+    heading, not monotonicity.
+
+    The negative separation is the other half of the population, and the
+    floor alone does not cover it: with the floor in place 95 records still
+    reversed, and their ``u(1) / |tangent|`` has p50 **-0.995** -- the far
+    anchor sits a floor's length *behind* the near one along the start
+    tangent, which no cubic can honour without doubling back. So the Hermite
+    is checked after it is built, and a reversing one is replaced.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (separation, 0.0, 0.0),
+        min_segment_length=0.005,
+        start_heading=0.0,
+        end_heading=math.radians(1.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+
+    assert not _tangent_opposes_displacement(geometry), (
+        f"the connector doubles back on itself: bU={geometry.bU:.6g} "
+        f"cU={geometry.cU:.6g} dU={geometry.dU:.6g}"
+    )
+    # Both tangents are known here, so both must still be met: a stub that
+    # carries only the start heading misses the far neighbour's lane borders
+    # by 2 * w * sin(d_psi / 2), which is 0.3 m at a 5 degree turn with a
+    # 3.5 m lane against a 1 cm tolerance -- measured as +199 findings of
+    # lane_smoothness.contact_point_no_horizontal_gaps on a real map.
+    _x1, _y1, end_heading = _end_pose(geometry)
+    assert end_heading == pytest.approx(math.radians(1.0), abs=1e-9), (
+        "the far neighbour's tangent must still be met; a straight stub "
+        "trades the fold for a lane-border gap"
+    )
+    displacement = math.hypot(*_local_offset(geometry, end_param(geometry)))
+    assert displacement == pytest.approx(0.005, rel=1e-9), (
+        "the connector must carry the length floor as real extent, not as "
+        f"arc length spent returning to its start (displacement {displacement:.6g} m)"
+    )
+    assert stub.length == pytest.approx(geometry.length)
+
+
+def test_a_chord_beyond_the_merge_tolerance_keeps_its_exact_endpoints():
+    """Position continuity outranks heading once the anchors are really apart.
+
+    The replacement draws the floor-length curve from the *near* anchor, so it
+    abandons the far one by up to ``raw separation + floor``. Inside the 1 cm
+    contact tolerance no consumer can tell; beyond it the abandoned distance
+    is a gap in the road network.
+
+    Measured: with the gate missing, two connectors whose anchors were 19 mm
+    apart became 5 mm stubs ending 23 mm from their successor's start, and
+    `linked_endpoints_apart` went from 2 violations to 4 on the customer map.
+    A 2 cm reversed stub is a heading artifact in 2 cm of road; a 23 mm hole
+    is a break. So this input keeps its endpoints and its reversal, and the
+    reversal is then a finding about the input -- the incoming road's tangent
+    points away from where the outgoing road starts.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (-0.02, 0.0, 0.0),
+        min_segment_length=0.005,
+        start_heading=0.0,
+        end_heading=math.radians(1.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+
+    assert geometry.pRange == "normalized", "the Hermite must stand"
+    x1, y1, _h1 = _end_pose(geometry)
+    assert (x1, y1) == pytest.approx(
+        (-0.02, 0.0), abs=1e-12
+    ), "the far anchor must still be met, so the contact stays closed"
+    assert _tangent_opposes_displacement(geometry), (
+        "and the reversal is accepted here -- if this input did not reverse, "
+        "the test would not be pinning the trade-off it is named for"
+    )
+
+
+def test_a_real_chord_keeps_its_curve_even_when_it_ends_facing_backwards():
+    """The guard rail on the reversal check: a hairpin is not a defect.
+
+    A curve with a genuine chord may legitimately end with its tangent
+    opposing that chord -- that is what a U-turn ramp does. The reversal
+    check must therefore not reach it, or a real manoeuvre would collapse to
+    a floor-length stub. ``_ANCHOR_RESIDUAL_WARN_M`` (5 m) is the line: below
+    it the two anchors are one contact point rendered twice, above it the
+    separation contradicts this function's premise and the geometry is
+    whatever the caller actually asked for.
+    """
+    stub = _stub_between(
+        (0.0, 0.0, 0.0),
+        (10.0, 0.0, 0.0),
+        min_segment_length=0.01,
+        start_heading=0.0,
+        end_heading=math.radians(175.0),
+    )
+    geometry = stub.plan_view.geometries[0]
+
+    assert geometry.pRange == "normalized", "the Hermite must stand"
+    assert _tangent_opposes_displacement(geometry), (
+        "this input really does double back -- if it did not, the test would "
+        "not be exercising the guard rail"
+    )
+    x1, y1, end_heading = _end_pose(geometry)
+    assert (x1, y1) == pytest.approx((10.0, 0.0), abs=1e-9), (
+        "the far anchor must still be met: 10 m of connector must not become "
+        "a 1 cm stub"
+    )
+    assert end_heading == pytest.approx(math.radians(175.0))
+    assert stub.length >= 10.0
 
 
 def _width_road(road_id, *, width, length=10.0, heading=0.0, x=0.0, y=0.0):
