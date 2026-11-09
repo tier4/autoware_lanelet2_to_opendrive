@@ -24,6 +24,7 @@ written naively:
 
 from pathlib import Path
 
+
 from autoware_lanelet2_to_opendrive.route_fidelity import EmittedNetwork, measure
 
 NISHISHINJUKU_MIN_SUCCESSIONS = 900
@@ -147,4 +148,109 @@ def test_shipped_conversion_preserves_the_stated_successions(
     assert result.missing_share < MAX_MISSING_SHARE, (
         f"{len(result.missing)} of {result.stated} successions"
         f" ({100.0 * result.missing_share:.2f}%) are absent from the file"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dangling lane links
+#
+# A `<lane><link><successor id="N"/>` is read by looking N up in the lane
+# section the road's successor end contacts. If no such lane exists there, a
+# consumer dereferences nothing: CARLA exits 139. Nothing in the repository
+# checks it, and the reader this module already builds knows both sides, so
+# the check costs one pass over what is already parsed.
+#
+# The nishishinjuku output has none today, which is why this is a gate rather
+# than a fix: it holds the zero while the junction and fork branches change
+# how lane links are written.
+# ---------------------------------------------------------------------------
+
+
+def test_a_lane_link_naming_a_lane_that_does_not_exist_is_found(
+    tmp_path: Path,
+) -> None:
+    """Road 1 lane 1 claims lane 2 of road 2, which has only lane 1."""
+    body = (
+        '<?xml version="1.0"?><OpenDRIVE>'
+        + _road(
+            1,
+            "LHT",
+            _lane(1, '<successor id="2"/>'),
+            '<successor elementType="road" elementId="2" contactPoint="start"/>',
+        )
+        + _road(
+            2,
+            "LHT",
+            _lane(1),
+            '<predecessor elementType="road" elementId="1" contactPoint="end"/>',
+        )
+        + "</OpenDRIVE>"
+    )
+    network = EmittedNetwork(_write(tmp_path, "dangling.xodr", body))
+
+    assert [
+        (link.road, link.lane, link.end, link.target_road, link.target_lane)
+        for link in network.dangling_lane_links()
+    ] == [(1, 1, "successor", 2, 2)]
+
+
+def test_a_lane_link_that_resolves_is_not_reported(tmp_path: Path) -> None:
+    """The same file with the link pointing at the lane that exists."""
+    body = (
+        '<?xml version="1.0"?><OpenDRIVE>'
+        + _road(
+            1,
+            "LHT",
+            _lane(1, '<successor id="1"/>'),
+            '<successor elementType="road" elementId="2" contactPoint="start"/>',
+        )
+        + _road(
+            2,
+            "LHT",
+            _lane(1),
+            '<predecessor elementType="road" elementId="1" contactPoint="end"/>',
+        )
+        + "</OpenDRIVE>"
+    )
+    network = EmittedNetwork(_write(tmp_path, "resolves.xodr", body))
+
+    assert network.dangling_lane_links() == []
+
+
+def test_a_lane_link_at_a_junction_end_is_not_reported(tmp_path: Path) -> None:
+    """A junction-typed end resolves through the junction, not the lane link.
+
+    Lane links are never cleared once written, so a road whose end became a
+    junction still carries the id it had as a road-typed end. Reading it
+    against the junction id would report every such end as dangling -- the
+    false positive this pins against.
+    """
+    body = (
+        '<?xml version="1.0"?><OpenDRIVE>'
+        + _road(
+            1,
+            "LHT",
+            _lane(1, '<successor id="7"/>'),
+            '<successor elementType="junction" elementId="900"/>',
+        )
+        + _road(2, "LHT", _lane(1))
+        + '<junction id="900"><connection id="0" incomingRoad="1"'
+        ' connectingRoad="2" contactPoint="start">'
+        '<laneLink from="1" to="1"/></connection></junction>' + "</OpenDRIVE>"
+    )
+    network = EmittedNetwork(_write(tmp_path, "junction.xodr", body))
+
+    assert network.dangling_lane_links() == []
+
+
+def test_shipped_conversion_has_no_dangling_lane_links(
+    nishishinjuku_xodr: Path,
+) -> None:
+    """The gate: a lane link that names nothing is a segfault, not a loss."""
+    network = EmittedNetwork(nishishinjuku_xodr)
+    dangling = network.dangling_lane_links()
+
+    assert dangling == [], (
+        f"{len(dangling)} lane link(s) name a lane their target road does not"
+        f" have; first few: {dangling[:5]}"
     )

@@ -92,6 +92,17 @@ def load_mapping(path: Path) -> Tuple[Dict[int, Slot], Dict[int, List[Slot]]]:
     return primary, extra
 
 
+@dataclass(frozen=True)
+class DanglingLink:
+    """A lane link whose target lane does not exist in the target road."""
+
+    road: int
+    lane: int
+    end: str
+    target_road: int
+    target_lane: int
+
+
 class EmittedNetwork:
     """The transitions an ``.xodr`` states, resolved the way a reader does."""
 
@@ -122,6 +133,73 @@ class EmittedNetwork:
                 self.junctions[int(junction_id)].append(
                     (int(incoming), int(connecting), links)
                 )
+
+    def all_lane_ids(self, road_id: int) -> Set[int]:
+        """Every lane id the road declares, whatever the lane's type.
+
+        A consumer resolving a lane link does not filter by type, so neither
+        does the existence check -- a ``driving`` lane linked to a ``sidewalk``
+        resolves, even if it means nothing for driving.
+        """
+        out: Set[int] = set()
+        for lane in self._lane_elements(road_id):
+            lane_id = lane.get("id")
+            if lane_id is not None:
+                out.add(int(lane_id))
+        return out
+
+    def dangling_lane_links(self) -> List["DanglingLink"]:
+        """Lane links naming a lane their target road does not have.
+
+        Only road-typed ends are examined. At a junction-typed end the
+        transition resolves through the junction's ``laneLink`` rows and the
+        lane's own link is not read, and because lane links are never cleared
+        once written, such an end usually still carries the id it had while
+        the end was road-typed -- so reading it would report a false positive
+        on every junctionised end.
+
+        Roads carrying more than one ``laneSection`` are skipped: there a
+        lane's link refers to the sibling section rather than to the
+        neighbouring road, and conflating the two would again be a false
+        positive. The converter emits exactly one section per road (711 of
+        711 on the reference map), so nothing is skipped today.
+        """
+        found: List[DanglingLink] = []
+        for road_id, road in sorted(self.roads.items()):
+            lanes = road.find("lanes")
+            if lanes is None or len(lanes.findall("laneSection")) != 1:
+                continue
+            road_link = road.find("link")
+            if road_link is None:
+                continue
+            for end in ("predecessor", "successor"):
+                neighbour = road_link.find(end)
+                if neighbour is None or neighbour.get("elementType") != "road":
+                    continue
+                target_road = neighbour.get("elementId")
+                if target_road is None:
+                    continue
+                available = self.all_lane_ids(int(target_road))
+                for lane in self._lane_elements(road_id):
+                    lane_id = lane.get("id")
+                    lane_link = lane.find("link")
+                    if lane_id is None or lane_link is None:
+                        continue
+                    target = lane_link.find(end)
+                    target_lane = target.get("id") if target is not None else None
+                    if target_lane is None:
+                        continue
+                    if int(target_lane) not in available:
+                        found.append(
+                            DanglingLink(
+                                road=int(road_id),
+                                lane=int(lane_id),
+                                end=end,
+                                target_road=int(target_road),
+                                target_lane=int(target_lane),
+                            )
+                        )
+        return found
 
     def _lane_elements(self, road_id: int) -> Iterable[ET._Element]:
         road = self.roads.get(road_id)
@@ -241,6 +319,7 @@ class RouteFidelity:
     emitted: int = 0
     missing: List[Succession] = field(default_factory=list)
     surplus: List[Transition] = field(default_factory=list)
+    dangling: List[DanglingLink] = field(default_factory=list)
 
     @property
     def missing_share(self) -> float:
@@ -302,6 +381,7 @@ def measure(
     result.emitted = len(emitted)
     result.missing = [s for s in successions if not (s.options & emitted)]
     result.surplus = sorted(emitted - wanted)
+    result.dangling = network.dangling_lane_links()
     return result
 
 
@@ -334,6 +414,7 @@ def format_report(result: RouteFidelity, examples: int = 8) -> str:
         f"  MISSING (stated by the map, absent from the file): {len(result.missing):6d}"
         f"  ({100.0 * result.missing_share:.2f}%)",
         f"  EXTRA   (in the file, not stated by the map)    : {len(result.surplus):6d}",
+        f"  DANGLING (lane link naming a lane that is absent): {len(result.dangling):6d}",
     ]
     if result.missing:
         lines.append("")
@@ -388,6 +469,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "emitted": result.emitted,
                     "missing": len(result.missing),
                     "surplus": len(result.surplus),
+                    "dangling": len(result.dangling),
                 },
                 indent=2,
             )
@@ -397,7 +479,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"file : {args.xodr_path}")
         print()
         print(format_report(result))
-    return 0
+    # A missing succession is a loss and reported as a share; a dangling lane
+    # link is a file a consumer can crash on, so it fails the run.
+    return 1 if result.dangling else 0
 
 
 if __name__ == "__main__":
