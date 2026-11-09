@@ -1760,6 +1760,20 @@ def preprocess_and_convert_with_hydra(
             )
         )
 
+        # Whether to measure and report positional accuracy against the
+        # Lanelet2 input. Same precedence as the other per-map overrides, and
+        # the same reason ``or`` cannot be used: the value is a boolean and
+        # False is a meaningful setting.
+        report_accuracy = bool(
+            cfg.map.get(
+                "report_reference_match_accuracy",
+                cfg.target.get(
+                    "report_reference_match_accuracy",
+                    cfg.get("report_reference_match_accuracy", True),
+                ),
+            )
+        )
+
         # Serialize TrafficLightConfig for the analyze command to read back
         tl_config_dict = {
             "offset_x": tl_config.offset_x,
@@ -1780,6 +1794,7 @@ def preprocess_and_convert_with_hydra(
             skipped_stop_lines=skipped_stop_lines,
             traffic_light_config=tl_config_dict,
             strict=strict_mapping_validation,
+            report_accuracy=report_accuracy,
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`
