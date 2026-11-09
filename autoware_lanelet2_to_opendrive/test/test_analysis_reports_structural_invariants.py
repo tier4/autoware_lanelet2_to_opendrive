@@ -13,11 +13,11 @@ customer map and none of them reports a dangling lane link.
 So a conversion of a map nobody has a test for can emit the one document
 shape that kills the simulator, and say ``FINAL RESULT: PASS``.
 
-Measured on 2026-11-06: the customer map's output has **0** dangling links,
-so wiring the checker in costs nothing today and is a gate for tomorrow. Its
-only violations -- 2 of them -- are of ``linked_endpoints_apart``, the one
-code in the set that is knowingly not at zero (22 on Nishi-Shinjuku), which
-is therefore reported and not enforced; see ``APART`` below.
+Measured on 2026-11-06: a Nishi-Shinjuku conversion violates **nothing**, and
+the customer map's output has **0** dangling links and 2 violations, both of
+``linked_endpoints_apart`` over one join -- a real defect (see ``APART``).
+So the section is at zero on the reference map and reports exactly one thing
+on the customer map, which is what a gate is supposed to look like.
 """
 
 from __future__ import annotations
@@ -48,12 +48,22 @@ CLEAN = DANGLING.replace('<link><successor id="2"/></link>', "")
 APART = CLEAN.replace('<geometry s="0" x="10" y="0"', '<geometry s="0" x="50" y="0"')
 """Road 2 sits 40 m from where road 1's link says it meets it.
 
-``linked_endpoints_apart`` fires on this, and that code is the one invariant
-``xodr_invariants`` admits is not at zero -- 22 violations over 15 joins on
-Nishi-Shinjuku, worst 0.071 m, pinned there under ``xfail(strict=True)`` with
-a ceiling. So this document must be *reported* and still pass: a gate that
-fails every real map on arrival is a gate nobody reads, which is the failure
-mode that module's own docstring warns about.
+``linked_endpoints_apart`` fires on this, and it is **enforced** like every
+other invariant. The first version of this section exempted it, on the
+strength of ``xodr_invariants``'s own docstring -- "22 violations over 15
+joins on Nishi-Shinjuku, worst 0.071 m" -- reasoning that a gate failing
+every real map on arrival is a gate nobody reads.
+
+That prose is stale, and the repository had already said so: measured
+2026-11-06, ``check_invariants`` reports **0** violations of every code on a
+Nishi-Shinjuku conversion, and ``test_xodr_structural_invariants`` pins
+``_KNOWN_GAP_VIOLATIONS = 0`` with the comment that excluding the code "would
+only hide a reappearance". The junction endpoint work closed them.
+
+So the exemption protected nothing on the reference map and, on the customer
+map, hid the only thing the check found: one join where **both** link records
+have the end and the role reversed, 39.830 m from where the two roads really
+touch. That is exactly the defect the invariant is for.
 """
 
 
@@ -67,7 +77,7 @@ def test_a_dangling_lane_link_fails_the_analysis_section(tmp_path: Path) -> None
     assert run_structural_invariant_validation(path) is False
 
 
-def test_the_pinned_endpoint_residual_is_reported_but_does_not_fail(
+def test_two_roads_that_claim_to_meet_far_apart_fail_the_section(
     tmp_path: Path, capsys
 ) -> None:
     from autoware_lanelet2_to_opendrive.analyze_xodr import (
@@ -76,10 +86,9 @@ def test_the_pinned_endpoint_residual_is_reported_but_does_not_fail(
 
     path = tmp_path / "apart.xodr"
     path.write_text(APART, encoding="utf-8")
-    assert run_structural_invariant_validation(path) is True
+    assert run_structural_invariant_validation(path) is False
     printed = capsys.readouterr().out
     assert "linked_endpoints_apart" in printed, printed
-    assert "not enforced" in printed, printed
 
 
 def test_a_clean_document_passes_the_analysis_section(tmp_path: Path) -> None:
