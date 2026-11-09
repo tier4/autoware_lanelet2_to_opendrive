@@ -4,6 +4,7 @@ import pytest
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     LatLonOrigin,
     PreprocessOperation,
+    RemoveOperation,
 )
 
 
@@ -87,7 +88,14 @@ class TestPreprocessOperationOriginValidation:
             )
 
     def test_neither_mgrs_nor_origin_raises_error(self):
-        """Test that specifying neither mgrs_code nor origin raises ValueError."""
+        """Neither one, with work to do, raises ValueError.
+
+        The origin is what the map is read and written through, so it is
+        required exactly when there is an operation to apply. This test used
+        to assert the same thing for a configuration with no operations;
+        that case is now accepted and pinned by
+        ``test_no_operations_needs_no_origin`` below.
+        """
         with pytest.raises(
             ValueError,
             match="Must specify projection origin using either mgrs_code or origin",
@@ -95,7 +103,24 @@ class TestPreprocessOperationOriginValidation:
             PreprocessOperation(
                 input_map_path="/path/to/input.osm",
                 output_map_path="/path/to/output.osm",
+                remove_operations=[RemoveOperation(lanelet_ids=[1])],
             )
+
+    def test_no_operations_needs_no_origin(self):
+        """With nothing to apply, no origin is required.
+
+        ``convert`` builds a PreprocessOperation from ``cfg.map`` before it
+        knows whether any preprocessing is configured. Demanding an origin
+        there rejected map=example_latlon outright: it declares a lat_lon
+        origin the projection resolver reads successfully, and carries no
+        operations, so the keys this check wanted were ones nothing would
+        have used.
+        """
+        config = PreprocessOperation(
+            input_map_path="/path/to/input.osm",
+            output_map_path="/path/to/output.osm",
+        )
+        assert not config.has_operations
 
     def test_empty_mgrs_code_without_origin_raises_error(self):
         """Test that empty mgrs_code without origin raises ValueError."""
@@ -107,6 +132,7 @@ class TestPreprocessOperationOriginValidation:
                 input_map_path="/path/to/input.osm",
                 output_map_path="/path/to/output.osm",
                 mgrs_code="",
+                remove_operations=[RemoveOperation(lanelet_ids=[1])],
             )
 
     def test_empty_mgrs_code_with_origin_is_valid(self):

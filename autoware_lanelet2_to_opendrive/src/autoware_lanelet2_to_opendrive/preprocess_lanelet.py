@@ -318,11 +318,30 @@ class PreprocessOperation:
         """Validate that origin is specified correctly after initialization."""
         self._validate_origin()
 
+    @property
+    def has_operations(self) -> bool:
+        """Whether any preprocessing operation is configured.
+
+        Reads every key in :data:`OPERATION_TYPES`, so a newly added
+        operation is counted here without a second list having to be kept in
+        step.
+        """
+        return any(getattr(self, name, None) for name in OPERATION_TYPES)
+
     def _validate_origin(self) -> None:
-        """Validate that exactly one origin specification method is used.
+        """Validate that at most one origin specification method is used.
+
+        An origin is only needed to read and write the map, which happens
+        only when there is an operation to apply. Demanding one regardless
+        makes a config unusable for a reason that would never have come up:
+        ``map=example_latlon`` declares a ``lat_lon`` origin that the
+        projection resolver reads successfully, carries no operations, and
+        was still rejected here because the keys it does not have are the
+        ones this check looks for.
 
         Raises:
-            ValueError: If both mgrs_code and origin are specified, or if neither is specified
+            ValueError: If both mgrs_code and origin are specified, or if
+                neither is specified while an operation needs one.
         """
         has_mgrs = self.mgrs_code is not None and self.mgrs_code != ""
         has_origin = self.origin is not None
@@ -333,9 +352,11 @@ class PreprocessOperation:
                 "Use either MGRS code or exact lat/lon coordinates, not both."
             )
 
-        if not has_mgrs and not has_origin:
+        if not has_mgrs and not has_origin and self.has_operations:
             raise ValueError(
-                "Must specify projection origin using either mgrs_code or origin."
+                "Must specify projection origin using either mgrs_code or"
+                " origin: it is needed to read and write the map while"
+                " applying the configured preprocessing operations."
             )
 
     @classmethod
