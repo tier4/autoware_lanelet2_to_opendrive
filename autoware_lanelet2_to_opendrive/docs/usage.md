@@ -46,6 +46,7 @@ conf/
 | `output_map_path` | no | Output `.xodr` (defaults to `<input>.xodr`) |
 | `dry_run` | no | Validate only, no save (default `false`) |
 | `verbose` | no | Enable debug logging (default `false`) |
+| `strict_analysis` | no | Abort the run when the post-conversion analysis reports errors instead of only logging the count (default `false`, overridable per map or target) |
 | `map=<name>` | no | Selects `conf/map/<name>.yaml` (default `example`) |
 | `target=<name>` | no | Selects `conf/target/<name>.yaml` (default `default`) |
 
