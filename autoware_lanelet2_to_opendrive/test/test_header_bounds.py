@@ -1,10 +1,16 @@
-"""Regression test for issue #465: header @north/@south/@east/@west must
-reflect the actual map extent, not the hard-coded ``0.0`` values.
+"""The header's bounding box must describe the file it sits in.
 
-The test runs the ``convert`` CLI on the synthetic ``walkway_mini.osm``
-fixture (already used by ``test_walkway_sidewalk.py``) and asserts that
-the four header attributes are present, finite, non-zero, and
-internally consistent (``west < east`` and ``south < north``).
+Issue #465 replaced hard-coded ``0.0`` values with the map's real extent,
+and the test below pins that. Presence, finiteness, non-zero and ordering
+are necessary but nowhere near sufficient: the extent is computed from the
+raw ``pointLayer`` while every ``<geometry>`` is written with the
+configured offset subtracted, so the two can describe frames kilometres
+apart and still satisfy all four of those checks. ``west < east`` in
+particular holds by construction for any axis-aligned fixture.
+
+``test_header_box_contains_the_emitted_geometry`` closes that by comparing
+the header against the only thing that can contradict it -- the
+coordinates in the same file.
 """
 
 import math
@@ -60,3 +66,62 @@ def test_header_bounding_box_reflects_map_extent(tmp_path: Path) -> None:
     # Self-consistency: north > south, east > west.
     assert south < north, f"south ({south}) must be < north ({north})"
     assert west < east, f"west ({west}) must be < east ({east})"
+
+
+def test_header_box_contains_the_emitted_geometry(tmp_path: Path) -> None:
+    """The header box must contain the coordinates in its own file.
+
+    ``compute_point_layer_bounds`` scans the raw ``pointLayer``, which is in
+    the projected frame *before* the configured offset is subtracted, while
+    ``extract_points`` subtracts it for every reference line. Under
+    ``map=example_mgrs_offset`` the offset is tens of kilometres, so the
+    header describes a box the geometry is nowhere near.
+
+    Reference-line start points are a subset of the map's points -- the
+    boundary points the header is computed from lie further out, and lane
+    width widens the real extent further -- so containment is the right
+    relation and equality is not. The second assertion guards the other
+    direction: a header made to contain everything by being enormous is not
+    a fix either.
+    """
+    out = _run_convert(tmp_path)
+    root = ET.parse(out).getroot()
+    header = root.find("header")
+    assert header is not None, "header element missing from output"
+
+    north = float(header.attrib["north"])
+    south = float(header.attrib["south"])
+    east = float(header.attrib["east"])
+    west = float(header.attrib["west"])
+
+    points = [
+        (float(geometry.attrib["x"]), float(geometry.attrib["y"]))
+        for geometry in root.iter("geometry")
+    ]
+    assert points, "no <geometry> records in the output; the fixture did not convert"
+
+    # The header comes from the pointLayer and the geometry from a spline fit
+    # of those same points, so at an extreme the two agree only to float
+    # precision -- the observed excursion is 2e-8 m. A micrometre of slack
+    # keeps that out while leaving the metres-to-kilometres frame error this
+    # test exists for firmly outside.
+    tol = 1e-6
+    outside = [
+        (x, y)
+        for x, y in points
+        if not (west - tol <= x <= east + tol and south - tol <= y <= north + tol)
+    ]
+    assert not outside, (
+        f"{len(outside)} of {len(points)} geometry points lie outside the header"
+        f" box west={west} east={east} south={south} north={north};"
+        f" first is {outside[0]}"
+    )
+
+    span_x = max(x for x, _ in points) - min(x for x, _ in points)
+    span_y = max(y for _, y in points) - min(y for _, y in points)
+    assert (
+        (east - west) <= span_x + 100.0
+    ), f"header is {east - west} m wide for geometry spanning {span_x} m"
+    assert (
+        (north - south) <= span_y + 100.0
+    ), f"header is {north - south} m tall for geometry spanning {span_y} m"
