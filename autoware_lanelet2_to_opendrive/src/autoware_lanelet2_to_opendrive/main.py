@@ -1617,11 +1617,16 @@ def preprocess_and_convert_with_hydra(
         "width_estimation", {}
     )
     if width_dict:
+        width_defaults = WidthEstimationConfig()
         width_config = WidthEstimationConfig(
-            adaptive_sampling=width_dict.get("adaptive_sampling", False),
-            min_samples=width_dict.get("min_samples", 5),
-            max_samples=width_dict.get("max_samples", 50),
-            default_sample_interval=width_dict.get("default_sample_interval", 5.0),
+            adaptive_sampling=width_dict.get(
+                "adaptive_sampling", width_defaults.adaptive_sampling
+            ),
+            min_samples=width_dict.get("min_samples", width_defaults.min_samples),
+            max_samples=width_dict.get("max_samples", width_defaults.max_samples),
+            default_sample_interval=width_dict.get(
+                "default_sample_interval", width_defaults.default_sample_interval
+            ),
         )
         logger.info(
             f"Width sampling config: adaptive={width_config.adaptive_sampling}, "

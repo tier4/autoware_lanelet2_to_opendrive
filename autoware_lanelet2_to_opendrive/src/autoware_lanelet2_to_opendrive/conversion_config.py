@@ -168,7 +168,7 @@ class WidthEstimationConfig:
         adaptive_sampling: Enable adaptive sampling based on road length (default: False)
         min_samples: Minimum number of samples per road (default: 5)
         max_samples: Maximum number of samples per road (default: 50)
-        default_sample_interval: Target interval between samples in meters (default: 5.0m)
+        default_sample_interval: Target interval between samples in meters (default: 2.0m)
             Used when adaptive_sampling is True
     """
 
@@ -178,7 +178,7 @@ class WidthEstimationConfig:
     adaptive_sampling: bool = False
     min_samples: int = 5
     max_samples: int = 50
-    default_sample_interval: float = 5.0
+    default_sample_interval: float = 2.0
 
 
 @dataclass
