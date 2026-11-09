@@ -376,6 +376,94 @@ class GeometryBase:
         return elem
 
 
+#: Below this curvature the circular solution is a straight line to machine
+#: precision: the endpoint of a line of the same length differs by
+#: ``length * (kappa * length) ** 2 / 24``, which is under 1e-14 m for any
+#: road-sized length.
+STRAIGHT_CURVATURE_EPSILON = 1e-10
+
+
+def _solve_half_turn(chord_over_length: float) -> float:
+    """Return ``u`` in [0, pi) with ``sin(u) / u == chord_over_length``.
+
+    ``u`` is half the arc's total turn. ``sin(u)/u`` decreases monotonically
+    from 1 at u=0 to 0 at u=pi, so a bisection converges on the one root; the
+    ratio of a chord to its own arc length is in (0, 1], which is exactly
+    that range.
+    """
+    if chord_over_length >= 1.0:
+        return 0.0
+    lo, hi = 0.0, np.pi - 1e-12
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if mid <= 0.0:
+            break
+        if np.sin(mid) / mid > chord_over_length:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def arc_through_spline_window(
+    spline: "Splines",
+    s_start: float,
+    s_end: float,
+    curvature_hint: float = 0.0,
+) -> Tuple[float, float, float, float]:
+    """Return ``(x, y, hdg, curvature)`` of the arc that spans the window.
+
+    The arc starts at the spline point of ``s_start``, **ends at the spline
+    point of ``s_end``**, and has the window's own arc length
+    ``s_end - s_start``. Those three constraints fix it: with ``u`` the half
+    turn, a circular arc of length ``L`` subtends a chord of ``L*sin(u)/u``,
+    so ``u`` follows from the chord the two spline points span, the curvature
+    is ``2u/L``, and the heading is the chord's direction rotated back by
+    ``u``.
+
+    This is what makes a chain of records continuous. Anchoring a record on
+    the spline point and tangent of ``s_start`` and giving it the window's
+    arc length -- the previous rule -- leaves its far end wherever the
+    primitive happens to arrive, which on nishishinjuku was up to 1.766e-3 m
+    from where the next record starts (529 of 9133 pairs over 1e-6 m), and
+    cost 11 ``road.geometry.contact_point`` errors. Keeping the length
+    exactly ``s_end - s_start`` is what keeps ``road@length`` equal to the
+    sum of its geometries, so continuity is not bought by breaking that.
+
+    ``curvature_hint`` only picks the turn direction, and only when the
+    chord and the start tangent are too close to co-linear to say; the
+    magnitude is always derived.
+    """
+    start = spline.evaluate(s_start, derivative=0)
+    end = spline.evaluate(s_end, derivative=0)
+    tangent = spline.evaluate(s_start, derivative=1)
+    x0, y0 = float(start[0]), float(start[1])
+    length = float(s_end - s_start)
+
+    dx, dy = float(end[0]) - x0, float(end[1]) - y0
+    chord = float(np.hypot(dx, dy))
+    tangent_hdg = float(np.arctan2(tangent[1], tangent[0]))
+    if length <= 0.0 or chord <= 0.0:
+        return x0, y0, tangent_hdg, 0.0
+
+    chord_hdg = float(np.arctan2(dy, dx))
+    u = _solve_half_turn(chord / length)
+
+    # The heading leaves the chord by -u on one side and +u on the other;
+    # the spline's own tangent says which.
+    offset = float(
+        np.arctan2(np.sin(chord_hdg - tangent_hdg), np.cos(chord_hdg - tangent_hdg))
+    )
+    if abs(offset) > 1e-12:
+        sign = 1.0 if offset > 0.0 else -1.0
+    elif curvature_hint != 0.0:
+        sign = 1.0 if curvature_hint > 0.0 else -1.0
+    else:
+        sign = 1.0
+    half_turn = sign * u
+    return x0, y0, chord_hdg - half_turn, 2.0 * half_turn / length
+
+
 @dataclass
 class Line(GeometryBase):
     """Straight line geometry."""
@@ -394,17 +482,38 @@ class Line(GeometryBase):
     ) -> "Line":
         """Build a Line covering arc-length [s_start, s_end] of ``spline``.
 
-        Heading is taken from the spline tangent at ``s_start`` so that
-        adjacent primitives are G1-continuous when their bounds match.
+        The heading is the direction of the chord between the window's two
+        spline points, not the tangent at ``s_start``: a straight record has
+        to *arrive* where the next record starts, and the tangent only
+        guarantees where it leaves. On a window the classifier calls straight
+        the two differ by less than the position tolerance it validated
+        against, so this costs nothing at the start and fixes the end.
+
+        ``length`` is the chord's own length, not the window's arc length:
+        those differ whenever the window bends at all, and only the chord
+        lands the record on the far point. Nothing is lost by it --
+        ``road@length`` is written as the sum of its records' lengths
+        (``Road.construct_*``), and ``_build_planview_geometries`` labels each
+        record's ``s`` by accumulating those same lengths, so the plan view
+        stays its own consistent s-domain.
         """
         start = spline.evaluate(s_start, derivative=0)
+        end = spline.evaluate(s_end, derivative=0)
+        dx = float(end[0]) - float(start[0])
+        dy = float(end[1]) - float(start[1])
+        chord = float(np.hypot(dx, dy))
         tangent = spline.evaluate(s_start, derivative=1)
+        hdg = (
+            float(np.arctan2(dy, dx))
+            if chord > 0.0
+            else float(np.arctan2(tangent[1], tangent[0]))
+        )
         return cls(
             s=s_start,
             x=float(start[0]),
             y=float(start[1]),
-            hdg=float(np.arctan2(tangent[1], tangent[0])),
-            length=float(s_end - s_start),
+            hdg=hdg,
+            length=chord if chord > 0.0 else float(s_end - s_start),
         )
 
 
@@ -432,19 +541,25 @@ class Arc(GeometryBase):
     ) -> "Arc":
         """Build an Arc covering arc-length [s_start, s_end] of ``spline``.
 
-        ``curvature`` must be the constant κ chosen by the classifier
-        (typically ``Splines.evaluate(s_start, derivative=2)`` projected
-        appropriately). Heading and start position come from the spline.
+        The emitted curvature is **derived** from the window, not taken from
+        ``curvature``: the arc is the one that starts at the spline point of
+        ``s_start``, ends at the spline point of ``s_end``, and carries the
+        window's arc length (see :func:`arc_through_spline_window`). That is
+        what makes the record chain continuous while leaving ``road@length``
+        equal to the sum of its geometries. ``curvature`` is kept as the
+        classifier's κ and used only to pick the turn direction in the
+        degenerate case where the chord and the start tangent are co-linear.
         """
-        start = spline.evaluate(s_start, derivative=0)
-        tangent = spline.evaluate(s_start, derivative=1)
+        x, y, hdg, derived = arc_through_spline_window(
+            spline, s_start, s_end, curvature_hint=float(curvature)
+        )
         return cls(
             s=s_start,
-            x=float(start[0]),
-            y=float(start[1]),
-            hdg=float(np.arctan2(tangent[1], tangent[0])),
+            x=x,
+            y=y,
+            hdg=hdg,
             length=float(s_end - s_start),
-            curvature=float(curvature),
+            curvature=derived,
         )
 
 
@@ -498,6 +613,107 @@ class ParamPoly3(GeometryBase):
     def arc_length(self) -> float:
         """Return the true arc length of this segment over its ``pRange``."""
         return param_poly3_arc_length(self.coefficients(), end_param(self))
+
+    @classmethod
+    def hermite(
+        cls,
+        start_xy: Tuple[float, float],
+        start_heading: float,
+        end_xy: Tuple[float, float],
+        end_heading: float,
+        s: float = 0.0,
+        tangent_scale: Optional[float] = None,
+    ) -> "ParamPoly3":
+        """Cubic through both endpoints, matching the tangent at each.
+
+        A straight segment carries one heading and therefore satisfies one
+        endpoint tangent.  Where the two roads a connector bridges leave and
+        arrive on different bearings -- a junction turn, a divergence branch
+        -- one heading against two constraints cannot be met, and the lane
+        borders reconstructed from the reference line miss by
+        ``2 * w * sin(dpsi / 2)`` at whichever end loses.  A cubic has the
+        second degree of freedom that resolves it.
+
+        In the local frame (origin ``start_xy``, +u along ``start_heading``)
+        the Hermite basis with ``P0 = 0`` gives::
+
+            P(p) = h10(p) m0 + h01(p) P1 + h11(p) m1,      p in [0, 1]
+            h10 = p^3 - 2p^2 + p,  h01 = -2p^3 + 3p^2,  h11 = p^3 - p^2
+
+        so ``b = m0``, ``c = -2 m0 + 3 P1 - m1``, ``d = m0 - 2 P1 + m1`` in
+        each of u and v.  Tangent magnitudes are the chord length, which
+        keeps the curve inside the hull of its control polygon.
+
+        ``@length`` is the **true arc length**, integrated -- not the chord.
+        The two differ once the curve actually bends, and
+        ``road.geometry.parampoly3.normalized_range`` compares them.
+
+        Args:
+            start_xy: World-frame ``(x, y)`` of the s=0 endpoint.
+            start_heading: World-frame tangent angle there, in radians.
+            end_xy: World-frame ``(x, y)`` of the far endpoint.
+            end_heading: World-frame tangent angle there, in radians.
+            s: The road-frame ``s`` this segment starts at.
+
+        Returns:
+            A ``pRange="normalized"`` segment spanning p in [0, 1].
+        """
+        from ..config import DEFAULT_CONFIG
+
+        dx = end_xy[0] - start_xy[0]
+        dy = end_xy[1] - start_xy[1]
+        cos_h, sin_h = np.cos(start_heading), np.sin(start_heading)
+
+        # End point and end tangent expressed in the start frame.
+        u1 = dx * cos_h + dy * sin_h
+        v1 = -dx * sin_h + dy * cos_h
+        # Wrapped to (-pi, pi] so the cubic takes the short way round.
+        d_psi = float(
+            np.arctan2(
+                np.sin(end_heading - start_heading),
+                np.cos(end_heading - start_heading),
+            )
+        )
+
+        chord = float(np.hypot(dx, dy))
+        if chord <= DEFAULT_CONFIG.geometry.epsilon:
+            raise ValueError(
+                "ParamPoly3.hermite: start and end coincide, so there is no "
+                "curve to fit; the caller must emit a straight segment along "
+                "start_heading instead"
+            )
+
+        # Tangent magnitude.  The chord is the natural choice, but a caller
+        # drawing a connector to a length floor passes that floor instead:
+        # the curve still interpolates both anchors and both tangents, and
+        # the larger magnitude is what lets a sub-floor chord turn through a
+        # large angle without the cubic doubling back on itself.
+        scale = chord if tangent_scale is None else max(float(tangent_scale), chord)
+
+        m0u, m0v = scale, 0.0
+        m1u, m1v = scale * np.cos(d_psi), scale * np.sin(d_psi)
+
+        b_u, b_v = m0u, m0v
+        c_u, c_v = -2.0 * m0u + 3.0 * u1 - m1u, -2.0 * m0v + 3.0 * v1 - m1v
+        d_u, d_v = m0u - 2.0 * u1 + m1u, m0v - 2.0 * v1 + m1v
+
+        coeffs = (0.0, b_u, c_u, d_u, 0.0, b_v, c_v, d_v)
+        return cls(
+            s=float(s),
+            x=float(start_xy[0]),
+            y=float(start_xy[1]),
+            hdg=float(start_heading),
+            length=float(param_poly3_arc_length(coeffs, 1.0)),
+            aU=0.0,
+            bU=float(b_u),
+            cU=float(c_u),
+            dU=float(d_u),
+            aV=0.0,
+            bV=float(b_v),
+            cV=float(c_v),
+            dV=float(d_v),
+            pRange=PARAM_RANGE_NORMALIZED,
+        )
 
     @staticmethod
     def _calculate_optimal_num_segments(

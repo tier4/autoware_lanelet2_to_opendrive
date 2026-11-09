@@ -20,10 +20,40 @@ class GeometryConstants:
             diverging/merging road's reference-line endpoint and each candidate
             regular road's mirrored endpoint. Sanity gate for issue #291.
         divergence_min_segment_length: Floor (m) on synthetic divergence/merge
-            connecting-road geometry length. Issue #291.
+            connecting-road geometry length. Issue #291. These connectors
+            stand for a *logically zero-length* transition; the floor exists
+            only because OpenDRIVE consumers such as CARLA reject
+            zero-length geometry. It must therefore stay strictly BELOW the
+            1 cm tolerance of
+            ``lane_smoothness.contact_point_no_horizontal_gaps``: the
+            stub's far end is displaced from its near end by exactly this
+            length, so a floor of 0.01 m makes even a perfectly anchored
+            stub fail that contact by exactly the tolerance (the checker
+            compares with ``<``, not ``<=``). Measured on nishishinjuku,
+            137 of 139 stubs sat exactly at a 0.01 m floor.
         divergence_default_lane_width: Default width (m) emitted on synthetic
             divergence/merge connecting-road lanes so the rendered XODR
             ``<width>`` element is always present. Issue #291.
+        divergence_anchor_merge_tolerance: Distance (m) within which a
+            synthetic connector's two anchors may be treated as one point,
+            i.e. the far one may be abandoned to draw a connector that does
+            not double back. It is the 1 cm contact tolerance of
+            ``lane_smoothness.contact_point_no_horizontal_gaps`` and of
+            ``xodr_invariants.linked_endpoints_apart``: inside it no consumer
+            can tell the far end moved, outside it the move is a gap in the
+            road network and position continuity outranks heading. The
+            replacement's far end sits ``divergence_min_segment_length`` from
+            the near anchor, so the test is ``raw separation + floor <=
+            this``. Measured: dropping it reported two roads 0.023 m apart
+            that had been within tolerance, because their separation (0.019 m)
+            was a real chord rather than a rendering residual.
+        divergence_reversal_check_samples: Number of parameter samples used to
+            test whether a synthetic connector's cubic doubles back on its own
+            net displacement. The test is a sign check on a quadratic, so the
+            density only has to be fine enough to catch a short negative
+            interval; 65 samples resolve one of 1/64 of the curve, and the
+            reversals measured on real maps span most of the range (the
+            recorded shape is negative over 58% to 82% of it).
         sidewalk_height: Height (m) emitted on ``lane[type=sidewalk]`` and
             ``lane[type=shoulder]`` when the inner boundary LineString has
             ``type=curbstone`` or ``type=road_border``. Both ``inner`` and
@@ -46,8 +76,10 @@ class GeometryConstants:
     epsilon: float = 1e-10
     point_distance_threshold: float = 0.001
     divergence_endpoint_tolerance: float = 0.5
-    divergence_min_segment_length: float = 0.01
+    divergence_min_segment_length: float = 0.005
     divergence_default_lane_width: float = 3.5
+    divergence_reversal_check_samples: int = 65
+    divergence_anchor_merge_tolerance: float = 0.01
     sidewalk_height: float = 0.15
     spatial_grid_min_cell_size: float = 1.0
     nearest_road_rerank_ulps: float = 8.0
@@ -129,11 +161,22 @@ class CenterlineConstants:
         min_sample_points_for_centerline: Minimum number of sample points for centerline extraction
         sample_point_multiplier: Multiplier for calculating sample points based on control points
         boundary_condition_default: Default boundary condition for cubic spline interpolation
+        width_interpolation_method: Interpolant fitted to the lane-width
+            samples. ``"pchip"`` cannot leave the envelope of its own
+            samples; ``"cubic"`` (``not-a-knot``) overshoots it between
+            knots. Measured on nishishinjuku over 892 lanes, the width
+            emitted beyond the envelope of the fit's own knots fell from
+            p95 117.6 mm, max 882.5 mm to 0.0000 mm at every percentile,
+            and from 362 lanes (40.6%) exceeding it by more than a
+            millimetre to none. Elevation keeps ``"cubic"``: it
+            is reported as accurate (p95 2.1 mm) and is fitted elsewhere
+            (``opendrive/reference_line.py``).
     """
 
     min_sample_points_for_centerline: int = 20
     sample_point_multiplier: int = 2
     boundary_condition_default: str = "not-a-knot"
+    width_interpolation_method: str = "pchip"
 
 
 @dataclass(frozen=True)
@@ -149,6 +192,42 @@ class PreprocessingConstants:
     merge_tolerance_default: float = 1e-3
     replace_tolerance_default: float = 1e-3
     validate_tolerance_default: float = 1e-3
+
+
+@dataclass(frozen=True)
+class LaneWidthValidationConstants:
+    """Constants for the output-side lane-width plausibility check.
+
+    A lane whose sampled effective width (see
+    ``xodr_digest._lane_width_samples``/``_width_stats``, reused unchanged
+    by ``opendrive.validation.check_lane_width_plausibility``) exceeds
+    ``implausible_width_threshold_m`` is reported: as a non-fatal warning
+    during conversion (``main.py``), and as a CI-failing error by
+    ``qc_validate.py``. Neither the topology checks in this module's
+    ``validate_*`` functions nor the spec-compliance checks in
+    ``qc_validate.py``'s ``asam-qc-opendrive`` bundle catch this failure
+    mode: a 22m-wide lane is legal OpenDRIVE, so nothing else in the
+    pipeline flags it.
+
+    Attributes:
+        implausible_width_threshold_m: Sampled width (metres) above which a
+            non-center lane is reported. Calibrated 2026-08 against the
+            only real map fixture in this repository (nishishinjuku, 693
+            roads / 938 non-center lanes): the healthy distribution tops
+            out at 11.83m (a genuine turn-pocket taper), while six known
+            corrupted-input incidents ranged 19.30-31.54m. 15.0m sits in
+            the 7.5m gap between them, with margin on both sides.
+            **This is a single-map calibration, not a physical limit** -
+            a different map could legitimately contain a wider lane (a
+            multi-lane turn pocket, a wide shoulder merge, etc.) and
+            trigger a false warning. That is why the conversion-time check
+            warns rather than aborts. It is also a plain upper bound: a
+            shape change that leaves the sampled min, max, *and* mean
+            unchanged (see ``_width_stats``'s docstring) is invisible to
+            it regardless of how the threshold is set.
+    """
+
+    implausible_width_threshold_m: float = 15.0
 
 
 @dataclass(frozen=True)
@@ -169,9 +248,17 @@ class OpenDriveConstants:
                            Once the highest road ID reaches the offset, junction
                            IDs start at the next multiple of the offset above it
                            instead, so they never collide with road IDs.
+        redundant_record_tolerance: Coefficient tolerance below which two
+                           consecutive profile records (a lane ``<width>``, a
+                           road ``<elevation>``) state the same polynomial and
+                           the second is not written. Matches the 1e-6 the ASAM
+                           rule ``performance.avoid_redundant_info`` uses, so
+                           the output and the checker agree on what counts as
+                           redundant.
     """
 
     junction_id_offset: int = 1000
+    redundant_record_tolerance: float = 1e-6
 
 
 @dataclass(frozen=True)
@@ -329,10 +416,71 @@ class GeoMappingConstants:
         rescue_threshold_factor: Multiplier applied to ``match_threshold``
             for the relaxed second-chance search over roads dropped during
             conflict resolution.
+        warn_threshold_factor: Multiplier applied to ``match_threshold`` to
+            obtain the default warn threshold of the positional-accuracy
+            report.  At the default of 0.5 a match is listed individually
+            once it sits closer to the tolerance limit than to its own
+            source geometry.
+        distance_report_decimals: Number of decimal places kept when the
+            reported reference-line distances (m) are serialised into the
+            mapping JSON.  Four places is sub-millimetre, far below any
+            geometric error the report is meant to surface.
+        exceedance_thresholds_m: Ordered ``(label, threshold)`` levels the
+            positional-accuracy summary counts roads against, from least to
+            most severe.  The summary's headline is a *count* per level, not
+            a distribution statistic, because a median or a percentile over
+            roads improves simply by adding more easy roads to the map and so
+            cannot be compared between maps of different size.
+
+            The two default levels follow the severity distinction drawn by
+            Schwab & Kolbe (ISPRS Annals X-4/W2-2022) for comparing road-space
+            models against a reference: a deviation on the centimetre-to-
+            decimetre scale is *modelling inaccuracy* -- spline fitting,
+            resampling, the geometric idealisation of a hand-digitised
+            boundary -- and is expected in a correct conversion.  A deviation
+            on the metre scale is not an inaccuracy but a different road: at
+            that magnitude the reference line has been matched to the wrong
+            lanelet, or the road was assembled from a wrong
+            predecessor/successor relation, and the geometry is a symptom
+            rather than the defect.  ``0.5`` m sits below a lane width, so it
+            still describes the same lane; ``1.0`` m is far enough that no
+            amount of fitting error explains it.
+        exceedance_density_base_m: Length (m) the exceedance density is
+            expressed per -- 1000 m, i.e. counts per kilometre of matched
+            boundary.  Unlike a raw count, this is independent of map size
+            and can be compared across maps.
     """
 
     match_threshold: float = 3.5
     rescue_threshold_factor: float = 1.5
+    warn_threshold_factor: float = 0.5
+    distance_report_decimals: int = 4
+    exceedance_thresholds_m: tuple[tuple[str, float], ...] = (
+        ("modelling_inaccuracy", 0.5),
+        ("wrong_match_or_relation", 1.0),
+    )
+    exceedance_density_base_m: float = 1000.0
+
+
+@dataclass(frozen=True)
+class PreflightConstants:
+    """Constants for the pre-flight inspection of an input Lanelet2 map.
+
+    These govern :mod:`autoware_lanelet2_to_opendrive.map_preflight`, which
+    names and counts the structural problems that make ``lanelet2.io.load``
+    refuse a map, instead of letting the raw parser exception through.
+
+    Attributes:
+        max_reported_ids: Maximum number of OSM element ids printed per
+            problem class before the rest is summarised as a count.  The
+            report always states the full count, so the cap only bounds the
+            listing.  Twenty is enough to spot a pattern in the ids (they
+            are usually consecutive, because a map editor produced them in
+            one pass) without burying the rest of the report when a class
+            has thousands of members.
+    """
+
+    max_reported_ids: int = 20
 
 
 @dataclass(frozen=True)
@@ -379,6 +527,8 @@ class ConversionConstants:
         utm: Standard UTM projection constants
         projection: Map projection resolution constants
         geo_mapping: Geometric mapping cross-validation constants
+        preflight: Input-map pre-flight inspection constants
+        lane_width_validation: Output-side lane-width plausibility check constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -391,6 +541,8 @@ class ConversionConstants:
     utm: UtmConstants = UtmConstants()
     projection: ProjectionConstants = ProjectionConstants()
     geo_mapping: GeoMappingConstants = GeoMappingConstants()
+    preflight: PreflightConstants = PreflightConstants()
+    lane_width_validation: LaneWidthValidationConstants = LaneWidthValidationConstants()
 
 
 @dataclass(frozen=True)

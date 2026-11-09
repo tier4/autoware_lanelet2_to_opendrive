@@ -1,34 +1,19 @@
 # Example map-specific configuration
 # Copy this file and customize for your specific map
 
-# DEPRECATED (#539): the origin keys below ('mgrs_grid' [+ 'offset'] /
-# 'lat_lon') are a legacy fallback. The canonical origin source is a
-# map_projector_info.yaml placed next to the .osm map; when it declares a
-# supported projector_type (currently MGRS or TransverseMercator), these keys are ignored. They are
+# DEPRECATED (#539): the origin keys below ('mgrs_grid' / 'lat_lon') are a
+# legacy fallback. The canonical origin source is a map_projector_info.yaml
+# placed next to the .osm map; when it declares a supported projector_type
+# (currently MGRS or TransverseMercator), these keys are ignored. They are
 # still required when no map_projector_info.yaml exists, or when its
 # projector_type is not supported yet, and will be removed in a future major
 # version (see #564).
 #
-# Legacy origin specification (choose ONE of the following methods):
-#
-# Method 1: Simple MGRS grid code
-mgrs_grid: 54SUE815501
-#
-# Method 2: MGRS grid with offset (see example_mgrs_offset.yaml)
-# mgrs_grid: 54SUE
-# offset:
-#   x: 81655.73
-#   y: 50137.43
-#   z: 42.49998
-#
-# Method 3: Latitude/longitude (see example_latlon.yaml)
-# lat_lon:
-#   latitude: -33.123456
-#   longitude: 151.234567
-#   altitude: 42.5
-#
-# NOTE: Only ONE base method (mgrs_grid or lat_lon) should be specified.
-# The offset field can only be used with mgrs_grid.
+# A map config declares no coordinate frame. It comes from a
+# map_projector_info.yaml next to the .osm map, or failing that from the map's
+# own node coordinates. The 'mgrs_grid', 'mgrs_code', 'lat_lon' and 'offset'
+# keys that used to declare it are removed, and a config that still carries
+# one is rejected with a message naming the replacement (see #564).
 
 # Merge operations - merge multiple lanelets into one
 # First creates all merged lanelets, then removes the original lanelets

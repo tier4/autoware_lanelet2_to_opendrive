@@ -1,20 +1,22 @@
 # Autoware Lanelet2 to OpenDRIVE
 
-A Python package and Hydra-based CLI for converting [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) HD maps used by [Autoware](https://www.autoware.org/) into the [OpenDRIVE 1.4](https://www.asam.net/standards/detail/opendrive/) road-network format, with optional Lanelet2 preprocessing, ASAM QC validation, and a [CARLA](https://carla.org/)-specific output overlay.
+A Python package and Hydra-based CLI for converting [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) HD maps used by [Autoware](https://www.autoware.org/) into the [OpenDRIVE 1.7](https://www.asam.net/standards/detail/opendrive/) road-network format, with optional Lanelet2 preprocessing, ASAM QC validation, and a [CARLA](https://carla.org/)-specific output overlay.
 
 This package is a workspace member of the [`autoware_lanelet2_to_opendrive` repository](../README.md). [`autoware_carla_scenario`](https://github.com/hakuturu583/autoware_carla_scenario), a separate repository, consumes the converted `.xodr` to drive Autoware scenarios in CARLA.
 
 ## Features
 
-- Lanelet2 → OpenDRIVE 1.4 conversion targeted at CARLA (with a `target=carla` overlay).
+- Lanelet2 → OpenDRIVE 1.7 conversion. `target=default` output passes the ASAM QC schema check; `target=carla` adds a CARLA-specific overlay (see [ASAM Schema Compliance](docs/limitations/asam-schema-compliance.md)).
 - [Hydra](https://hydra.cc/)-based CLI (`convert`) composed from `config.yaml`, `map/*.yaml`, and `target/*.yaml` under [`src/autoware_lanelet2_to_opendrive/conf/`](src/autoware_lanelet2_to_opendrive/conf/).
 - Optional Lanelet2 preprocessing pipeline (merge / replace / remove / move-point / delete-point / remove-turn-direction / validate) configurable from the same YAML.
 - Reference-line geometry emitted as `<paramPoly3>` chains, optionally classified into `<line>` / `<arc>` / `<paramPoly3>` runs (`arcspiral.enabled`).
 - Crosswalk lanelets emitted as `<object type="crosswalk">` with closed outlines.
-- Stop-line linestrings emitted as `<object type="stopLine">` (or CARLA `Stencil_STOP`) with optional `<signal type="294">` and dependencies on associated traffic-light, stop-sign, and yield-sign signals.
+- Stop-line linestrings emitted as `<object type="roadMark">` (or CARLA `Stencil_STOP`) with optional `<signal type="294">` and dependencies on associated traffic-light, stop-sign, and yield-sign signals.
 - Parking-lot `Area`s emitted as synthetic parking roads with `<lane type="parking">` and `<object type="parkingSpace">` per stall.
 - Traffic-light extraction from Autoware regulatory elements with arrow-bulb subtype encoding.
 - Right-of-way regulatory elements emitted as `<junction><priority>` records.
+- Pre-flight structural inspection of the input map, reporting each problem class with its
+  count and element ids instead of the parser's flat error wall (`map-preflight`).
 - Built-in ASAM QC validation and Lanelet2-to-road geometric cross-validation (`analyze`, `qc-validate`).
 - CARLA import smoke test (`carla-import-test`).
 - Pure Python 3.10 with full type hints (`py.typed`); managed by `uv`.
@@ -32,14 +34,17 @@ This pulls `lanelet2-python-api-for-autoware`, which builds from source against 
 
 ## Quick usage
 
-The package registers five console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
+The package registers eight console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
 
 | Command | Framework | Purpose |
 |---------|-----------|---------|
 | `convert` | Hydra | Run the full Lanelet2 → OpenDRIVE pipeline |
 | `preprocess-lanelet` | argparse | Run preprocessing operations only |
+| `map-preflight` | argparse | Report the structural problems that stop a Lanelet2 `.osm` loading |
 | `analyze` | argparse | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | argparse | Run the ASAM QC checker on an existing `.xodr` |
+| `route-fidelity` | argparse | Check the `.xodr` states the lane successions the map states |
+| `xodr-digest` | argparse | Extract a normalized structure digest of an `.xodr`, for diff-based review |
 | `carla-import-test` | argparse | Smoke-test loading the `.xodr` in a running CARLA server |
 
 Run them via `uv run <script>` (or `<script>` directly inside an active venv).
@@ -76,7 +81,7 @@ uv run analyze /path/to/map.osm /path/to/map.xodr
 
 ## Docker
 
-The repository's multi-stage Docker image exposes a slim conversion image and a CI-equivalent test profile:
+The repository's multi-stage Docker image exposes a slim conversion image and a test profile on CI's OS and Boost versions:
 
 ```bash
 # One-shot conversion via the slim image (mount the directory holding your map)

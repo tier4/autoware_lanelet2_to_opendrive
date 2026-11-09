@@ -1,10 +1,14 @@
 """OpenDRIVE road definitions."""
 
+import itertools
 import logging
+import math
+from collections import Counter
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Dict,
+    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -18,8 +22,6 @@ import lanelet2
 import lxml.etree as ET
 import numpy as np
 from lanelet2.routing import RoutingGraph, RoutingCostDistance
-from tqdm import tqdm
-
 from ..config import CoordinateOffset
 from ..conversion_config import (
     ArcSpiralConfig,
@@ -27,14 +29,22 @@ from ..conversion_config import (
     ParamPoly3Config,
     WidthEstimationConfig,
 )
+from ..progress import track
 from ..util import (
+    BOUNDARY_ATTACHED_LANELET_SUBTYPES,
     CONVERTIBLE_LANELET_SUBTYPES,
+    ConnectionDirection,
     LaneletInput,
+    attach_boundary_adjacent_lanelets,
+    build_boundary_longitudinal_adjacency,
     filter_lanelets_by_subtype,
+    is_boundary_attached_lanelet,
+    lanelet_subtype,
+    resolve_lane_link_neighbours,
     to_lanelet_list,
 )
 from .elevation import ElevationProfile
-from .enums import ContactPoint, ElementType, RoadType, TrafficRule
+from .enums import ContactPoint, ElementType, LaneType, RoadType, TrafficRule
 from .geometry import (
     Arc,
     GeometryBase,
@@ -50,6 +60,257 @@ from .reference_line import ReferenceLine
 from .road_links import Predecessor, RoadLink, Successor
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# In-junction chain merging (one connecting road per end-to-end path)
+# ---------------------------------------------------------------------------
+#
+# A road with ``@junction != -1`` may only link to *roads*, and it owns one
+# road-level ``<successor>``. A connecting road whose lane forks to several
+# other connecting roads of the same junction therefore loses every branch
+# but one: the alternatives cannot be reached through a ``<connection>``
+# either, because an ``incomingRoad`` that is itself a connecting road
+# crashes CARLA's parser (deliberately removed in 090be208).
+#
+# The representable form is to duplicate the shared stage: each end-to-end
+# path *that shares a stage with another path* becomes its own connecting
+# road, running from an outside road to an outside road, and each fork
+# branch is a separate ``<connection>`` row of the external incoming road.
+# Duplicating the shared stage is the only way OpenDRIVE can express the
+# fork at all.
+#
+# Chains that nothing branches off are left alone: their single
+# ``<successor>`` slot already carries the one maneuver they have, and
+# merging them would replace roads that stand for one lanelet each with
+# roads that stand for several -- which the lanelet-to-lane mapping and the
+# geometric cross-check both model as one-to-one.
+#
+# ``lanelet2.core.getId()`` draws from the same counter a loaded map uses,
+# so a synthetic primitive can silently alias a real one. The merged
+# primitives take ids from a dedicated range far above any real map id.
+_SYNTHETIC_PRIMITIVE_IDS = itertools.count(10_000_000_000)
+
+# Hard ceiling on the number of end-to-end paths enumerated inside one
+# junction. Chains are shallow in practice (depth <= 4 on the reference
+# maps) and the walk is linear in the number of paths, so hitting this
+# means the source map has a pathological in-junction DAG. Exceeding it is
+# reported loudly rather than silently falling back, because the fallback
+# is exactly the defect this machinery exists to remove.
+_MAX_JUNCTION_CHAIN_PATHS = 512
+
+
+def _next_synthetic_id() -> int:
+    return next(_SYNTHETIC_PRIMITIVE_IDS)
+
+
+def _oriented_bound_points(
+    bound,
+    previous_tail: Optional[Tuple[float, float]],
+) -> List:
+    """Return ``bound``'s points oriented to continue from ``previous_tail``.
+
+    Lanelet2 does not guarantee that consecutive lanelets store their
+    boundaries in the same direction of travel; concatenating them blindly
+    would fold the merged boundary back on itself.
+    """
+    points = list(bound)
+    if previous_tail is not None and len(points) >= 2:
+        start = points[0]
+        end = points[-1]
+        d_start = math.hypot(start.x - previous_tail[0], start.y - previous_tail[1])
+        d_end = math.hypot(end.x - previous_tail[0], end.y - previous_tail[1])
+        if d_end < d_start:
+            points = points[::-1]
+    return points
+
+
+def _concatenate_chain_lanelet(
+    chain: List[lanelet2.core.Lanelet],
+) -> lanelet2.core.Lanelet:
+    """Merge a longitudinal chain of lanelets into one synthetic lanelet.
+
+    Left/right bounds are concatenated in travel order (deduplicating the
+    shared joint points) so the merged lanelet's geometry is exactly the
+    union of the chain's source geometry. The merged lanelet is *not* added
+    to the map; it only feeds :meth:`Road.construct_from_lanelet_groups`.
+    """
+    if len(chain) == 1:
+        return chain[0]
+
+    def concatenate(bound_getter) -> lanelet2.core.LineString3d:
+        merged_points: List[lanelet2.core.Point3d] = []
+        tail: Optional[Tuple[float, float]] = None
+        for lanelet in chain:
+            for point in _oriented_bound_points(bound_getter(lanelet), tail):
+                if merged_points and (
+                    math.hypot(
+                        merged_points[-1].x - point.x,
+                        merged_points[-1].y - point.y,
+                    )
+                    < 1e-9
+                ):
+                    continue
+                merged_points.append(
+                    lanelet2.core.Point3d(
+                        _next_synthetic_id(),
+                        float(point.x),
+                        float(point.y),
+                        float(point.z),
+                    )
+                )
+            if merged_points:
+                tail = (merged_points[-1].x, merged_points[-1].y)
+        return lanelet2.core.LineString3d(_next_synthetic_id(), merged_points)
+
+    merged = lanelet2.core.Lanelet(
+        _next_synthetic_id(),
+        concatenate(lambda ll: ll.leftBound),
+        concatenate(lambda ll: ll.rightBound),
+    )
+    for key in chain[0].attributes.keys():
+        merged.attributes[key] = chain[0].attributes[key]
+    return merged
+
+
+def _solitary_routing_graph(lanelet: lanelet2.core.Lanelet) -> RoutingGraph:
+    """Routing graph over a scratch map holding ``lanelet`` and nothing else.
+
+    Road construction consults the routing graph only for lane-change
+    adjacency (``left``/``right``).  A synthetic merged lanelet has no
+    neighbours by construction, and it is absent from the real map, so a
+    graph over the real map could not answer for it either.
+    """
+    scratch_map = lanelet2.core.LaneletMap()
+    scratch_map.add(lanelet)
+    traffic_rules = lanelet2.traffic_rules.create(
+        lanelet2.traffic_rules.Locations.Germany,
+        lanelet2.traffic_rules.Participants.Vehicle,
+    )
+    return RoutingGraph(scratch_map, traffic_rules, [RoutingCostDistance(0.0)])
+
+
+class ChainEnumerationOverflow(Exception):
+    """Raised when one junction's in-junction DAG has too many paths."""
+
+
+def _junction_chain_paths(
+    junction_group: List[lanelet2.core.Lanelet],
+    routing_graph: RoutingGraph,
+    max_paths: int = _MAX_JUNCTION_CHAIN_PATHS,
+) -> List[List[lanelet2.core.Lanelet]]:
+    """Enumerate end-to-end longitudinal lanelet paths inside one junction.
+
+    A path starts at a junction lanelet with no in-junction predecessor and
+    follows in-junction longitudinal successors until it leaves the group.
+    Lane changes are excluded: they are lateral, not a maneuver stage.
+
+    A stage that hands over both to another in-junction stage and to a road
+    outside the junction ends one path there and continues another, because
+    a connecting road links to a single outside road at each end.
+
+    Lanelets that take part in no in-junction longitudinal edge are *not*
+    returned — they are single-stage connectors and keep the ordinary
+    lateral grouping.
+
+    Returns ``[]`` when the junction has no chain at all (the overwhelmingly
+    common case, which then follows the byte-identical legacy path).
+
+    Raises:
+        ChainEnumerationOverflow: when more than ``max_paths`` end-to-end
+            paths exist. The caller must report this rather than silently
+            falling back, because the fallback reinstates the lost-fork
+            defect.
+    """
+    group_ids = {lanelet.id for lanelet in junction_group}
+    in_group_succ: Dict[int, List[lanelet2.core.Lanelet]] = {}
+    in_group_pred_ids: Dict[int, List[int]] = {}
+    # Chain members that *also* hand over to a road outside the junction.
+    # The maneuver that leaves there is a path of its own: a connecting road
+    # ends at one outside road, so folding it into the longer path would
+    # drop it exactly the way the in-junction fork used to be dropped.
+    leaves_junction: Set[int] = set()
+    for lanelet in junction_group:
+        successors = []
+        for successor in routing_graph.following(lanelet, False):
+            if successor.id == lanelet.id:
+                continue
+            if successor.id in group_ids:
+                successors.append(successor)
+            else:
+                leaves_junction.add(lanelet.id)
+        if successors:
+            in_group_succ[lanelet.id] = successors
+            for successor in successors:
+                in_group_pred_ids.setdefault(successor.id, []).append(lanelet.id)
+    if not in_group_succ:
+        return []
+
+    chain_member_ids = set(in_group_succ) | set(in_group_pred_ids)
+    entries = [
+        lanelet
+        for lanelet in junction_group
+        if lanelet.id in chain_member_ids and lanelet.id not in in_group_pred_ids
+    ]
+    paths: List[List[lanelet2.core.Lanelet]] = []
+
+    def walk(path: List[lanelet2.core.Lanelet]) -> None:
+        if len(paths) > max_paths:
+            raise ChainEnumerationOverflow
+        successors = in_group_succ.get(path[-1].id, [])
+        if not successors:
+            paths.append(path)
+            return
+        if path[-1].id in leaves_junction:
+            # This stage both continues inside the junction and hands over
+            # to a road outside it; the second maneuver ends here.
+            paths.append(list(path))
+        for successor in successors:
+            if any(existing.id == successor.id for existing in path):
+                # Cycle in the source map: stop here rather than looping.
+                paths.append(path)
+                continue
+            walk(path + [successor])
+
+    for entry in sorted(entries, key=lambda lanelet: lanelet.id):
+        walk([entry])
+
+    # A cycle can leave a chain member off every path (no entry reaches it).
+    # Those lanelets keep the legacy lateral treatment, which is what the
+    # caller does with anything not covered by a returned path.
+    return paths
+
+
+def _external_exit_roads(
+    lanelets: Iterable[lanelet2.core.Lanelet],
+    routing_graph: RoutingGraph,
+    junction_lanelet_ids: Set[int],
+    lanelet_to_regular_road: Dict[int, int],
+) -> List[int]:
+    """Roads *outside* the junction that ``lanelets`` hand over to, ascending.
+
+    The mirror of the in-junction fork that :func:`_junction_chain_paths`
+    resolves: a connecting road owns one road-level ``<successor>``, so a
+    connector whose lane leaves the junction into several outside roads can
+    name only one of them and every other maneuver is lost.  The caller
+    emits one connecting road per returned id.
+
+    A successor still inside the same junction is skipped: that is the
+    in-junction fork, and duplicating for it here would double-count what the
+    chain merge already handles.  A successor in no known regular road — a
+    neighbouring junction's connector, say — is skipped too, because the
+    link would not be to a road this function can name; such a connector
+    keeps its existing single-``<successor>`` behaviour.
+    """
+    exits: Set[int] = set()
+    for lanelet in lanelets:
+        for successor in routing_graph.following(lanelet, False):
+            if successor.id == lanelet.id or successor.id in junction_lanelet_ids:
+                continue
+            road_id = lanelet_to_regular_road.get(successor.id)
+            if road_id is not None:
+                exits.add(road_id)
+    return sorted(exits)
 
 
 def _build_planview_geometries(
@@ -94,14 +355,49 @@ def _build_planview_geometries(
         if isinstance(run, LineRun):
             out.append(Line.from_spline_window(spline, run.s_start, run.s_end))
         elif isinstance(run, ArcRun):
-            out.append(
-                Arc.from_spline_window(spline, run.s_start, run.s_end, run.curvature)
-            )
+            arc = Arc.from_spline_window(spline, run.s_start, run.s_end, run.curvature)
+            if arc.curvature == 0.0:
+                # A zero curvature is an infinite radius, which is a
+                # <line>. The curvature a record carries is derived from
+                # the window's chord, not taken from the classifier's
+                # kappa, and `_solve_half_turn` returns exactly zero once
+                # that chord is numerically not shorter than the arc
+                # length -- so a window the classifier accepted as an arc
+                # can still come out straight. Retuning the classifier
+                # cannot close this: the kappa it measures comes from the
+                # fitted derivative and the chord from the arc-length
+                # table, and the two disagree by more than the tolerance
+                # that decides the primitive.
+                #
+                # Emitting it as <arc curvature="0.0"> is not readable.
+                # An arc's radius is 1 / curvature, so ASAM's own
+                # lane.smoothness.contact_point_no_horizontal_gaps raises
+                # ZeroDivisionError on the file and reports nothing for
+                # the whole map, taking road.geometry.contact_point with
+                # it -- 2 of 26 checkers silenced by 8 records out of
+                # 124,000 on the customer map.
+                out.append(Line.from_spline_window(spline, run.s_start, run.s_end))
+            else:
+                out.append(arc)
         elif isinstance(run, ParamPoly3Run):
             # Re-use existing per-window splitting (CARLA min length).
             out.extend(_emit_paramPoly3_run(spline, run, pp3_cfg))
         else:
             raise TypeError(f"Unknown ClassifiedSegment type: {type(run)!r}")
+
+    # The plan view is its own s-domain: a reader locating s walks the
+    # records' own s and length, and road@length is written as the sum of
+    # those lengths. The runs are labelled in the fitted spline's arc length
+    # while a paramPoly3 piece carries its own quadrature length, and the two
+    # measures of one span differ by about 1e-5 relative, so mixing them left
+    # the plan view ending up to 9.6e-05 m short of the road's own @length --
+    # 38 roads on nishishinjuku, and the 11 of them at a road-typed contact
+    # were the 11 ASAM road.geometry.contact_point errors. The spline's s
+    # chooses the windows; the records' own lengths name them.
+    running = out[0].s if out else 0.0
+    for record in out:
+        record.s = running
+        running += record.length
     return out
 
 
@@ -420,6 +716,7 @@ def _evaluate_lane_width(lane: "Lane", s: float) -> Optional[float]:
 
 
 if TYPE_CHECKING:
+    from ..util import BoundaryAttachmentResult
     from .signal import Signal
     from .lane import Lane
     from .junction import Junction
@@ -459,6 +756,127 @@ class Road:
     # correct rendered lane edge rather than the regular road's reference
     # line — see :meth:`evaluate_lane_anchor_xyz` and #437.
     sorted_lanelet_ids: Optional[List[int]] = None
+    # Source lanelet IDs, in travel order, of a chain-merged connecting road:
+    # one road that spans every longitudinally consecutive junction lanelet
+    # of one end-to-end maneuver, so no connecting road's successor is
+    # another connecting road and each branch of an in-junction fork is a
+    # separate <connection> row of the external incoming road.  ``None`` for
+    # every other road.  A fork's shared prefix appears in several of these
+    # lists; ``chain_owned_lanelet_ids`` records the subset this road alone
+    # covers, which is what the lanelet <-> lane mapping may claim.
+    chain_source_lanelet_ids: Optional[List[int]] = None
+    chain_owned_lanelet_ids: Optional[List[int]] = None
+    # The exit-side mirror of the fork above.  A connecting road whose lanes
+    # leave the junction into several roads *outside* it is emitted once per
+    # outside road, because the single road-level <successor> would otherwise
+    # name one of them and lose the rest.  Every copy carries the id of the
+    # outside road it serves; ``exit_fork_lanelet_ids`` are the source
+    # lanelets the copies share (a duplicate is absent from
+    # ``road_to_lanelet_ids``, which is keyed by the *claiming* road, so it
+    # needs its own record to resolve links from).  ``None`` / ``False`` for
+    # every road that does not fork on its exit side.
+    exit_fork_successor_road_id: Optional[int] = None
+    exit_fork_lanelet_ids: Optional[List[int]] = None
+    # True on every copy but the first.  A lanelet may name only one
+    # ``(road, lane)`` pair, so the duplicates claim none of them — the same
+    # rule ``chain_owned_lanelet_ids`` applies to a fork's shared stage.
+    exit_fork_duplicate: bool = False
+    # Position in :attr:`sorted_lanelet_ids` of the lanelet whose outer
+    # boundary IS this road's reference line, as decided by
+    # ``util.reference_lanelet_index``.  Lanelets beyond it carry lane ids of
+    # the opposite sign, so the lane-aware pin arithmetic in
+    # :meth:`evaluate_lane_anchor_pose` needs it to map an index to a lane.
+    # ``None`` means the outermost lanelet of any subtype, which is what the
+    # choice was before attached non-vehicle lanes could sort outside it.
+    reference_lanelet_index: Optional[int] = None
+
+    def _reference_index(self) -> Optional[int]:
+        """Where the reference line sits in :attr:`sorted_lanelet_ids`.
+
+        ``None`` on :attr:`reference_lanelet_index` means "the outermost
+        lanelet of any subtype", which is what the choice was before an
+        attached non-vehicle lane could sort outside the carriageway.
+        """
+        if self.sorted_lanelet_ids is None:
+            return None
+        n = len(self.sorted_lanelet_ids)
+        index = self.reference_lanelet_index
+        if index is None:
+            index = n - 1 if self.rule == TrafficRule.LHT else 0
+        return index if 0 <= index < n else None
+
+    def lane_id_for_sorted_index(self, sorted_index: int) -> Optional[int]:
+        """The OpenDRIVE lane id of the lanelet at ``sorted_index``.
+
+        Lane ids count outward from the reference line in both directions.
+        The lanelets on the reference line's inner side take the sign of the
+        traffic rule's own side and the ones beyond it take the opposite
+        sign. With the reference line at the outermost lanelet the outer side
+        is empty and this reduces to ``n - k`` for LHT and ``-(k + 1)`` for
+        RHT -- **which is only a reduction**, and reading it as the rule cost
+        178 junctions on a real map; see
+        :meth:`sorted_index_for_lane_id`.
+        """
+        if self.sorted_lanelet_ids is None:
+            return None
+        n = len(self.sorted_lanelet_ids)
+        if not (0 <= sorted_index < n):
+            return None
+        reference_index = self._reference_index()
+        if reference_index is None:
+            return None
+
+        is_lht = self.rule == TrafficRule.LHT
+        if is_lht:
+            inward = sorted_index <= reference_index
+            rank = (
+                reference_index - sorted_index
+                if inward
+                else sorted_index - reference_index - 1
+            )
+        else:
+            inward = sorted_index >= reference_index
+            rank = (
+                sorted_index - reference_index
+                if inward
+                else reference_index - sorted_index - 1
+            )
+        return (rank + 1) * (1 if (inward == is_lht) else -1)
+
+    def sorted_index_for_lane_id(self, lane_id: int) -> Optional[int]:
+        """The inverse of :meth:`lane_id_for_sorted_index`.
+
+        Callers that hold an OpenDRIVE lane id and want its lanelet's anchor
+        need this direction, and the obvious shortcut is wrong. ``n -
+        lane_id`` for LHT is the *reduction* that holds only while the
+        reference line is the outermost lanelet, and since the reference line
+        became the outermost **vehicle** lanelet an attached sidewalk or
+        shoulder can sort outside it -- 18.8% of roads on a real map. There
+        the shortcut names a different lanelet, and the anchor comes back
+        offset by the lanes in between: measured as a lane-pair separation
+        clustered at p50 2.975 m against a p50 lane width of 3.27 m, i.e.
+        exactly one lane, on all 178 divergence sites the sanity gate then
+        rejected.
+        """
+        if self.sorted_lanelet_ids is None or lane_id == 0:
+            return None
+        n = len(self.sorted_lanelet_ids)
+        reference_index = self._reference_index()
+        if reference_index is None:
+            return None
+
+        is_lht = self.rule == TrafficRule.LHT
+        rank = abs(lane_id) - 1
+        inward = (lane_id > 0) == is_lht
+        if is_lht:
+            sorted_index = (
+                reference_index - rank if inward else reference_index + 1 + rank
+            )
+        else:
+            sorted_index = (
+                reference_index + rank if inward else reference_index - 1 - rank
+            )
+        return sorted_index if 0 <= sorted_index < n else None
 
     def evaluate_lane_anchor_pose(
         self,
@@ -482,15 +900,16 @@ class Road:
 
         ``sorted_index`` is the 0-based position in
         :attr:`sorted_lanelet_ids` (left-to-right).  The anchor boundary is
-        ``leftBound`` for RHT roads and ``rightBound`` for LHT roads — the
-        side that joins the reference line for the outermost lanelet.
+        the one facing the reference line, which depends on the lane's side
+        of it: ``rightBound`` for a lane to its left (positive id),
+        ``leftBound`` for a lane to its right (negative id).
 
-        For ``sorted_index == 0`` (RHT) or ``sorted_index == n-1`` (LHT)
-        this is the reference line itself (lateral offset ``t = 0``) and
-        the result equals :attr:`reference_start_xyz` /
-        :attr:`reference_end_xyz`.  For other indices the result is offset
-        laterally by the cumulative width of the lanes between the anchor
-        and the reference line — the lane-aware pin target used when a
+        At ``sorted_index == reference_lanelet_index`` the anchor is the
+        reference line itself (lateral offset ``t = 0``) and the result
+        equals :attr:`reference_start_xyz` / :attr:`reference_end_xyz`.  For
+        other indices the result is offset laterally by the cumulative width
+        of the lanes between the anchor and the reference line, positive
+        towards the left — the lane-aware pin target used when a
         connecting road joins a non-outermost lane of a regular road
         (see #437).
 
@@ -519,14 +938,15 @@ class Road:
         s = 0.0 if at_start else self.length
 
         lane_section = self.lanes.lane_sections[0]
-        is_lht = self.rule == TrafficRule.LHT
+
+        target_lane_id = self.lane_id_for_sorted_index(sorted_index)
+        if target_lane_id is None:
+            return None
+
+        # The anchor of lane ``L`` sits at the cumulative width of the lanes
+        # between it and the reference line, measured on its own side.
         t = 0.0
-        if is_lht:
-            # LHT: lanelets at ``sorted_index k`` carry lane id ``n - k``.
-            # The anchor (rightBound) of lane ``n - k`` sits at
-            # ``t = + sum(widths of lanes 1 .. n - k - 1)`` — the widths of
-            # the lanelets to its right (more rightward in sorted order).
-            target_lane_id = n - sorted_index
+        if target_lane_id > 0:
             for lane_id in range(1, target_lane_id):
                 lane = lane_section.left_lanes.get(lane_id)
                 if lane is None:
@@ -536,12 +956,8 @@ class Road:
                     return None
                 t += w
         else:
-            # RHT: lanelets at ``sorted_index k`` carry lane id ``-(k + 1)``.
-            # The anchor (leftBound) of lane ``-(k + 1)`` sits at
-            # ``t = - sum(widths of lanes -1 .. -k)`` — the widths of the
-            # lanelets to its left in sorted order.
-            for j in range(1, sorted_index + 1):
-                lane = lane_section.right_lanes.get(-j)
+            for lane_id in range(-1, target_lane_id, -1):
+                lane = lane_section.right_lanes.get(lane_id)
                 if lane is None:
                     return None
                 w = _evaluate_lane_width(lane, s)
@@ -658,6 +1074,14 @@ class Road:
     def get_lanelet_to_lane_mapping(self) -> Dict[int, int]:
         """Get mapping from lanelet ID to lane ID for all lanes in this road.
 
+        A chain-merged connecting road carries one synthetic lane built from
+        several source lanelets, so its lane holds no ``lanelet_id`` of its
+        own.  The lanelets it claimed during construction are attributed to
+        that lane here.  A fork's shared stage is claimed by the first of the
+        merged roads that traverses it: a lanelet may name only one
+        ``(road, lane)`` pair, and leaving it unnamed would drop it from the
+        mapping altogether.
+
         Returns:
             Dictionary mapping lanelet_id -> lane_id
         """
@@ -670,7 +1094,32 @@ class Road:
             section_mapping = lane_section.get_lanelet_to_lane_mapping()
             mapping.update(section_mapping)
 
+        if self.chain_owned_lanelet_ids:
+            chain_lane_id = self._chain_lane_id()
+            if chain_lane_id is not None:
+                for lanelet_id in self.chain_owned_lanelet_ids:
+                    mapping[lanelet_id] = chain_lane_id
+
         return mapping
+
+    def _chain_lane(self) -> Optional["Lane"]:
+        """Return a chain-merged road's single driving lane, if it has one."""
+        if self.lanes is None or not self.lanes.lane_sections:
+            return None
+        section = self.lanes.lane_sections[0]
+        driving = [
+            lane
+            for lane in {**section.left_lanes, **section.right_lanes}.values()
+            if getattr(lane.lane_type, "value", lane.lane_type) == "driving"
+        ]
+        if len(driving) != 1:
+            return None
+        return driving[0]
+
+    def _chain_lane_id(self) -> Optional[int]:
+        """Return the lane id of a chain-merged road's single driving lane."""
+        lane = self._chain_lane()
+        return None if lane is None else lane.lane_id
 
     def get_elevation_at_s(self, s: float) -> float:
         """Calculate road surface elevation at a given s-coordinate.
@@ -794,6 +1243,7 @@ class Road:
                     context.lanelet_to_road_and_lane,
                     context.road_lane_ids,
                     context.road_id_to_road,
+                    context.non_vehicle_succession,
                 )
 
             # Process right lanes
@@ -805,34 +1255,49 @@ class Road:
                     context.lanelet_to_road_and_lane,
                     context.road_lane_ids,
                     context.road_id_to_road,
+                    context.non_vehicle_succession,
                 )
 
     @staticmethod
-    def _find_closest_lane(target_lane: int, available_lanes: list[int]) -> int:
+    def _find_closest_lane(
+        target_lane: int, available_lanes: list[int]
+    ) -> Optional[int]:
         """Find the closest lane ID when exact match doesn't exist.
 
         This handles cases where a lane references a non-existent lane in the
         target road, typically when the number of lanes changes (e.g., 3 lanes
         merging into 2 lanes).
 
+        Only lanes on the same side of the reference line are candidates. A
+        lane id's sign is which side it sits on, and under a single traffic
+        rule a lane on the other side travels the other way, so it cannot be
+        the continuation of this one.
+
         Args:
             target_lane: The desired lane ID that doesn't exist
             available_lanes: Sorted list of existing lane IDs in the target road
 
         Returns:
-            Closest existing lane ID
+            The closest existing lane ID on the same side, or ``None`` when
+            there is none. ``None`` means "emit no link": any id returned here
+            is written as a ``<successor>``/``<predecessor>`` that a consumer
+            then looks up in the target road, so inventing one produces a
+            dangling link rather than a missing one.
 
         Example:
             >>> _find_closest_lane(-3, [-1, -2])  # Lane -3 merges into -2
             -2
         """
-        if not available_lanes:
-            return -1  # Fallback to default lane
+        same_side = [
+            lane for lane in available_lanes if (lane > 0) == (target_lane > 0)
+        ]
+        if not same_side:
+            return None
 
         # Find the lane with minimum distance to target_lane
         # For right lanes (negative IDs): -3 is closer to -2 than -1
         # For left lanes (positive IDs): 3 is closer to 2 than 1
-        closest = min(available_lanes, key=lambda x: abs(x - target_lane))
+        closest = min(same_side, key=lambda x: abs(x - target_lane))
         return closest
 
     def _set_single_lane_links(
@@ -843,6 +1308,9 @@ class Road:
         lanelet_to_road_and_lane: Dict[int, Tuple[int, int]],
         road_lane_ids: Optional[Dict[int, Set[int]]] = None,
         road_id_to_road: Optional[Dict[int, "Road"]] = None,
+        non_vehicle_succession: Optional[
+            Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]
+        ] = None,
     ) -> None:
         """Set predecessor and successor for a single lane.
 
@@ -855,14 +1323,26 @@ class Road:
                           Used to validate that lane links reference existing lanes.
             road_id_to_road: Optional mapping from road_id to Road objects.
                             Used to check if target roads are connecting roads in junctions.
+            non_vehicle_succession: Optional geometric succession used for the
+                            lanelets the vehicle routing graph has no vertex
+                            for. See ``resolve_lane_link_neighbours``.
         """
 
-        if lane.lanelet_id is None:
+        # A chain-merged connecting road's lane stands for a whole path of
+        # junction lanelets, so it carries no single ``lanelet_id``: its
+        # predecessors come from the path's first lanelet and its successors
+        # from the last.  Every other lane reads both from its own lanelet.
+        head_lanelet_id = tail_lanelet_id = lane.lanelet_id
+        if self.chain_source_lanelet_ids and lane is self._chain_lane():
+            head_lanelet_id = self.chain_source_lanelet_ids[0]
+            tail_lanelet_id = self.chain_source_lanelet_ids[-1]
+        if head_lanelet_id is None or tail_lanelet_id is None:
             return
 
-        # Get the lanelet corresponding to this lane
+        # Get the lanelet(s) corresponding to this lane
         try:
-            lanelet = lanelet_map.laneletLayer.get(lane.lanelet_id)
+            head_lanelet = lanelet_map.laneletLayer.get(head_lanelet_id)
+            tail_lanelet = lanelet_map.laneletLayer.get(tail_lanelet_id)
         except Exception:
             return
 
@@ -876,7 +1356,13 @@ class Road:
         is_connecting_road = self.junction is not None and self.junction >= 0
 
         # Find predecessor lanelets
-        previous_lanelets = routing_graph.previous(lanelet)
+        previous_lanelets = resolve_lane_link_neighbours(
+            head_lanelet,
+            routing_graph.previous,
+            non_vehicle_succession,
+            ConnectionDirection.PREVIOUS,
+            lanelet_map,
+        )
         if previous_lanelets:
             # Take the first predecessor that maps to the road link's predecessor road
             for prev_ll in previous_lanelets:
@@ -932,19 +1418,25 @@ class Road:
                             if pred_lane_id not in existing_lanes:
                                 # Lane doesn't exist, find closest lane
                                 # This handles lane reduction scenarios (e.g., 3 lanes -> 2 lanes)
-                                if existing_lanes:
-                                    available_lanes = sorted(existing_lanes)
-                                    pred_lane_id = Road._find_closest_lane(
-                                        pred_lane_id, available_lanes
-                                    )
-                                else:
-                                    # No lanes available, skip this link
+                                closest = Road._find_closest_lane(
+                                    pred_lane_id, sorted(existing_lanes)
+                                )
+                                if closest is None:
+                                    # Nothing on this side of the reference
+                                    # line to continue into; skip this link.
                                     continue
+                                pred_lane_id = closest
                         lane.predecessor = LaneLink(id=pred_lane_id)
                         break
 
         # Find successor lanelets
-        following_lanelets = routing_graph.following(lanelet)
+        following_lanelets = resolve_lane_link_neighbours(
+            tail_lanelet,
+            routing_graph.following,
+            non_vehicle_succession,
+            ConnectionDirection.FOLLOWING,
+            lanelet_map,
+        )
         if following_lanelets:
             # Take the first successor that maps to the road link's successor road
             for next_ll in following_lanelets:
@@ -996,16 +1488,73 @@ class Road:
                             if succ_lane_id not in existing_lanes:
                                 # Lane doesn't exist, find closest lane
                                 # This handles lane reduction scenarios (e.g., 3 lanes -> 2 lanes)
-                                if existing_lanes:
-                                    available_lanes = sorted(existing_lanes)
-                                    succ_lane_id = Road._find_closest_lane(
-                                        succ_lane_id, available_lanes
-                                    )
-                                else:
-                                    # No lanes available, skip this link
+                                closest = Road._find_closest_lane(
+                                    succ_lane_id, sorted(existing_lanes)
+                                )
+                                if closest is None:
+                                    # Nothing on this side of the reference
+                                    # line to continue into; skip this link.
                                     continue
+                                succ_lane_id = closest
                         lane.successor = LaneLink(id=succ_lane_id)
                         break
+
+    @staticmethod
+    def _log_boundary_attachment_summary(
+        all_lanelets: List[lanelet2.core.Lanelet],
+        attachable_lanelets: Set[lanelet2.core.Lanelet],
+        attachment: "BoundaryAttachmentResult",
+    ) -> None:
+        """Emit one aggregated line about non-vehicle lanelet handling.
+
+        Deliberately aggregated: on a real map this covers thousands of
+        lanelets (odaiba has 4,225 non-vehicle ones), and a per-lanelet
+        message would bury every other diagnostic.
+        """
+        attached_by_subtype: Dict[str, int] = {}
+        standalone_by_subtype: Dict[str, int] = {}
+        unattached_ids = {lanelet.id for lanelet in attachment.unattached}
+        for lanelet in attachable_lanelets:
+            subtype = lanelet_subtype(lanelet)
+            bucket = (
+                standalone_by_subtype
+                if lanelet.id in unattached_ids
+                else attached_by_subtype
+            )
+            bucket[subtype] = bucket.get(subtype, 0) + 1
+
+        def _fmt(counts: Dict[str, int]) -> str:
+            if not counts:
+                return "none"
+            return ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+
+        logger.info(
+            "Non-vehicle lanelets (%s): attached as lanes of the adjacent "
+            "road [%s]; kept as standalone roads because no road shares a "
+            "boundary linestring [%s]; %d bordered more than one road group "
+            "and joined the one with the smallest lanelet id",
+            ", ".join(BOUNDARY_ATTACHED_LANELET_SUBTYPES),
+            _fmt(attached_by_subtype),
+            _fmt(standalone_by_subtype),
+            len(attachment.ambiguous_ids),
+        )
+
+        # Subtypes that are not converted at all.  Previously silent; a
+        # single aggregated line makes the loss visible without one message
+        # per lanelet.
+        skipped: Dict[str, int] = {}
+        for lanelet in all_lanelets:
+            subtype = lanelet_subtype(lanelet)
+            if subtype in CONVERTIBLE_LANELET_SUBTYPES or subtype == "crosswalk":
+                continue
+            skipped[subtype or "<none>"] = skipped.get(subtype or "<none>", 0) + 1
+        if skipped:
+            logger.warning(
+                "Skipped %d lanelet(s) whose subtype has no OpenDRIVE lane "
+                "mapping: %s",
+                sum(skipped.values()),
+                _fmt(skipped),
+            )
 
     @staticmethod
     def _extract_road_types_from_lanelets(
@@ -1022,8 +1571,19 @@ class Road:
         if not lanelet_list:
             return None
 
-        # Get the first lanelet to extract attributes
-        first_lanelet = lanelet_list[0]
+        # Take the attributes from a driving lanelet when the group has one.
+        # A group can now also contain shoulders / sidewalks / bicycle lanes,
+        # whose speed_limit and location describe the non-vehicle lane, not
+        # the road; letting one of those land in position 0 would change the
+        # whole road's <type> and speed limit.
+        first_lanelet = next(
+            (
+                lanelet
+                for lanelet in lanelet_list
+                if not is_boundary_attached_lanelet(lanelet)
+            ),
+            lanelet_list[0],
+        )
 
         # Extract speed limit
         speed_limit = None
@@ -1187,8 +1747,13 @@ class Road:
         # This ensures elevation profile segments align with ParamPoly3 segments
         geometry_s_values = [g.s for g in geometries]
 
-        # Get elevation profile from reference line, aligned with geometry boundaries
-        elevation_profile = reference_line.get_elevation_profile(geometry_s_values)
+        # Get elevation profile from reference line, aligned with geometry
+        # boundaries *and* with the road length the geometries just produced.
+        # Passing ``road_length`` is what makes the profile's s-domain the same
+        # interval the <road> declares; see get_elevation_profile's docstring.
+        elevation_profile = reference_line.get_elevation_profile(
+            geometry_s_values, road_length=road_length
+        )
 
         # Extract speed limit and road type from lanelets
         road_types_list = Road._extract_road_types_from_lanelets(lanelet_list)
@@ -1230,18 +1795,25 @@ class Road:
                 z_end,
             )
 
-        from ..util import sort_adjacent_groups
+        from ..util import (
+            reference_lanelet_index as reference_lanelet_index_of,
+            sort_adjacent_groups,
+        )
 
         try:
             sorted_lls = sort_adjacent_groups(
                 lanelet_map, set(lanelet_list), routing_graph
             )
             sorted_lanelet_ids: Optional[List[int]] = [ll.id for ll in sorted_lls]
+            reference_lanelet_index: Optional[int] = reference_lanelet_index_of(
+                sorted_lls, is_lht=(rule_enum == TrafficRule.LHT)
+            )
         except ValueError:
             # Non-adjacent lanelet group — leaves lane-aware pinning
             # disabled for this road; the junction phase falls back to
             # the natural lanelet boundary for any incoming connection.
             sorted_lanelet_ids = None
+            reference_lanelet_index = None
 
         road = Road(
             id=road_id,
@@ -1257,6 +1829,7 @@ class Road:
             reference_start_xyz=rendered_start_xyz,
             reference_end_xyz=rendered_end_xyz,
             sorted_lanelet_ids=sorted_lanelet_ids,
+            reference_lanelet_index=reference_lanelet_index,
         )
 
         return road
@@ -1302,15 +1875,28 @@ class Road:
         # Include non-road subtypes so they can be emitted with the correct
         # OpenDRIVE lane type
         # (see Lane.construct_from_lanelet for the subtype -> LaneType mapping).
-        # Different subtypes form separate adjacent groups because the routing
-        # graph treats them as different participant classes, so e.g. walkways
-        # will not be grouped together with road lanelets here.
         road_lanelets = _filter_lanelets_outside_junction(
             filter_lanelets_by_subtype(all_lanelets, CONVERTIBLE_LANELET_SUBTYPES)
         )
 
         if not road_lanelets:
             raise ValueError("No lanelets found outside junctions")
+
+        # Split the candidates into the ones the vehicle routing graph can
+        # group (road / highway, plus walkway which is genuinely detached)
+        # and the ones it structurally cannot: the non-vehicle subtypes are
+        # not vertices of a ``Participants.Vehicle`` graph, so every
+        # left/right query on them returns None and they would each become
+        # their own link-less one-lane road overlapping the driving road
+        # they belong to.  They are folded into the driving road's lateral
+        # group after the vehicle grouping is final — see
+        # ``attach_boundary_adjacent_lanelets``.
+        attachable_lanelets = {
+            lanelet
+            for lanelet in road_lanelets
+            if is_boundary_attached_lanelet(lanelet)
+        }
+        primary_lanelets = set(road_lanelets) - attachable_lanelets
 
         # Create routing graph once and reuse for all operations
         traffic_rules = lanelet2.traffic_rules.create(
@@ -1324,9 +1910,11 @@ class Road:
         # Find adjacent groups of lanelets
         from ..util import find_adjacent_groups, split_groups_by_divergent_connections
 
-        # Pass the road_lanelets set to find_adjacent_groups so it only groups these
-        adjacent_groups = find_adjacent_groups(
-            lanelet_map, set(road_lanelets), routing_graph
+        # Pass the primary set to find_adjacent_groups so it only groups these
+        adjacent_groups = (
+            find_adjacent_groups(lanelet_map, primary_lanelets, routing_graph)
+            if primary_lanelets
+            else []
         )
 
         # Split groups whose lanelets fan out to more than one downstream
@@ -1335,8 +1923,33 @@ class Road:
         # that can only carry a road-level link to one of them, silently
         # dropping the other lane's link.
         # See specs/2026-05-22-road-successor-mis-merge-design.md.
+        #
+        # This runs BEFORE the non-vehicle attachment below on purpose: the
+        # splitter's signature is the set of downstream groups reached
+        # through the vehicle routing graph, which is empty for every
+        # non-vehicle lanelet.  Attaching first would give those lanelets a
+        # signature that differs from their road's and split them straight
+        # back out into their own road.
         adjacent_groups = split_groups_by_divergent_connections(
             lanelet_map, adjacent_groups, routing_graph
+        )
+
+        # Fold shoulders / pedestrian lanes / bicycle lanes into the lateral
+        # group of the driving road whose boundary linestring they share, so
+        # they become extra lanes of that road instead of overlapping
+        # standalone roads (issue: non-vehicle lanelets never grouped).
+        attachment = attach_boundary_adjacent_lanelets(
+            adjacent_groups, attachable_lanelets
+        )
+        adjacent_groups = attachment.groups
+        # Lanelets that reached no driving road keep their previous
+        # behaviour (one standalone road each); nothing is dropped.
+        if attachment.unattached:
+            adjacent_groups = adjacent_groups + find_adjacent_groups(
+                lanelet_map, attachment.unattached, routing_graph
+            )
+        Road._log_boundary_attachment_summary(
+            all_lanelets, attachable_lanelets, attachment
         )
 
         # Create roads from adjacent groups
@@ -1345,11 +1958,12 @@ class Road:
         lanelet_to_road: dict[int, int] = {}
         road_to_group: dict[int, Set[lanelet2.core.Lanelet]] = {}
 
-        print(f"Creating roads from {len(adjacent_groups)} lanelet groups...")
-        for road_id, adjacent_group in tqdm(
+        logger.info("Creating roads from %d lanelet groups", len(adjacent_groups))
+        for road_id, adjacent_group in track(
             enumerate(adjacent_groups),
+            "Building roads",
+            unit="group",
             total=len(adjacent_groups),
-            desc="Building roads",
         ):
             # ll_ids = [ll.id for ll in adjacent_group]
             # target_ids = [112, 114, 115, 116]
@@ -1389,11 +2003,16 @@ class Road:
                     # Find the line that actually called len()
                     for line in full_trace.split("\n"):
                         if "len(" in line and "autoware_lanelet2_to_opendrive" in line:
-                            tqdm.write(
-                                f"len() error in group {road_id}: {line.strip()}"
+                            logger.warning(
+                                "len() error in group %d: %s", road_id, line.strip()
                             )
                             break
-                tqdm.write(f"Warning: Failed to create road from group {road_id}: {e}")
+                logger.warning(
+                    "Failed to create road from group %d: %s",
+                    road_id,
+                    e,
+                    exc_info=True,
+                )
                 continue
 
         if not roads:
@@ -1405,8 +2024,8 @@ class Road:
         deferred_predecessor_candidates: Dict[int, List[int]] = {}
         deferred_successor_candidates: Dict[int, List[int]] = {}
 
-        print(f"Building road links for {len(roads)} roads...")
-        for road in tqdm(roads, desc="Building road links"):
+        logger.info("Building road links for %d roads", len(roads))
+        for road in track(roads, "Building road links", unit="road"):
             adjacent_group = road_to_group[road.id]
 
             # Predecessor
@@ -1430,8 +2049,11 @@ class Road:
                     # Defer to divergence/merge synthesis (issue #291).
                     deferred_predecessor_candidates[road.id] = pred_candidates
             except Exception as e:
-                tqdm.write(
-                    f"Warning: Failed to find predecessors for road {road.id}: {e}"
+                logger.warning(
+                    "Failed to find predecessors for road %d: %s",
+                    road.id,
+                    e,
+                    exc_info=True,
                 )
 
             # Successor
@@ -1455,8 +2077,11 @@ class Road:
                     # Defer to divergence/merge synthesis (issue #291).
                     deferred_successor_candidates[road.id] = succ_candidates
             except Exception as e:
-                tqdm.write(
-                    f"Warning: Failed to find successors for road {road.id}: {e}"
+                logger.warning(
+                    "Failed to find successors for road %d: %s",
+                    road.id,
+                    e,
+                    exc_info=True,
                 )
 
         # Build lane links based on lanelet previous/following relationships
@@ -1635,17 +2260,20 @@ class Road:
 
         current_road_id = starting_road_id
 
-        print(
-            f"Creating connecting roads from {len(junction_groups)} junction groups..."
+        logger.info(
+            "Creating connecting roads from %d junction groups",
+            len(junction_groups),
         )
 
-        for junction_index, junction_group in tqdm(
+        for junction_index, junction_group in track(
             enumerate(junction_groups),
+            "Building junction roads",
+            unit="junction",
             total=len(junction_groups),
-            desc="Building junction roads",
         ):
             # Issue #132 fix: Apply offset to junction ID
             junction_id = junction_index + junction_id_offset
+            junction_group_ids = {lanelet.id for lanelet in junction_group}
             # Find adjacent groups within this junction.  Hand over the
             # routing graph built above: without it ``find_adjacent_groups``
             # rebuilds a whole-map graph on every iteration, which dominates
@@ -1665,7 +2293,119 @@ class Road:
 
             junction_road_ids = []
 
-            # Create one road per adjacent group within the junction
+            # Stop chaining connectors inside the junction: every end-to-end
+            # longitudinal path becomes one connecting road, so no connecting
+            # road's <successor> is another connecting road and each branch
+            # of an in-junction fork is a separate <connection> row of the
+            # external incoming road.  Without this, a connector whose lane
+            # forks to several in-junction exits keeps only the one branch
+            # that fits its single road-level <successor>.
+            try:
+                chain_paths = _junction_chain_paths(junction_group, routing_graph)
+            except ChainEnumerationOverflow:
+                chain_paths = []
+                logger.error(
+                    "Junction %d: more than %d end-to-end in-junction paths; "
+                    "chain merging disabled for this junction. Connecting "
+                    "roads stay chained, so in-junction forks lose every "
+                    "branch but one.",
+                    junction_id,
+                    _MAX_JUNCTION_CHAIN_PATHS,
+                )
+
+            # Merge only where the representation forces it. A stage that
+            # belongs to exactly one end-to-end path is already expressible
+            # as its own connecting road chained to the next one: its single
+            # <successor> slot is enough. Merging those too would duplicate
+            # nothing, but it would replace roads that stand for one lanelet
+            # each with roads that stand for several -- which the lanelet
+            # <-> lane mapping and the geometric cross-check both model as
+            # one-to-one. Only the paths that *share* a stage need merging,
+            # because only they need the same lanelet in several roads.
+            traversals = Counter(lanelet.id for path in chain_paths for lanelet in path)
+            chain_paths = [
+                path
+                for path in chain_paths
+                if any(traversals[lanelet.id] > 1 for lanelet in path)
+            ]
+
+            chain_member_ids: Set[int] = {
+                lanelet.id for path in chain_paths for lanelet in path
+            }
+            # The merge replaces whole lateral groups.  A chain member that
+            # shares its lateral group with a lanelet the chain does not
+            # cover cannot be pulled out without also splitting that group's
+            # geometry, so such a junction keeps the legacy decomposition.
+            if chain_paths and any(
+                bool({ll.id for ll in group} & chain_member_ids)
+                and not {ll.id for ll in group} <= chain_member_ids
+                for group in adjacent_groups_in_junction
+            ):
+                logger.error(
+                    "Junction %d: an in-junction chain shares a lateral group "
+                    "with lanelets outside the chain; chain merging disabled "
+                    "for this junction, so in-junction forks lose every "
+                    "branch but one.",
+                    junction_id,
+                )
+                chain_paths = []
+                chain_member_ids = set()
+
+            # A merged path whose last stage leaves the junction into several
+            # outside roads has the same single-<successor> problem at its
+            # exit that the fork above has inside the junction, so it is
+            # emitted once per outside road too.
+            chain_paths_with_exit: List[
+                Tuple[List[lanelet2.core.Lanelet], Optional[int]]
+            ] = []
+            for path in chain_paths:
+                path_exits = _external_exit_roads(
+                    [path[-1]],
+                    routing_graph,
+                    junction_group_ids,
+                    ll_to_regular_road,
+                )
+                if len(path_exits) > 1:
+                    chain_paths_with_exit.extend(
+                        (path, exit_id) for exit_id in path_exits
+                    )
+                else:
+                    chain_paths_with_exit.append((path, None))
+
+            if chain_paths:
+                current_road_id = Road._build_chain_connecting_roads(
+                    lanelet_map=lanelet_map,
+                    chain_paths=chain_paths_with_exit,
+                    junction_id=junction_id,
+                    starting_road_id=current_road_id,
+                    traffic_rule=traffic_rule,
+                    parampoly3_config=parampoly3_config,
+                    arcspiral_config=arcspiral_config,
+                    width_config=width_config,
+                    offset=offset,
+                    lane_aware_endpoint=_lane_aware_endpoint,
+                    connecting_roads=connecting_roads,
+                    junction_road_ids=junction_road_ids,
+                    lanelet_to_road=lanelet_to_road,
+                )
+                # The merged roads own every chain lanelet; the lateral
+                # groups they came from must not be emitted a second time.
+                adjacent_groups_in_junction = [
+                    group
+                    for group in adjacent_groups_in_junction
+                    if not ({ll.id for ll in group} & chain_member_ids)
+                ]
+
+            # Create one road per adjacent group within the junction -- or,
+            # when the group's lanes leave the junction into several roads
+            # outside it, one road per outside road.  A connecting road owns
+            # a single road-level <successor>, so a single road here would
+            # name one exit and silently drop the other maneuvers; this is
+            # the exit-side mirror of the in-junction fork the chain merge
+            # above resolves.  ``split_junction_groups_by_connections`` has
+            # already split the group so that every lanelet in it reaches the
+            # same set of outside roads, which is why one copy per outside
+            # road covers every lane.
             for adjacent_group in adjacent_groups_in_junction:
                 # Resolve endpoint overrides from linked regular roads using
                 # lane-aware pinning: the pin target is the rendered lane
@@ -1680,50 +2420,197 @@ class Road:
                     _lane_aware_endpoint(adjacent_group, "following")
                 )
 
-                try:
-                    road = Road.construct_from_lanelet_groups(
-                        lanelet_map=lanelet_map,
-                        lanelet_group=adjacent_group,
-                        road_id=current_road_id,
-                        s_offset=0.0,
-                        traffic_rule=traffic_rule,
-                        parampoly3_config=parampoly3_config,
-                        arcspiral_config=arcspiral_config,
-                        width_config=width_config,
-                        routing_graph=routing_graph,
-                        start_xyz_override=start_override,
-                        end_xyz_override=end_override,
-                        offset=offset,
-                        start_hdg_override=start_hdg_override,
-                        end_hdg_override=end_hdg_override,
-                    )
+                exit_roads = _external_exit_roads(
+                    adjacent_group,
+                    routing_graph,
+                    junction_group_ids,
+                    ll_to_regular_road,
+                )
+                # A single exit (or none this function can name) keeps the
+                # legacy single road, unchanged down to the endpoint pins.
+                exit_fork = len(exit_roads) > 1
+                copy_exit_roads: List[Optional[int]] = (
+                    list(exit_roads) if exit_fork else [None]
+                )
 
-                    # Set the junction field to mark this as a connecting road
-                    road.junction = junction_id
+                # Ownership follows the first copy that was actually built,
+                # not the first one attempted: a failed copy must not leave
+                # the group unclaimed.
+                group_claimed = False
+                for exit_road_id in copy_exit_roads:
+                    try:
+                        road = Road.construct_from_lanelet_groups(
+                            lanelet_map=lanelet_map,
+                            lanelet_group=adjacent_group,
+                            road_id=current_road_id,
+                            s_offset=0.0,
+                            traffic_rule=traffic_rule,
+                            parampoly3_config=parampoly3_config,
+                            arcspiral_config=arcspiral_config,
+                            width_config=width_config,
+                            routing_graph=routing_graph,
+                            start_xyz_override=start_override,
+                            end_xyz_override=end_override,
+                            offset=offset,
+                            start_hdg_override=start_hdg_override,
+                            end_hdg_override=end_hdg_override,
+                        )
 
-                    connecting_roads.append(road)
-                    junction_road_ids.append(current_road_id)
+                        # Set the junction field to mark this as a connecting road
+                        road.junction = junction_id
 
-                    # Store lanelet ID to road ID mapping
-                    for lanelet in adjacent_group:
-                        lanelet_to_road[lanelet.id] = current_road_id
+                        if exit_road_id is not None:
+                            road.exit_fork_successor_road_id = exit_road_id
+                            road.exit_fork_lanelet_ids = sorted(
+                                lanelet.id for lanelet in adjacent_group
+                            )
+                            road.exit_fork_duplicate = group_claimed
 
-                    current_road_id += 1
+                        connecting_roads.append(road)
+                        junction_road_ids.append(current_road_id)
 
-                except Exception as e:
-                    tqdm.write(
-                        f"Warning: Failed to create connecting road in junction {junction_id}: {e}"
-                    )
-                    continue
+                        # Store lanelet ID to road ID mapping.  Only the first
+                        # copy claims the group's lanelets: a lanelet may name
+                        # one (road, lane) pair, and the junction's
+                        # <connection> table is what enumerates the copies.
+                        if not group_claimed:
+                            for lanelet in adjacent_group:
+                                lanelet_to_road[lanelet.id] = current_road_id
+                            group_claimed = True
+
+                        current_road_id += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to create connecting road in junction %d: %s",
+                            junction_id,
+                            e,
+                            exc_info=True,
+                        )
+                        continue
 
             # Store the mapping from junction ID to its road IDs
             junction_to_roads[junction_id] = junction_road_ids
 
-        print(
-            f"Created {len(connecting_roads)} connecting roads across {len(junction_groups)} junctions"
+        logger.info(
+            "Created %d connecting roads across %d junctions",
+            len(connecting_roads),
+            len(junction_groups),
         )
 
         return connecting_roads, junction_to_roads, lanelet_to_road
+
+    @staticmethod
+    def _build_chain_connecting_roads(
+        *,
+        lanelet_map: lanelet2.core.LaneletMap,
+        chain_paths: List[Tuple[List[lanelet2.core.Lanelet], Optional[int]]],
+        junction_id: int,
+        starting_road_id: int,
+        traffic_rule: Optional[str],
+        parampoly3_config: Optional[ParamPoly3Config],
+        arcspiral_config: Optional[ArcSpiralConfig],
+        width_config: Optional[WidthEstimationConfig],
+        offset: CoordinateOffset,
+        lane_aware_endpoint,
+        connecting_roads: List["Road"],
+        junction_road_ids: List[int],
+        lanelet_to_road: Dict[int, int],
+    ) -> int:
+        """Emit one connecting road per end-to-end in-junction path.
+
+        Each road's reference line is fitted over the concatenation of its
+        path's lanelet boundaries, so the whole maneuver is a single road
+        running from an outside road to an outside road.  The endpoints are
+        pinned to the linked regular roads exactly as the single-stage path
+        does, using the path's first and last lanelet.
+
+        A fork's shared stage is traversed by several of these roads, but a
+        lanelet may name only one ``(road, lane)`` pair: the first road that
+        traverses it claims it, so every source lanelet keeps exactly one
+        entry in the lanelet-to-lane mapping and none is dropped.
+
+        ``chain_paths`` pairs each path with the road outside the junction
+        the resulting connector must link to, or ``None`` to resolve it from
+        the routing graph as before.  A path whose last stage leaves the
+        junction into several outside roads appears once per outside road:
+        the exit-side mirror of the in-junction fork, and the same
+        duplication answers it.
+
+        Returns the next free road id.
+        """
+        road_id = starting_road_id
+        claimed: Set[int] = set()
+        for path, exit_road_id in chain_paths:
+            head_group = {path[0]}
+            tail_group = {path[-1]}
+            start_override, start_hdg_override = _split_anchor_pose(
+                lane_aware_endpoint(head_group, "previous")
+            )
+            end_override, end_hdg_override = _split_anchor_pose(
+                lane_aware_endpoint(tail_group, "following")
+            )
+            try:
+                merged_lanelet = _concatenate_chain_lanelet(path)
+                road = Road.construct_from_lanelet_groups(
+                    lanelet_map=lanelet_map,
+                    lanelet_group=[merged_lanelet],
+                    road_id=road_id,
+                    s_offset=0.0,
+                    traffic_rule=traffic_rule,
+                    parampoly3_config=parampoly3_config,
+                    arcspiral_config=arcspiral_config,
+                    width_config=width_config,
+                    # The merged lanelet is synthetic and absent from the
+                    # real map, so the shared graph cannot answer anything
+                    # about it.  A graph over a scratch map holding just this
+                    # lanelet answers the only questions road construction
+                    # asks (``left``/``right`` lane-change adjacency) with
+                    # the same "no neighbour" result, at O(1) cost -- leaving
+                    # ``routing_graph=None`` would rebuild a whole-map graph
+                    # three times per merged road.
+                    routing_graph=_solitary_routing_graph(merged_lanelet),
+                    start_xyz_override=start_override,
+                    end_xyz_override=end_override,
+                    offset=offset,
+                    start_hdg_override=start_hdg_override,
+                    end_hdg_override=end_hdg_override,
+                )
+            except Exception as exc:  # noqa: BLE001 - mirrors legacy handling
+                logger.warning(
+                    "Failed to create chain connecting road in junction %d "
+                    "for lanelets %s: %s",
+                    junction_id,
+                    [ll.id for ll in path],
+                    exc,
+                    exc_info=True,
+                )
+                continue
+
+            road.junction = junction_id
+            road.exit_fork_successor_road_id = exit_road_id
+            road.chain_source_lanelet_ids = [lanelet.id for lanelet in path]
+            road.chain_owned_lanelet_ids = [
+                lanelet.id for lanelet in path if lanelet.id not in claimed
+            ]
+            claimed.update(road.chain_owned_lanelet_ids)
+            # The merged lane stands for several source lanelets, so it may
+            # not claim any single one: ``_set_single_lane_links`` reads the
+            # path's head/tail from ``chain_source_lanelet_ids`` instead, and
+            # ``get_lanelet_to_lane_mapping`` re-attaches the owned ids.
+            chain_lane = road._chain_lane()
+            if chain_lane is not None:
+                chain_lane.lanelet_id = None
+            # Lane-aware pinning by other roads keys off real lanelet ids;
+            # the synthetic merged lanelet is not one.
+            road.sorted_lanelet_ids = None
+
+            connecting_roads.append(road)
+            junction_road_ids.append(road_id)
+            for lanelet in path:
+                lanelet_to_road.setdefault(lanelet.id, road_id)
+            road_id += 1
+        return road_id
 
     @staticmethod
     def set_all_lane_links(
@@ -1752,9 +2639,35 @@ class Road:
         # Build global mapping from lanelet_id to (road_id, lane_id)
         lanelet_to_road_and_lane: Dict[int, Tuple[int, int]] = {}
         for road in roads:
+            if road.exit_fork_duplicate:
+                # A second copy of an exit-forking lateral group: its lanes
+                # carry the same source lanelets as the copy that claimed
+                # them, and a lanelet may name only one ``(road, lane)``
+                # pair.  The junction's <connection> table is what makes the
+                # other copies reachable.
+                continue
             lane_mapping = road.get_lanelet_to_lane_mapping()
             for lanelet_id, lane_id in lane_mapping.items():
                 lanelet_to_road_and_lane[lanelet_id] = (road.id, lane_id)
+
+        # The entry lanelet shared by the branches of an in-junction fork
+        # belongs to no single merged road, so it is absent from the mapping
+        # above (a lanelet may name only one ``(road, lane)`` pair, and
+        # naming one branch would assert a maneuver the others do not make).
+        # The incoming road's lane still has to name *a* lane to continue
+        # into, though, or it is emitted with no ``<link>`` at all. Resolve
+        # such a lanelet to the lowest-numbered merged road that traverses
+        # it — deterministic, and the junction's ``<connection>`` table is
+        # what actually enumerates all the branches.
+        link_resolution: Dict[int, Tuple[int, int]] = dict(lanelet_to_road_and_lane)
+        for road in sorted(roads, key=lambda r: r.id):
+            if not road.chain_source_lanelet_ids:
+                continue
+            lane_id = road._chain_lane_id()
+            if lane_id is None:
+                continue
+            for lanelet_id in road.chain_source_lanelet_ids:
+                link_resolution.setdefault(lanelet_id, (road.id, lane_id))
 
         # Build mapping from road_id to set of existing lane_ids
         # This is used to validate that lane links reference existing lanes
@@ -1781,22 +2694,176 @@ class Road:
                 lanelet_map, traffic_rules, [RoutingCostDistance(0.0)]
             )
 
+        # The non-vehicle subtypes are not vertices of the vehicle routing
+        # graph, so its previous/following lookups return nothing for them
+        # and their lanes were emitted with no <link> at all.  Their
+        # succession comes from shared boundary geometry instead; built once
+        # for the whole map rather than per road.
+        non_vehicle_succession = build_boundary_longitudinal_adjacency(
+            lanelet_map.laneletLayer
+        )
+
         # Set lane links for each road
-        print(f"Building lane links for {len(roads)} roads...")
-        for road in tqdm(roads, desc="Building lane links"):
+        logger.info("Building lane links for %d roads", len(roads))
+        for road in track(roads, "Building lane links", unit="road"):
             try:
                 context = LaneLinksContext(
                     lanelet_map=lanelet_map,
-                    lanelet_to_road_and_lane=lanelet_to_road_and_lane,
+                    lanelet_to_road_and_lane=link_resolution,
                     routing_graph=routing_graph,
                     road_lane_ids=road_lane_ids,
                     road_id_to_road=road_id_to_road,
+                    non_vehicle_succession=non_vehicle_succession,
                 )
                 road.set_lane_links(context)
             except Exception as e:
-                tqdm.write(f"Warning: Failed to set lane links for road {road.id}: {e}")
+                logger.warning(
+                    "Failed to set lane links for road %d: %s",
+                    road.id,
+                    e,
+                    exc_info=True,
+                )
+
+        Road._drop_asymmetric_non_vehicle_lane_links(roads, road_id_to_road)
 
         return lanelet_to_road_and_lane
+
+    #: Lane types emitted for the non-vehicle subtypes whose succession comes
+    #: from geometry rather than the routing graph.  Only these are subject to
+    #: the symmetry pass below; driving lanes are left exactly as they were.
+    _NON_VEHICLE_LANE_TYPES = frozenset(
+        {LaneType.SIDEWALK, LaneType.SHOULDER, LaneType.BIKING}
+    )
+
+    @staticmethod
+    def _drop_asymmetric_non_vehicle_lane_links(
+        roads: List["Road"],
+        road_id_to_road: Dict[int, "Road"],
+    ) -> None:
+        """Remove non-vehicle lane links whose reciprocal does not exist.
+
+        ``road.lane.link.lanes_across_lane_sections`` requires a lane
+        continuing into another lane to be named from *both* sides, and it
+        examines a road boundary from both directions -- so a one-sided link
+        is a finding no matter which side wrote it.
+
+        The road-link consistency guard of issue #202 is applied per lane as
+        each road is processed, and it can pass on one side of a boundary and
+        refuse on the other: measured on nishishinjuku, road 261's
+        predecessor is road-typed toward road 259 while road 259's successor
+        is a junction, so 261's shoulder gets a predecessor link and 259's
+        shoulder gets no successor. That asymmetry is invisible while a road
+        is being processed, because the other road may not have been
+        processed yet, so it can only be resolved once every road has its
+        links.
+
+        It also removes a non-vehicle lane link at a junction-typed road
+        end, where OpenDRIVE says the ``<link>`` shall be omitted. **That
+        removal is invisible to the ASAM totals**: the checker deliberately
+        skips junction-boundary lanes, which is the very case the standard
+        excludes, so the error count is identical with and without this pass
+        (measured on nishishinjuku: 87 either way, while the number of
+        non-vehicle links at a junction end goes from 1 to 0). The totals
+        would hide a regression here in both directions, which is why
+        ``test_no_non_vehicle_lane_link_survives_at_a_junction_end`` asserts
+        the property directly rather than watching the count.
+
+        This pass is strictly subtractive and touches only the lane types in
+        :data:`_NON_VEHICLE_LANE_TYPES`. It can never add a link, never
+        change a driving lane, and never alter a road-level link.
+
+        Args:
+            roads: All roads, already linked.
+            road_id_to_road: ``road_id -> Road`` for resolving link targets.
+        """
+
+        def _lanes(road: "Road"):
+            if road.lanes is None:
+                return
+            for lane_section in road.lanes.lane_sections:
+                for lane in lane_section.left_lanes.values():
+                    yield lane
+                for lane in lane_section.right_lanes.values():
+                    yield lane
+
+        def _lane_by_id(road: Optional["Road"], lane_id: int) -> Optional["Lane"]:
+            if road is None:
+                return None
+            for lane in _lanes(road):
+                if lane.lane_id == lane_id:
+                    return lane
+            return None
+
+        dropped = 0
+        dropped_junction_end = 0
+        dropped_no_reciprocal = 0
+        for road in roads:
+            road_link = road.link
+            if road_link is None:
+                continue
+            for lane in _lanes(road):
+                if lane.lane_type not in Road._NON_VEHICLE_LANE_TYPES:
+                    continue
+                for own_side, road_side in (
+                    ("predecessor", road_link.predecessor),
+                    ("successor", road_link.successor),
+                ):
+                    own_link = getattr(lane, own_side, None)
+                    if own_link is None:
+                        continue
+                    # A junction-typed end resolves through the junction's
+                    # <connection> table, not a reciprocal lane link.
+                    if road_side is None or road_side.element_type != ElementType.ROAD:
+                        setattr(lane, own_side, None)
+                        dropped += 1
+                        dropped_junction_end += 1
+                        continue
+                    # Joining the target at its start means ITS predecessor
+                    # points back at us; at its end, its successor does.
+                    peer_side = (
+                        "predecessor"
+                        if road_side.contact_point == ContactPoint.START
+                        else "successor"
+                    )
+                    peer_lane = _lane_by_id(
+                        road_id_to_road.get(road_side.element_id), own_link.id
+                    )
+                    peer_link = (
+                        getattr(peer_lane, peer_side, None)
+                        if peer_lane is not None
+                        else None
+                    )
+                    if peer_link is None or peer_link.id != lane.lane_id:
+                        setattr(lane, own_side, None)
+                        dropped += 1
+                        dropped_no_reciprocal += 1
+
+        if dropped:
+            # Split by cause, because they are different defects.
+            #
+            # "already at a junction end" is the stale-link class caught in
+            # the act: the standard says to omit a lane <link> there at all.
+            #
+            # "no reciprocal" covers two situations that look identical
+            # here.  One is the road-link guard passing on one side of a
+            # boundary and refusing on the other, which is an ASAM finding
+            # from whichever side the checker reaches.  The other is a link
+            # that is *about to become* stale: measured on nishishinjuku,
+            # road 261's predecessor is still road-typed toward road 259
+            # when this pass runs and is re-pointed at a junction
+            # afterwards, so the link never looks like a junction-end case
+            # to this code but is one by the time the file is written.
+            # Do not read this counter as "the junction-end case did not
+            # occur" -- it means this pass did not *see* it as one.
+            logger.info(
+                "Dropped %d non-vehicle lane link(s): %d already at a "
+                "junction-typed road end, %d with no reciprocal (the "
+                "road-link guard refused the other side, or the end is "
+                "re-pointed at a junction after this pass)",
+                dropped,
+                dropped_junction_end,
+                dropped_no_reciprocal,
+            )
 
     @staticmethod
     def _find_connected_road(
@@ -1844,6 +2911,85 @@ class Road:
         return primary if primary is not None else fallback
 
     @staticmethod
+    def _set_chain_road_links(
+        *,
+        lanelet_map: lanelet2.core.LaneletMap,
+        road: "Road",
+        routing_graph: RoutingGraph,
+        own_junction_lanelet_ids: Set[int],
+        all_junction_lanelet_ids: Set[int],
+        lanelet_to_road_id: Dict[int, int],
+    ) -> None:
+        """Link a chain-merged connecting road to the roads outside it.
+
+        The path already contains every in-junction stage of the maneuver,
+        so both ends must resolve to a road outside *this* junction.  A
+        neighbour still inside it would mean the chain enumeration missed an
+        edge; it is reported rather than linked, because linking it would
+        re-create the single-``<successor>`` bottleneck this merge removes.
+        A neighbour inside a *different* junction is a legitimate
+        junction-to-junction transition and is used as a fallback, exactly
+        as :meth:`_find_connected_road` does for ordinary connecting roads.
+        """
+        path_ids = road.chain_source_lanelet_ids or []
+        if not path_ids:
+            return
+        try:
+            head = lanelet_map.laneletLayer.get(path_ids[0])
+            tail = lanelet_map.laneletLayer.get(path_ids[-1])
+        except Exception:
+            return
+
+        sides = (
+            (
+                head,
+                routing_graph.previous,
+                road.add_predecessor,
+                ContactPoint.END,
+                False,
+            ),
+            (
+                tail,
+                routing_graph.following,
+                road.add_successor,
+                ContactPoint.START,
+                True,
+            ),
+        )
+        for lanelet, get_connected, add_link, contact, is_exit in sides:
+            if is_exit and road.exit_fork_successor_road_id is not None:
+                # This road is one of several copies of the same path, each
+                # carrying one of the outside roads the path's last stage
+                # leads to.  Resolving from the routing graph would give
+                # every copy the first of them and lose the rest.
+                add_link(
+                    element_id=road.exit_fork_successor_road_id,
+                    element_type=ElementType.ROAD,
+                    contact_point=contact,
+                )
+                continue
+            primary: Optional[int] = None
+            fallback: Optional[int] = None
+            for neighbour in get_connected(lanelet):
+                if neighbour.id in own_junction_lanelet_ids:
+                    continue
+                neighbour_road = lanelet_to_road_id.get(neighbour.id)
+                if neighbour_road is None or neighbour_road == road.id:
+                    continue
+                if neighbour.id not in all_junction_lanelet_ids:
+                    primary = neighbour_road
+                    break
+                if fallback is None:
+                    fallback = neighbour_road
+            target = primary if primary is not None else fallback
+            if target is not None:
+                add_link(
+                    element_id=target,
+                    element_type=ElementType.ROAD,
+                    contact_point=contact,
+                )
+
+    @staticmethod
     def set_connecting_road_links(
         lanelet_map: lanelet2.core.LaneletMap,
         connecting_roads: List["Road"],
@@ -1880,16 +3026,52 @@ class Road:
 
         # Get junction lanelet IDs (all lanelets belonging to connecting roads)
         junction_lanelet_ids: set[int] = set()
+        # Per-junction view of the same thing: a chain-merged road must not
+        # link back into its own junction, but a neighbouring junction's
+        # connector is a legitimate target.
+        junction_to_lanelet_ids: dict[int, set[int]] = {}
         for road in connecting_roads:
-            if road.id in road_to_lanelet_ids:
-                junction_lanelet_ids.update(road_to_lanelet_ids[road.id])
+            own_ids: set[int] = set(road_to_lanelet_ids.get(road.id, ()))
+            # A fork's shared prefix is owned by only one of the merged roads
+            # that traverse it, so ``road_to_lanelet_ids`` alone does not see
+            # every in-junction lanelet.
+            if road.chain_source_lanelet_ids:
+                own_ids.update(road.chain_source_lanelet_ids)
+            junction_lanelet_ids.update(own_ids)
+            junction_to_lanelet_ids.setdefault(road.junction, set()).update(own_ids)
 
-        print(f"Setting road links for {len(connecting_roads)} connecting roads...")
-        for road in tqdm(connecting_roads, desc="Building connecting road links"):
-            if road.id not in road_to_lanelet_ids:
+        logger.info("Setting road links for %d connecting roads", len(connecting_roads))
+        for road in track(
+            connecting_roads, "Building connecting road links", unit="road"
+        ):
+            # A chain-merged connecting road spans a whole in-junction
+            # maneuver: its predecessor is read from the path's first lanelet
+            # and its successor from the last.  Going through
+            # ``road_to_lanelet_ids`` instead would resolve the links from
+            # whichever path lanelets this road happens to *own*, and for a
+            # fork branch that is only the tail — whose predecessor is the
+            # shared prefix, i.e. another connecting road.  That is exactly
+            # the chaining this merge exists to remove.
+            if road.chain_source_lanelet_ids:
+                Road._set_chain_road_links(
+                    lanelet_map=lanelet_map,
+                    road=road,
+                    routing_graph=routing_graph,
+                    own_junction_lanelet_ids=junction_to_lanelet_ids.get(
+                        road.junction, set()
+                    ),
+                    all_junction_lanelet_ids=junction_lanelet_ids,
+                    lanelet_to_road_id=lanelet_to_road_id,
+                )
                 continue
 
-            road_lanelet_ids = road_to_lanelet_ids[road.id]
+            # A duplicate of an exit-forking lateral group claims none of the
+            # group's lanelets, so ``road_to_lanelet_ids`` -- which is keyed
+            # by the claiming road -- does not list it.  Its own record of
+            # the group it stands for is what the links are resolved from.
+            road_lanelet_ids = road_to_lanelet_ids.get(road.id) or (
+                road.exit_fork_lanelet_ids or []
+            )
             if not road_lanelet_ids:
                 continue
 
@@ -1931,13 +3113,20 @@ class Road:
                     contact_point=ContactPoint.END,
                 )
 
-            succ_id = Road._find_connected_road(
-                road_lanelets,
-                routing_graph.following,
-                own_lanelet_ids,
-                junction_lanelet_ids,
-                lanelet_to_road_id,
-            )
+            # An exit-forking group is emitted once per road outside the
+            # junction it leads to, and each copy carries its own.
+            # ``_find_connected_road`` returns whichever comes first, so
+            # every copy would otherwise name the same one and the fork
+            # would be lost again.
+            succ_id: Optional[int] = road.exit_fork_successor_road_id
+            if succ_id is None:
+                succ_id = Road._find_connected_road(
+                    road_lanelets,
+                    routing_graph.following,
+                    own_lanelet_ids,
+                    junction_lanelet_ids,
+                    lanelet_to_road_id,
+                )
             if succ_id is not None:
                 road.add_successor(
                     element_id=succ_id,
@@ -1959,6 +3148,14 @@ class Road:
         through junctions. Issue #132 fix: Use connection.contactPoint directly
         instead of checking connecting road links, which may only reference
         one of multiple incoming roads.
+
+        A slot that already names *another* junction is left alone, because
+        there is nothing useful to do about it here: a road end carries one
+        link slot, so overwriting would only move the dead rows from one
+        junction to the other. Two junctions claiming one road end are two
+        descriptions of one place; they are merged afterwards by
+        ``junction_claims.merge_contested_junction_claims``, which is where
+        that conflict is settled.
 
         Args:
             roads: List of all roads (both regular and connecting roads)
@@ -2109,6 +3306,7 @@ class Road:
             road_to_lanelet_ids, road_junction, routing_previous
         )
         _apply_outgoing_junction_links(roads, outgoing_links)
-        print(
-            f"Set junction predecessor links for {len(outgoing_links)} outgoing roads"
+        logger.info(
+            "Set junction predecessor links for %d outgoing roads",
+            len(outgoing_links),
         )

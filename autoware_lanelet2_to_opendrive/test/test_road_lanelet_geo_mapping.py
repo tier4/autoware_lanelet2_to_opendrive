@@ -20,18 +20,28 @@ from autoware_lanelet2_to_opendrive.opendrive.geometry import (
 from autoware_lanelet2_to_opendrive.opendrive.road import Road
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+    _MATCH_THRESHOLD,
     GeoRoadLaneletMapping,
     MappingMismatchError,
+    ReferenceMatchDistance,
     _bbox,
     _bboxes_overlap,
     _build_boundary_grid,
     _CANDIDATE_BBOX_MARGIN,
     _grid_candidate_positions,
     _RoadCandidates,
+    _REPORT_METRIC_NAME,
+    _accuracy_report_key,
     _resolve_conflicts,
     _sample_reference_line_from_road,
+    _directed_mean_distance,
+    _symmetric_max_polyline_distance,
+    _symmetric_mean_distance,
+    _symmetric_mean_polyline_distance,
+    build_mapping,
     parse_roads_from_xodr,
     save_mapping_json,
+    summarise_reference_match_accuracy,
     validate_mapping_consistency,
 )
 
@@ -183,6 +193,61 @@ class TestSaveMappingJson:
         assert restored.xodr_sha256 == original.xodr_sha256
         assert restored.osm_sha256 == original.osm_sha256
 
+    def test_additional_road_lanes_is_absent_when_empty(self, tmp_path: Path) -> None:
+        """A map with no in-junction fork writes the key not at all.
+
+        The field is empty for the overwhelming majority of lanelets, so
+        omitting it keeps the sidecar of an ordinary map byte-identical to
+        what it was before the field existed.
+        """
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        mapping = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+        )
+        data = json.loads(save_mapping_json(mapping, xodr_path).read_text("utf-8"))
+        assert "lanelet_additional_road_lanes" not in data
+
+    def test_round_trip_preserves_additional_road_lanes(self, tmp_path: Path) -> None:
+        """The extra ``(road, lane)`` pairs survive the JSON round trip.
+
+        JSON has no tuples, so the pairs come back as lists unless the
+        reader rebuilds them; the reverse index and every existing consumer
+        compare against tuples.
+        """
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            lanelet_additional_road_lanes={10: [(2, -1), (3, -1)]},
+        )
+        data = json.loads(save_mapping_json(original, xodr_path).read_text("utf-8"))
+        assert data["lanelet_additional_road_lanes"] == {"10": [[2, -1], [3, -1]]}
+
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.lanelet_additional_road_lanes == {10: [(2, -1), (3, -1)]}
+        # The 1:1 field and the reverse index are untouched by the widening.
+        assert restored.lanelet_to_road_and_lane == {10: (1, -1)}
+        assert restored.road_lane_to_lanelet == {(1, -1): 10}
+
+    def test_mapping_without_additional_road_lanes_still_loads(self) -> None:
+        """A sidecar written before the field existed loads unchanged."""
+        restored = GeoRoadLaneletMapping.from_dict(
+            {
+                "xodr_sha256": "abc",
+                "osm_sha256": "def",
+                "lanelet_to_road_and_lane": {"10": [1, -1]},
+            }
+        )
+        assert restored.lanelet_additional_road_lanes is None
+        assert restored.lanelet_to_road_and_lane == {10: (1, -1)}
+
     def test_round_trip_preserves_skipped_synthetic_roads(self, tmp_path: Path) -> None:
         """#493: synthetic divergence connectors are recorded in the mapping
         JSON so consumers can tell them apart from real mapping failures."""
@@ -201,6 +266,761 @@ class TestSaveMappingJson:
         assert data["skipped_synthetic_roads"] == [274, 290, 303]
         restored = GeoRoadLaneletMapping.from_dict(data)
         assert restored.skipped_synthetic_roads == [274, 290, 303]
+
+    def test_round_trip_preserves_reference_match_distances(
+        self, tmp_path: Path
+    ) -> None:
+        """Positional error against the Lanelet2 input survives the JSON."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        records = {
+            10: ReferenceMatchDistance(
+                max_m=0.1234, mean_m=0.05, boundary_length_m=40.0
+            ),
+            11: ReferenceMatchDistance(max_m=2.5, mean_m=0.4, boundary_length_m=17.5),
+        }
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            reference_match_distances=records,
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["reference_match_distances"]["10"] == {
+            "max_m": 0.1234,
+            "mean_m": 0.05,
+            "boundary_length_m": 40.0,
+        }
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.reference_match_distances == records
+
+    def test_round_trip_preserves_rescued_reference_lanelets(
+        self, tmp_path: Path
+    ) -> None:
+        """Rescued matches are flagged so a report cannot claim they are
+        within the matching tolerance — the rescue pass accepts more."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+            reference_match_distances={
+                10: ReferenceMatchDistance(max_m=0.5, mean_m=0.2),
+                11: ReferenceMatchDistance(max_m=4.6, mean_m=4.6),
+            },
+            rescued_reference_lanelets=[11],
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["rescued_reference_lanelets"] == [11]
+        restored = GeoRoadLaneletMapping.from_dict(data)
+        assert restored.rescued_reference_lanelets == [11]
+
+    def test_absent_reference_match_distances_stay_absent(self, tmp_path: Path) -> None:
+        """Mappings from before this field existed round-trip unchanged."""
+        xodr_path = tmp_path / "test.xodr"
+        xodr_path.write_text("<OpenDRIVE/>")
+
+        original = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={10: (1, -1)},
+        )
+        result_path = save_mapping_json(original, xodr_path)
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert "reference_match_distances" not in data
+        assert GeoRoadLaneletMapping.from_dict(data).reference_match_distances is None
+
+    def test_legacy_float_reference_match_distances_still_load(self) -> None:
+        """A mapping written before the record existed stored a bare float.
+
+        That float was the mean; the maximum cannot be recovered from it, so
+        it stands in for both rather than the whole record being dropped.
+        """
+        restored = GeoRoadLaneletMapping.from_dict(
+            {
+                "xodr_sha256": "abc",
+                "osm_sha256": "def",
+                "lanelet_to_road_and_lane": {"10": [1, -1]},
+                "reference_match_distances": {"10": 0.25, "11": 1.5},
+            }
+        )
+        assert restored.reference_match_distances == {
+            10: ReferenceMatchDistance(max_m=0.25, mean_m=0.25, boundary_length_m=None),
+            11: ReferenceMatchDistance(max_m=1.5, mean_m=1.5, boundary_length_m=None),
+        }
+
+        # And it still summarises — minus the density, which needs the
+        # boundary lengths the old format never recorded.
+        summary = summarise_reference_match_accuracy(restored)
+        assert summary["count"] == 2
+        assert summary["max_m"] == pytest.approx(1.5)
+        assert summary["matched_boundary_length_m"] is None
+        assert all(exc["per_km"] is None for exc in summary["exceedances"])
+
+
+# ---------------------------------------------------------------------------
+# summarise_reference_match_accuracy
+# ---------------------------------------------------------------------------
+
+
+#: Configured exceedance levels, ordered least to most severe.
+_EXCEEDANCE_LEVELS = DEFAULT_CONFIG.geo_mapping.exceedance_thresholds_m
+
+
+def _mapping_with_distances(
+    distances: dict[int, float],
+    rescued: list[int] | None = None,
+    means: dict[int, float] | None = None,
+    boundary_lengths: dict[int, float] | None = None,
+) -> GeoRoadLaneletMapping:
+    """Mapping whose per-lanelet records carry ``distances`` as the maxima."""
+    records = {
+        lid: ReferenceMatchDistance(
+            max_m=d,
+            mean_m=(means or {}).get(lid, d),
+            boundary_length_m=(boundary_lengths or {}).get(lid),
+        )
+        for lid, d in distances.items()
+    }
+    return GeoRoadLaneletMapping(
+        xodr_sha256="abc",
+        osm_sha256="def",
+        lanelet_to_road_and_lane={lid: (lid, -1) for lid in distances},
+        reference_match_distances=records or None,
+        rescued_reference_lanelets=rescued,
+    )
+
+
+class TestSummariseReferenceMatchAccuracy:
+    def test_no_distances_returns_empty(self) -> None:
+        assert summarise_reference_match_accuracy(_mapping_with_distances({})) == {}
+
+    def test_reports_distribution(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.1, 2: 0.2, 3: 0.3})
+        )
+        assert summary["count"] == 3
+        assert summary["median_m"] == pytest.approx(0.2)
+        assert summary["max_m"] == pytest.approx(0.3)
+        assert summary["match_threshold_m"] == _MATCH_THRESHOLD
+
+    def test_warn_threshold_defaults_to_half_the_matching_tolerance(self) -> None:
+        summary = summarise_reference_match_accuracy(_mapping_with_distances({1: 0.1}))
+        assert summary["warn_threshold_m"] == pytest.approx(_MATCH_THRESHOLD / 2.0)
+
+    def test_lists_worst_offenders_sorted_by_distance(self) -> None:
+        """A match just inside the tolerance passes matching but is not accurate."""
+        near_limit = _MATCH_THRESHOLD - 0.1
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.05, 2: near_limit, 3: _MATCH_THRESHOLD / 2.0})
+        )
+        assert [w["lanelet_id"] for w in summary["worst"]] == [2, 3]
+        assert summary["worst"][0]["distance_m"] == pytest.approx(near_limit)
+
+    def test_accurate_map_reports_no_offenders(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.01, 2: 0.02, 3: 0.03})
+        )
+        assert summary["worst"] == []
+
+    def test_explicit_warn_threshold_is_honoured(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.5, 2: 1.5}), warn_threshold=1.0
+        )
+        assert [w["lanelet_id"] for w in summary["worst"]] == [2]
+        assert summary["warn_threshold_m"] == 1.0
+
+    def test_thresholds_come_from_the_geo_mapping_config(self) -> None:
+        summary = summarise_reference_match_accuracy(_mapping_with_distances({1: 0.1}))
+        geo = DEFAULT_CONFIG.geo_mapping
+        assert summary["warn_threshold_m"] == pytest.approx(
+            geo.match_threshold * geo.warn_threshold_factor
+        )
+        assert summary["rescue_threshold_m"] == pytest.approx(
+            geo.match_threshold * geo.rescue_threshold_factor
+        )
+
+    def test_metric_name_is_reported(self) -> None:
+        """All values share one metric, so the summary can name it."""
+        summary = summarise_reference_match_accuracy(_mapping_with_distances({1: 0.1}))
+        assert summary["metric"] == _REPORT_METRIC_NAME
+
+    def test_rescued_matches_above_the_tolerance_are_counted(self) -> None:
+        """A rescued road may sit beyond the matching tolerance; saying every
+        match is "within tolerance" would be wrong for it."""
+        rescue_dist = _MATCH_THRESHOLD + 1.0
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.1, 2: rescue_dist}, rescued=[2])
+        )
+        assert summary["rescued_count"] == 1
+        assert summary["above_match_threshold"] == 1
+        assert summary["max_m"] == pytest.approx(rescue_dist)
+        assert summary["worst"][0] == {
+            "lanelet_id": 2,
+            "distance_m": pytest.approx(rescue_dist),
+            "mean_distance_m": pytest.approx(rescue_dist),
+            "rescued": True,
+        }
+
+    def test_non_rescued_matches_are_flagged_as_such(self) -> None:
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: _MATCH_THRESHOLD - 0.1})
+        )
+        assert summary["rescued_count"] == 0
+        assert summary["above_match_threshold"] == 0
+        assert summary["worst"][0]["rescued"] is False
+
+    def test_absolute_max_names_the_lanelet_it_belongs_to(self) -> None:
+        """The headline max is actionable only if it says where to look."""
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.1, 2: 1.9, 3: 0.4})
+        )
+        assert summary["max_m"] == pytest.approx(1.9)
+        assert summary["worst_lanelet_id"] == 2
+
+    def test_secondary_statistics_are_labelled_scale_dependent(self) -> None:
+        """Median and p95 stay, but flagged: they move when easy roads are
+        added, so they cannot be compared between maps."""
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances({1: 0.1, 2: 0.2, 3: 0.3})
+        )
+        assert "median_m" in summary["scale_dependent_keys"]
+        assert "p95_m" in summary["scale_dependent_keys"]
+
+    def test_median_is_scale_dependent_but_the_count_is_not(self) -> None:
+        """Adding well-converted roads must not make the map look better.
+
+        The same three bad roads are reported identically once ten good ones
+        are added; only the median improves, which is exactly why it is not
+        the headline.
+        """
+        bad = {1: 0.6, 2: 1.4, 3: 2.0}
+        small = summarise_reference_match_accuracy(_mapping_with_distances(bad))
+        padded = summarise_reference_match_accuracy(
+            _mapping_with_distances({**bad, **{100 + i: 0.01 for i in range(10)}})
+        )
+
+        counts_small = [exc["count"] for exc in small["exceedances"]]
+        counts_padded = [exc["count"] for exc in padded["exceedances"]]
+        assert counts_small == counts_padded
+        assert padded["max_m"] == pytest.approx(small["max_m"])
+        assert padded["median_m"] < small["median_m"]
+
+    def test_counts_roads_above_each_configured_threshold(self) -> None:
+        inaccuracy, error = _EXCEEDANCE_LEVELS
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances(
+                {
+                    1: 0.05,  # below both
+                    2: inaccuracy[1] + 0.1,  # modelling inaccuracy only
+                    3: error[1] + 0.1,  # both
+                    4: error[1] + 2.0,  # both
+                }
+            )
+        )
+        by_label = {exc["label"]: exc for exc in summary["exceedances"]}
+        assert by_label[inaccuracy[0]]["threshold_m"] == pytest.approx(inaccuracy[1])
+        assert by_label[inaccuracy[0]]["count"] == 3
+        assert by_label[inaccuracy[0]]["fraction"] == pytest.approx(0.75)
+        assert by_label[error[0]]["count"] == 2
+        assert by_label[error[0]]["fraction"] == pytest.approx(0.5)
+
+    def test_thresholds_come_from_config_not_hardcoded(self) -> None:
+        summary = summarise_reference_match_accuracy(_mapping_with_distances({1: 0.1}))
+        assert [
+            (exc["label"], exc["threshold_m"]) for exc in summary["exceedances"]
+        ] == [(label, pytest.approx(value)) for label, value in _EXCEEDANCE_LEVELS]
+
+    def test_exceedance_density_is_per_kilometre_of_matched_boundary(self) -> None:
+        """Two roads over the error threshold in 500 m is 4 per km."""
+        error_label, error_threshold = _EXCEEDANCE_LEVELS[1]
+        summary = summarise_reference_match_accuracy(
+            _mapping_with_distances(
+                {1: 0.05, 2: error_threshold + 0.5, 3: error_threshold + 0.5},
+                boundary_lengths={1: 200.0, 2: 200.0, 3: 100.0},
+            )
+        )
+        assert summary["matched_boundary_length_m"] == pytest.approx(500.0)
+        by_label = {exc["label"]: exc for exc in summary["exceedances"]}
+        assert by_label[error_label]["per_km"] == pytest.approx(4.0)
+
+    def test_density_is_independent_of_map_size(self) -> None:
+        """A map twice the size with twice the problems scores the same."""
+        _, threshold = _EXCEEDANCE_LEVELS[1]
+        bad = threshold + 0.5
+        small = summarise_reference_match_accuracy(
+            _mapping_with_distances(
+                {1: 0.05, 2: bad}, boundary_lengths={1: 500.0, 2: 500.0}
+            )
+        )
+        large = summarise_reference_match_accuracy(
+            _mapping_with_distances(
+                {1: 0.05, 2: bad, 3: 0.05, 4: bad},
+                boundary_lengths={1: 500.0, 2: 500.0, 3: 500.0, 4: 500.0},
+            )
+        )
+        assert large["exceedances"][1]["per_km"] == pytest.approx(
+            small["exceedances"][1]["per_km"]
+        )
+        assert large["exceedances"][1]["count"] == 2 * small["exceedances"][1]["count"]
+
+
+class TestSummaryHeadlineIsScaleIndependent:
+    """The headline figure must not improve when well-converted roads appear.
+
+    ``median_m`` and ``p95_m`` describe the mix of roads in one particular
+    map. Convert a wider area that happens to contain more easy roads and both
+    fall, with nothing having been fixed, so two maps cannot be compared by
+    them and a regression can hide behind growth. The headline therefore has
+    to be a count of roads past each severity level, which does not move when
+    accurate roads are added.
+    """
+
+    def test_adding_accurate_roads_leaves_the_headline_alone(self) -> None:
+        offenders = {1: 0.2, 2: 1.4}
+        small = summarise_reference_match_accuracy(_mapping_with_distances(offenders))
+        large = summarise_reference_match_accuracy(
+            _mapping_with_distances({**offenders, **{i: 0.01 for i in range(10, 60)}})
+        )
+
+        assert "exceedances" in small, (
+            "the summary has no count-based headline: median_m and p95_m alone "
+            "cannot be compared between maps of different size"
+        )
+        assert [e["count"] for e in small["exceedances"]] == [
+            e["count"] for e in large["exceedances"]
+        ]
+        # The statistics this guards against do move, which is the point.
+        assert large["median_m"] < small["median_m"]
+
+
+# ---------------------------------------------------------------------------
+# Reporting distance metric (point-to-segment vs point-to-vertex)
+# ---------------------------------------------------------------------------
+
+
+def _polyline(y: float, x_values: list[float]) -> np.ndarray:
+    """Horizontal polyline at height ``y`` through ``x_values``."""
+    return np.array([[float(x), float(y)] for x in x_values])
+
+
+class TestReportDistanceMetric:
+    """The reported accuracy must not charge boundary vertex spacing as error.
+
+    A Lanelet2 boundary is a handful of vertices metres apart; the road
+    reference line is sampled every 0.5 m.  Measured against the boundary's
+    *vertices*, a reference line lying exactly on the boundary still reports
+    roughly a quarter of the vertex spacing.
+    """
+
+    #: Boundary vertices 5 m apart, reference line sampled every 0.5 m.
+    SPARSE_X = [float(x) for x in range(0, 105, 5)]
+    DENSE_X = [0.5 * i for i in range(201)]
+
+    def test_perfect_fit_over_sparse_vertices_reports_zero(self) -> None:
+        boundary = _polyline(0.0, self.SPARSE_X)
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+    def test_matching_metric_is_left_unchanged(self) -> None:
+        """The vertex-based metric still reports ~1.25 m for the same input.
+
+        It is deliberately untouched: it decides matches, and this fix is a
+        reporting fix only.
+        """
+        boundary = _polyline(0.0, self.SPARSE_X)
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_distance(ref_line, boundary) == pytest.approx(
+            1.24, abs=0.01
+        )
+
+    def test_constant_offset_is_reported_exactly(self) -> None:
+        boundary = _polyline(0.0, self.SPARSE_X)
+        ref_line = _polyline(0.2, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.2
+        )
+
+    def test_two_point_boundary_is_handled(self) -> None:
+        boundary = _polyline(0.0, [0.0, 100.0])
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+    def test_duplicate_vertices_do_not_divide_by_zero(self) -> None:
+        boundary = np.array([[0.0, 0.0], [0.0, 0.0], [100.0, 0.0]])
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_mean_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+    def test_max_form_agrees_with_the_mean_on_a_constant_offset(self) -> None:
+        """With no variation along the road the two forms coincide."""
+        boundary = _polyline(0.0, self.SPARSE_X)
+        ref_line = _polyline(0.2, self.DENSE_X)
+        assert _symmetric_max_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.2
+        )
+
+    def test_max_form_handles_a_two_point_boundary(self) -> None:
+        boundary = _polyline(0.0, [0.0, 100.0])
+        ref_line = _polyline(0.0, self.DENSE_X)
+        assert _symmetric_max_polyline_distance(ref_line, boundary) == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+
+# ---------------------------------------------------------------------------
+# build_mapping — positional accuracy report
+# ---------------------------------------------------------------------------
+
+
+def _make_linestring(y: float, x_values: list[float]):
+    """Lanelet2 LineString3d running along ``x_values`` at height ``y``."""
+    import lanelet2
+
+    points = [
+        lanelet2.core.Point3d(lanelet2.core.getId(), float(x), float(y), 0.0)
+        for x in x_values
+    ]
+    return lanelet2.core.LineString3d(lanelet2.core.getId(), points)
+
+
+def _make_linestring_xy(x_values: list[float], y_values: list[float]):
+    """Lanelet2 LineString3d through explicit ``(x, y)`` pairs."""
+    import lanelet2
+
+    points = [
+        lanelet2.core.Point3d(lanelet2.core.getId(), float(x), float(y), 0.0)
+        for x, y in zip(x_values, y_values)
+    ]
+    return lanelet2.core.LineString3d(lanelet2.core.getId(), points)
+
+
+def _make_lanelet(left, right):
+    """Convertible (``subtype=road``) lanelet from two boundary linestrings."""
+    import lanelet2
+
+    lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), left, right)
+    lanelet.attributes["subtype"] = "road"
+    return lanelet
+
+
+def _straight_road_xml(
+    road_id: int, y: float, length: float, lane_ids: list[int]
+) -> str:
+    """XODR ``<road>`` whose planView is a straight line at height ``y``."""
+    lanes = "".join(f"<lane id='{lid}' type='driving'/>" for lid in lane_ids)
+    return (
+        f"<road id='{road_id}' junction='-1'><planView>"
+        f"<geometry s='0.0' x='0.0' y='{y}' hdg='0.0' length='{length}'>"
+        f"<line/></geometry></planView>"
+        f"<lanes><laneSection s='0.0'><right>{lanes}</right></laneSection></lanes>"
+        f"</road>"
+    )
+
+
+def _make_lanelet_of_subtype(left, right, subtype: str):
+    """Lanelet carrying an explicit ``subtype`` attribute."""
+    import lanelet2
+
+    lanelet = lanelet2.core.Lanelet(lanelet2.core.getId(), left, right)
+    lanelet.attributes["subtype"] = subtype
+    return lanelet
+
+
+def _two_sided_road_xml(
+    road_id: int,
+    y: float,
+    length: float,
+    left_lane_ids: list[int],
+    right_lane_ids: list[int],
+) -> str:
+    """XODR ``<road>`` with lanes on both sides of its reference line.
+
+    This is the cross-section the carriageway reference line produces: the
+    reference line follows the outermost *vehicle* lanelet, so an attached
+    shoulder or footway beside it lands on the other side and takes a
+    negative id under LHT.
+    """
+    left = "".join(f"<lane id='{lid}' type='driving'/>" for lid in left_lane_ids)
+    right = "".join(f"<lane id='{lid}' type='sidewalk'/>" for lid in right_lane_ids)
+    return (
+        f"<road id='{road_id}' junction='-1'><planView>"
+        f"<geometry s='0.0' x='0.0' y='{y}' hdg='0.0' length='{length}'>"
+        f"<line/></geometry></planView>"
+        f"<lanes><laneSection s='0.0'>"
+        f"<left>{left}</left><right>{right}</right>"
+        f"</laneSection></lanes>"
+        f"</road>"
+    )
+
+
+def _parse_roads(*road_xml: str) -> list[Road]:
+    import lxml.etree as ET
+
+    return parse_roads_from_xodr(
+        Path("unused.xodr"),
+        xodr_root=ET.fromstring("<OpenDRIVE>" + "".join(road_xml) + "</OpenDRIVE>"),
+    )
+
+
+class TestAccuracyReportKey:
+    """``_accuracy_report_key`` must name the lanelet that was measured.
+
+    The reference line is a boundary of exactly one lanelet of the walk, and
+    the accuracy figure is only meaningful against that one.  The walk does
+    not start there on a road with an attached shoulder or footway, so the
+    key cannot be the walk start.
+
+    It must also not name a lanelet another road was already filed under.
+    The report is a plain dict keyed by lanelet, so a collision does not
+    merge the two figures: it deletes one.  The walk start could not collide
+    -- it is the lanelet Phase 1 matched and Phase 2 made unique per road --
+    but the reference-lane lanelet sits *inside* the walk, and the walk
+    covers the whole cross-section, which two roads can overlap on.
+    """
+
+    #: LHT cross-section, outermost first, as the walk emits it: an attached
+    #: footway at lane -1, the carriageway at lane +1, an inner lane at +2.
+    #: ``(lanelet id, road id, lane id)``.
+    LHT_WALK = [(10, 1, -1), (11, 1, 1), (12, 1, 2)]
+    #: The RHT mirror: the reference lane is -1 there.
+    RHT_WALK = [(20, 2, 1), (21, 2, -1), (22, 2, -2)]
+
+    def test_the_reference_lane_is_preferred_over_the_walk_start(self) -> None:
+        """The lanelet whose boundary *is* the reference line wins."""
+        assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken=()) == 11
+        assert _accuracy_report_key(self.RHT_WALK, is_rht=True, taken=()) == 21
+
+    def test_an_already_measured_reference_lane_falls_back_to_the_walk_start(
+        self,
+    ) -> None:
+        """A second road keeps its old, pessimistic key rather than vanishing.
+
+        Both keys stay in play, so both roads are reported.  The fallback
+        figure is the one the road carried before the key was moved to the
+        reference lane -- too pessimistic, but present.  Measured on the
+        customer map, moving the key lost 5 of 17,473 roads this way.
+        """
+        assert _accuracy_report_key(self.LHT_WALK, is_rht=False, taken={11}) == 10
+        assert _accuracy_report_key(self.RHT_WALK, is_rht=True, taken={21}) == 20
+
+    def test_a_walk_short_of_the_reference_lane_uses_the_walk_start(self) -> None:
+        """No reference lane in the walk: the figure stays where it was."""
+        short = [(30, 3, -2), (31, 3, -3)]
+        assert _accuracy_report_key(short, is_rht=True, taken=()) == 30
+
+
+class TestBuildMappingAccuracyReport:
+    """``reference_match_distances`` must be an honest accuracy figure."""
+
+    #: 20 m of road; boundaries sampled at the reference-line sample spacing
+    #: so that these cases isolate one effect at a time.
+    DENSE_X = [0.5 * i for i in range(41)]
+
+    def test_perfect_fit_with_sparse_boundary_reports_zero(self) -> None:
+        """A road lying exactly on a 5 m-spaced boundary reports ~0 m, not ~1.25 m."""
+        import lanelet2
+
+        sparse_x = [float(x) for x in range(0, 105, 5)]
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, sparse_x), _make_linestring(-3.0, sparse_x)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        roads = _parse_roads(_straight_road_xml(1, 0.0, 100.0, [-1]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        assert mapping.lanelet_to_road_and_lane == {lanelet.id: (1, -1)}
+        assert mapping.reference_match_distances is not None
+        record = mapping.reference_match_distances[lanelet.id]
+        assert record.max_m == pytest.approx(0.0, abs=1e-6)
+        assert record.mean_m == pytest.approx(0.0, abs=1e-6)
+        assert record.boundary_length_m == pytest.approx(100.0)
+
+    def test_rescued_road_is_included_in_the_report(self) -> None:
+        """A road recovered by the rescue pass carries positional error too.
+
+        Road 1 sits exactly on lanelet A; road 2 is within the matching
+        tolerance of A as well, loses the conflict and is dropped, then the
+        rescue pass recovers it on lanelet B at 4.6 m — beyond the 3.5 m
+        matching tolerance.  Omitting it understates ``max`` and ``p95``.
+        """
+        import lanelet2
+
+        lanelet_a = _make_lanelet(
+            _make_linestring(0.0, self.DENSE_X), _make_linestring(-3.0, self.DENSE_X)
+        )
+        lanelet_b = _make_lanelet(
+            _make_linestring(-8.0, self.DENSE_X), _make_linestring(-11.0, self.DENSE_X)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet_a)
+        lanelet_map.add(lanelet_b)
+
+        roads = _parse_roads(
+            _straight_road_xml(1, 0.0, 20.0, [-1]),
+            _straight_road_xml(2, -3.4, 20.0, [-1]),
+        )
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        distances = mapping.reference_match_distances
+        assert distances is not None
+        assert distances[lanelet_a.id].max_m == pytest.approx(0.0, abs=1e-6)
+        assert distances[lanelet_b.id].max_m == pytest.approx(4.6, abs=1e-6)
+        assert mapping.rescued_reference_lanelets == [lanelet_b.id]
+
+        summary = summarise_reference_match_accuracy(mapping)
+        assert summary["count"] == 2
+        assert summary["max_m"] == pytest.approx(4.6, abs=1e-6)
+        assert summary["worst_lanelet_id"] == lanelet_b.id
+        assert summary["rescued_count"] == 1
+        assert summary["above_match_threshold"] == 1
+        # Two 20 m boundaries matched -> 40 m; one road over each threshold.
+        assert summary["matched_boundary_length_m"] == pytest.approx(40.0)
+        assert summary["exceedances"][0]["per_km"] == pytest.approx(25.0)
+
+    def test_distance_is_keyed_by_the_lanelet_the_walk_used(self) -> None:
+        """When the pre-walk corrects the reference, the key follows it.
+
+        The road's reference line is closest to the *inner* lanelet's left
+        boundary, so Phase 1 picks lanelet 2.  The adjacency pre-walk then
+        corrects the reference to lanelet 1 — the true edge lanelet — and the
+        distance belongs to lanelet 1, measured against *its* boundary.
+        """
+        import lanelet2
+
+        outer_left = _make_linestring(0.0, self.DENSE_X)
+        shared = _make_linestring(-3.0, self.DENSE_X)
+        inner_right = _make_linestring(-6.0, self.DENSE_X)
+        lanelet_1 = _make_lanelet(outer_left, shared)
+        lanelet_2 = _make_lanelet(shared, inner_right)
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet_1)
+        lanelet_map.add(lanelet_2)
+
+        roads = _parse_roads(_straight_road_xml(1, -2.6, 20.0, [-1, -2]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        assert mapping.lanelet_to_road_and_lane == {
+            lanelet_1.id: (1, -1),
+            lanelet_2.id: (1, -2),
+        }
+        distances = mapping.reference_match_distances
+        assert distances is not None
+        # Keyed by lanelet 1 (the reference the walk used), not lanelet 2
+        # (the Phase-1 pick), and measured against lanelet 1's boundary.
+        assert set(distances) == {lanelet_1.id}
+        assert distances[lanelet_1.id].max_m == pytest.approx(2.6, abs=1e-6)
+
+    def _two_sided_cross_section(self):
+        """LHT cross-section with a footway attached beside the carriageway.
+
+        Mirrors the real map: two ``road`` lanelets side by side and a
+        ``pedestrian_lane`` sharing the outer carriageway boundary.  Under
+        LHT the road reference line is the outermost *vehicle* lanelet's
+        right boundary, so it runs at y = 0 -- between the carriageway and
+        the footway -- and the footway sits on the negative side.
+
+        Returns ``(lanelet_map, carriageway, inner, footway)``.
+        """
+        import lanelet2
+
+        inner_left = _make_linestring(7.0, self.DENSE_X)
+        shared_inner = _make_linestring(3.5, self.DENSE_X)
+        reference = _make_linestring(0.0, self.DENSE_X)
+        footway_right = _make_linestring(-2.0, self.DENSE_X)
+
+        inner = _make_lanelet(inner_left, shared_inner)
+        carriageway = _make_lanelet(shared_inner, reference)
+        footway = _make_lanelet_of_subtype(reference, footway_right, "pedestrian_lane")
+
+        lanelet_map = lanelet2.core.LaneletMap()
+        for lanelet in (inner, carriageway, footway):
+            lanelet_map.add(lanelet)
+        return lanelet_map, carriageway, inner, footway
+
+    def test_accuracy_is_measured_against_the_reference_lane_not_the_walk_start(
+        self,
+    ) -> None:
+        """A two-sided road must not be charged the attached lane's width.
+
+        Phase 1 correctly matches the road's reference line to the
+        carriageway lanelet, whose right boundary it *is*.  The adjacency
+        walk then starts from the footway, because that is the outermost
+        lanelet of the whole cross-section and the walk runs inward -- which
+        is right for the lane ids and wrong for the accuracy key.  Measuring
+        the reference line against the footway's own right boundary charges
+        the road the footway's full width (2 m here) for geometry that is
+        exact.
+        """
+        lanelet_map, carriageway, inner, footway = self._two_sided_cross_section()
+
+        roads = _parse_roads(_two_sided_road_xml(1, 0.0, 20.0, [1, 2], [-1]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        # The lane ids themselves are already right: the walk covers the
+        # whole cross-section from the footway inward.
+        assert mapping.lanelet_to_road_and_lane == {
+            footway.id: (1, -1),
+            carriageway.id: (1, 1),
+            inner.id: (1, 2),
+        }
+
+        distances = mapping.reference_match_distances
+        assert distances is not None
+        # One boundary per road, and it must be the one the reference line
+        # was generated from -- the lane-1 lanelet's right boundary.
+        assert set(distances) == {carriageway.id}
+        assert distances[carriageway.id].max_m == pytest.approx(0.0, abs=1e-6)
+        assert distances[carriageway.id].mean_m == pytest.approx(0.0, abs=1e-6)
+
+    def test_a_localised_spike_is_reported_by_the_max(self) -> None:
+        """One bad vertex on an otherwise exact road must not be averaged away.
+
+        The road lies exactly on its source boundary except for a single
+        vertex pushed 1.5 m aside.  ``max_m`` reports that 1.5 m; ``mean_m``
+        divides it by the road's whole length and reports centimetres, which
+        is why it is only the secondary figure.
+        """
+        import lanelet2
+
+        spike_m = 1.5
+        left_x = list(self.DENSE_X)
+        left_y = [-spike_m if x == 10.0 else 0.0 for x in left_x]
+        left = _make_linestring_xy(left_x, left_y)
+        lanelet = _make_lanelet(left, _make_linestring(-3.0, left_x))
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        roads = _parse_roads(_straight_road_xml(1, 0.0, 20.0, [-1]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        assert mapping.lanelet_to_road_and_lane == {lanelet.id: (1, -1)}
+        assert mapping.reference_match_distances is not None
+        record = mapping.reference_match_distances[lanelet.id]
+        assert record.max_m == pytest.approx(spike_m, abs=1e-6)
+        assert record.mean_m < spike_m / 10.0
+
+        # And the summary counts it as an exceedance rather than hiding it
+        # behind a small median.
+        summary = summarise_reference_match_accuracy(mapping)
+        assert summary["max_m"] == pytest.approx(spike_m, abs=1e-6)
+        assert summary["worst_lanelet_id"] == lanelet.id
+        assert [exc["count"] for exc in summary["exceedances"]] == [1, 1]
 
 
 # ---------------------------------------------------------------------------
@@ -843,3 +1663,245 @@ class TestBoundaryGridPreFilter:
             grid.lids[_grid_candidate_positions(grid, (0.0, 0.0, 1.0, 1.0), 10.0)[0]]
             == 1
         )
+
+
+class TestAccuracyReportIsOptIn:
+    """The report must be switchable off without editing the source.
+
+    It adds a section to ``.mapping.json`` on every conversion and can warn
+    about maps that are fine, so a pipeline that does not want it needs a way
+    to say so.
+    """
+
+    DENSE_X = [0.5 * i for i in range(41)]
+
+    def _convert(self, tmp_path: Path, report_accuracy: bool = True) -> dict:
+        """Run the save/validate entry point and return the mapping JSON."""
+        import lanelet2
+
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            validate_and_save_mapping,
+        )
+
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, self.DENSE_X), _make_linestring(-3.0, self.DENSE_X)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        xodr_path = tmp_path / "test.xodr"
+        xodr_xml = _straight_road_xml(1, 0.0, 20.0, [-1])
+        xodr_path.write_text(xodr_xml, encoding="utf-8")
+        osm_path = tmp_path / "test.osm"
+        osm_path.write_text("<osm/>", encoding="utf-8")
+
+        result = validate_and_save_mapping(
+            lanelet_to_road_and_lane={lanelet.id: (1, -1)},
+            lanelet_map=lanelet_map,
+            roads=_parse_roads(xodr_xml),
+            xodr_path=xodr_path,
+            osm_path=osm_path,
+            mgrs_offset=(0.0, 0.0),
+            strict=False,
+            report_accuracy=report_accuracy,
+        )
+        return json.loads(result.read_text(encoding="utf-8"))
+
+    def test_report_is_written_by_default(self, tmp_path: Path) -> None:
+        data = self._convert(tmp_path)
+        assert "reference_match_distances" in data
+
+    def test_report_can_be_switched_off(self, tmp_path: Path) -> None:
+        data = self._convert(tmp_path, report_accuracy=False)
+        assert "reference_match_distances" not in data, (
+            "the positional-accuracy report cannot be switched off, so it "
+            "changes .mapping.json on every conversion"
+        )
+
+
+class TestOriginalLaneletIds:
+    """A reported lanelet id is a preprocessed id, and must be traceable back.
+
+    ``main`` converts the *preprocessed* map, so a lanelet that preprocessing
+    merged carries an id that does not appear in the file the user supplied.
+    Reporting such an id without a way back makes the worst-offender list
+    unusable: there is nothing to look up in the source map.
+    """
+
+    def _mapping_with_merge(self) -> GeoRoadLaneletMapping:
+        """Mapping whose lanelet 99 was merged from input lanelets 1 and 2."""
+        return GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={99: (1, -1)},
+            preprocessing_log={
+                "config_path": None,
+                "entries": [
+                    {
+                        "operation": "merge",
+                        "input_ids": [1, 2],
+                        "output_ids": [99],
+                        "details": "merged 1 and 2",
+                    }
+                ],
+            },
+        )
+
+    def test_a_merged_id_resolves_to_the_ids_it_was_made_from(self) -> None:
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            original_lanelet_ids,
+        )
+
+        assert original_lanelet_ids(self._mapping_with_merge(), 99) == [1, 2]
+
+    def test_an_untouched_id_resolves_to_itself(self) -> None:
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            original_lanelet_ids,
+        )
+
+        assert original_lanelet_ids(self._mapping_with_merge(), 7) == [7]
+
+    def test_a_chain_of_operations_is_followed_to_the_input(self) -> None:
+        """A lanelet merged twice must resolve to the original input ids."""
+        from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
+            original_lanelet_ids,
+        )
+
+        mapping = GeoRoadLaneletMapping(
+            xodr_sha256="abc",
+            osm_sha256="def",
+            lanelet_to_road_and_lane={100: (1, -1)},
+            preprocessing_log={
+                "config_path": None,
+                "entries": [
+                    {
+                        "operation": "merge",
+                        "input_ids": [1, 2],
+                        "output_ids": [99],
+                        "details": "",
+                    },
+                    {
+                        "operation": "merge",
+                        "input_ids": [99, 3],
+                        "output_ids": [100],
+                        "details": "",
+                    },
+                ],
+            },
+        )
+        assert original_lanelet_ids(mapping, 100) == [1, 2, 3]
+
+
+class TestLevelThreeFallbackIsReportedHonestly:
+    """A road matched by the last-resort level must not report its own metric.
+
+    The matching search falls back through three levels. Levels 1 and 2 rank
+    candidates by the symmetric distance; level 3 drops to the directed
+    distance, which only asks whether the *boundary* lies on the reference
+    line and says nothing about the rest of the reference line. A road is
+    matched at level 3 precisely when its reference line is far longer than
+    any single lanelet boundary, so the directed figure is small by
+    construction -- which is exactly the road whose accuracy figure must not
+    come from it.
+    """
+
+    def test_a_level_three_match_reports_the_whole_reference_line(self) -> None:
+        import lanelet2
+
+        # 100 m road; the only lanelet covers its first 20 m.
+        short_x = [0.5 * i for i in range(41)]
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, short_x), _make_linestring(-3.0, short_x)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        roads = _parse_roads(_straight_road_xml(1, 0.0, 100.0, [-1]))
+        mapping = build_mapping(lanelet_map, roads, (0.0, 0.0), "x", "o")
+
+        # The strict levels reject this pairing on the symmetric distance; it
+        # only matches because level 3 measures boundary -> reference.
+        assert mapping.lanelet_to_road_and_lane == {lanelet.id: (1, -1)}
+        assert mapping.reference_match_distances is not None
+        record = mapping.reference_match_distances[lanelet.id]
+
+        boundary = np.array([[x, 0.0] for x in short_x])
+        reference = np.array([[0.5 * i, 0.0] for i in range(201)])
+
+        # That the match happened at all is what proves level 3 ran: the
+        # symmetric distance is far past the tolerance, so levels 1 and 2
+        # could not have accepted this pairing.
+        assert _symmetric_mean_distance(boundary, reference) > _MATCH_THRESHOLD
+        # What level 3 measured: the boundary sits on the reference line.
+        assert _directed_mean_distance(boundary, reference) == pytest.approx(
+            0.0, abs=1e-6
+        )
+        # What the report measures: 80 m of reference line with no boundary
+        # under it. Reporting the matching figure would have claimed ~0 m.
+        assert record.max_m == pytest.approx(
+            _symmetric_max_polyline_distance(reference, boundary), rel=1e-6
+        )
+        assert record.max_m > _MATCH_THRESHOLD
+        assert record.boundary_length_m == pytest.approx(20.0)
+
+    def test_the_level_three_road_is_listed_as_an_offender(self) -> None:
+        """A match the report cannot vouch for must reach the summary."""
+        import lanelet2
+
+        short_x = [0.5 * i for i in range(41)]
+        lanelet = _make_lanelet(
+            _make_linestring(0.0, short_x), _make_linestring(-3.0, short_x)
+        )
+        lanelet_map = lanelet2.core.LaneletMap()
+        lanelet_map.add(lanelet)
+
+        mapping = build_mapping(
+            lanelet_map,
+            _parse_roads(_straight_road_xml(1, 0.0, 100.0, [-1])),
+            (0.0, 0.0),
+            "x",
+            "o",
+        )
+        summary = summarise_reference_match_accuracy(mapping)
+
+        assert [w["lanelet_id"] for w in summary["worst"]] == [lanelet.id]
+        assert summary["above_match_threshold"] == 1
+        # Past every configured severity level, not merely the warn threshold.
+        assert all(e["count"] == 1 for e in summary["exceedances"])
+
+
+class TestLocalisedSpikeIsNotDiluted:
+    """A road that is wrong in one spot must be reported at full size.
+
+    The mean divides that one spot by the whole length of the road, so the
+    same defect reports ten times smaller on a road ten times longer.  The
+    maximum is what the accuracy figure is for.
+    """
+
+    SPIKE_M = 1.5
+    SPIKE_AT_X = 10.0
+
+    def _case(self, length_m: float) -> tuple[np.ndarray, np.ndarray]:
+        """Straight reference line vs. a boundary with one displaced vertex."""
+        x_values = [0.5 * i for i in range(int(length_m / 0.5) + 1)]
+        ref_line = _polyline(0.0, x_values)
+        boundary = np.array(
+            [[x, -self.SPIKE_M if x == self.SPIKE_AT_X else 0.0] for x in x_values]
+        )
+        return ref_line, boundary
+
+    def test_max_is_independent_of_road_length(self) -> None:
+        for length_m in (20.0, 200.0):
+            assert _symmetric_max_polyline_distance(
+                *self._case(length_m)
+            ) == pytest.approx(self.SPIKE_M)
+
+    def test_mean_shrinks_as_the_road_grows(self) -> None:
+        """The reason the mean cannot be the headline figure."""
+        short = _symmetric_mean_polyline_distance(*self._case(20.0))
+        long = _symmetric_mean_polyline_distance(*self._case(200.0))
+        assert long < short / 5.0
+
+    def test_mean_understates_the_spike_by_an_order_of_magnitude(self) -> None:
+        mean = _symmetric_mean_polyline_distance(*self._case(20.0))
+        assert mean < self.SPIKE_M / 10.0

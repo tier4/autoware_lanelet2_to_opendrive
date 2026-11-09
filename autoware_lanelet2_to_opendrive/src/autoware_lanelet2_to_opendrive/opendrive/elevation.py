@@ -5,6 +5,7 @@ from typing import List
 import lxml.etree as ET
 
 from .xml_utils import replace_subnormal
+from .profile_redundancy import without_redundant_records
 
 
 @dataclass
@@ -33,8 +34,14 @@ class ElevationProfile:
     elevations: List[Elevation]
 
     def to_xml(self) -> ET.Element:
-        """Convert to XML element."""
+        """Convert to XML element.
+
+        A record that restates its predecessor's polynomial is not written:
+        it covers the same s with the same height, and ASAM reports it
+        (performance.avoid_redundant_info). See
+        :mod:`.profile_redundancy` for why only that case is safe to drop.
+        """
         elem = ET.Element("elevationProfile")
-        for elevation in self.elevations:
+        for elevation in without_redundant_records(self.elevations, "s"):
             elem.append(elevation.to_xml())
         return elem

@@ -26,12 +26,15 @@ from lanelet2.routing import RoutingGraph
 from autoware_lanelet2_to_opendrive.projection_resolver import (
     geo_reference_for_origin,
     resolve_projection,
-    resolve_projection_from_hydra,
 )
 from autoware_lanelet2_to_opendrive.util import (
     RoadLaneletMapping,
 )
 from autoware_lanelet2_to_opendrive.config import CoordinateOffset
+from autoware_lanelet2_to_opendrive.map_preflight import (
+    MapPreflightError,
+    inspect_lanelet2_osm,
+)
 from autoware_lanelet2_to_opendrive.geometry import compute_point_layer_bounds
 from autoware_lanelet2_to_opendrive.preprocess_lanelet import (
     PreprocessOperation,
@@ -48,6 +51,7 @@ from autoware_lanelet2_to_opendrive.opendrive.road import (
     Road,
 )
 from autoware_lanelet2_to_opendrive.opendrive.junction import Junction
+from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
 from autoware_lanelet2_to_opendrive.opendrive.objects import (
     RoadSamplePointIndex,
 )
@@ -360,17 +364,26 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_to_lanelet_ids: Dict[int, List[int]],
         lanelet_to_road_id: Dict[int, int],
         junctions: List[Junction],
+        traffic_rule: TrafficRule,
+        min_segment_length: float,
         routing_graph: Optional[RoutingGraph] = None,
     ) -> Dict[int, Tuple[int, int]]:
         """
         Set up predecessor/successor connections for roads and lanes.
 
+        ``all_roads`` is extended in place with the connecting roads the
+        junction-peer reconciliation pass has to synthesise: they have to
+        exist before ``set_all_lane_links`` runs here, and the caller needs
+        them in the same list for the rest of the pipeline.
+
         Args:
-            all_roads: All roads (regular + connecting)
+            all_roads: All roads (regular + connecting); extended in place.
             connecting_roads: Connecting roads only
             road_to_lanelet_ids: Dictionary mapping road IDs to lanelet IDs
             lanelet_to_road_id: Dictionary mapping lanelet IDs to road IDs
             junctions: All junctions
+            traffic_rule: RHT / LHT, for the synthetic connectors' lane ids.
+            min_segment_length: Minimum planView length for synthetic stubs.
             routing_graph: Pre-built vehicle routing graph reused for every
                 pass below; built on demand when omitted.
 
@@ -406,6 +419,52 @@ class _Lanelet2ToOpenDRIVEConverter:
             road_to_lanelet_ids=road_to_lanelet_ids,
             routing_graph=routing_graph,
         )
+
+        # Reconcile the road links the two passes above left one-sided: the
+        # junction link takes priority on the road they touched, but the
+        # road on the other side still names it back with elementType="road"
+        # (issue: road.lane.link.lanes_across_lane_sections). Must run after
+        # both of them and before set_all_lane_links, which reads the final
+        # road links.
+        print("\n=== Reconciling one-sided junction road links ===")
+        from autoware_lanelet2_to_opendrive.direct_junction_completion import (
+            reconcile_junction_peer_links,
+        )
+
+        reconcile_start_id = (
+            (max(road.id for road in all_roads) + 1) if all_roads else 0
+        )
+        reconcile_roads, _reconcile_next_id = reconcile_junction_peer_links(
+            lanelet_map=self.lanelet_map,
+            routing_graph=routing_graph,
+            all_roads=all_roads,
+            junctions=junctions,
+            starting_road_id=reconcile_start_id,
+            traffic_rule=traffic_rule,
+            min_segment_length=min_segment_length,
+        )
+        if reconcile_roads:
+            all_roads.extend(reconcile_roads)
+        print(
+            f"Synthesised {len(reconcile_roads)} connecting road(s) while "
+            f"reconciling one-sided junction road links"
+        )
+        # A road end carries one <link> slot, so two junctions claiming the
+        # same end can never both be read: the slot names one of them and
+        # every <connection> of the other is dead, along with the connecting
+        # roads those rows point at. Merge such groups into one junction.
+        # Must run after every pass above -- they are the ones that write the
+        # slot -- and before set_all_lane_links, which reads the final links.
+        print("\n=== Merging junctions that claim the same road end ===")
+        from autoware_lanelet2_to_opendrive.junction_claims import (
+            merge_contested_junction_claims,
+        )
+
+        merged_away = merge_contested_junction_claims(
+            all_roads=all_roads,
+            junctions=junctions,
+        )
+        print(f"Merged away {merged_away} junction(s) with contested road ends")
 
         # Set lane links for all roads
         print("\n=== Building lane links for all roads ===")
@@ -657,6 +716,36 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         return stop_line_to_tl_ids
 
+    def _build_stop_line_regulating_lanelets(self) -> Dict[int, Set[int]]:
+        """Which lanelets stop at which stop line, per the source map.
+
+        A lanelet refers to a ``regulatory_element`` and that element names
+        the line as its ``ref_line``, so this is the map's own statement of
+        which lanes a stop line governs -- the relation
+        ``find_nearest_road_for_linestring`` cannot see. Every subtype that
+        carries a ``ref_line`` counts (traffic_light, traffic_sign, crosswalk,
+        road_marking, ...), because the question here is only which lanes stop
+        there.
+
+        ``laneletLayer`` is walked rather than ``findUsages``, which returns
+        nothing for a lanelet holding an inverted linestring.
+
+        Returns:
+            ``{stop line linestring id: {lanelet ids}}``.
+        """
+        out: Dict[int, Set[int]] = {}
+        for lanelet in self.lanelet_map.laneletLayer:
+            for reg_elem in lanelet.regulatoryElements:
+                try:
+                    params = reg_elem.parameters
+                    if "ref_line" not in params:
+                        continue
+                    for ref_line in params["ref_line"]:
+                        out.setdefault(ref_line.id, set()).add(lanelet.id)
+                except Exception:
+                    continue
+        return out
+
     def _build_stop_sign_stop_line_ids(self) -> Set[int]:
         """Build a set of stop line linestring IDs associated with stop signs.
 
@@ -816,6 +905,8 @@ class _Lanelet2ToOpenDRIVEConverter:
         """
         from autoware_lanelet2_to_opendrive.opendrive.objects import (
             StopLineObject,
+            choose_nearest_road_on_the_driving_side,
+            choose_road_for_regulated_stop_line,
             find_nearest_road_for_linestring,
         )
         from autoware_lanelet2_to_opendrive.opendrive.signal import (
@@ -853,6 +944,20 @@ class _Lanelet2ToOpenDRIVEConverter:
         road_marking_294_count = 0
         signal_country = self.config.signal.country
 
+        # The map says which lanes stop at which line; nearest does not.
+        # Attaching the object to the nearest road put 43 of Nishishinjuku's
+        # 196 stop lines and 554 of the customer map's 1,464 outside the
+        # carriageway of the road carrying them, because every driving lane
+        # here has a positive id and the chosen road's reference line was on
+        # the far side of the line.
+        regulating_lanelets = self._build_stop_line_regulating_lanelets()
+        roads_of_lanelet: Dict[int, List[Road]] = {}
+        for road in all_roads:
+            for lanelet_id in (road.sorted_lanelet_ids or []) + (
+                road.chain_source_lanelet_ids or []
+            ):
+                roads_of_lanelet.setdefault(lanelet_id, []).append(road)
+
         for ls in self.lanelet_map.lineStringLayer:
             if "type" not in ls.attributes or ls.attributes["type"] != "stop_line":
                 continue
@@ -860,9 +965,38 @@ class _Lanelet2ToOpenDRIVEConverter:
                 continue
             stop_line_ids_seen.add(ls.id)
 
-            best_road = find_nearest_road_for_linestring(
-                ls, all_roads, offset=self.offset, road_index=road_index
+            candidate_roads = [
+                road
+                for lanelet_id in regulating_lanelets.get(ls.id, ())
+                for road in roads_of_lanelet.get(lanelet_id, ())
+            ]
+            best_road = choose_road_for_regulated_stop_line(
+                ls,
+                candidate_roads,
+                width=self.config.stopline.width,
+                carla_format=self.config.stopline.carla_stop_line,
+                offset=self.offset,
             )
+            if best_road is None:
+                # Either the map regulates this line from no lanelet, or no
+                # regulating lanelet's road carries it. Geometry is then the
+                # only statement available, but "nearest" is still not the
+                # whole of it: a road has a side, and the nearest road may
+                # hold the line outside its own carriageway while a road just
+                # behind it holds it inside. Take the nearest road that does
+                # carry it, and only then the nearest road at all.
+                best_road = choose_nearest_road_on_the_driving_side(
+                    ls,
+                    all_roads,
+                    width=self.config.stopline.width,
+                    carla_format=self.config.stopline.carla_stop_line,
+                    offset=self.offset,
+                    road_index=road_index,
+                )
+            if best_road is None:
+                best_road = find_nearest_road_for_linestring(
+                    ls, all_roads, offset=self.offset, road_index=road_index
+                )
             if best_road is None:
                 skipped_stop_lines[ls.id] = SkippedStopLineEntry(
                     reason="no_nearest_road"
@@ -1059,12 +1193,18 @@ class _Lanelet2ToOpenDRIVEConverter:
         # Bounding box of the projected map — populates the OpenDRIVE
         # ``<header>`` ``@north/@south/@east/@west`` attributes used by
         # esmini, RoadRunner, and asam-qc-opendrive (issue #465).
-        min_x, min_y, max_x, max_y = compute_point_layer_bounds(self.lanelet_map)
+        min_x, min_y, max_x, max_y = compute_point_layer_bounds(
+            self.lanelet_map, offset=self.offset
+        )
 
         # Create header
+        # revMinor="7": see Header's docstring for why 1.7 is the version we
+        # declare (it is the one whose XSD admits what we emit, it keeps the
+        # whole asam-qc-opendrive bundle applicable, and CARLA ignores the
+        # declaration entirely).
         header = Header(
             rev_major="1",
-            rev_minor="4",
+            rev_minor="7",
             name="Converted from Lanelet2",
             version="1.0",
             date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1119,7 +1259,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             apply_divergence_synthesis,
             collect_divergence_sites,
         )
-        from autoware_lanelet2_to_opendrive.opendrive.enums import TrafficRule
         from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
         traffic_rule_value = (
@@ -1195,7 +1334,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             complete_direct_junction_lanelinks,
         )
 
-        junction_lanelet_id_set: Set[int] = {ll.id for ll in junction_lanelets}
         existing_road_ids = [r.id for r in (regular_roads + connecting_roads)]
         completion_start_id = (max(existing_road_ids) + 1) if existing_road_ids else 0
 
@@ -1205,7 +1343,6 @@ class _Lanelet2ToOpenDRIVEConverter:
             all_roads=regular_roads + connecting_roads,
             junctions=junctions,
             lanelet_to_road_id=lanelet_to_road_id,
-            junction_lanelet_ids=junction_lanelet_id_set,
             starting_road_id=completion_start_id,
             traffic_rule=traffic_rule_value,
             min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
@@ -1231,6 +1368,8 @@ class _Lanelet2ToOpenDRIVEConverter:
             mapping.road_to_lanelets,
             lanelet_to_road_id,
             junctions,
+            traffic_rule_value,
+            DEFAULT_CONFIG.geometry.divergence_min_segment_length,
             routing_graph=regular_result.routing_graph,
         )
 
@@ -1333,12 +1472,36 @@ class _Lanelet2ToOpenDRIVEConverter:
 
         # Step 6.9: Validate no duplicate road IDs (safety check for ID assignment bugs)
         from autoware_lanelet2_to_opendrive.opendrive.validation import (
+            check_lane_width_plausibility,
             validate_no_duplicate_road_ids,
         )
 
         dup_result = validate_no_duplicate_road_ids(all_roads)
         if not dup_result.is_valid:
             print(f"\nWARNING: {dup_result.get_error_summary()}")
+
+        # Step 6.9a: Warn about implausibly wide lanes (e.g. a corrupted
+        # source coordinate inflating a lane to 20+ metres - see
+        # `check_lane_width_plausibility`'s docstring). This is a heuristic
+        # threshold calibrated on one map, not a spec violation, so it is a
+        # warning here, not a build failure - `qc_validate.py` is the CI gate
+        # that turns the same check into a hard failure. Run on `all_roads`
+        # before the parking-lot roads below are appended: parking-lot widths
+        # are config-driven (`construct_parking_roads`), not derived from
+        # lanelet boundary geometry, so they are not exposed to the source-map
+        # coordinate corruption this check targets. Run before Step 7 so the
+        # warnings print before `_write_opendrive_output` writes the file.
+        width_violations = check_lane_width_plausibility(all_roads)
+        if width_violations:
+            print(
+                f"\nWARNING: {len(width_violations)} lane(s) exceed the "
+                f"{DEFAULT_CONFIG.lane_width_validation.implausible_width_threshold_m:.1f}m "
+                "lane-width plausibility threshold (heuristic, calibrated on one "
+                "reference map - a legitimately wide lane on a different map can "
+                "also trigger this; conversion is not aborted):"
+            )
+            for violation in width_violations:
+                print(f"  {violation}")
 
         # Step 6.9: Build parking lots (P2-1)
         # Runs AFTER crosswalk/stop-line extraction so the nearest-road
@@ -1356,6 +1519,33 @@ class _Lanelet2ToOpenDRIVEConverter:
             )
             all_roads.extend(parking_roads)
             print(f"Built {len(parking_roads)} parking roads")
+
+        # Step 6.94: Give every <connection> a connecting road of its own.
+        # A connector the source map feeds from two external roads is
+        # enumerated once per incoming road, and OpenDRIVE has no way to
+        # write that on one connecting road: <connection> carries a single
+        # incomingRoad and the connecting road a single <predecessor>.
+        # Runs after the road and lane links are final -- the stubs are
+        # built from them -- and before the junction-ID shift, so the new
+        # roads count towards the highest road ID.
+        from autoware_lanelet2_to_opendrive.shared_connecting_roads import (
+            split_shared_connecting_roads,
+        )
+
+        shared_start_id = (max(road.id for road in all_roads) + 1) if all_roads else 0
+        shared_roads, _shared_next_id = split_shared_connecting_roads(
+            junctions=junctions,
+            all_roads=all_roads,
+            starting_road_id=shared_start_id,
+            traffic_rule=traffic_rule_value,
+            min_segment_length=DEFAULT_CONFIG.geometry.divergence_min_segment_length,
+        )
+        if shared_roads:
+            all_roads.extend(shared_roads)
+            print(
+                f"\nSplit {len(shared_roads)} shared connecting road(s) so "
+                "every junction connection names one of its own"
+            )
 
         # Step 6.95: Move the junction IDs above the road IDs (CARLA resolves
         # both in one ID space). They were numbered from ``junction_id_offset``
@@ -1431,47 +1621,6 @@ def convert_lanelet2_to_opendrive(
     return converter.convert()
 
 
-def parse_origin_from_config(
-    cfg: DictConfig,
-) -> Tuple[lanelet2.io.Origin, str, float, float, float, float, float]:
-    """
-    Parse origin specification from Hydra config with mutual exclusion validation.
-
-    Thin wrapper around
-    :func:`autoware_lanelet2_to_opendrive.projection_resolver.resolve_projection_from_hydra`
-    kept for backward compatibility. New code should use the projector-resolution
-    layer directly.
-
-    Supports three methods of origin specification (mutually exclusive):
-    1. mgrs_grid: Simple MGRS grid code (e.g., "54SUE")
-       - With optional offset: mgrs_grid + offset {x, y, z}
-    2. lat_lon: Latitude/longitude {latitude, longitude, altitude}
-
-    Args:
-        cfg: Hydra configuration object with map settings
-
-    Returns:
-        Tuple of (lanelet2.io.Origin, mgrs_code_for_proj_string, origin_lat, origin_lon,
-                  offset_x, offset_y, offset_z)
-        The mgrs_code_for_proj_string is used for generating the OpenDRIVE geoReference
-        The origin_lat and origin_lon are the actual origin coordinates (with offset applied)
-        The offset values are used to convert coordinates to local coordinate system
-
-    Raises:
-        ValueError: If origin specification is invalid or multiple methods are specified
-    """
-    resolved = resolve_projection_from_hydra(cfg)
-    return (
-        resolved.origin,
-        resolved.mgrs_code,
-        resolved.origin_lat,
-        resolved.origin_lon,
-        resolved.offset_x,
-        resolved.offset_y,
-        resolved.offset_z,
-    )
-
-
 def preprocess_and_convert_with_hydra(
     cfg: DictConfig,
     lanelet2_file: Path,
@@ -1484,8 +1633,41 @@ def preprocess_and_convert_with_hydra(
         cfg: Hydra configuration object
         lanelet2_file: Path to input Lanelet2 OSM file
         output_file: Path to output OpenDRIVE file
+
+    Raises:
+        MapPreflightError: If the pre-flight inspection found structural
+            problems that make the map unloadable.  Disable with
+            ``preflight=false`` to get the raw ``lanelet2.io.load`` failure
+            back instead.
     """
     input_map_path = lanelet2_file
+
+    # Pre-flight the *original* file, before preprocessing: the preprocessor
+    # loads the map itself, so a structural problem would otherwise surface
+    # there as the same unhelpful parser exception. This only names problems
+    # that already stop lanelet2 loading the map -- it never repairs one and
+    # never rejects a map that would otherwise convert.
+    if cfg.get("preflight", True) and lanelet2_file.suffix == ".osm":
+        report = inspect_lanelet2_osm(lanelet2_file)
+        # `inspected` first: a file lxml cannot parse must be reported as
+        # uninspected and let through, never refused. Testing `ok` first works
+        # only because `inspect_lanelet2_osm` returns early with no findings
+        # on that path, which makes the guard incidental rather than
+        # structural -- one future check that appends a finding before
+        # returning would invert it silently.
+        if not report.inspected:
+            logger.warning(f"Pre-flight could not parse the map: {report.xml_error}")
+        elif not report.ok:
+            raise MapPreflightError(report)
+        elif report.findings:
+            # Non-blocking only, or the raise above would have fired. Worth
+            # saying out loud; not worth refusing a map that converts.
+            logger.warning(f"Pre-flight found non-fatal problems:\n{report.format()}")
+        else:
+            logger.info(
+                f"Pre-flight: no structural problems in {lanelet2_file} "
+                f"({report.counts.get('relations', 0)} relations)"
+            )
 
     # Resolve the coordinate frame (origin, projector, geoReference, offset)
     # through the single projector-resolution layer. Prefers a
@@ -1512,18 +1694,11 @@ def preprocess_and_convert_with_hydra(
     # Build PreprocessOperation from Hydra map config
     config = PreprocessOperation.from_hydra_config(cfg.map)
 
-    # Check if any preprocessing operations are configured
-    has_preprocessing = any(
-        [
-            config.merge_operations,
-            config.remove_operations,
-            config.replace_operations,
-            config.move_point_operations,
-            config.delete_point_operations,
-            config.remove_lanelet_operations,
-            config.remove_turn_direction_operations,
-        ]
-    )
+    # Check if any preprocessing operations are configured. Derived from
+    # OPERATION_TYPES rather than restated here: the list this replaced had
+    # fallen out of step with it and omitted validate_operations, so a
+    # validate-only config ran no preprocessing at all.
+    has_preprocessing = config.has_operations
 
     # TransverseMercator is not yet supported together with preprocessing:
     # the preprocessing pipeline's coordinate handling has only been
@@ -1594,15 +1769,28 @@ def preprocess_and_convert_with_hydra(
     # Priority: map config > target config > default
     arcspiral_dict = cfg.map.get("arcspiral") or cfg.target.get("arcspiral", {})
     if arcspiral_dict:
+        arc_defaults = ArcSpiralConfig()
         arcspiral_config = ArcSpiralConfig(
-            enabled=arcspiral_dict.get("enabled", False),
-            arc_enabled=arcspiral_dict.get("arc_enabled", True),
-            spiral_enabled=arcspiral_dict.get("spiral_enabled", False),
-            line_curvature_tol=arcspiral_dict.get("line_curvature_tol", 1e-3),
-            arc_curvature_tol=arcspiral_dict.get("arc_curvature_tol", 5e-4),
-            arc_position_tol=arcspiral_dict.get("arc_position_tol", 0.05),
-            min_line_length=arcspiral_dict.get("min_line_length", 5.0),
-            min_arc_length=arcspiral_dict.get("min_arc_length", 5.0),
+            enabled=arcspiral_dict.get("enabled", arc_defaults.enabled),
+            arc_enabled=arcspiral_dict.get("arc_enabled", arc_defaults.arc_enabled),
+            spiral_enabled=arcspiral_dict.get(
+                "spiral_enabled", arc_defaults.spiral_enabled
+            ),
+            line_curvature_tol=arcspiral_dict.get(
+                "line_curvature_tol", arc_defaults.line_curvature_tol
+            ),
+            arc_curvature_tol=arcspiral_dict.get(
+                "arc_curvature_tol", arc_defaults.arc_curvature_tol
+            ),
+            arc_position_tol=arcspiral_dict.get(
+                "arc_position_tol", arc_defaults.arc_position_tol
+            ),
+            min_line_length=arcspiral_dict.get(
+                "min_line_length", arc_defaults.min_line_length
+            ),
+            min_arc_length=arcspiral_dict.get(
+                "min_arc_length", arc_defaults.min_arc_length
+            ),
         )
         logger.info(
             f"ArcSpiral config: enabled={arcspiral_config.enabled}, "
@@ -1617,11 +1805,16 @@ def preprocess_and_convert_with_hydra(
         "width_estimation", {}
     )
     if width_dict:
+        width_defaults = WidthEstimationConfig()
         width_config = WidthEstimationConfig(
-            adaptive_sampling=width_dict.get("adaptive_sampling", False),
-            min_samples=width_dict.get("min_samples", 5),
-            max_samples=width_dict.get("max_samples", 50),
-            default_sample_interval=width_dict.get("default_sample_interval", 5.0),
+            adaptive_sampling=width_dict.get(
+                "adaptive_sampling", width_defaults.adaptive_sampling
+            ),
+            min_samples=width_dict.get("min_samples", width_defaults.min_samples),
+            max_samples=width_dict.get("max_samples", width_defaults.max_samples),
+            default_sample_interval=width_dict.get(
+                "default_sample_interval", width_defaults.default_sample_interval
+            ),
         )
         logger.info(
             f"Width sampling config: adaptive={width_config.adaptive_sampling}, "
@@ -1760,6 +1953,32 @@ def preprocess_and_convert_with_hydra(
             )
         )
 
+        # Strictness of the post-conversion ASAM QC analysis. Same precedence
+        # as above.
+        strict_analysis = bool(
+            cfg.map.get(
+                "strict_analysis",
+                cfg.target.get(
+                    "strict_analysis",
+                    cfg.get("strict_analysis", False),
+                ),
+            )
+        )
+
+        # Whether to measure and report positional accuracy against the
+        # Lanelet2 input. Same precedence as the other per-map overrides, and
+        # the same reason ``or`` cannot be used: the value is a boolean and
+        # False is a meaningful setting.
+        report_accuracy = bool(
+            cfg.map.get(
+                "report_reference_match_accuracy",
+                cfg.target.get(
+                    "report_reference_match_accuracy",
+                    cfg.get("report_reference_match_accuracy", True),
+                ),
+            )
+        )
+
         # Serialize TrafficLightConfig for the analyze command to read back
         tl_config_dict = {
             "offset_x": tl_config.offset_x,
@@ -1780,6 +1999,7 @@ def preprocess_and_convert_with_hydra(
             skipped_stop_lines=skipped_stop_lines,
             traffic_light_config=tl_config_dict,
             strict=strict_mapping_validation,
+            report_accuracy=report_accuracy,
         )
 
         # Save preprocessed OSM next to XODR so that standalone `analyze`
@@ -1793,10 +2013,43 @@ def preprocess_and_convert_with_hydra(
         from autoware_lanelet2_to_opendrive.analyze_xodr import run_analysis
 
         logger.info("Running post-conversion analysis...")
-        run_analysis(
+        analysis_error_count = run_analysis(
             xodr_path=xodr_path,
             osm_path=input_map_path,
         )
+        _fail_on_analysis_errors(analysis_error_count, strict=strict_analysis)
+
+
+def _fail_on_analysis_errors(error_count: int, *, strict: bool) -> None:
+    """Act on the post-conversion analysis result.
+
+    ``run_analysis`` prints its own ``FINAL RESULT`` banner and returns the
+    number of errors it found. The banner goes to stdout, so a caller reading
+    the log, or checking the exit status, has only this to go on.
+
+    Args:
+        error_count: What ``run_analysis`` returned.
+        strict: Abort the run instead of warning. Resolved from
+            ``strict_analysis`` (map > target > global).
+
+    Raises:
+        RuntimeError: ``strict`` is set and the analysis found errors.
+    """
+    if error_count <= 0:
+        return
+
+    if strict:
+        raise RuntimeError(
+            f"Post-conversion analysis found {error_count} error(s). "
+            "The .xodr and .mapping.json were written; set "
+            "strict_analysis=false to keep them and only warn."
+        )
+
+    logger.warning(
+        "Post-conversion analysis found %d error(s); output kept. "
+        "Set strict_analysis=true to fail instead.",
+        error_count,
+    )
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
@@ -1842,6 +2095,12 @@ def main(cfg: DictConfig) -> None:
             output_file=output_path,
         )
 
+    except MapPreflightError as e:
+        # The message is the formatted report: problem classes, counts and
+        # element ids. Print it as-is rather than folding it into a log line.
+        logger.error("Input map cannot be loaded. Pre-flight report follows.")
+        print(e, file=sys.stderr)
+        sys.exit(1)
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
         sys.exit(1)

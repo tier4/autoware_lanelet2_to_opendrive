@@ -103,6 +103,102 @@ def test_no_junction_bound_lane_lacks_a_lanelink(nishishinjuku_xodr):
     )
 
 
+def _chained_connectors(root: ET._Element) -> Dict[int, Tuple[int, int]]:
+    """Map every chained connecting road to ``(junction_id, predecessor)``.
+
+    A *chained* connector is a connecting road whose road-level
+    ``<link><predecessor>`` is another connecting road of the same
+    junction: it is entered by traversing that earlier stage, so a
+    vehicle cannot be at its start without having driven the stage
+    before it.
+    """
+    junction_of: Dict[int, int] = {}
+    predecessor_of: Dict[int, int] = {}
+    for road in root.iterfind("road"):
+        rid = int(road.get("id"))
+        junction_of[rid] = int(road.get("junction", "-1"))
+        link = road.find("link")
+        pred = link.find("predecessor") if link is not None else None
+        if pred is not None and pred.get("elementType") == "road":
+            predecessor_of[rid] = int(pred.get("elementId"))
+
+    chained: Dict[int, Tuple[int, int]] = {}
+    for rid, jid in junction_of.items():
+        pred_id = predecessor_of.get(rid)
+        if jid == -1 or pred_id is None:
+            continue
+        if junction_of.get(pred_id, -1) == jid:
+            chained[rid] = (jid, pred_id)
+    return chained
+
+
+def test_no_connection_advertises_a_chained_connecting_road(nishishinjuku_xodr):
+    """A later stage of an in-junction chain is never directly reachable.
+
+    ``_enumerate_lane_pairs`` used to walk back through in-junction
+    predecessors so that a chained connector's ``<connection>`` could
+    name a non-junction ``incomingRoad``. The side effect was that the
+    external road was advertised as connected to *every* stage of the
+    chain, letting a consumer enter the second connector and skip the
+    first — a physical jump of one connector length (24 such transitions
+    on this fixture, e.g. junction 1015 listing incomingRoad 12 with both
+    connectingRoad 541 and its own predecessor 542).
+    """
+    root = ET.parse(str(nishishinjuku_xodr)).getroot()
+    chained = _chained_connectors(root)
+    assert len(chained) >= 10, (
+        f"only {len(chained)} chained connector(s) in the fixture; the "
+        "assertion below no longer exercises the chain path."
+    )
+
+    offenders: List[Tuple[int, int, int]] = []
+    for junction in root.iterfind("junction"):
+        jid = int(junction.get("id"))
+        for conn in junction.iterfind("connection"):
+            connecting = int(conn.get("connectingRoad"))
+            if connecting in chained and chained[connecting][0] == jid:
+                offenders.append((jid, int(conn.get("incomingRoad")), connecting))
+
+    assert not offenders, (
+        f"{len(offenders)} <connection>(s) advertise a chained connecting "
+        f"road as directly reachable. Sample: {offenders[:5]}"
+    )
+
+
+def test_chained_connectors_stay_reachable_through_their_chain(nishishinjuku_xodr):
+    """Dropping the shortcut must not strand the chain.
+
+    Following the road-level ``<link><predecessor>`` chain backwards from
+    every chained connector has to arrive at a connecting road that *is*
+    in its junction's ``<connection>`` table, so a consumer can still
+    enter the junction from a non-junction road and traverse the chain in
+    order.
+    """
+    root = ET.parse(str(nishishinjuku_xodr)).getroot()
+    chained = _chained_connectors(root)
+
+    advertised: Dict[int, Set[int]] = defaultdict(set)
+    for junction in root.iterfind("junction"):
+        jid = int(junction.get("id"))
+        for conn in junction.iterfind("connection"):
+            advertised[jid].add(int(conn.get("connectingRoad")))
+
+    stranded: List[Tuple[int, int]] = []
+    for connecting, (jid, _pred) in chained.items():
+        head = connecting
+        seen: Set[int] = set()
+        while head in chained and head not in seen:
+            seen.add(head)
+            head = chained[head][1]
+        if head not in advertised[jid]:
+            stranded.append((jid, connecting))
+
+    assert not stranded, (
+        f"{len(stranded)} chained connector(s) have no advertised chain "
+        f"head and are unreachable. Sample: {stranded[:5]}"
+    )
+
+
 def test_known_problem_lanes_are_covered(nishishinjuku_xodr):
     """The 10 specific (road, lane, junction) triples from the audit must be covered.
 

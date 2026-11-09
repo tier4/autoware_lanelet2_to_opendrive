@@ -9,8 +9,8 @@ import logging
 from enum import Enum
 
 # Import autoware extensions before lanelet2 to ensure proper registration
-from autoware_lanelet2_extension_python.projection import MGRSProjector
 import lanelet2
+from omegaconf import OmegaConf
 
 from .config import DEFAULT_CONFIG
 from .lanelet import (
@@ -21,7 +21,7 @@ from .lanelet import (
     get_max_lanelet_id,
     validate_lanelet_continuity,
 )
-from .projection import mgrs_to_lanelet2_origin
+from .projection_resolver import resolve_projection
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -276,11 +276,31 @@ class PreprocessOperation:
     This dataclass defines all preprocessing operations to be performed
     on a Lanelet2 map. It can be loaded from a YAML configuration file.
 
-    The projection origin can be specified in two ways (mutually exclusive):
-    1. Using MGRS code: Set mgrs_code to a valid MGRS grid reference
-    2. Using exact lat/lon: Set both origin_lat and origin_lon
+    The frame is resolved exactly as a conversion resolves it, through
+    :func:`~.projection_resolver.resolve_projection`: a
+    ``map_projector_info.yaml`` next to the map, else the map's own node
+    coordinates, else the keys below. So a ``TransverseMercator`` map is
+    preprocessed in its declared frame rather than as MGRS.
 
-    Specifying both methods will raise a ValueError.
+    On the MGRS path the origin is **inert**: ``MGRSProjector.forward()``
+    returns each point's offset from the south-west corner of that point's
+    own 100 km grid square regardless of the origin it was built with.
+    Measured on ``walkway_mini.osm`` with four origins -- ``54SUE``,
+    ``53SPU``, a Sydney lat/lon and none at all -- the loaded point
+    coordinates are identical and the re-written ``.osm`` is byte-identical.
+    A ``TransverseMercator`` origin is *not* inert, but it comes from the
+    projector-info file, never from the keys below.
+
+    The keys are therefore **ignored**, with a warning, and kept only so
+    that an existing preprocessing config and the ``--mgrs`` / ``--origin``
+    CLI flags still load. They may be given in either of two mutually
+    exclusive ways:
+
+    1. ``mgrs_code``: a valid MGRS grid reference
+    2. ``origin``: an exact lat/lon :class:`LatLonOrigin`
+
+    Specifying both raises a ValueError. A map config never carries them:
+    there they are removed and rejected (#564).
     """
 
     # Input/Output paths
@@ -318,11 +338,26 @@ class PreprocessOperation:
         """Validate that origin is specified correctly after initialization."""
         self._validate_origin()
 
+    @property
+    def has_operations(self) -> bool:
+        """Whether any preprocessing operation is configured.
+
+        Reads every key in :data:`OPERATION_TYPES`, so a newly added
+        operation is counted here without a second list having to be kept in
+        step.
+        """
+        return any(getattr(self, name, None) for name in OPERATION_TYPES)
+
     def _validate_origin(self) -> None:
-        """Validate that exactly one origin specification method is used.
+        """Validate the origin specification, which is optional.
+
+        Only the ambiguous case is rejected. Declaring neither is fine: the
+        origin never reaches the coordinates (see the class docstring) --
+        which subsumes the narrower "only when an operation needs one" rule
+        the other branch arrived at.
 
         Raises:
-            ValueError: If both mgrs_code and origin are specified, or if neither is specified
+            ValueError: If both mgrs_code and origin are specified.
         """
         has_mgrs = self.mgrs_code is not None and self.mgrs_code != ""
         has_origin = self.origin is not None
@@ -331,11 +366,6 @@ class PreprocessOperation:
             raise ValueError(
                 "Cannot specify both mgrs_code and origin. "
                 "Use either MGRS code or exact lat/lon coordinates, not both."
-            )
-
-        if not has_mgrs and not has_origin:
-            raise ValueError(
-                "Must specify projection origin using either mgrs_code or origin."
             )
 
     @classmethod
@@ -434,8 +464,6 @@ class PreprocessOperation:
         Returns:
             PreprocessOperation instance configured from the Hydra config
         """
-        from omegaconf import OmegaConf
-
         # Convert OmegaConf to dict for easier processing
         config = OmegaConf.to_container(cfg, resolve=True)
 
@@ -449,13 +477,12 @@ class PreprocessOperation:
         if origin_config is not None:
             origin = LatLonOrigin(lat=origin_config["lat"], lon=origin_config["lon"])
 
-        # Support both mgrs_code (legacy) and mgrs_grid (current)
-        mgrs_code = config.get("mgrs_code") or config.get("mgrs_grid") or None
-
+        # No origin is read from a map config: the `mgrs_grid`/`mgrs_code`
+        # keys are removed and rejected (#564), and the frame comes from the
+        # map itself.
         return cls(
             input_map_path=config.get("input_map_path") or "",
             output_map_path=config.get("output_map_path") or "",
-            mgrs_code=mgrs_code,
             origin=origin,
             merge_operations=operations["merge_operations"],
             remove_operations=operations["remove_operations"],
@@ -574,7 +601,9 @@ class LaneletPreprocessor:
         """
         self.config = config
         self.lanelet_map: Optional[lanelet2.core.LaneletMap] = None
-        self.projector: Optional[Any] = None  # MGRSProjector or UtmProjector
+        # Whatever projector the resolved frame calls for: MGRSProjector or
+        # TransverseMercatorProjector. Set by load_map and reused by save_map.
+        self.projector: Optional[Any] = None
 
         if config.verbose:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -582,14 +611,18 @@ class LaneletPreprocessor:
     def load_map(self) -> lanelet2.core.LaneletMap:
         """Load the input Lanelet2 map using MGRS projection.
 
-        The projection origin can be specified either via MGRS code or
-        exact lat/lon coordinates (mutually exclusive).
+        The frame comes from :func:`~.projection_resolver.resolve_projection`,
+        so the projector is the one the map declares. This config's own
+        ``mgrs_code``/``origin`` are not consulted -- see
+        :class:`PreprocessOperation` for why they never mattered.
 
         Returns:
             Loaded LaneletMap
 
         Raises:
             FileNotFoundError: If input map file doesn't exist
+            ValueError: If the frame can be determined from neither the map
+                nor the config's origin keys
             RuntimeError: If map loading fails
         """
         input_path = Path(self.config.input_map_path)
@@ -598,21 +631,22 @@ class LaneletPreprocessor:
 
         logger.info(f"Loading map from: {input_path}")
 
-        # Create origin from either MGRS code or lat/lon
-        if self.config.mgrs_code is not None:
-            logger.info(f"Using MGRS projection with code: {self.config.mgrs_code}")
-            origin = mgrs_to_lanelet2_origin(self.config.mgrs_code)
-        elif self.config.origin is not None:
-            logger.info(
-                f"Using lat/lon origin: lat={self.config.origin.lat}, "
-                f"lon={self.config.origin.lon}"
+        if self.config.mgrs_code or self.config.origin is not None:
+            logger.warning(
+                "This preprocessing config declares a projection origin "
+                "(mgrs_code/origin). It is ignored: the frame comes from the "
+                "map's own map_projector_info.yaml or node coordinates, and "
+                "MGRSProjector never read the origin anyway (#564)."
             )
-            origin = lanelet2.io.Origin(self.config.origin.lat, self.config.origin.lon)
-        else:
-            # This should never happen due to __post_init__ validation
-            raise RuntimeError("No projection origin specified")
+        resolved = resolve_projection(OmegaConf.create({"map": {}}), input_path)
+        logger.info(
+            "Preprocessing in the %s frame (origin lat=%s lon=%s)",
+            resolved.projector_type,
+            resolved.origin_lat,
+            resolved.origin_lon,
+        )
 
-        self.projector = MGRSProjector(origin)
+        self.projector = resolved.make_projector()
         self.lanelet_map = lanelet2.io.load(str(input_path), self.projector)
 
         logger.info(f"Loaded map with {len(self.lanelet_map.laneletLayer)} lanelets")

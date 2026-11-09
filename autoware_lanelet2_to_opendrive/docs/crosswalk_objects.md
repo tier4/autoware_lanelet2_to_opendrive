@@ -19,11 +19,11 @@ Each crosswalk lanelet produces an `<object>` element with a closed polygon outl
             hdg="1.5707" pitch="0.0" roll="0.0"
             orientation="none" width="4.5" length="6.0">
       <outline>
-        <cornerLocal u="-3.0" v="-2.25" z="0.0"/>
-        <cornerLocal u="3.0"  v="-2.25" z="0.0"/>
-        <cornerLocal u="3.0"  v="2.25"  z="0.0"/>
-        <cornerLocal u="-3.0" v="2.25"  z="0.0"/>
-        <cornerLocal u="-3.0" v="-2.25" z="0.0"/>
+        <cornerLocal u="-3.0" v="-2.25" z="0.0" height="0.0"/>
+        <cornerLocal u="3.0"  v="-2.25" z="0.0" height="0.0"/>
+        <cornerLocal u="3.0"  v="2.25"  z="0.0" height="0.0"/>
+        <cornerLocal u="-3.0" v="2.25"  z="0.0" height="0.0"/>
+        <cornerLocal u="-3.0" v="-2.25" z="0.0" height="0.0"/>
       </outline>
     </object>
   </objects>
@@ -186,7 +186,7 @@ Expected output format:
 <objects>
   <object type="crosswalk" id="..." name="crosswalk_..." s="..." t="..." ...>
     <outline>
-      <cornerLocal u="..." v="..." z="0.0"/>
+      <cornerLocal u="..." v="..." z="0.0" height="0.0"/>
       ...
     </outline>
   </object>

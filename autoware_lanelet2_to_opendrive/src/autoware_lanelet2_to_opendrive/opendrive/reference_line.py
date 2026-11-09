@@ -46,6 +46,24 @@ def _guard_heading_override(
     return hdg_override
 
 
+def _polyline_tangent_2d(points_3d: np.ndarray, at_start: bool) -> np.ndarray:
+    """Unit XY direction of the polyline's own first or last segment.
+
+    ``Splines`` scales its velocity targets internally and its own estimates
+    are unit vectors, so a unit vector is the right magnitude to hand it.
+    """
+    if len(points_3d) < 2:
+        return np.array([1.0, 0.0])
+    if at_start:
+        segment = points_3d[1, :2] - points_3d[0, :2]
+    else:
+        segment = points_3d[-1, :2] - points_3d[-2, :2]
+    length = float(np.linalg.norm(segment))
+    if length < DEFAULT_CONFIG.geometry.epsilon:
+        return np.array([1.0, 0.0])
+    return segment / length
+
+
 if TYPE_CHECKING:
     pass
 
@@ -206,20 +224,32 @@ class ReferenceLine:
                 f"Invalid traffic_rule: '{traffic_rule}'. Must be 'RHT' or 'LHT'."
             )
 
-        # Select reference lanelet and boundary based on traffic rule
+        # Select reference lanelet and boundary based on traffic rule.
+        # ``reference_lanelet_index`` picks the outermost VEHICLE lanelet, not
+        # simply the outermost one: a lanelet attached by
+        # ``attach_boundary_adjacent_lanelets`` is present or absent according
+        # to the map at that place, so letting it carry the reference line
+        # moves the line sideways wherever it starts or stops. Lanelets
+        # outside the returned index lie on the other side of the reference
+        # line and ``LaneSection`` gives them the opposite lane-id sign.
+        from ..util import reference_lanelet_index
+
+        reference_index = reference_lanelet_index(
+            sorted_lanelets, is_lht=traffic_rule_normalized == "LHT"
+        )
+        reference_lanelet = sorted_lanelets[reference_index]
         if traffic_rule_normalized == "RHT":
-            # RHT: Use leftmost lanelet's left boundary.
-            # All lanes extend to the right (negative IDs) from this line.
-            reference_lanelet = sorted_lanelets[0]
+            # RHT: use the reference lanelet's left boundary.
+            # The lanes inward of it extend to the right (negative IDs).
             border = "left"
             boundary = reference_lanelet.leftBound
         else:  # LHT
-            # LHT: Use rightmost (innermost) lanelet's right boundary.
-            # In LHT, traffic is on the left side of the road.  The innermost lane is
-            # adjacent to the road centre divider, whose edge is the rightBound of the
-            # rightmost lanelet.  All lanes extend to the left (positive IDs) from
-            # this line, matching the OpenDRIVE convention for LHT roads.
-            reference_lanelet = sorted_lanelets[-1]
+            # LHT: use the reference lanelet's right boundary.
+            # In LHT, traffic is on the left side of the road.  The innermost
+            # lane is adjacent to the road centre divider, whose edge is the
+            # rightBound of the rightmost carriageway lanelet.  The lanes
+            # inward of it extend to the left (positive IDs), matching the
+            # OpenDRIVE convention for LHT roads.
             border = "right"
             boundary = reference_lanelet.rightBound
 
@@ -354,6 +384,45 @@ class ReferenceLine:
             start_vel, end_vel = -end_vel, -start_vel
             logger.debug("Reversed velocity vectors to match reversed boundary points")
 
+        # An end that no other lanelet shares has no continuity to buy.
+        #
+        # The cut perpendicular is used because the cut itself is *shared*
+        # between longitudinally connected lanelets, so both sides derive the
+        # same tangent from the same data and meet exactly; the price is that
+        # a skewed cut steers the fit off the polyline by the skew (replacing
+        # the rule everywhere was measured and makes 877 of 889 neighbour
+        # contacts worse, so the price is worth paying where there is a
+        # neighbour).  Where no lanelet shares the end there is nothing on the
+        # other side to agree with, and the skew is paid for nothing: the
+        # fitter is asked to leave a polyline at up to 86 deg off its own
+        # direction.  Take the polyline's own direction there instead.
+        #
+        # Measured on nishishinjuku this is 16 of 600 reference-lanelet ends,
+        # all of them on the 8 walkway-only roads, with cut skews up to
+        # 85.113 deg; the road_shoulder ends do have contacts and keep the
+        # shared rule.
+        from ..util import lanelet_end_has_contact
+
+        emitted_start_is_lanelet_start = not boundary_reversed
+        if not lanelet_end_has_contact(
+            lanelet_map, reference_lanelet, at_start=emitted_start_is_lanelet_start
+        ):
+            start_vel = _polyline_tangent_2d(points_3d, at_start=True)
+            logger.debug(
+                "Lanelet %d start is shared with no other lanelet; using the "
+                "boundary's own tangent for the reference line",
+                reference_lanelet.id,
+            )
+        if not lanelet_end_has_contact(
+            lanelet_map, reference_lanelet, at_start=not emitted_start_is_lanelet_start
+        ):
+            end_vel = _polyline_tangent_2d(points_3d, at_start=False)
+            logger.debug(
+                "Lanelet %d end is shared with no other lanelet; using the "
+                "boundary's own tangent for the reference line",
+                reference_lanelet.id,
+            )
+
         # Apply the heading overrides (direction half of the junction contact
         # contract).  These must come *after* the reversal above: they are
         # stated in the frame of the emitted reference line, which is what
@@ -408,6 +477,13 @@ class ReferenceLine:
             end_vel=end_vel,
             num_control_points=None,
             hard_constraint_weight=spline_hard_weight,
+            # A road reference line's endpoints are a contract with the
+            # neighbouring roads, not just two more points to fit: the
+            # ASAM rule lane_smoothness.contact_point_no_horizontal_gaps
+            # compares lane borders reconstructed from them and allows
+            # 1 cm. The weighted solve leaves 1-3 cm there, which is the
+            # whole of the gap on plain road-to-road joints. Pin them.
+            exact_endpoints=True,
         )
 
         # Generate height_spline: mapping from XY arc length (s) to relative elevation (z)
@@ -420,9 +496,54 @@ class ReferenceLine:
         num_samples = max(10, int(np.ceil(total_length_2d / 0.1)) + 1)
         xy_arc_lengths_resampled = np.linspace(0, total_length_2d, num_samples)
 
+        # ``xy_arc_lengths`` measures the *polyline* through the source points;
+        # ``total_length_2d`` measures the *fitted* reference line.  The two
+        # lengths differ either way -- on the Nishi-Shinjuku fixture the fit is
+        # shorter for 795 of 1548 reference-line constructions and longer for
+        # the other 753 -- so interpolating one domain at abscissae taken from
+        # the other misplaces the last sample.  Where the fit is shorter it
+        # lands short of the final source point; where it is longer ``np.interp``
+        # clamps and flattens the tail.  Either way the road's terminal
+        # elevation stops being the source z, while s=0 stays exact because
+        # both domains start at 0.  That asymmetry is what
+        # asam.net:xodr:1.7.0:road.geometry.contact_point sees at a plain
+        # road-to-road joint, where it compares this road's end against the
+        # neighbour's (exact) start with a 1e-6 m tolerance.
+        #
+        # Map the source samples onto the reference line's own arc-length
+        # domain before interpolating, so both endpoints are reproduced
+        # exactly.
+        #
+        # The convention here is a *uniform* rescale.  It fixes the endpoints,
+        # which is the contract the rule tests, but it is not a claim about
+        # elevation accuracy in the road's interior: measured against a
+        # nearest-point-on-polyline reference it recovers only ~15% of the
+        # interior error and makes the worst road worse (25 mm -> 41 mm).
+        # Which source z belongs at which curve arc length is a separate,
+        # still-open question -- the fitted line sits up to 0.49 m laterally
+        # off the polyline it was fitted to, which is larger than the error
+        # being removed here.  ``Splines.param_at_arc_length`` is the
+        # candidate successor: the fit uses chord-length parameterisation
+        # over these same points with ``t_max == xy_arc_lengths[-1]``, so it
+        # is a true bridge between the two domains rather than an assumption
+        # of constant speed ratio.  It is unmeasured, so it is not used here.
+        if xy_arc_lengths[-1] > 0.0:
+            xy_arc_lengths_on_spline = xy_arc_lengths * (
+                total_length_2d / xy_arc_lengths[-1]
+            )
+            # ``linspace`` reproduces its stop value exactly, but the scaled
+            # array's last element can still miss it by one ulp.  Pin it so
+            # the final sample is an evaluation *at* the last source point
+            # rather than just before it.
+            xy_arc_lengths_on_spline[-1] = total_length_2d
+        else:  # pragma: no cover - degenerate zero-length polyline
+            xy_arc_lengths_on_spline = xy_arc_lengths
+
         # Interpolate z-coordinates at resampled positions
         relative_elevations = np.interp(
-            xy_arc_lengths_resampled, xy_arc_lengths, relative_elevations_raw
+            xy_arc_lengths_resampled,
+            xy_arc_lengths_on_spline,
+            relative_elevations_raw,
         )
 
         # Create height_spline mapping XY arc length -> relative elevation
@@ -438,10 +559,9 @@ class ReferenceLine:
         )
 
         # Derive the center-lane road mark from the boundary LineString used
-        # for this reference line. For RHT the reference is the leftmost
-        # lanelet's leftBound; for LHT it is the rightmost lanelet's
-        # rightBound. Fall back to solid/white when no attributes are
-        # available.
+        # for this reference line. For RHT the reference is the outermost
+        # vehicle lanelet's leftBound; for LHT its rightBound. Fall back to
+        # solid/white when no attributes are available.
         try:
             boundary_attrs = dict(boundary.attributes)
         except (AttributeError, TypeError):  # pragma: no cover - defensive
@@ -481,7 +601,9 @@ class ReferenceLine:
         return self._lane.level
 
     def get_elevation_profile(
-        self, geometry_s_values: list[float] | None = None
+        self,
+        geometry_s_values: list[float] | None = None,
+        road_length: float | None = None,
     ) -> ElevationProfile:
         """
         Get elevation profile from the reference line.
@@ -495,6 +617,25 @@ class ReferenceLine:
                 If provided, elevation segments will be aligned with these boundaries
                 (typically from ParamPoly3 geometries) to ensure consistency.
                 If None, uses the internal height_spline segment boundaries.
+            road_length: The road's own ``@length``, i.e. the upper bound of the
+                s-domain the emitted document declares.  The last elevation
+                segment is built to end exactly here.
+
+                Without it the last segment ends at
+                ``self.height_spline.total_length``, which is the arc length of
+                the *fitted* reference-line spline and is **not** the same
+                number as ``road@length``: the road's length is the sum of the
+                emitted ``<geometry>@length`` values, and the two disagree by
+                up to 265 um over Nishi-Shinjuku's 650 roads (p50 0.81 um).
+                Evaluating the profile at the road's own end then runs past the
+                last cubic's intended domain, giving an elevation that is wrong
+                by that overshoot times the local gradient -- measured at up to
+                12.1 um, on 6 of 650 roads.  Micron-scale, but it is a
+                bookkeeping error that reads as a geometry error, and it is
+                free to remove.
+
+                Only used when ``geometry_s_values`` is given; the fallback
+                branch below has no geometry to be consistent with.
 
         Returns:
             ElevationProfile object containing elevation segments with polynomial coefficients
@@ -509,13 +650,21 @@ class ReferenceLine:
         else:
             # Create elevation segments aligned with geometry boundaries
             # Use cubic Hermite interpolation to compute polynomial coefficients
+            #
+            # The final boundary is the road's declared length when the caller
+            # supplies it, so that the profile's s-domain is the same interval
+            # the rest of the <road> is written against.  See the ``road_length``
+            # argument for the size of the discrepancy this removes.
+            final_s = (
+                self.height_spline.total_length if road_length is None else road_length
+            )
             elevations = []
             for i in range(len(geometry_s_values)):
                 s_start = geometry_s_values[i]
                 s_end = (
                     geometry_s_values[i + 1]
                     if i + 1 < len(geometry_s_values)
-                    else self.height_spline.total_length
+                    else final_s
                 )
                 segment_length = s_end - s_start
 

@@ -21,6 +21,7 @@ from .opendrive_dataclass import (
     LaneAccess,
     SpeedUnit,
 )
+from .profile_redundancy import without_redundant_records
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +42,20 @@ _CURB_LINESTRING_TYPES = frozenset({"curbstone", "road_border"})
 
 def _compute_sidewalk_height(
     lanelet: lanelet2.core.Lanelet,
-    rule: Optional[str],
+    lane_id: int,
     lane_type: LaneType,
 ) -> Optional[LaneHeight]:
     """Return a ``LaneHeight`` for sidewalk/shoulder lanes whose inner
     boundary is a curb LineString, otherwise ``None``.
 
-    Inner side selection follows the same RHT/LHT convention used for width
-    anchoring in :meth:`Lane.construct_from_lanelet`: under RHT the
-    reference line is at the left edge of the road, so the lanelet's
-    ``leftBound`` is the inner (road-facing) side; under LHT it is the
-    ``rightBound``.
+    Inner side selection follows the same rule as width anchoring in
+    :meth:`Lane.construct_from_lanelet`: the inner (road-facing) side is the
+    one that faces the reference line, which is decided by the lane's own
+    side of it. A lane to the left of the reference line (positive id) has
+    its inner boundary on the right; a lane to the right (negative id) has
+    it on the left. With every lane of a section on one side — positive
+    for LHT, negative for RHT — this is the RHT/LHT convention it
+    replaces.
 
     See Issue #469. The sidewalk surface is modelled as flat — both
     ``inner`` and ``outer`` of the emitted ``<height>`` are set to
@@ -60,8 +64,7 @@ def _compute_sidewalk_height(
     if lane_type not in (LaneType.SIDEWALK, LaneType.SHOULDER):
         return None
 
-    is_lht = (rule or "RHT").upper() == "LHT"
-    inner_bound = lanelet.rightBound if is_lht else lanelet.leftBound
+    inner_bound = lanelet.rightBound if lane_id > 0 else lanelet.leftBound
 
     if "type" not in inner_bound.attributes:
         return None
@@ -271,14 +274,19 @@ class Lane:
             rule=rule,
         )
 
-        # Choose the anchor boundary for width calculation based on traffic rule.
-        # RHT: reference line is at the left edge → anchor = LEFT_BOUND
-        #       Width is measured from the left (inner) boundary outward to the right.
-        # LHT: reference line is at the right edge → anchor = RIGHT_BOUND
-        #       Width is measured from the right (inner) boundary outward to the left.
-        is_lht = (rule or "RHT").upper() == "LHT"
+        # Choose the anchor boundary for width calculation: a lane's width is
+        # measured from the boundary facing the reference line, outward.
+        # Which boundary that is follows the lane's SIDE of the reference
+        # line, not the road's traffic rule.
+        #   lane_id > 0 (left of the reference line)  -> RIGHT_BOUND
+        #   lane_id < 0 (right of the reference line) -> LEFT_BOUND
+        # A section whose lanes are all on one side is unchanged by this:
+        # LHT lanes are positive and anchor on rightBound, RHT lanes are
+        # negative and anchor on leftBound, exactly as before. Only a lanelet
+        # that ``attach_boundary_adjacent_lanelets`` put beyond the reference
+        # line crosses over and takes the other anchor.
         width_reference = (
-            WidthReference.RIGHT_BOUND if is_lht else WidthReference.LEFT_BOUND
+            WidthReference.RIGHT_BOUND if lane_id > 0 else WidthReference.LEFT_BOUND
         )
 
         if width_config is None:
@@ -335,9 +343,9 @@ class Lane:
 
         # Sidewalk / shoulder lifted onto a curb (issue #469).
         # Resolved before the access loop below because that loop reuses the
-        # local name ``rule`` for allow/deny strings and would shadow the
-        # RHT/LHT traffic rule that ``_compute_sidewalk_height`` needs.
-        height = _compute_sidewalk_height(lanelet, rule, lane_type)
+        # local name ``rule`` for allow/deny strings; the helper itself now
+        # takes ``lane_id``, which carries the side of the reference line.
+        height = _compute_sidewalk_height(lanelet, lane_id, lane_type)
         if height is not None:
             lane._add_height(height)
 
@@ -403,9 +411,21 @@ class Lane:
         elem.set("type", self.lane_type.value)
         elem.set("level", "true" if self.level else "false")
 
-        # Add rule attribute if specified
-        if self.rule:
-            elem.set("rule", self.rule)
+        # `self.rule` (RHT/LHT) is deliberately NOT serialised onto <lane>.
+        # `rule` is not an attribute of `t_road_lanes_laneSection_lr_lane` in
+        # any OpenDRIVE XSD (1.4 through 1.8): the RHT/LHT traffic rule lives
+        # on <road> (`e_trafficRule`, 1.7+), which Road.to_xml already emits,
+        # and within a lane only <access rule="allow|deny"> and
+        # <roadMark rule="..."> carry a `rule`. Emitting it here produced one
+        # "attribute 'rule' is not allowed" schema error per lane (1015 on the
+        # Nishi-Shinjuku fixture), which failed the bundle's valid_schema
+        # precondition and skipped all 21 semantic/geometry checkers. No
+        # consumer reads it — CARLA's LaneParser reads only <lane>@id, @type
+        # and @level. The field itself is kept because the converter passes
+        # the road's traffic rule down with each lane, but it no longer picks
+        # a lane's inner side or its id sign: ``LaneSection`` assigns ids
+        # outward from the reference line and every per-lane side choice
+        # reads ``lane_id``.
 
         # Add predecessor and successor links if available
         if self.predecessor or self.successor:
@@ -421,8 +441,12 @@ class Lane:
         for border in self.borders:
             elem.append(border.to_xml())
 
-        # Add width definitions
-        for width in self.widths:
+        # Add width definitions. A record that restates its predecessor's
+        # polynomial is not written: it covers the same s with the same value,
+        # and ASAM reports it (performance.avoid_redundant_info). Only such a
+        # record is dropped -- a lane whose widths do not cover its whole s
+        # makes consumers abort.
+        for width in without_redundant_records(self.widths, "s_offset"):
             elem.append(width.to_xml())
 
         # Add road marks

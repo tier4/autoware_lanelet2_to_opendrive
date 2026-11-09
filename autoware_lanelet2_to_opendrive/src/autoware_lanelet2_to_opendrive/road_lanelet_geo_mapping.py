@@ -19,13 +19,13 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Container, Optional
 
 import numpy as np
-from tqdm import tqdm
 
 from .config import DEFAULT_CONFIG
 from .opendrive.enums import TrafficRule
+from .progress import manual, track
 from .opendrive.geometry import (
     Arc,
     GeometryBase,
@@ -119,6 +119,63 @@ class SkippedStopLineEntry:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ReferenceMatchDistance:
+    """Positional error of one road's reference line against its source boundary.
+
+    Attributes:
+        max_m: Symmetric Hausdorff-style point-to-segment distance (m) -- the
+            primary figure.  A mean over sample points shrinks as the road
+            gets longer, so a road that is correct everywhere but one spot
+            reports a small error purely because of the correct part; the
+            maximum does not.
+        mean_m: Symmetric mean point-to-segment distance (m), kept as a
+            secondary figure: it says how much of the road is off, where
+            ``max_m`` says how far the worst of it is.
+        boundary_length_m: Length (m) of the lanelet boundary this was
+            measured against, so exceedance counts can be normalised per
+            kilometre and compared across maps of different size.  ``None``
+            for records restored from a mapping written before it existed.
+    """
+
+    max_m: float
+    mean_m: float
+    boundary_length_m: float | None = None
+
+    def to_dict(self, decimals: int) -> dict:
+        """Serialize to a JSON-compatible dictionary, rounded to *decimals*."""
+        result: dict = {
+            "max_m": round(self.max_m, decimals),
+            "mean_m": round(self.mean_m, decimals),
+        }
+        if self.boundary_length_m is not None:
+            result["boundary_length_m"] = round(self.boundary_length_m, decimals)
+        return result
+
+    @classmethod
+    def from_value(cls, value: object) -> "ReferenceMatchDistance":
+        """Deserialize one stored value, accepting the legacy plain float.
+
+        Mappings written before this record existed stored a bare float per
+        lanelet, and that float was the *mean*.  There is no way to recover
+        the maximum from it, so it is reused for both fields: the summary then
+        reports what the old file actually measured rather than dropping the
+        record or inventing a worse figure.
+        """
+        if isinstance(value, dict):
+            return cls(
+                max_m=float(value["max_m"]),
+                mean_m=float(value["mean_m"]),
+                boundary_length_m=(
+                    float(value["boundary_length_m"])
+                    if value.get("boundary_length_m") is not None
+                    else None
+                ),
+            )
+        mean = float(value)  # type: ignore[arg-type]
+        return cls(max_m=mean, mean_m=mean, boundary_length_m=None)
+
+
 @dataclass
 class _RoadCandidates:
     """Per-road candidate list for the 3-phase matching algorithm."""
@@ -153,7 +210,72 @@ class GeoRoadLaneletMapping:
     #: they have no source lanelet. Recorded so consumers can tell them
     #: apart from genuine mapping failures (#493).
     skipped_synthetic_roads: list[int] | None = None
+    #: ``road id -> source lanelet ids`` for chain-merged connecting roads:
+    #: one road that spans a whole in-junction maneuver so an in-junction
+    #: fork can be expressed at all (see
+    #: ``Road._build_chain_connecting_roads``). Recorded because the XODR
+    #: carries no trace of the merge, and shape matching, which models one
+    #: lanelet per ``(road, lane)``, needs to be told about it.
+    chain_merged_roads: dict[int, list[int]] | None = None
+    #: ``road id -> source lanelet ids`` for the extra copies of an
+    #: exit-forking junction group: one connecting road per road outside the
+    #: junction the group leads to, so the single road-level ``<successor>``
+    #: stops losing every exit but one (see
+    #: ``Road.exit_fork_successor_road_id``). Recorded for the same reason as
+    #: ``chain_merged_roads``: the XODR carries no trace of the duplication,
+    #: and shape matching, which models one lanelet per ``(road, lane)``, has
+    #: to be told to leave the copies alone. The lanelet ids are carried too
+    #: because ``lanelet_to_road_and_lane`` can name only the copy that
+    #: claimed them; without this a consumer would read a duplicate's lanes
+    #: as synthetic rather than as the same maneuver stage.
+    exit_fork_duplicate_roads: dict[int, list[int]] | None = None
+    #: ``lanelet id -> the (road, lane) pairs it belongs to *beyond* the one
+    #: ``lanelet_to_road_and_lane`` names``.  Junction forks are handled by
+    #: duplicating a shared stage into several connecting roads, so such a
+    #: lanelet genuinely belongs to several pairs while the 1:1 field can
+    #: name only the one that claimed it.  This records the rest, so the
+    #: relation can be read in full without re-deriving it from
+    #: ``chain_merged_roads`` / ``exit_fork_duplicate_roads`` and the XODR.
+    #:
+    #: Deliberately the *extra* pairs only, never the full list: a full list
+    #: would restate what ``lanelet_to_road_and_lane`` already says, and two
+    #: fields that can disagree eventually do.  Read the complete relation as
+    #: ``{lanelet_to_road_and_lane[lid]} | set(lanelet_additional_road_lanes
+    #: .get(lid, []))``.
+    #:
+    #: Empty for the overwhelming majority of lanelets -- 5 of 892 on
+    #: nishishinjuku carry anything at all -- so an empty dict is the normal
+    #: case for a map without in-junction forks, not a failure to populate
+    #: it.  ``None`` for mappings written before this field existed, and for
+    #: mappings built from an XODR alone (the geometric pass matches one
+    #: lanelet per road and so never produces a second attribution).
+    lanelet_additional_road_lanes: dict[int, list[tuple[int, int]]] | None = None
     traffic_light_config: dict | None = None
+    #: Symmetric mean point-to-segment distance (m) between a road's reference
+    #: line and the boundary of the lanelet that reference line was generated
+    #: from, keyed by that lanelet's id. This is the conversion's positional
+    #: error measured against its own Lanelet2 input, so accuracy can be
+    #: reported without converting the same map twice. Keyed by lanelet id
+    #: because those survive a change of road grouping, unlike road ids, which
+    #: are reassigned whenever preprocessing changes it.
+    #:
+    #: These are ids in the *preprocessed* map, which is what conversion runs
+    #: on. A lanelet that preprocessing merged therefore carries an id that
+    #: does not appear in the file the user supplied;
+    #: :func:`original_lanelet_ids` walks ``preprocessing_log`` back to the
+    #: ids that do.
+    #:
+    #: Every value comes from the same metric (``_REPORT_METRIC_NAME``),
+    #: recomputed rather than taken from whichever matching fallback level
+    #: happened to win — those levels use two different metrics and mixing
+    #: them makes level-3 matches look optimistically small.
+    reference_match_distances: dict[int, ReferenceMatchDistance] | None = None
+    #: Subset of the ``reference_match_distances`` keys whose road was
+    #: recovered by the rescue pass. Those roads are matched with a relaxed
+    #: threshold (``rescue_threshold_factor`` x ``match_threshold``), so their
+    #: distance may legitimately exceed the matching tolerance and a report
+    #: must not claim otherwise.
+    rescued_reference_lanelets: list[int] | None = None
     _road_lane_to_lanelet: dict[tuple[int, int], int] = field(
         default_factory=dict,
         init=False,
@@ -197,6 +319,27 @@ class GeoRoadLaneletMapping:
             result["preprocessing_log"] = self.preprocessing_log
         if self.traffic_light_config is not None:
             result["traffic_light_config"] = self.traffic_light_config
+        if self.chain_merged_roads:
+            result["chain_merged_roads"] = {
+                str(k): list(v) for k, v in self.chain_merged_roads.items()
+            }
+        if self.exit_fork_duplicate_roads:
+            result["exit_fork_duplicate_roads"] = {
+                str(k): list(v) for k, v in self.exit_fork_duplicate_roads.items()
+            }
+        if self.lanelet_additional_road_lanes:
+            result["lanelet_additional_road_lanes"] = {
+                str(k): [list(pair) for pair in v]
+                for k, v in self.lanelet_additional_road_lanes.items()
+            }
+        if self.reference_match_distances is not None:
+            decimals = DEFAULT_CONFIG.geo_mapping.distance_report_decimals
+            result["reference_match_distances"] = {
+                str(k): v.to_dict(decimals)
+                for k, v in self.reference_match_distances.items()
+            }
+        if self.rescued_reference_lanelets is not None:
+            result["rescued_reference_lanelets"] = list(self.rescued_reference_lanelets)
         return result
 
     @classmethod
@@ -217,6 +360,13 @@ class GeoRoadLaneletMapping:
                 int(k): SkippedStopLineEntry.from_dict(v) for k, v in raw_ssl.items()
             }
 
+        raw_rmd = data.get("reference_match_distances")
+        reference_match_distances: dict[int, ReferenceMatchDistance] | None = None
+        if raw_rmd is not None:
+            reference_match_distances = {
+                int(k): ReferenceMatchDistance.from_value(v) for k, v in raw_rmd.items()
+            }
+
         return cls(
             xodr_sha256=data["xodr_sha256"],
             osm_sha256=data["osm_sha256"],
@@ -228,7 +378,25 @@ class GeoRoadLaneletMapping:
             stop_line_mapping=stop_line_mapping,
             skipped_stop_lines=skipped_stop_lines,
             skipped_synthetic_roads=data.get("skipped_synthetic_roads"),
+            chain_merged_roads=(
+                {int(k): list(v) for k, v in raw_chain.items()}
+                if (raw_chain := data.get("chain_merged_roads")) is not None
+                else None
+            ),
+            exit_fork_duplicate_roads=(
+                {int(k): list(v) for k, v in raw_dup.items()}
+                if (raw_dup := data.get("exit_fork_duplicate_roads")) is not None
+                else None
+            ),
+            lanelet_additional_road_lanes=(
+                {int(k): [(p[0], p[1]) for p in v] for k, v in raw_additional.items()}
+                if (raw_additional := data.get("lanelet_additional_road_lanes"))
+                is not None
+                else None
+            ),
             traffic_light_config=data.get("traffic_light_config"),
+            reference_match_distances=reference_match_distances,
+            rescued_reference_lanelets=data.get("rescued_reference_lanelets"),
         )
 
 
@@ -314,7 +482,44 @@ def _build_boundary_grid(
             for cell_y in range(int(box[1] // cell_size), int(box[3] // cell_size) + 1):
                 cells.setdefault((cell_x, cell_y), []).append(position)
 
-    return _BoundaryGrid(cell_size=cell_size, cells=cells, lids=lids, boxes=boxes)
+    grid = _BoundaryGrid(cell_size=cell_size, cells=cells, lids=lids, boxes=boxes)
+    _log_grid_dimensions(grid)
+    return grid
+
+
+def _log_grid_dimensions(grid: _BoundaryGrid) -> None:
+    """Report how coarse the grid turned out.
+
+    The cell is the largest bounding-box extent in the pool, so one long
+    boundary sizes it for everything -- and the cell size decides how many
+    boundaries a query returns. The occupancy is reported alongside it
+    because the size on its own does not say whether the grid separates
+    anything: a pool that lands in one cell is a linear scan wearing a grid.
+
+    The work the candidates feed into is bounded by the querying road's own
+    bounding box, so a coarse grid does not show up as a slowdown until the
+    map's extent grows -- at which point it arrives as a cliff. This line is
+    what makes that visible beforehand.
+    """
+    if not grid.lids:
+        logger.info("Boundary grid: empty pool")
+        return
+
+    extent_x = max(box[2] for box in grid.boxes) - min(box[0] for box in grid.boxes)
+    extent_y = max(box[3] for box in grid.boxes) - min(box[1] for box in grid.boxes)
+    entries = sum(len(positions) for positions in grid.cells.values())
+    per_cell = entries / len(grid.cells) if grid.cells else 0.0
+
+    logger.info(
+        "Boundary grid: %d boundaries, cell %.1f m, %d cell(s) occupied over a "
+        "%.0f x %.0f m extent, %.1f boundaries per occupied cell",
+        len(grid.lids),
+        grid.cell_size,
+        len(grid.cells),
+        extent_x,
+        extent_y,
+        per_cell,
+    )
 
 
 def _grid_candidate_positions(
@@ -380,6 +585,152 @@ def _symmetric_mean_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
         _directed_mean_distance(line_a, line_b),
         _directed_mean_distance(line_b, line_a),
     )
+
+
+def _directed_polyline_distances(
+    from_points: np.ndarray, to_line: np.ndarray
+) -> np.ndarray:
+    """Point-to-segment distance from every point of *from_points* to *to_line*.
+
+    Unlike :func:`_directed_mean_distance`, the nearest point is taken on the
+    *segments* of ``to_line``, not on its vertices.  The two agree only when
+    ``to_line`` is sampled far more densely than ``from_points``; otherwise the
+    vertex form reports the sampling gap as if it were a geometric error.  A
+    reference line sampled every 0.5 m that lies exactly on a boundary with 5 m
+    vertex spacing measures ~1.25 m against the vertices and 0 m against the
+    segments.
+
+    This is used for *reporting only*.  Matching keeps
+    :func:`_directed_mean_distance` so that no match decision changes.
+    """
+    seg_start = to_line[:-1]  # (M-1, 2)
+    seg_vec = to_line[1:] - seg_start  # (M-1, 2)
+    seg_len_sq = np.sum(seg_vec * seg_vec, axis=1)  # (M-1,)
+    # Degenerate (zero-length) segments collapse to their start point: the
+    # projection parameter is forced to 0 rather than dividing by zero.
+    safe_len_sq = np.where(seg_len_sq > 0.0, seg_len_sq, 1.0)
+
+    # (N, 1, 2) - (1, M-1, 2) -> (N, M-1, 2)
+    rel = from_points[:, np.newaxis, :] - seg_start[np.newaxis, :, :]
+    t = np.sum(rel * seg_vec[np.newaxis, :, :], axis=2) / safe_len_sq[np.newaxis, :]
+    t = np.clip(t, 0.0, 1.0)
+    closest = (
+        seg_start[np.newaxis, :, :] + t[:, :, np.newaxis] * seg_vec[np.newaxis, :, :]
+    )
+    diffs = from_points[:, np.newaxis, :] - closest
+    dists_sq = np.sum(diffs * diffs, axis=2)
+    return np.sqrt(np.min(dists_sq, axis=1))
+
+
+def _directed_mean_polyline_distance(
+    from_points: np.ndarray, to_line: np.ndarray
+) -> float:
+    """Mean point-to-segment distance from *from_points* to *to_line*."""
+    if len(to_line) < 2:
+        return _directed_mean_distance(from_points, to_line)
+    return float(np.mean(_directed_polyline_distances(from_points, to_line)))
+
+
+def _directed_max_polyline_distance(
+    from_points: np.ndarray, to_line: np.ndarray
+) -> float:
+    """Worst point-to-segment distance from *from_points* to *to_line*."""
+    if len(to_line) < 2:
+        return _directed_mean_distance(from_points, to_line)
+    return float(np.max(_directed_polyline_distances(from_points, to_line)))
+
+
+def _symmetric_mean_polyline_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
+    """Symmetric point-to-segment distance: max of both directed means.
+
+    The reporting counterpart of :func:`_symmetric_mean_distance`; see
+    :func:`_directed_polyline_distances` for why the vertex-based form is
+    unsuitable for an accuracy figure.
+
+    Averaging over the sample points makes this figure fall as the road gets
+    longer: a single localised excursion is divided by the whole length, so it
+    is kept only as a secondary value.  Use
+    :func:`_symmetric_max_polyline_distance` for the headline figure.
+    """
+    return max(
+        _directed_mean_polyline_distance(line_a, line_b),
+        _directed_mean_polyline_distance(line_b, line_a),
+    )
+
+
+def _symmetric_max_polyline_distance(line_a: np.ndarray, line_b: np.ndarray) -> float:
+    """Symmetric Hausdorff-style point-to-segment distance.
+
+    The maximum over both directed worst-case distances: the smallest ``d``
+    such that every point of either polyline lies within ``d`` of the other.
+    This is the primary accuracy figure, because it is the only one that
+    survives the road's length — a mean dilutes a localised deviation in
+    proportion to how much correct geometry surrounds it, so a road with one
+    bad metre reports a small error simply for being long.
+    """
+    return max(
+        _directed_max_polyline_distance(line_a, line_b),
+        _directed_max_polyline_distance(line_b, line_a),
+    )
+
+
+def _polyline_length(pts: np.ndarray) -> float:
+    """Total length (m) of a polyline."""
+    if len(pts) < 2:
+        return 0.0
+    return float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)))
+
+
+#: Name of the metric behind every ``max_m`` in
+#: :attr:`GeoRoadLaneletMapping.reference_match_distances`.  The matching
+#: fallback levels use two different metrics (symmetric for levels 1-2,
+#: one-directional for level 3), so the reported figures are *not* taken from
+#: whichever level won — they are all recomputed with this single metric, and
+#: the name is carried in the summary so it cannot be mistaken for another.
+_REPORT_METRIC_NAME: str = "symmetric_point_to_segment_max"
+
+
+def _accuracy_report_key(
+    walk_result: list[tuple[int, int, int]],
+    is_rht: bool,
+    taken: "Container[int]",
+) -> int:
+    """Lanelet the road's positional accuracy should be reported under.
+
+    ``walk_result`` is the adjacency walk's output as
+    ``(lanelet id, road id, lane id)``, outermost lane first.  ``taken``
+    holds the lanelets already reported on, so that two roads cannot be
+    filed under one key.
+
+    The reference line is a boundary of exactly one lanelet of the walk --
+    its left boundary under RHT, its right boundary under LHT -- so that is
+    the only lanelet the road's positional accuracy can be measured against.
+
+    This is not in general the lanelet the walk started from.  The walk
+    starts at the outermost lanelet of the whole cross-section, and since the
+    road reference line follows the outermost *vehicle* lanelet, an attached
+    shoulder or footway sits outside it and is where the walk begins.
+    Measuring the reference line against that lanelet's own boundary charges
+    the road the attached lane's full width for geometry that is exact.
+
+    Falls back to the walk start in two cases, which leaves the figure where
+    it used to be rather than dropping the road from the report altogether:
+    when the walk never reached the reference lane, and when another road has
+    already been filed under that lanelet.
+
+    The second case is why ``taken`` exists.  The walk start cannot collide
+    -- it is the lanelet Phase 1 matched and Phase 2 made unique per road --
+    but the reference-lane lanelet sits *inside* the walk, and the walk
+    covers the whole cross-section, which two roads can overlap on.  The
+    report is a plain dict keyed by lanelet, so a collision does not merge
+    the two figures: it deletes one.
+    """
+    reference_lane_id = -1 if is_rht else 1
+    start = walk_result[0][0]
+    for lanelet_id, _road_id, lane_id in walk_result:
+        if lane_id == reference_lane_id:
+            return start if lanelet_id in taken else lanelet_id
+    return start
 
 
 def _polyline_direction(pts: np.ndarray) -> np.ndarray:
@@ -705,12 +1056,125 @@ def _synthetic_connector_road_ids(roads: list["ConverterRoad"]) -> set[int]:
     return skipped
 
 
+def _chain_merged_road_lanelets(
+    roads: list["ConverterRoad"],
+) -> dict[int, list[int]]:
+    """``road id -> source lanelet ids`` for chain-merged connecting roads.
+
+    A chain-merged connecting road spans several longitudinally consecutive
+    junction lanelets so that an in-junction fork can be expressed at all
+    (see ``Road._build_chain_connecting_roads``). Shape matching is written
+    around one lanelet per ``(road, lane)``, so such a road would be matched
+    to whichever single lanelet its reference line starts or ends on and
+    then charged, as positional error, the length of everything else it
+    covers. The mapping is taken from the road instead.
+
+    Empty when the roads were parsed back from an XODR, which carries no
+    record of the merge; callers that have the sidecar pass it explicitly.
+    """
+    return {
+        road.id: list(ids)
+        for road in roads
+        if (ids := getattr(road, "chain_source_lanelet_ids", None))
+    }
+
+
+def _exit_fork_duplicate_roads(
+    roads: list["ConverterRoad"],
+) -> dict[int, list[int]]:
+    """``road id -> source lanelet ids`` for exit-fork duplicate roads.
+
+    A connecting road whose lanes leave the junction into several roads
+    outside it is emitted once per outside road, because the road-level
+    ``<successor>`` holds one (see ``Road.exit_fork_successor_road_id``).
+    The copies are geometrically identical and only the first claims the
+    group's lanelets, so the rest have nothing to match: shape matching
+    would let a duplicate win a lanelet the conversion gave to the claiming
+    copy, and the cross-check would then report a mismatch that is only a
+    disagreement about which identical road to name.
+
+    The source lanelets are recorded alongside the ids, not just the ids,
+    because the ``lanelet -> (road, lane)`` mapping can name one road per
+    lanelet: without this, a consumer reading the sidecar has no way to
+    learn that a duplicate realises the same maneuver stage as the road
+    that claimed it, and would read the duplicate's lanes as synthetic.
+
+    Empty when the roads were parsed back from an XODR, which carries no
+    trace of the duplication; callers that have the sidecar pass it.
+    """
+    return {
+        road.id: list(getattr(road, "exit_fork_lanelet_ids", None) or ())
+        for road in sorted(roads, key=lambda r: r.id)
+        if getattr(road, "exit_fork_duplicate", False)
+    }
+
+
+def _additional_road_lanes(
+    roads: list["ConverterRoad"],
+    primary: dict[int, tuple[int, int]],
+) -> dict[int, list[tuple[int, int]]]:
+    """``lanelet id -> (road, lane) pairs beyond the one *primary* names``.
+
+    A junction fork is realised by duplicating a shared stage into several
+    connecting roads, so one lanelet can genuinely belong to several
+    ``(road, lane)`` pairs while ``lanelet_to_road_and_lane`` names only the
+    one that claimed it.  Two constructs produce such a lanelet:
+
+    * a **chain-merged** road's shared prefix, traversed by every branch of
+      an in-junction fork but owned by whichever branch claimed it first
+      (``Road.chain_owned_lanelet_ids`` is the unclaimed remainder), and
+    * an **exit-fork duplicate**, a geometrically identical copy of the
+      claiming road that ``Road.set_all_lane_links`` skips precisely because
+      the 1:1 record has no room for it.
+
+    Read off the converter's own ``Road`` objects rather than derived from
+    the sidecar's ``chain_merged_roads`` / ``exit_fork_duplicate_roads``: a
+    chain road that owns no lanelet at all exposes its lane id nowhere in
+    the 1:1 record, so a sidecar-only derivation silently drops it (32 of
+    300 chain roads on one customer map).  Here the lane id is simply asked
+    for.
+
+    This is a read-only pass.  It must stay one: the same
+    ``get_lanelet_to_lane_mapping()`` it calls also feeds the lane-link
+    resolution that decides the emitted XODR, and this record is not
+    supposed to change a single byte of it.
+
+    Returns:
+        Extra pairs only, per lanelet, sorted and without duplicates.
+        Empty for a map with no in-junction forks.
+    """
+    extras: dict[int, set[tuple[int, int]]] = {}
+
+    def add(lanelet_id: int, pair: tuple[int, int]) -> None:
+        if primary.get(lanelet_id) != pair:
+            extras.setdefault(lanelet_id, set()).add(pair)
+
+    for road in sorted(roads, key=lambda r: r.id):
+        # Covers the exit-fork duplicates: their lanes carry real lanelet
+        # ids, and it is only the record that skipped them.  For an ordinary
+        # road every pair here already *is* the primary one, so ``add``
+        # filters it out and nothing is recorded.
+        for lanelet_id, lane_id in road.get_lanelet_to_lane_mapping().items():
+            add(lanelet_id, (road.id, lane_id))
+
+        # Covers a chain-merged road's *whole* path, not just the part it
+        # owns: the shared prefix is what the claiming branch took and every
+        # other branch drives through it just the same.
+        source_ids = getattr(road, "chain_source_lanelet_ids", None)
+        if source_ids and (chain_lane_id := road._chain_lane_id()) is not None:
+            for lanelet_id in source_ids:
+                add(lanelet_id, (road.id, chain_lane_id))
+
+    return {lid: sorted(pairs) for lid, pairs in sorted(extras.items())}
+
+
 def _compute_all_candidates(
     roads: list["ConverterRoad"],
     lanelet_left: dict[int, np.ndarray],
     lanelet_right: dict[int, np.ndarray],
     lanelet_left_bbox: dict[int, tuple[float, float, float, float]],
     lanelet_right_bbox: dict[int, tuple[float, float, float, float]],
+    excluded_road_ids: Optional[set[int]] = None,
 ) -> tuple[list[_RoadCandidates], dict[int, dict], set[int]]:
     """Phase 1: compute candidate lanelet lists for every road.
 
@@ -732,13 +1196,14 @@ def _compute_all_candidates(
     # poisoning Phase 2 conflict resolution and the Phase 3 adjacency walk.
     # Exclude them up front and report them separately (#493).
     skipped_synthetic = _synthetic_connector_road_ids(roads)
+    excluded = skipped_synthetic | (excluded_road_ids or set())
 
     # Uniform grids over the two boundary populations, built on first use so
     # that a map with a single traffic rule never pays for the unused side.
     grids: dict[bool, Optional[_BoundaryGrid]] = {True: None, False: None}
 
-    for road in tqdm(roads, desc="Computing road candidates", unit="road"):
-        if road.id in skipped_synthetic:
+    for road in track(roads, "Computing road candidates", unit="road"):
+        if road.id in excluded:
             continue
 
         ref_line = _sample_reference_line_from_road(road)
@@ -941,10 +1406,10 @@ def _resolve_conflicts(
     # Both loops below run for an unknown number of rounds, so the bars count
     # rounds rather than showing a percentage.  Without them this phase is
     # silent, and on a large map that silence is indistinguishable from a hang.
-    rounds = tqdm(desc="Resolving candidate conflicts", unit="round")
+    rounds = manual("Resolving candidate conflicts", unit="round")
 
     while True:
-        rounds.update()
+        rounds.advance()
         # Build claims: lanelet_id -> [(rc_idx, distance), ...]
         claims: dict[int, list[tuple[int, float]]] = {}
         for rc_idx, cand_idx in assignment.items():
@@ -1083,10 +1548,10 @@ def _resolve_conflicts(
         for cand_lid in all_rc[rc_idx].raw_dists:
             holders.setdefault(cand_lid, []).append(position)
 
-    swaps = tqdm(desc="Fixing pairwise swaps", unit="pass")
+    swaps = manual("Fixing pairwise swaps", unit="pass")
     swap_found = True
     while swap_found:
-        swaps.update()
+        swaps.advance()
         swap_found = False
         for i, rc_a in enumerate(order):
             _, lid_a = all_rc[rc_a].candidates[valid[rc_a]]
@@ -1151,6 +1616,8 @@ def build_mapping(
     mgrs_offset: tuple[float, float],
     xodr_sha256: str,
     osm_sha256: str,
+    chain_roads: Optional[dict[int, list[int]]] = None,
+    duplicate_roads: Optional[dict[int, list[int]]] = None,
 ) -> GeoRoadLaneletMapping:
     """Build lanelet -> (road_id, lane_id) mapping by boundary shape comparison.
 
@@ -1181,11 +1648,30 @@ def build_mapping(
         mgrs_offset: ``(offset_x, offset_y)`` subtracted from lanelet coords.
         xodr_sha256: SHA256 of the XODR file.
         osm_sha256: SHA256 of the OSM file.
+        chain_roads: ``road id -> source lanelet ids`` for chain-merged
+            connecting roads, which cover several lanelets per lane and so
+            fall outside the one-lanelet-per-lane shape matching below.
+            Derived from the roads themselves when omitted; pass the value
+            from the conversion sidecar when the roads were parsed back from
+            an XODR, which carries no record of the merge.
+        duplicate_roads: ``road id -> source lanelet ids`` for the extra
+            copies of an exit-forking
+            junction group (see ``Road.exit_fork_duplicate``). They are
+            geometrically identical to the copy that claims the group's
+            lanelets and claim none themselves, so they are held out of the
+            shape matching exactly like the chain-merged roads; the claiming
+            copy's record covers their geometry. Derived from the roads
+            themselves when omitted, and likewise unavailable to roads parsed
+            back from an XODR, which carries no trace of the duplication.
 
     Returns:
         :class:`GeoRoadLaneletMapping` built by geometric comparison.
     """
     offset_x, offset_y = mgrs_offset
+    if chain_roads is None:
+        chain_roads = _chain_merged_road_lanelets(roads)
+    if duplicate_roads is None:
+        duplicate_roads = _exit_fork_duplicate_roads(roads)
 
     # -- Pre-compute lanelet boundary data --------------------------------
 
@@ -1232,7 +1718,7 @@ def build_mapping(
             n_excluded,
         )
 
-    for ll in tqdm(lanelets, desc="Pre-computing lanelet boundaries", unit="lanelet"):
+    for ll in track(lanelets, "Pre-computing lanelet boundaries", unit="lanelet"):
         lid = ll.id
         lp = np.array([(p.x - offset_x, p.y - offset_y) for p in ll.leftBound])
         rp = np.array([(p.x - offset_x, p.y - offset_y) for p in ll.rightBound])
@@ -1337,10 +1823,67 @@ def build_mapping(
         lanelet_right,
         lanelet_left_bbox,
         lanelet_right_bbox,
+        excluded_road_ids=set(chain_roads) | set(duplicate_roads),
     )
 
     # Phase 2: resolve conflicts iteratively
     assignment = _resolve_conflicts(all_rc)
+
+    # Positional accuracy of every accepted match, for reporting only.
+    #
+    # The figures are recomputed rather than read out of ``raw_dists``, for
+    # three reasons: ``raw_dists`` holds whichever metric the winning fallback
+    # level used (symmetric for levels 1-2, one-directional for level 3), which
+    # would mix two scales in one summary; it measures against boundary
+    # *vertices*, which charges the boundary's vertex spacing as if it were
+    # error; and the Phase-3 pre-walk may move the reference to a lanelet that
+    # ``raw_dists`` has no entry for at all.
+    reference_match_distances: dict[int, ReferenceMatchDistance] = {}
+    rescued_reference_lanelets: set[int] = set()
+
+    def _record_reference_accuracy(
+        lanelet_id: int, rc: _RoadCandidates, *, rescued: bool
+    ) -> None:
+        """Measure ``rc``'s reference line against the boundary actually used.
+
+        One boundary per road, deliberately: the reference line was generated
+        from this boundary, so this is the error of the thing being reported.
+        The opposite boundary's deviation is lane-width error -- a different
+        quantity, carried by the emitted ``<width>`` rather than by the road's
+        geometry -- and averaging the two would blend them into a figure that
+        means neither.
+        """
+        boundaries = lanelet_left if rc.is_rht else lanelet_right
+        boundary = boundaries.get(lanelet_id)
+        if boundary is None:
+            return
+        record = ReferenceMatchDistance(
+            max_m=_symmetric_max_polyline_distance(rc.ref_line, boundary),
+            mean_m=_symmetric_mean_polyline_distance(rc.ref_line, boundary),
+            boundary_length_m=_polyline_length(boundary),
+        )
+        # ``_accuracy_report_key`` keeps roads off each other's keys, and the
+        # rescue pass writes the lanelet it matched, which is unmatched by
+        # definition.  If a collision happens anyway, keep the larger figure
+        # and say so: a plain assignment would drop one road from the counts
+        # silently, and silently lowering a total is how this report has been
+        # wrong before.
+        previous = reference_match_distances.get(lanelet_id)
+        if previous is not None:
+            logger.warning(
+                "Reference accuracy collision on lanelet %d: road %d reports "
+                "max %.3f m where %.3f m was already recorded; keeping the "
+                "larger. One road is missing from the accuracy counts.",
+                lanelet_id,
+                rc.road_id,
+                record.max_m,
+                previous.max_m,
+            )
+            if previous.max_m >= record.max_m:
+                return
+        reference_match_distances[lanelet_id] = record
+        if rescued:
+            rescued_reference_lanelets.add(lanelet_id)
 
     # Build resolved_references: lanelet_id -> rc_idx
     resolved_references: dict[int, int] = {}
@@ -1354,8 +1897,8 @@ def build_mapping(
         key=lambda item: all_rc[item[0]].candidates[item[1]][0],
     )
 
-    for rc_idx, cand_idx in tqdm(
-        sorted_assignments, desc="Matching roads to lanelets", unit="road"
+    for rc_idx, cand_idx in track(
+        sorted_assignments, "Matching roads to lanelets", unit="road"
     ):
         rc = all_rc[rc_idx]
         _, best_lid = rc.candidates[cand_idx]
@@ -1449,6 +1992,17 @@ def build_mapping(
         # Commit walk results
         _commit(walk_result)
 
+        # Record accuracy under the lanelet whose boundary the reference line
+        # was generated from -- the one carrying the reference lane id -- and
+        # not under whichever lanelet the walk started from.  See
+        # ``_accuracy_report_key``.
+        if walk_result:
+            _record_reference_accuracy(
+                _accuracy_report_key(walk_result, rc.is_rht, reference_match_distances),
+                rc,
+                rescued=False,
+            )
+
     # -- Rescue pass: attempt to assign dropped roads -----------------------
     # Roads that had candidates in Phase 1 but were dropped in Phase 2
     # (conflict resolution) get a second chance with a relaxed search
@@ -1469,7 +2023,7 @@ def build_mapping(
     # ties included.  Built on first use so a map with no dropped roads, or
     # with a single traffic rule, never pays for it.
     rescue_grids: dict[bool, Optional[_BoundaryGrid]] = {True: None, False: None}
-    for rc_idx in tqdm(dropped_rc_indices, desc="Rescuing dropped roads", unit="road"):
+    for rc_idx in track(dropped_rc_indices, "Rescuing dropped roads", unit="road"):
         rc = all_rc[rc_idx]
         boundaries = lanelet_left if rc.is_rht else lanelet_right
         bboxes = lanelet_left_bbox if rc.is_rht else lanelet_right_bbox
@@ -1506,6 +2060,17 @@ def build_mapping(
                     break
                 current = next_ll
             _commit(walk_result_rescue)
+            # Rescued roads carry positional error like any other match — and
+            # more of it, since they are accepted up to the relaxed rescue
+            # threshold.  Leaving them out understates ``max`` and ``p95``.
+            # ``best_lid`` is right here, where ``_accuracy_report_key``
+            # would be wrong: this pass has no pre-walk, so the walk starts
+            # at the lanelet matched against the reference-side boundary --
+            # the reference lanelet itself -- and the lane ids it then writes
+            # from ``walk_lane_ids`` are shifted on a road with lanes on both
+            # sides.  Reading the key off those ids would follow the shift;
+            # the match does not.
+            _record_reference_accuracy(best_lid, rc, rescued=True)
             rescued_road_ids.add(rc.road_id)
             logger.info(
                 "Rescue: road %d recovered via lanelet %d (dist=%.3f, lanes=%d/%d)",
@@ -1515,6 +2080,50 @@ def build_mapping(
                 len(walk_result_rescue),
                 len(rc.walk_lane_ids),
             )
+
+    # -- Chain-merged connecting roads -------------------------------------
+    #
+    # These were held out of the shape matching above: their single lane
+    # stands for a whole in-junction maneuver, i.e. for several lanelets in
+    # travel order, which the candidate/assignment machinery cannot express.
+    # Every source lanelet is attributed to that lane here, so the mapping
+    # stays complete.  Measuring such a road's reference line needs the
+    # concatenation of those boundaries rather than any single one of them;
+    # that measurement lives with the accuracy report (#610), which is not
+    # an ancestor of this branch.
+    if chain_roads:
+        road_by_id = {road.id: road for road in roads}
+        # A fork's shared stage is traversed by several merged roads but may
+        # name only one ``(road, lane)`` pair. The conversion gives it to the
+        # first road that traverses it; ascending road id reproduces that
+        # order, so the two mappings agree instead of disagreeing over which
+        # branch owns the shared stage.
+        chain_claimed: set[int] = set()
+        for road_id in sorted(chain_roads):
+            road = road_by_id.get(road_id)
+            if road is None:
+                continue
+            lane_ids = _get_driving_lane_ids_from_road(road)
+            if not lane_ids:
+                continue
+            lane_id = lane_ids[0]
+            is_rht = (
+                road.rule == TrafficRule.RHT
+                if road.rule is not None
+                else all(lid < 0 for lid in lane_ids)
+            )
+            boundaries = lanelet_left if is_rht else lanelet_right
+            path = [lid for lid in chain_roads[road_id] if lid in boundaries]
+            if not path:
+                continue
+            _commit(
+                [
+                    (lid, int(road_id), lane_id)
+                    for lid in path
+                    if lid not in chain_claimed
+                ]
+            )
+            chain_claimed.update(path)
 
     # -- Diagnostic summary ------------------------------------------------
     all_road_ids = {road.id for road in roads if road.plan_view and road.lanes}
@@ -1556,31 +2165,32 @@ def build_mapping(
             f"by a later road (the earlier assignment was dropped); "
             f"{len({lid for lid, _, _ in overwrites})} distinct lanelets"
         )
-        tqdm.write(msg)
         logger.warning(msg)
         for lid, previous, current in overwrites[:10]:
-            tqdm.write(f"    lanelet {lid}: {previous} -> {current}")
+            logger.warning("    lanelet %d: %s -> %s", lid, previous, current)
     if roads_no_candidates:
         msg = (
             f"  [Diag] Phase 1: {len(roads_no_candidates)} roads had 0 "
             f"candidates (threshold={_MATCH_THRESHOLD}m): "
             f"road IDs = {sorted(roads_no_candidates)[:30]}"
         )
-        tqdm.write(msg)
         logger.warning(msg)
         # Print detailed diagnostics for roads without candidates
         for rid in sorted(roads_no_candidates)[:10]:
             diag = no_candidate_diag.get(rid)
             if diag:
-                tqdm.write(
-                    f"    road {rid}: rule={diag['rule']}, "
-                    f"is_rht={diag['is_rht']}, "
-                    f"lanes={diag['lane_ids']}, "
-                    f"ref_pts={diag['ref_pts']}, "
-                    f"bbox_skip={diag['n_bbox_skip']}, "
-                    f"dir_skip={diag['n_dir_skip']}, "
-                    f"nearest_dist={diag['nearest_dist']}m "
-                    f"(lanelet {diag['nearest_lid']})"
+                logger.warning(
+                    "    road %s: rule=%s, is_rht=%s, lanes=%s, ref_pts=%s, "
+                    "bbox_skip=%s, dir_skip=%s, nearest_dist=%sm (lanelet %s)",
+                    rid,
+                    diag["rule"],
+                    diag["is_rht"],
+                    diag["lane_ids"],
+                    diag["ref_pts"],
+                    diag["n_bbox_skip"],
+                    diag["n_dir_skip"],
+                    diag["nearest_dist"],
+                    diag["nearest_lid"],
                 )
     if roads_dropped_phase2:
         unrecovered = roads_dropped_phase2 - rescued_road_ids
@@ -1591,7 +2201,6 @@ def build_mapping(
                 f"in conflict resolution (unrecovered): "
                 f"road IDs = {sorted(unrecovered)[:30]}"
             )
-            tqdm.write(msg)
             logger.warning(msg)
         if rescued:
             msg = (
@@ -1599,7 +2208,6 @@ def build_mapping(
                 f"in conflict resolution but rescued: "
                 f"road IDs = {sorted(rescued)[:30]}"
             )
-            tqdm.write(msg)
             logger.info(msg)
     if roads_not_fully_mapped:
         msg = (
@@ -1607,7 +2215,6 @@ def build_mapping(
             f"fully mapped (walk stopped early): "
             f"{sorted(roads_not_fully_mapped)[:30]}"
         )
-        tqdm.write(msg)
         logger.warning(msg)
 
     return GeoRoadLaneletMapping(
@@ -1615,6 +2222,8 @@ def build_mapping(
         osm_sha256=osm_sha256,
         lanelet_to_road_and_lane=mapping,
         skipped_synthetic_roads=sorted(skipped_synthetic) or None,
+        reference_match_distances=reference_match_distances or None,
+        rescued_reference_lanelets=sorted(rescued_reference_lanelets) or None,
     )
 
 
@@ -1631,6 +2240,213 @@ def _cache_path_for(xodr_path: Path) -> Path:
 def _preprocessed_osm_path_for(xodr_path: Path) -> Path:
     """Return the preprocessed OSM sidecar path next to the XODR file."""
     return xodr_path.parent / f"{xodr_path.stem}.preprocessed.osm"
+
+
+# ---------------------------------------------------------------------------
+# Accuracy reporting
+# ---------------------------------------------------------------------------
+
+
+def original_lanelet_ids(mapping: GeoRoadLaneletMapping, lanelet_id: int) -> list[int]:
+    """Input-map lanelet ids that *lanelet_id* was built from.
+
+    Conversion runs on the preprocessed map, so an id the accuracy report
+    names may not exist in the file the user supplied: a merge consumes its
+    inputs and emits a new id.  ``preprocessing_log`` records ``input_ids``
+    and ``output_ids`` per operation, and this walks that backwards --
+    transitively, since an output can be the input of a later operation --
+    until every id is one preprocessing did not create.
+
+    An id preprocessing never touched resolves to itself, so a caller can use
+    this unconditionally.  The result is sorted: the order operations ran in
+    is of no use to a reader looking the ids up in the source map.
+
+    Args:
+        mapping: Mapping carrying the ``preprocessing_log``.
+        lanelet_id: Lanelet id as reported, i.e. in the preprocessed map.
+
+    Returns:
+        Sorted input-map lanelet ids.  ``[lanelet_id]`` when there is no log,
+        or when the id appears among no operation's outputs.
+    """
+    log = mapping.preprocessing_log
+    if not log:
+        return [lanelet_id]
+
+    # output id -> the ids that operation consumed
+    produced_by: dict[int, list[int]] = {}
+    for entry in log.get("entries") or []:
+        inputs = [int(i) for i in entry.get("input_ids") or []]
+        if not inputs:
+            continue
+        for out in entry.get("output_ids") or []:
+            produced_by[int(out)] = inputs
+
+    resolved: set[int] = set()
+    pending = [lanelet_id]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:  # a malformed log must not loop forever
+            continue
+        seen.add(current)
+        sources = produced_by.get(current)
+        if sources is None:
+            resolved.add(current)
+        else:
+            pending.extend(sources)
+    return sorted(resolved)
+
+
+def _describe_offender(entry: dict, mapping: GeoRoadLaneletMapping) -> str:
+    """One worst-offender line, naming the input ids behind a merged lanelet.
+
+    The id in the report is a preprocessed-map id. When preprocessing created
+    it, the reader has nothing to look up in the source map, so the ids it was
+    merged from are named alongside it.
+    """
+    lid = entry["lanelet_id"]
+    text = f"lanelet {lid} at {entry['distance_m']:.2f} m"
+    sources = original_lanelet_ids(mapping, lid)
+    if sources != [lid]:
+        text += " (from input " + ", ".join(str(i) for i in sources) + ")"
+    if entry["rescued"]:
+        text += " (rescued)"
+    return text
+
+
+def summarise_reference_match_accuracy(
+    mapping: GeoRoadLaneletMapping,
+    *,
+    warn_threshold: float | None = None,
+) -> dict:
+    """Summarise how closely the emitted roads follow their source lanelets.
+
+    :func:`build_mapping` measures, for every road it matches, the point-to-
+    segment distance between that road's reference line and the boundary of
+    the lanelet the reference line was generated from. That figure is the
+    conversion's positional error against its own Lanelet2 input, and this
+    turns it into something reportable.
+
+    The distinction matters: ``_MATCH_THRESHOLD`` asks "is this the same
+    road?", not "is this road accurate?". A road sitting 3.4 m from its source
+    boundary -- most of a lane width -- passes the tolerance without comment.
+
+    The headline is a **count**, not a distribution statistic: how many roads
+    exceed each level of
+    :attr:`~.config.GeoMappingConstants.exceedance_thresholds_m`, what
+    fraction of all matched roads that is, and how many that is per kilometre
+    of matched boundary. ``median_m`` and ``p95_m`` are kept but are
+    *scale-dependent* -- they are named in ``scale_dependent_keys`` -- because
+    they describe the mix of roads in this particular map: adding
+    well-converted roads improves them without anything being fixed, and two
+    maps cannot be compared by them. ``per_km`` is the figure that survives a
+    change of map size.
+
+    Roads recovered by the rescue pass are included, and their distances may
+    exceed ``_MATCH_THRESHOLD`` because that pass uses a relaxed threshold;
+    ``above_match_threshold`` and ``rescued_count`` make that visible instead
+    of letting a summary claim every match is within tolerance.
+
+    Because the distances are keyed by lanelet id, this works from a single
+    conversion. Comparing two ``.xodr`` outputs instead requires converting
+    the same map twice and cannot be keyed on road ids at all, since those are
+    reassigned whenever preprocessing changes the lanelet grouping.
+
+    Args:
+        mapping: Mapping carrying ``reference_match_distances``.
+        warn_threshold: Distances at or above this many metres are listed
+            individually. Defaults to ``warn_threshold_factor`` times
+            ``_MATCH_THRESHOLD``, i.e. the point beyond which a match is
+            closer to the tolerance limit than to its own source geometry.
+
+    Returns:
+        Dictionary with the headline ``exceedances`` (one entry per configured
+        level, each with ``label``, ``threshold_m``, ``count``, ``fraction``
+        and ``per_km``), ``max_m`` with its ``worst_lanelet_id``,
+        ``matched_boundary_length_m``, ``count``, the secondary
+        ``median_m``/``p95_m``/``median_mean_m`` named by
+        ``scale_dependent_keys``, plus ``match_threshold_m``,
+        ``rescue_threshold_m``, ``warn_threshold_m``, ``metric``,
+        ``rescued_count``, ``above_match_threshold`` and ``worst`` -- a list of
+        ``{"lanelet_id", "distance_m", "mean_distance_m", "rescued"}`` at or
+        above the warn threshold, worst first. Returns ``{}`` when no distances
+        were recorded.
+    """
+    distances = mapping.reference_match_distances
+    if not distances:
+        return {}
+
+    geo_config = DEFAULT_CONFIG.geo_mapping
+    if warn_threshold is None:
+        warn_threshold = _MATCH_THRESHOLD * geo_config.warn_threshold_factor
+
+    rescue_threshold = _MATCH_THRESHOLD * geo_config.rescue_threshold_factor
+    rescued = set(mapping.rescued_reference_lanelets or ())
+    values = np.array([d.max_m for d in distances.values()], dtype=float)
+    mean_values = np.array([d.mean_m for d in distances.values()], dtype=float)
+
+    # Boundary lengths are absent in mappings written before they were
+    # recorded; the density is then unavailable rather than wrong.
+    lengths = [
+        d.boundary_length_m
+        for d in distances.values()
+        if d.boundary_length_m is not None
+    ]
+    total_length = float(sum(lengths)) if lengths else None
+
+    exceedances = []
+    for label, threshold in geo_config.exceedance_thresholds_m:
+        count = int((values > threshold).sum())
+        exceedances.append(
+            {
+                "label": label,
+                "threshold_m": float(threshold),
+                "count": count,
+                "fraction": count / float(values.size),
+                "per_km": (
+                    count * geo_config.exceedance_density_base_m / total_length
+                    if total_length
+                    else None
+                ),
+            }
+        )
+
+    worst_lanelet_id = max(distances, key=lambda lid: distances[lid].max_m)
+    worst = sorted(
+        (
+            {
+                "lanelet_id": lid,
+                "distance_m": d.max_m,
+                "mean_distance_m": d.mean_m,
+                "rescued": lid in rescued,
+            }
+            for lid, d in distances.items()
+            if d.max_m >= warn_threshold
+        ),
+        key=lambda item: -item["distance_m"],
+    )
+
+    return {
+        "count": int(values.size),
+        # Headline: size-independent, count-based.
+        "exceedances": exceedances,
+        "max_m": float(values.max()),
+        "worst_lanelet_id": worst_lanelet_id,
+        "matched_boundary_length_m": total_length,
+        # Secondary: these depend on the mix of roads in *this* map.
+        "median_m": float(np.median(values)),
+        "p95_m": float(np.percentile(values, 95)),
+        "median_mean_m": float(np.median(mean_values)),
+        "scale_dependent_keys": ["median_m", "p95_m", "median_mean_m"],
+        "match_threshold_m": _MATCH_THRESHOLD,
+        "rescue_threshold_m": rescue_threshold,
+        "warn_threshold_m": warn_threshold,
+        "metric": _REPORT_METRIC_NAME,
+        "rescued_count": sum(1 for lid in distances if lid in rescued),
+        "above_match_threshold": int((values > _MATCH_THRESHOLD).sum()),
+        "worst": worst,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1731,10 +2547,6 @@ def validate_mapping_consistency(
             "kept.  Set strict_mapping_validation=true to fail instead.",
             summary,
         )
-        tqdm.write(
-            f"  Mapping cross-validation: {total} mismatching entries "
-            f"(non-fatal; see log for details)"
-        )
         return False
 
     logger.info(
@@ -1793,6 +2605,7 @@ def validate_and_save_mapping(
     skipped_stop_lines: dict[int, SkippedStopLineEntry] | None = None,
     traffic_light_config: dict | None = None,
     strict: bool = True,
+    report_accuracy: bool = True,
 ) -> Path:
     """Save mapping JSON and cross-validate against geometric mapping.
 
@@ -1827,6 +2640,13 @@ def validate_and_save_mapping(
             logged as a warning and the already-written XODR and
             ``.mapping.json`` are kept — the conversion itself succeeded, and
             the geometric mapping is only a heuristic cross-check.
+        report_accuracy: Whether to measure and report positional accuracy
+            against the Lanelet2 input.  When ``False`` the mapping JSON
+            carries no ``reference_match_distances`` section and no accuracy
+            log line is emitted.  The measurement itself is cheap — the
+            matching already holds both polylines — so this exists to leave
+            the output and the log untouched for callers that have not asked
+            for the report, not to save work.
 
     Returns:
         Path to the saved ``.mapping.json`` file.
@@ -1851,6 +2671,11 @@ def validate_and_save_mapping(
         stop_line_mapping=stop_line_mapping,
         skipped_stop_lines=skipped_stop_lines,
         skipped_synthetic_roads=sorted(_synthetic_connector_road_ids(roads)) or None,
+        chain_merged_roads=_chain_merged_road_lanelets(roads) or None,
+        exit_fork_duplicate_roads=_exit_fork_duplicate_roads(roads) or None,
+        lanelet_additional_road_lanes=(
+            _additional_road_lanes(roads, lanelet_to_road_and_lane) or None
+        ),
         traffic_light_config=traffic_light_config,
     )
     json_path = save_mapping_json(conv_mapping, xodr_path)
@@ -1865,6 +2690,77 @@ def validate_and_save_mapping(
     )
     if passed:
         logger.info("Cross-validation passed successfully!")
+
+    # 4. Report positional accuracy against the Lanelet2 input. The distances
+    #    come from the matching above, which already holds both polylines, so
+    #    this costs one extra measurement per matched road and no extra
+    #    conversion. Re-save the JSON so the figures outlive the log.
+    #
+    #    Skipped entirely when the caller does not want the report: it adds a
+    #    section to the mapping JSON and can warn about a map that is fine, so
+    #    a pipeline that has not asked for it should see neither.
+    accuracy = (
+        summarise_reference_match_accuracy(geo_mapping) if report_accuracy else {}
+    )
+    if accuracy:
+        # The headline is the exceedance counts, not median/p95: those two
+        # fall as soon as the map gains well-converted roads, so they are
+        # logged after the counts and only as a description of this map.
+        logger.info(
+            "Geometric accuracy vs Lanelet2 input (%s): %s over %d matched "
+            "road(s)%s; worst %.3f m at lanelet %d (matching tolerance %.1f m; "
+            "%d rescued under the relaxed %.2f m threshold)",
+            accuracy["metric"],
+            "; ".join(
+                "{} > {:.2f} m: {} ({:.1%}{})".format(
+                    e["label"],
+                    e["threshold_m"],
+                    e["count"],
+                    e["fraction"],
+                    "" if e["per_km"] is None else f", {e['per_km']:.2f}/km",
+                )
+                for e in accuracy["exceedances"]
+            ),
+            accuracy["count"],
+            (
+                ""
+                if accuracy["matched_boundary_length_m"] is None
+                else f" spanning {accuracy['matched_boundary_length_m'] / 1000.0:.2f} km"
+            ),
+            accuracy["max_m"],
+            accuracy["worst_lanelet_id"],
+            accuracy["match_threshold_m"],
+            accuracy["rescued_count"],
+            accuracy["rescue_threshold_m"],
+        )
+        logger.info(
+            "  map-dependent (not comparable between maps): median=%.3f m  "
+            "p95=%.3f m  median of per-road means=%.3f m",
+            accuracy["median_m"],
+            accuracy["p95_m"],
+            accuracy["median_mean_m"],
+        )
+        worst = accuracy["worst"]
+        if worst:
+            # A reported distance can exceed the matching tolerance: rescued
+            # roads are accepted up to the relaxed rescue threshold, and the
+            # reported metric is not the one every fallback level matched on.
+            # Claiming "no match failed" for all of them would be wrong.
+            logger.warning(
+                "%d road(s) sit >= %.2f m from their source lanelet boundary; "
+                "%d of those exceed the %.1f m matching tolerance (matching "
+                "used a looser metric, or the relaxed %.2f m rescue "
+                "threshold). Worst: %s",
+                len(worst),
+                accuracy["warn_threshold_m"],
+                accuracy["above_match_threshold"],
+                accuracy["match_threshold_m"],
+                accuracy["rescue_threshold_m"],
+                ", ".join(_describe_offender(w, geo_mapping) for w in worst[:10]),
+            )
+        conv_mapping.reference_match_distances = geo_mapping.reference_match_distances
+        conv_mapping.rescued_reference_lanelets = geo_mapping.rescued_reference_lanelets
+        save_mapping_json(conv_mapping, xodr_path)
 
     return json_path
 
@@ -1885,7 +2781,7 @@ def load_or_build_mapping(
 
     The mapping is stored as ``<xodr_stem>.mapping.json`` next to the XODR file.
     """
-    tqdm.write("Computing SHA256 checksums for map files...")
+    logger.info("Computing SHA256 checksums for map files")
     xodr_sha256 = _sha256_of_file(xodr_path)
     osm_sha256 = _sha256_of_file(osm_path)
     cache_file = _cache_path_for(xodr_path)
@@ -1899,17 +2795,12 @@ def load_or_build_mapping(
                 and data.get("osm_sha256") == osm_sha256
             ):
                 mapping = GeoRoadLaneletMapping.from_dict(data)
-                tqdm.write(
-                    f"Loaded cached mapping from {cache_file} "
-                    f"({len(mapping.lanelet_to_road_and_lane)} entries)"
-                )
                 logger.info(
                     "Loaded cached lanelet-to-road mapping from %s (%d entries)",
                     cache_file,
                     len(mapping.lanelet_to_road_and_lane),
                 )
                 return mapping
-            tqdm.write("Cache invalidated (SHA256 mismatch); rebuilding mapping...")
             logger.info("Cache invalidated (SHA256 mismatch); rebuilding mapping")
         except (json.JSONDecodeError, KeyError, TypeError):
             logger.warning(
@@ -1922,13 +2813,16 @@ def load_or_build_mapping(
 
     # Save to cache
     try:
-        tqdm.write(f"Saving mapping to {cache_file}...")
+        logger.info("Saving mapping to %s", cache_file)
         cache_file.write_text(
             json.dumps(mapping.to_dict(), indent=2) + "\n",
             encoding="utf-8",
         )
-        tqdm.write(f"Saved mapping ({len(mapping.lanelet_to_road_and_lane)} entries)")
-        logger.info("Saved lanelet-to-road mapping to %s", cache_file)
+        logger.info(
+            "Saved lanelet-to-road mapping to %s (%d entries)",
+            cache_file,
+            len(mapping.lanelet_to_road_and_lane),
+        )
     except OSError:
         logger.warning("Could not write mapping cache to %s", cache_file, exc_info=True)
 

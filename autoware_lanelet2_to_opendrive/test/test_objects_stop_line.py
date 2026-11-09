@@ -91,7 +91,12 @@ def _make_mock_linestring(
 
     ls = MagicMock()
     ls.id = ls_id
-    ls.__iter__ = MagicMock(return_value=iter(mock_points_3d))
+    # A fresh iterator per call: the real `LineString3d` can be walked more
+    # than once, and `StopLineObject.construct_from_linestring` does walk it
+    # twice -- once for the 2D centroid and once for the 3D z. A single
+    # `iter(...)` as the return value is consumed by the first walk, and the
+    # second then sees an empty, 1-dimensional array.
+    ls.__iter__ = MagicMock(side_effect=lambda: iter(mock_points_3d))
     ls.__len__ = MagicMock(return_value=len(mock_points_3d))
     return ls
 
@@ -125,7 +130,7 @@ def test_stop_line_object_creation():
 
 
 def test_stop_line_object_to_xml():
-    """Test that to_xml() returns an <object type="stopLine"> element."""
+    """Test that to_xml() returns an <object type="roadMark"> element."""
     obj = StopLineObject(
         id=42,
         name="stop_line_42",
@@ -138,7 +143,7 @@ def test_stop_line_object_to_xml():
     )
     elem = obj.to_xml()
     assert elem.tag == "object"
-    assert elem.get("type") == "stopLine"
+    assert elem.get("type") == "roadMark"
 
 
 def test_stop_line_object_xml_attributes():
@@ -347,6 +352,128 @@ def test_road_sample_point_index_matches_sequential_scan():
 
             assert actual_road is expected_road
             assert actual_dist == expected_dist
+
+
+def _real_road(road_id: int, *, y: float, driving_width: float, shoulder: float = 0.5):
+    """A real LHT Road along +x at height ``y``: lane 1 driving, lane 2 shoulder."""
+    from autoware_lanelet2_to_opendrive.opendrive.elevation import (
+        Elevation,
+        ElevationProfile,
+    )
+    from autoware_lanelet2_to_opendrive.opendrive.enums import LaneType, TrafficRule
+    from autoware_lanelet2_to_opendrive.opendrive.geometry import ParamPoly3, PlanView
+    from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
+    from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneWidth
+    from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
+    from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
+    from autoware_lanelet2_to_opendrive.opendrive.road import Road
+
+    section = LaneSection(s_offset=0.0)
+    for lane_id, lane_type, lane_width in (
+        (1, LaneType.DRIVING, driving_width),
+        (2, LaneType.SHOULDER, shoulder),
+    ):
+        lane = Lane(lane_id=lane_id, lane_type=lane_type)
+        lane.widths.append(LaneWidth(s_offset=0.0, a=lane_width, b=0.0, c=0.0, d=0.0))
+        section.left_lanes[lane_id] = lane
+
+    return Road(
+        id=road_id,
+        length=100.0,
+        junction=-1,
+        rule=TrafficRule.LHT,
+        plan_view=PlanView(
+            geometries=[
+                ParamPoly3(
+                    s=0.0,
+                    x=0.0,
+                    y=y,
+                    hdg=0.0,
+                    length=100.0,
+                    aU=0.0,
+                    bU=100.0,
+                    cU=0.0,
+                    dU=0.0,
+                    aV=0.0,
+                    bV=0.0,
+                    cV=0.0,
+                    dV=0.0,
+                )
+            ]
+        ),
+        elevation_profile=ElevationProfile(
+            elevations=[Elevation(s=0.0, a=0.0, b=0.0, c=0.0, d=0.0)]
+        ),
+        lanes=Lanes(lane_sections=[section]),
+    )
+
+
+def test_the_regulator_road_that_contains_the_line_beats_a_marginally_closer_one():
+    """Containment first, then `|t|` -- otherwise a tenth of a millimetre decides.
+
+    Both roads of one approach see the same stop line, so their `|t|` differ
+    by almost nothing while their carriageways differ by metres. Ranking on
+    `|t|` alone then hands the line to whichever road's reference line is a
+    hair closer, even when that road's driving lanes end short of it.
+
+    Measured 2026-11-06 on a 6,672-lanelet map, after the ownership fix: 9
+    stop lines sat past their road's outer edge with `|t|` about 4.6355 m,
+    while another road the same regulatory element names held them inside at
+    4.6356 m -- a difference of 0.1 mm. Nishi-Shinjuku has no such case, so
+    this is the only red available for it.
+    """
+    from autoware_lanelet2_to_opendrive.opendrive.objects import (
+        choose_road_for_regulated_stop_line,
+    )
+
+    # The line sits 4.0 m to the left of both reference lines (+t for LHT).
+    line = _make_mock_linestring(900, [(49.9, 4.0), (50.1, 4.0)])
+    narrow = _real_road(1, y=0.0, driving_width=3.0)  # |t| 4.000, outside
+    wide = _real_road(2, y=-0.0001, driving_width=7.0)  # |t| 4.0001, inside
+
+    chosen = choose_road_for_regulated_stop_line(
+        line, [narrow, wide], width=0.1, carla_format=False
+    )
+
+    assert chosen is not None
+    assert chosen.id == 2, (
+        "the road whose driving lanes reach the line must win, even though "
+        "the other road's reference line is 0.1 mm closer"
+    )
+
+
+def test_roads_within_agrees_with_nearest_and_then_ranks_the_runners_up():
+    """The runners-up exist because "which road" is the wrong question.
+
+    A stop line placed off a road's reference line has a side, and the
+    nearest road may hold it on the wrong side of itself while a road just
+    behind holds it inside. ``choose_nearest_road_on_the_driving_side`` walks
+    this list and takes the first road that carries the line, so the first
+    element must be exactly what :meth:`nearest` returns -- otherwise the
+    fallback would silently change which road an already-correct stop line
+    lands on.
+    """
+    roads = [
+        _make_mock_road(road_id=0, wx=0.0, wy=0.0),
+        _make_mock_road(road_id=1, wx=30.0, wy=-4.0, s=10.0),
+        _make_mock_road(road_id=2, wx=-15.0, wy=25.0, s=20.0),
+    ]
+    index = RoadSamplePointIndex(roads)
+
+    for px in (-20.0, -3.5, 0.0, 7.25, 31.0):
+        for py in (-10.0, 0.0, 4.75, 26.0):
+            found = index.roads_within(px, py, 1e9)
+            nearest_road, nearest_dist = index.nearest(px, py)
+
+            assert found[0][0] is nearest_road
+            assert found[0][1] == nearest_dist
+            # Every road appears once, in non-decreasing distance order.
+            assert len(found) == len({id(road) for road, _d in found})
+            assert [d for _r, d in found] == sorted(d for _r, d in found)
+
+    # The radius excludes, rather than returning everything sorted.
+    assert index.roads_within(0.0, 0.0, 1.0) == [(roads[0], 0.0)]
+    assert index.roads_within(1000.0, 1000.0, 1.0) == []
 
 
 def test_road_sample_point_index_tie_goes_to_the_first_road():
@@ -590,8 +717,10 @@ def test_to_xml_carla_format():
     )
     elem = obj.to_xml()
 
-    # CARLA-specific attributes
-    assert elem.get("type") == "-1"
+    # The CARLA target emits the same schema-conforming @type as the default
+    # target; CARLA locates the stencil by @name, not @type (see
+    # _STOP_LINE_OBJECT_TYPE_CARLA).
+    assert elem.get("type") == "roadMark"
     assert elem.get("name") == "Stencil_STOP"
     assert elem.get("orientation") == "-"
     assert float(elem.get("zOffset")) == pytest.approx(0.0)
@@ -619,7 +748,7 @@ def test_to_xml_carla_vs_default():
     )
     elem = obj.to_xml()
 
-    assert elem.get("type") == "stopLine"
+    assert elem.get("type") == "roadMark"
     assert elem.get("name") == "stop_line_88"
     assert elem.get("orientation") == "none"
     assert float(elem.get("zOffset")) == pytest.approx(0.05)
@@ -655,7 +784,7 @@ def test_construct_from_linestring_carla_format():
     assert result.carla_format is True
 
     elem = result.to_xml()
-    assert elem.get("type") == "-1"
+    assert elem.get("type") == "roadMark"
     assert elem.get("name") == "Stencil_STOP"
     assert elem.get("orientation") == "-"
     assert float(elem.get("zOffset")) == pytest.approx(0.0)

@@ -10,3 +10,12 @@ nishishinjuku_carla.xodr
 
 # Fingerprint of the inputs that produced the file above. Regenerated with it.
 nishishinjuku_carla.xodr.inputs
+
+# reduce_lanelet2_map.py's scratch directory. Its default is
+# `DESTINATION.reduce-work/` next to the fixture being produced, and it holds
+# an excerpt of the source map plus one directory per evaluation -- so on a
+# real map it is tens of megabytes. `*.osm` is not otherwise ignored here
+# (the fixtures are committed) and `check-added-large-files` excludes `.osm`
+# from its size check, so without this a `git add -A` commits it silently.
+*.reduce-work/
+*.provenance.json

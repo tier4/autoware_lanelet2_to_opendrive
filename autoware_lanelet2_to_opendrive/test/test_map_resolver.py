@@ -106,7 +106,7 @@ class TestResolveMapToXodrConversion:
         ) as mock_convert:
             result = resolve_map_to_xodr(osm)
 
-        mock_convert.assert_called_once_with(osm, None, None)
+        mock_convert.assert_called_once_with(osm, None, None, True)
         assert result == expected
 
     def test_bin_triggers_conversion(self, tmp_path: Path) -> None:
@@ -121,7 +121,7 @@ class TestResolveMapToXodrConversion:
         ) as mock_convert:
             result = resolve_map_to_xodr(bin_file)
 
-        mock_convert.assert_called_once_with(bin_file, None, None)
+        mock_convert.assert_called_once_with(bin_file, None, None, True)
         assert result == expected
 
     def test_config_and_mgrs_forwarded(self, tmp_path: Path) -> None:
@@ -142,7 +142,7 @@ class TestResolveMapToXodrConversion:
         ) as mock_convert:
             resolve_map_to_xodr(osm, config=config, mgrs_code="54SUE")
 
-        mock_convert.assert_called_once_with(osm, config, "54SUE")
+        mock_convert.assert_called_once_with(osm, config, "54SUE", True)
 
 
 # ---------------------------------------------------------------------------

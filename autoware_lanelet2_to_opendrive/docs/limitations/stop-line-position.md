@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The converter now exports Lanelet2 `type="stop_line"` linestrings as OpenDRIVE `<object type="stopLine">` elements (see [Stop Line Objects](../stop_line_objects.md)). The geometric position (s, t, heading, width) is faithfully derived from the Lanelet2 linestring geometry.
+The converter now exports Lanelet2 `type="stop_line"` linestrings as OpenDRIVE `<object type="roadMark">` elements (see [Stop Line Objects](../stop_line_objects.md)). The geometric position (s, t, heading, width) is faithfully derived from the Lanelet2 linestring geometry.
 
 However, the **positional accuracy perceived by CARLA** remains limited due to the CARLA architecture described below.
 
@@ -44,20 +44,20 @@ CARLA's OpenDRIVE parser does not extract stop line positions:
 
 **3. Road Object Parser: Stop Lines Not Extracted**
 
-Stop lines are exported as `<object type="stopLine">` road objects in the OpenDRIVE output, but CARLA ignores them:
+Stop lines are exported as `<object type="roadMark">` road objects in the OpenDRIVE output, but CARLA ignores them:
 
 - **Object Parser**: [`LibCarla/source/carla/opendrive/parser/ObjectParser.cpp`](https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/opendrive/parser/ObjectParser.cpp)
   - Parses road objects like poles, barriers, etc.
-  - **Does not specifically handle** `type="stopLine"` road objects
+  - **Does not specifically handle** `type="roadMark"` stop-line road objects
   - Stop line geometries from the road objects section are not converted into game world coordinates
 
 ## Impact
 
-- The converter **correctly outputs** stop line geometry as `<object type="stopLine">` elements
+- The converter **correctly outputs** stop line geometry as `<object type="roadMark">` elements
 - However, CARLA does not read these objects; stop positions recognized by CARLA may **differ** from the Lanelet2 source
 - The discrepancy depends on CARLA's trigger volume configuration
 - This is a CARLA architectural limitation, not a converter bug
-- Tools and simulators other than CARLA that support the OpenDRIVE object model can use the emitted `stopLine` objects directly
+- Tools and simulators other than CARLA that support the OpenDRIVE object model can use the emitted stop-line objects directly
 
 ## Workaround
 
@@ -128,7 +128,7 @@ void SignalParser::Parse(/* ... */) {
   }
 
   // NEW: Parse road object for stop line geometry (alternative method)
-  // OpenDRIVE can define stop lines as <object type="stopLine">
+  // OpenDRIVE can define stop lines as <object type="roadMark">
   pugi::xml_node objects_node = road_node.child("objects");
   for (pugi::xml_node object_node : objects_node.children("object")) {
     std::string type = object_node.attribute("type").as_string();

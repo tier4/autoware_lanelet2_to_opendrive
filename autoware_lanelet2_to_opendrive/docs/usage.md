@@ -5,15 +5,18 @@ to convert Lanelet2 maps to OpenDRIVE format.
 
 ## Console Scripts
 
-The package registers five console scripts (see `[project.scripts]` in
+The package registers eight console scripts (see `[project.scripts]` in
 [`pyproject.toml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/pyproject.toml)):
 
 | Script | Purpose |
 |--------|---------|
 | `convert` | Run the full Lanelet2 → OpenDRIVE pipeline (Hydra CLI) |
 | `preprocess-lanelet` | Run preprocessing operations only (argparse CLI) |
+| `map-preflight` | Report the structural problems that stop a Lanelet2 `.osm` loading |
 | `analyze` | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | Run ASAM QC checker on an existing `.xodr` |
+| `route-fidelity` | Check the `.xodr` states the lane successions the map states |
+| `xodr-digest` | Extract a normalized structure digest of an `.xodr`, for diff-based review |
 | `carla-import-test` | Smoke-test loading the `.xodr` in a running CARLA server |
 
 Run them via `uv run <script>` (or `<script>` directly inside an active venv).
@@ -29,7 +32,6 @@ conf/
 ├── config.yaml          # base
 ├── map/                 # map-specific (origin + preprocessing)
 │   ├── example.yaml
-│   ├── example_latlon.yaml
 │   ├── example_mgrs_offset.yaml
 │   ├── nishishinjuku.yaml
 │   └── odaiba.yaml
@@ -46,6 +48,10 @@ conf/
 | `output_map_path` | no | Output `.xodr` (defaults to `<input>.xodr`) |
 | `dry_run` | no | Validate only, no save (default `false`) |
 | `verbose` | no | Enable debug logging (default `false`) |
+| `preflight` | no | Report the input map's structural problems before loading it (default `true`) |
+| `strict_analysis` | no | Abort the run when the post-conversion analysis reports errors instead of only logging the count (default `false`, overridable per map or target) |
+| `report_reference_match_accuracy` | no | Report each road's positional accuracy against the Lanelet2 input, in the log and in `.mapping.json` (default `true`, overridable per map or target) |
+| `check_origin_against_map` | no | The resolved origin must contain the map's own nodes; a mismatch aborts the run (default `true`, overridable per map or target) |
 | `map=<name>` | no | Selects `conf/map/<name>.yaml` (default `example`) |
 | `target=<name>` | no | Selects `conf/target/<name>.yaml` (default `default`) |
 
@@ -76,7 +82,7 @@ uv run convert \
 ```
 
 The `target=carla` overlay sets `exclude_non_junction_signals: true`, switches
-`stopline.carla_stop_line` to `true` (emitting `<object name="Stencil_STOP">`),
+`stopline.carla_stop_line` to `true` (emitting `<object type="-1" name="Stencil_STOP">`),
 and applies traffic-light spawn offsets tuned for CARLA actors.
 
 ### Override Output Path
@@ -116,7 +122,7 @@ The preferred way to specify the map origin is a `map_projector_info.yaml`
 file placed next to the input `.osm` map (same directory). When present with
 a supported `projector_type` (`MGRS` or `TransverseMercator`, matched
 case-sensitively as Autoware writes them), it is used as the origin source and
-any `mgrs_grid`/`lat_lon` keys in the map config are ignored:
+the map's own coordinates are not consulted:
 
 ```yaml
 projector_type: MGRS
@@ -135,59 +141,47 @@ This is the format Autoware itself writes alongside a map, so pointing the
 converter at an Autoware map directory "just works" with no per-map Hydra
 config needed for the origin.
 
-### Legacy: explicit `mgrs_grid` / `lat_lon` config keys
+### Derived from the map: no configuration at all
 
-If no `map_projector_info.yaml` is found (or its `projector_type` isn't yet
-supported), origin resolution falls back to explicit keys in the map config.
-**This fallback is deprecated**: it still works unchanged, but emits a
-`DeprecationWarning` (and a matching log warning) and may be removed in a
-future major version (tracked in
-[#564](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/564);
-the soft-deprecation itself is
+With no `map_projector_info.yaml`, the frame is derived from the map's own
+node coordinates. Every Lanelet2 `<node>` carries `lat`/`lon`, so the 100 km
+MGRS grid square the map occupies follows from the data — the same method
+Autoware's own tooling uses. The per-node `mgrs_code` tag that Autoware
+tooling writes is *optional*, so it is deliberately not read; only `lat`/`lon`
+are.
+
+This is a second canonical route, so it emits no
+deprecation notice. It is the only route left for a map without a
+projector-info file.
+
+Derivation declines, with a log line saying why, when the map cannot be read
+or parsed, carries no georeferenced `<node>` elements, or spans more than one
+grid square — the last has no single grid origin, and the log names the
+squares it found. With nothing left to fall back to, resolution then fails,
+naming both sources it tried.
+
+### Removed: the origin keys
+
+A map config used to be able to declare the frame itself. Those keys are
+**gone**, and a config that still carries one is rejected with a message
+naming what replaced it ([#564](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/564);
+the soft deprecation that preceded it was
 [#539](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues/539)).
-Prefer `map_projector_info.yaml` for new configs.
 
-Each map config in `conf/map/*.yaml` must specify exactly **one** of the
-following (see
-[`example.yaml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/conf/map/example.yaml)):
+| removed key | what to do |
+| --- | --- |
+| `mgrs_grid` | delete it — the frame comes from `map_projector_info.yaml` or from the map |
+| `mgrs_code` | as above; it was the legacy spelling of `mgrs_grid` |
+| `lat_lon` | as above |
+| `offset` | delete the block; exported coordinates move by exactly the offset it declared |
 
-#### Method 1 — MGRS grid only
+**They are rejected rather than ignored, deliberately.** A config naming a
+grid square its map is not in would otherwise keep converting while the
+geoReference it named had no effect, and `offset` was *subtracted from every
+exported coordinate*, so ignoring it relocated the map by its own magnitude.
 
-```yaml
-mgrs_grid: 54SUE815501
-```
-
-The legacy field name `mgrs_code` is also accepted.
-
-#### Method 2 — MGRS grid + offset
-
-```yaml
-mgrs_grid: 54SUE
-offset:
-  x: 81655.73
-  y: 50137.43
-  z: 42.49998
-```
-
-The offset is **subtracted** from every coordinate during export, so the
-resulting `.xodr` lives in a local frame anchored at the offset point.
-
-#### Method 3 — Latitude / Longitude
-
-```yaml
-lat_lon:
-  latitude: 35.6762
-  longitude: 139.6503
-  altitude: 0.0
-```
-
-The MGRS grid for the `<header><geoReference>` PROJ string is derived
-automatically.
-
-The validator in
-[`main.py:parse_origin_from_config`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/src/autoware_lanelet2_to_opendrive/main.py)
-rejects combinations that mix `mgrs_grid` and `lat_lon`, or use `offset`
-without `mgrs_grid`.
+`OriginSpec(mgrs_code=...)` in the Python API is a different thing and is
+unaffected: a library caller may still state an origin directly.
 
 ## Preprocessing Operations
 
@@ -207,8 +201,6 @@ conversion. The execution order is fixed (defined in
 Skeleton (commented examples are in `conf/map/example.yaml`):
 
 ```yaml
-mgrs_grid: 54SUE815501
-
 merge_operations:
   - lanelet_ids: [100, 101, 102]
     validate: true
@@ -236,14 +228,16 @@ each is also overridable from the command line.
 | | `default_segment_length` | `1.0` m | Target segment length |
 | | `max_segments` / `min_segments` | 100 / 1 | Caps on segment count per road |
 | | `coefficient_epsilon` | `1e-8` | Round small coefficients to zero |
-| `arcspiral` | `enabled` | `false` | Emit `<line>` / `<arc>` / `<paramPoly3>` mix |
+| `arcspiral` | `enabled` | `true` | Emit `<line>` / `<arc>` / `<paramPoly3>` mix instead of a `paramPoly3` chain |
 | | `arc_enabled` | `true` | Detect constant-curvature arcs |
-| | `min_line_length` | 5.0 m | Reject shorter line runs |
+| | `min_line_length` | 10.0 m | Reject shorter line runs |
+| | `arc_position_tol` | `0.001` m | Maximum deviation between the analytic primitive and the fitted spline over the window it replaces |
+| | `line_curvature_tol` | `1e-5` | Median signed curvature below which a window is a straight run |
 | `stopline` | `width` | `0.1` m | Painted stop-line width |
-| | `carla_stop_line` | `false` | Emit `Stencil_STOP` instead of `stopLine` |
+| | `carla_stop_line` | `false` | Emit `<object type="-1" name="Stencil_STOP">` instead of the conforming `<object type="roadMark" name="stop_line_<id>">` |
 | `traffic_light` | `offset_x/y/z`, `hdg_offset` | 0 / 0 / 0 / π/2 | CARLA actor placement |
 | `width_estimation` | `adaptive_sampling` | `true` | Sample width based on road length |
-| | `default_sample_interval` | 5.0 m | Spacing between width samples |
+| | `default_sample_interval` | 2.0 m | Spacing between width samples; 5 m leaves a p95 of ~74 mm and 10 m ~153 mm between the emitted envelope and the source boundary |
 | `parking_lot` | `enabled` | `true` | Emit synthetic parking-lot roads |
 | | `default_stall_width` | `2.5` m | Stall width |
 | | `nearest_area_threshold_m` | 30 m | Stall ↔ area association radius |
@@ -305,6 +299,40 @@ Default ignore patterns suppress the known false-positive
 [ASAM Schema Compliance](limitations/asam-schema-compliance.md)). Pass
 `--no-default-ignores` to see them.
 
+## `map-preflight`
+
+`lanelet2.io.load` refuses a structurally broken map with a single
+`RuntimeError` whose payload is an unordered wall of per-primitive lines.
+Nothing in it says how many distinct problems there are, which lines are the
+cause and which are its knock-on effect, or what a map author would have to
+change. On the map this was written against, 38 such lines described **one**
+problem class with 19 instances, plus its own cascade.
+
+`map-preflight` reads the OSM XML directly -- before, and independently of,
+`lanelet2.io.load` -- and reports the problems it recognises grouped by class,
+with a count and a capped list of element ids per class.
+
+```
+map-preflight <map.osm> [--max-ids N]
+```
+
+Exit code 0 when nothing blocking was found, 1 otherwise, so it can gate a
+pipeline.
+
+It is deliberately a **diagnostic only**:
+
+- it never edits the map and never hands the converter a patched copy;
+- it never makes the converter tolerate input it would otherwise reject;
+- a **blocking** finding corresponds to a constraint `lanelet2.io.load` itself
+  enforces, so it means the load *will* fail -- the report replaces the raw
+  exception rather than adding a new class of rejection;
+- anything that is a smell but still loads is reported as **non-blocking** and
+  conversion goes ahead, because rejecting a map that converts today would be a
+  worse failure than leaving a smell unenforced.
+
+`convert` runs the same inspection itself, controlled by the `preflight` key
+(default `true`); set `preflight=false` to get the raw parser exception back.
+
 ## `qc-validate`
 
 Thin wrapper that runs only the ASAM QC checker on a standalone `.xodr`. Use
@@ -314,6 +342,55 @@ cross-check).
 ```
 qc-validate <xodr_file> [--output FILE] [--no-default-ignores] [...]
 ```
+
+## `route-fidelity`
+
+Compares the lane-to-lane successions the source Lanelet2 map states with the
+transitions the emitted `.xodr` states. `analyze` cross-checks that each
+lanelet reached *a* road; this checks that the *connections between* them
+survived, which is what a planner reads.
+
+```
+route-fidelity <map.osm> <file.xodr> [mapping.json] [--json]
+```
+
+The mapping argument is the conversion's `*.mapping.json` sidecar; it
+defaults to the `.xodr` path with `.mapping.json` in place of its suffix,
+which is where `convert` writes it.
+
+The report separates three things a bare "lost routes" count conflates:
+
+- **missing** -- a succession the map states that the file does not. These are
+  the losses.
+- **internal** -- both lanelets were emitted as the same `(road, lane)`, so
+  there is no boundary to carry a link. Not a loss.
+- **walked through** -- a road with no backing lanelet, i.e. a synthetic
+  connector inserted where the map states a succession directly. These are
+  followed rather than counted, because counting them reports every connector
+  as a transition the map never stated.
+## `xodr-digest`
+
+The repository keeps no byte-exact golden `.xodr` files: conversion output is
+gitignored and regenerated on every run, and floating-point formatting, element
+ordering and the header's `date` attribute all vary between runs even when the
+semantic content is unchanged. Plain byte diffing therefore cannot show that a
+change touched only the intended part of the output.
+
+`xodr-digest` produces a normalized JSON digest instead: coordinates are rounded
+to millimetre precision, `date` and the generator-version comment are dropped,
+and roads and junctions are sorted by `id`.
+
+```
+xodr-digest <xodr_file> [--output FILE]
+```
+
+Diffing two digests shows which of the fields the digest extracts changed. It
+does **not** show that nothing else changed: a digest diff is a claim about the
+extracted fields and only about those. Anything the digest never reads is
+invisible to it regardless of whether it changed in the `.xodr` itself -- which
+is not hypothetical, since an earlier revision extracted no lane-width metrics
+and reported as unchanged two roads whose sampled lane width had moved from
+about 3.0 m to about 31.5 m.
 
 ## `carla-import-test`
 
@@ -338,7 +415,7 @@ OpenDRIVE structure:
 
 ```
 <OpenDRIVE>
-  <header revMajor="1" revMinor="4" .../>      # PROJ geoReference + bounding box
+  <header revMajor="1" revMinor="7" .../>      # PROJ geoReference + bounding box
   <road id=... rule="RHT|LHT" .../>            # regular + connecting + parking roads
   <junction id=... .../>                       # intersection + synthetic divergence/merge
   <controller id=... .../>                     # signal groups
@@ -402,10 +479,24 @@ The repository's `examples/` directory contains:
 `config.yaml` marks `input_map_path` as `???` (Hydra "must override"). Pass
 it on the command line: `convert input_map_path=/path/to/map.osm`.
 
-### `Multiple origin specification methods detected`
+### `The map config key '...' is no longer supported`
 
-Set exactly one of `mgrs_grid` or `lat_lon` in the map config. `offset`
-applies only with `mgrs_grid`.
+Delete that key from the map config; the message names what replaced it. See
+[Removed: the origin keys](#removed-the-origin-keys).
+
+### `Cannot determine the coordinate frame of ...`
+
+The map has no sibling `map_projector_info.yaml` and no usable node
+coordinates. The log above the error says why derivation declined — most
+often the map is unparseable, or it spans more than one MGRS grid square.
+Add a `map_projector_info.yaml` next to it.
+
+### `projector_type '...' is not supported`
+
+The map's `map_projector_info.yaml` names a projection this converter cannot
+build. Only `MGRS` and `TransverseMercator` are wired. The frame is *not*
+derived from the map instead, because that would export it in a projection it
+does not declare.
 
 ### `Failed to load Lanelet2 map`
 

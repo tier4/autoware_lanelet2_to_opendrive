@@ -1,7 +1,9 @@
 """Tests for centerline functions."""
 
 import numpy as np
+import pytest
 from autoware_lanelet2_to_opendrive.centerline import (
+    _calculate_optimal_num_samples,
     extract_centerline_as_spline,
     estimate_lanelet_width_as_spline,
 )
@@ -89,3 +91,49 @@ def test_extract_centerline_as_spline(lanelet_map):
     # Test that spline can be evaluated at specific arc length
     point_mid = spline.evaluate(total_length / 2)
     assert point_mid.shape[0] == 3, "Spline should return 3D points"
+
+
+@pytest.mark.parametrize("total_length", [20.0, 40.0, 61.5, 98.0])
+def test_adaptive_sampling_does_not_exceed_configured_interval(total_length):
+    """Adaptive sampling must not space width samples further apart than configured.
+
+    ``np.linspace(0.0, 1.0, num_samples)`` is inclusive at both ends, so N
+    samples span N-1 intervals. Returning ``ceil(total_length / interval)``
+    samples therefore realises a spacing of
+    ``total_length / (ceil(total_length / interval) - 1)``, which is always
+    coarser than the configured interval.
+
+    The lengths are chosen to stay inside the unclamped band for this config:
+    at a 2 m interval, ``min_samples`` governs below 8 m and ``max_samples``
+    above 98 m.
+    """
+    config = WidthEstimationConfig(
+        adaptive_sampling=True,
+        min_samples=5,
+        max_samples=50,
+        default_sample_interval=2.0,
+    )
+
+    num_samples = _calculate_optimal_num_samples(total_length, config)
+
+    realised_interval = total_length / (num_samples - 1)
+    assert realised_interval <= config.default_sample_interval + 1e-9, (
+        f"{num_samples} samples over {total_length} m realise a spacing of "
+        f"{realised_interval:.3f} m, coarser than the configured "
+        f"{config.default_sample_interval} m"
+    )
+
+
+def test_adaptive_sampling_respects_the_sample_clamps():
+    """The +1 for the inclusive endpoint must not push the count past max_samples."""
+    config = WidthEstimationConfig(
+        adaptive_sampling=True,
+        min_samples=5,
+        max_samples=50,
+        default_sample_interval=2.0,
+    )
+
+    # Far below the interval: min_samples governs.
+    assert _calculate_optimal_num_samples(1.0, config) == config.min_samples
+    # Far above: max_samples governs, +1 included.
+    assert _calculate_optimal_num_samples(1000.0, config) == config.max_samples

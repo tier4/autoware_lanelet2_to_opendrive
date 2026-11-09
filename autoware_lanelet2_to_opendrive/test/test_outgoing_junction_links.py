@@ -8,7 +8,11 @@ Nishishinjuku conversion).  ``Road.set_outgoing_road_junction_links`` walks
 the routing graph to restore the missing junction predecessor link.
 """
 
+import json
+from pathlib import Path
+
 import lxml.etree as ET
+import pytest
 
 from autoware_lanelet2_to_opendrive.opendrive.enums import ElementType
 from autoware_lanelet2_to_opendrive.opendrive.road import (
@@ -175,6 +179,76 @@ def test_no_driving_road_is_emitted_topologically_orphaned(nishishinjuku_xodr):
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="9 drivable roads on Nishishinjuku claim a junction that names "
+    "them in no <connection> and carry no <link>, so nothing in the file "
+    "reaches them; the fix is a design decision, see the docstring",
+)
+def test_no_driving_road_is_unreachable(nishishinjuku_xodr):
+    """The invariant above, without the exclusion that hides its own population.
+
+    ``test_no_driving_road_is_emitted_topologically_orphaned`` skips every
+    road whose ``junction`` is not ``-1``. That exclusion is reasonable on its
+    face -- a connecting road is reached through its junction, not through a
+    road link -- but it is only true when a ``<connection>`` names the road.
+    A road that claims a junction and appears in no connection is reached
+    through neither, and the filter removes exactly that population from the
+    check. The invariant therefore reads as satisfied while the roads it
+    exists to forbid are present.
+
+    A road is reachable here if it carries a road ``<link>`` with at least one
+    side, or some junction's ``<connection>`` names it as a ``connectingRoad``.
+
+    Measured: **9 drivable roads on Nishishinjuku** (380, 381, 409, 420, 436,
+    445, 696, 697, 698) and **70 on the 36,249-lanelet customer map**
+    (11.1-132.6 m each, p50 42.7 m, 67 with a driving lane, no lane ``<link>``
+    at all) satisfy neither. On the customer map 462 of 8,200 connecting roads
+    (5.6%, 18.3 km) appear in no connection; those 70 are the ones that also
+    have no road link.
+
+    The cause is largely the source map and is not ours: by Lanelet2's own
+    definition of connectivity -- a predecessor's boundary end points being
+    this lanelet's start points -- 95 of the 107 lanelets behind those 70
+    roads share their start points with nothing, so there is no incoming
+    movement to emit a connection from.
+
+    What to *do* is a design decision, which is why this is an xfail and not
+    a fix:
+
+    * Writing ``junction="-1"`` is **not** an option. It satisfies this test's
+      letter and breaks the test above: these roads become drivable
+      non-junction roads with no links, which is the shape #494 Part A
+      forbids. Measured -- it turns the 9 above into 9 failures there.
+    * Not emitting them keeps both invariants but silently drops real
+      pavement from the map, and removes its lanelets from the mapping.
+    * Emitting a connection needs an incoming road, which for 95 of 107 does
+      not exist.
+    """
+    tree = ET.parse(str(nishishinjuku_xodr))
+
+    backed = {
+        connection.get("connectingRoad")
+        for connection in tree.iterfind(".//junction/connection")
+    }
+
+    unreachable = []
+    for road in tree.iterfind(".//road"):
+        if not _is_driving_road(road):
+            continue
+        link = road.find("link")
+        has_link = link is not None and (
+            link.find("predecessor") is not None or link.find("successor") is not None
+        )
+        if has_link or road.get("id") in backed:
+            continue
+        unreachable.append(road.get("id"))
+
+    assert unreachable == [], (
+        "drivable roads that no <link> and no <connection> reaches: " f"{unreachable}"
+    )
+
+
 def test_every_real_junction_has_an_outgoing_road_linked_back(nishishinjuku_xodr):
     """Every real junction must be referenced as a <predecessor> by an outgoing road.
 
@@ -194,6 +268,69 @@ def test_every_real_junction_has_an_outgoing_road_linked_back(nishishinjuku_xodr
     )
 
 
+def _roads_fed_by_a_lanelet_carrying_connector(tree: ET._ElementTree, mapping: dict):
+    """Yield regular roads a junction feeds through a connector built from a lanelet.
+
+    This is the population for the lane-``<predecessor>`` assertion below, and
+    it is defined by the property that assertion depends on rather than by a
+    stand-in for it.  ``_set_single_lane_links`` resolves a lane predecessor
+    through the *routing graph*, so it can only produce one when some road
+    feeding this one carries a source lanelet to resolve through.  A road fed
+    only by synthetic divergence connectors -- which are geometry with no
+    lanelet behind them -- has nothing to resolve, and its lanes are
+    legitimately unlinked.
+
+    The obvious shorthand is the one this test used to use: ``predecessor
+    junction id < 10_000``, i.e. "not a synthetic divergence junction".  That
+    was a proxy, and it stopped tracking the property when junction-claim
+    merging landed, because a merged junction is a real intersection *and* the
+    owner of the divergence connectors it absorbed -- both at once.  Exactly
+    one road crossed the boundary when it landed, with byte-identical lane
+    links, so the proxy moved and the thing it stood for did not.
+
+    Measured on Nishi-Shinjuku ``target=carla``, before and after that merge:
+    this population is **107 roads with 0 violations** both times, while the
+    roads lacking a lane ``<predecessor>`` are **the same 33 ids** both times,
+    every one of them fed only by connectors carrying no lanelet.  That gap is
+    real and pre-existing; it is not what this test is for, and scoping it out
+    by the property keeps it visible rather than hiding it behind a proxy.
+
+    **The direction of the statement matters, and the obvious one is wrong.**
+    Stated as an *exclusion* -- "skip roads fed only by connectors carrying no
+    lanelet" -- this leaks: measured, it mis-classifies 34 roads that have the
+    link anyway, and an XODR-only variant of it mis-classifies 33.  Stated as
+    an *inclusion* -- "a road with at least one feeder carrying a source
+    lanelet must have the link" -- it is exact, with no exception on either
+    side of the merge.  It is the same property both times; only the quantifier
+    changes.  The exclusion form is the one to reach for first and the one to
+    discard, so it is written down here rather than rediscovered.
+    """
+    carries: set = {
+        int(pair[0]) for pair in mapping["lanelet_to_road_and_lane"].values()
+    }
+    for extra in mapping.get("lanelet_additional_road_lanes", {}).values():
+        for pair in extra:
+            carries.add(int(pair[0]))
+
+    feeders: dict = {}
+    for road in tree.iterfind(".//road"):
+        if road.get("junction") == "-1":
+            continue
+        successor = road.find("link/successor")
+        if successor is not None and successor.get("elementType") == "road":
+            fed = feeders.setdefault(successor.get("elementId"), [])
+            fed.append(int(road.get("id")))
+
+    for road in tree.iterfind(".//road"):
+        if road.get("junction") != "-1":
+            continue
+        pred = road.find("link/predecessor")
+        if pred is None or pred.get("elementType") != "junction":
+            continue
+        if any(f in carries for f in feeders.get(road.get("id"), [])):
+            yield road
+
+
 def test_lane_predecessor_links_restored_for_junction_outgoing_roads(
     nishishinjuku_xodr,
 ):
@@ -202,12 +339,29 @@ def test_lane_predecessor_links_restored_for_junction_outgoing_roads(
     ``_set_single_lane_links`` skips lane-level ``<predecessor>`` creation
     when the road has no predecessor link, so a fix that set only the
     road-level link would leave the lanes unlinked. Every junction-outgoing
-    road's driving lanes must therefore carry a lane ``<predecessor>``.
+    road the routing graph can actually resolve a predecessor through must
+    therefore carry a lane ``<predecessor>`` on its driving lanes.
     """
     tree = ET.parse(str(nishishinjuku_xodr))
+    mapping_path = Path(nishishinjuku_xodr).with_suffix(".mapping.json")
+    # The sidecar is this test's premise, not an optional extra: the population
+    # is defined by which connectors carry a source lanelet, and only the
+    # sidecar records that.  The fixture above has already asserted the
+    # converter exited successfully, so a missing sidecar is a failure of the
+    # thing under test, not an environmental excuse -- skipping here would make
+    # the test go quiet exactly when it has stopped checking anything.
+    assert mapping_path.is_file(), (
+        f"{mapping_path} was not produced alongside the XODR; the converter "
+        f"exited successfully, so the sidecar is missing rather than unavailable"
+    )
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+
+    population = list(_roads_fed_by_a_lanelet_carrying_connector(tree, mapping))
+    # A population that silently emptied would make the assertion vacuous.
+    assert population, "fixture is expected to contain junction-outgoing roads"
 
     without_lane_link = []
-    for road, _jid in _roads_with_real_junction_predecessor(tree):
+    for road in population:
         driving_lanes = [
             lane
             for lane in road.iterfind(".//lane[@type]")

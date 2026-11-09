@@ -19,7 +19,9 @@ Jump to specific limitations:
 4. [Priority-Based Right-of-Way Control](priority-right-of-way.md) — converter now emits `<junction><priority>` from `right_of_way` REs, but CARLA still ignores them
 5. [Geometric Approximation Limitations](geometric-approximation.md) — parametric curve fitting to discrete points
 6. [Coordinate System Considerations](coordinate-system.md) — MGRS projection constraints
-7. [ASAM Schema Compliance](asam-schema-compliance.md) — known QC-checker false positives from CARLA's LHT `rule` extension on top of OpenDRIVE 1.4
+7. [ASAM Schema Compliance](asam-schema-compliance.md) — `target=default` output conforms to OpenDRIVE 1.7; `target=carla` keeps one documented non-conforming construct
+8. [Lane Section Granularity and Cross-Slope](lane-section-granularity.md) — exactly one `<laneSection>` per road, and no superelevation is emitted
+9. [Pedestrian Network Connectivity](pedestrian-network-connectivity.md) — `walkway` lanelets share no boundary geometry with anything, so their links cannot be derived; a map-data limitation
 
 For a summary comparison, see the [Summary](#summary) table below.
 
@@ -35,7 +37,9 @@ For a summary comparison, see the [Summary](#summary) table below.
 | [Priority emitted but ignored by CARLA](priority-right-of-way.md) | Low | Yes (CARLA-side) | None on the converter side; non-CARLA consumers already work |
 | [Geometric approximation](geometric-approximation.md) | Low | No | Use higher-resolution input data |
 | [MGRS projection limitations](coordinate-system.md) | Medium | No | Split large maps by grid zone |
-| [ASAM schema compliance](asam-schema-compliance.md) | Low | No | Suppressed automatically by the `analyze` command |
+| [ASAM schema compliance](asam-schema-compliance.md) | Low | `target=carla` only | Use `target=default` for a schema-conforming file |
+| [One `<laneSection>` per road; no superelevation](lane-section-granularity.md) | Low | No | None; lane-count changes are expressed as separate linked roads |
+| [`walkway` lanelets emitted without links](pedestrian-network-connectivity.md) | Low | No | None on the converter side; fix in the map by sharing boundary linestrings |
 
 !!! info "Feedback Welcome"
     If you encounter limitations not documented here, please [report them](https://github.com/tier4/autoware_lanelet2_to_opendrive/issues) so we can improve this documentation.

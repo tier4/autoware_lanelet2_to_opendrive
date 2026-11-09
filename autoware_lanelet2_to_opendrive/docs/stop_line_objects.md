@@ -4,7 +4,7 @@ This document describes the conversion of Lanelet2 stop line linestrings to Open
 
 ## Overview
 
-The converter transforms Lanelet2 linestrings with `type="stop_line"` into OpenDRIVE `<object type="stopLine">` elements within each road's `<objects>` section. This allows downstream tools and simulators that support the OpenDRIVE object model to recognize and use stop line positions.
+The converter transforms Lanelet2 linestrings with `type="stop_line"` into OpenDRIVE `<object type="roadMark">` elements within each road's `<objects>` section. This allows downstream tools and simulators that support the OpenDRIVE object model to recognize and use stop line positions.
 
 ## OpenDRIVE Output Structure
 
@@ -14,7 +14,7 @@ Each stop line linestring produces an `<object>` element:
 <road id="5" ...>
   ...
   <objects>
-    <object type="stopLine" id="3002478" name="stop_line_3002478"
+    <object type="roadMark" id="3002478" name="stop_line_3002478"
             s="15.4" t="1.8" zOffset="0.0"
             hdg="1.5707" pitch="0.0" roll="0.0"
             orientation="none" width="0.1" length="3.5"/>
@@ -36,7 +36,7 @@ CARLA actually consumes it:
 
 | OpenDRIVE Attribute | Source | Description |
 |---------------------|--------|-------------|
-| `type` | Fixed | Standard form: `"stopLine"`. CARLA form: `"-1"` (with `name="Stencil_STOP"`). |
+| `type` | Fixed | Standard form: `"roadMark"` (the ASAM `e_objectType` member for road-surface markings). CARLA form: `"-1"` (with `name="Stencil_STOP"`) — not an `e_objectType` member; see [ASAM Schema Compliance](limitations/asam-schema-compliance.md). |
 | `id` | Linestring ID | The Lanelet2 linestring ID. |
 | `name` | Derived | Standard form: `"stop_line_<id>"`. CARLA form: `"Stencil_STOP"`. |
 | `s` | Projection | Arc-length position along road reference line. |
@@ -215,18 +215,18 @@ Step 7: Write OpenDRIVE output
 After conversion, verify the output contains stop line objects:
 
 ```bash
-# Check for stopLine objects
-grep 'type="stopLine"' output.xodr
+# Check for stop-line objects
+grep 'name="stop_line_' output.xodr
 
 # Count stop line objects
-grep -c 'type="stopLine"' output.xodr
+grep -c 'name="stop_line_' output.xodr
 ```
 
 Expected output format:
 
 ```xml
 <objects>
-  <object type="stopLine" id="..." name="stop_line_..." s="..." t="..."
+  <object type="roadMark" id="..." name="stop_line_..." s="..." t="..."
           zOffset="..." hdg="..." pitch="0.0" roll="0.0"
           orientation="none" width="..." length="0.0"/>
 </objects>
@@ -246,7 +246,7 @@ Expected output format:
   road sampling; other geometry types fall back to straight-line
   approximation.
 - CARLA's stock OpenDRIVE object parser does **not** consume
-  `<object type="stopLine">`; use `target=carla` (or
+  `<object type="roadMark">`; use `target=carla` (or
   `stopline.carla_stop_line=true`) to emit the `Stencil_STOP` form CARLA
   actually reads. See
   [Stop Line Position Discrepancies](limitations/stop-line-position.md)

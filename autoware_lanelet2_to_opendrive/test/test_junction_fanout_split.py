@@ -24,9 +24,35 @@ import lxml.etree as ET
 import pytest
 
 from autoware_lanelet2_to_opendrive.qc_validate import (
+    error_counts_by_checker,
     load_ignore_patterns,
-    validate,
+    run_bundle,
 )
+
+# ERROR counts the qc-framework bundle reports on these two fixtures today,
+# per checker.  **None** remain on this base.
+#
+# ``lane_smoothness.contact_point_no_horizontal_gaps`` used to report 2: the
+# road reference lines were fitted with the endpoints as a *weighted* term,
+# so consecutive roads' reference lines ended 1-3 cm apart and the lane
+# borders reconstructed from them could not meet.  Pinning the endpoints
+# exactly (``Splines(exact_endpoints=True)``) removes it here, and on 13 of
+# the 343 joints on Nishi-Shinjuku.
+#
+# ``road.geometry.contact_point`` used to report 1 here, and it was an
+# upstream false positive rather than a converter defect: the checker's
+# junction guard tested ``@junction == 1`` instead of ``!= -1``, so it ran on
+# a road that belongs to a junction, which the rule explicitly does not
+# cover.  That fix landed in ``tier4/qc-opendrive`` and arrived here with the
+# bundle bump this branch is based on, so the finding is gone and the pin
+# goes with it: the suite reported ``assert {} == {'check_asam_..._contact_
+# point': 1}`` until this entry was removed.
+#
+# Keep pinning the exact per-checker counts rather than asserting "no
+# errors": a regression in any checker then shows up as a new key with the
+# count attached, and any future known-broken finding has to be written
+# down here deliberately.
+_KNOWN_QC_FINDINGS: dict[str, int] = {}
 
 DATA = Path(__file__).parent / "data"
 FAN_OUT = (DATA / "junction_fanout_mini.osm").resolve()
@@ -173,9 +199,18 @@ def test_junction_connections_cover_every_incoming_lane(
 
 @BOTH
 def test_fixture_passes_qc_validate(tmp_path: Path, fixture: Path) -> None:
-    """The emitted OpenDRIVE must pass qc-framework with zero ERRORs."""
-    errors = validate(_run_convert(tmp_path, fixture), load_ignore_patterns())
-    assert errors == 0, f"qc-framework reported {errors} ERROR(s)"
+    """qc-framework must report only the known, pre-existing findings.
+
+    The schema checker in particular must be clean: it is the precondition
+    for every other checker in the bundle.
+    """
+    result = run_bundle(_run_convert(tmp_path, fixture))
+    schema = result.get_checker_result("xodrBundle", "check_asam_xodr_xml_valid_schema")
+    assert schema.issues == [], (
+        "schema check must stay clean, otherwise the other 21 checkers skip: "
+        f"{[loc.description for i in schema.issues for loc in i.locations][:5]}"
+    )
+    assert error_counts_by_checker(result, load_ignore_patterns()) == _KNOWN_QC_FINDINGS
 
 
 @BOTH

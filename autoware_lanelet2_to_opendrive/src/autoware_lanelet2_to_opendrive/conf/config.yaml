@@ -14,6 +14,15 @@ output_map_path: null  # Optional: output file path
 dry_run: false    # If true, only validate without saving output
 verbose: false    # Enable detailed logging
 
+# Pre-flight inspection of the input map
+# Before anything is loaded, the .osm is scanned for the structural problems
+# that make lanelet2.io.load() refuse it, and each problem class is reported
+# with its count and element ids instead of the parser's flat error wall.
+# It is a diagnostic only: it never repairs the map, and it only names
+# problems that already stop the load, so it cannot reject a map that would
+# otherwise convert. Set to false to get the raw parser exception back.
+preflight: true
+
 # Mapping cross-validation
 # After conversion the lanelet -> (road_id, lane_id) mapping is re-derived
 # from raw geometry and compared against the mapping recorded during
@@ -25,3 +34,34 @@ verbose: false    # Enable detailed logging
 # (target.strict_mapping_validation); map takes precedence over target,
 # which takes precedence over this global value.
 strict_mapping_validation: false
+
+# The resolved origin is compared against the map's own node lat/lon: the
+# configured MGRS square must be one the map lies in, or -- for a frame with
+# no grid -- the origin must sit within a degree of the map's bounding box. A
+# mismatch means every emitted coordinate is in the wrong frame, so it aborts
+# the run. Set to false to proceed anyway.
+# Can be overridden per map (map.check_origin_against_map) or per target
+# (target.check_origin_against_map); map takes precedence over target, which
+# takes precedence over this global value.
+check_origin_against_map: true
+
+# After conversion the emitted XODR is run through the ASAM QC checks and the
+# mapping cross-validation, which print their own FINAL RESULT banner and
+# return an error count. When false (default) a non-zero count is logged as a
+# warning and the output is kept; when true it aborts the run.
+# Can be overridden per map (map.strict_analysis) or per target
+# (target.strict_analysis); map takes precedence over target, which takes
+# precedence over this global value.
+strict_analysis: false
+
+# Measure how far each emitted road's reference line sits from the Lanelet2
+# boundary it was generated from, and report the counts past each severity
+# level. The figures are written to .mapping.json as
+# reference_match_distances and summarised in the log; a road past the warn
+# threshold is listed individually as a WARNING. The measurement reuses
+# polylines the matching already holds, so it costs no extra conversion.
+# Set to false to leave .mapping.json and the log untouched.
+# Can be overridden per map (map.report_reference_match_accuracy) or per
+# target (target.report_reference_match_accuracy); map takes precedence over
+# target, which takes precedence over this global value.
+report_reference_match_accuracy: true

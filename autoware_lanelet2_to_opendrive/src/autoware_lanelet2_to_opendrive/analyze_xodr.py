@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .opendrive.road import Road as ConverterRoad
+    from .projection_resolver import ResolvedProjection
 
 from qc_baselib import Configuration, IssueSeverity, Result
 from qc_opendrive import constants
@@ -285,10 +286,10 @@ class ValidationContext:
     """Loaded Lanelet2 map (``lanelet2.LaneletMap``)."""
 
     offset_x: float
-    """MGRS projection X offset."""
+    """Projection X offset of the map origin in the exported frame."""
 
     offset_y: float
-    """MGRS projection Y offset."""
+    """Projection Y offset of the map origin in the exported frame."""
 
     conv_mapping: object
     """``GeoRoadLaneletMapping`` loaded from ``.mapping.json``."""
@@ -318,6 +319,14 @@ class GeoReferenceFrame:
 
     offset_y: float
     """Offset (m) subtracted from projected OSM y to get XODR y."""
+
+    offset_is_exact: bool = False
+    """True when the offset was read out of the PROJ string itself.
+
+    ``False`` means it was probed by projecting the frame origin with an
+    ``MGRSProjector``, so the probe has to be redone with the projector that
+    actually loads the map -- see :func:`_load_validation_context`.
+    """
 
 
 def _frame_from_geo_reference(proj_string: str) -> GeoReferenceFrame | None:
@@ -349,6 +358,7 @@ def _frame_from_geo_reference(proj_string: str) -> GeoReferenceFrame | None:
             mgrs_frame.longitude,
             mgrs_frame.offset_x,
             mgrs_frame.offset_y,
+            offset_is_exact=True,
         )
 
     lat_match = re.search(r"\+lat_0=([\d.eE+-]+)", proj_string)
@@ -360,6 +370,52 @@ def _frame_from_geo_reference(proj_string: str) -> GeoReferenceFrame | None:
     projector = MGRSProjector(latlon_to_lanelet2_origin(origin_lat, origin_lon))
     fwd = projector.forward(lanelet2.core.GPSPoint(origin_lat, origin_lon, 0.0))
     return GeoReferenceFrame(origin_lat, origin_lon, fwd.x, fwd.y)
+
+
+def _resolve_analysis_projection(
+    effective_osm: Path, origin_lat: float, origin_lon: float
+) -> "ResolvedProjection":
+    """Resolve the projector used to reload the OSM for cross-validation.
+
+    The reloaded lanelets have to land in the frame the converter put them
+    in, so the projector comes from the same projector-resolution layer the
+    converter uses instead of being assumed to be MGRS. Assuming MGRS for a
+    TransverseMercator map rotates and rescales the reloaded geometry -- at
+    lon 139.78 in UTM zone 54 that is about 0.7 deg of meridian convergence
+    plus a scale mismatch -- which makes the mapping cross-validation compare
+    mismatched frames.
+
+    Falls back to an MGRS frame built from the geoReference's
+    ``+lat_0``/``+lon_0`` when the map ships no (supported)
+    ``map_projector_info.yaml``: the historical behaviour, which stays
+    correct for MGRS maps because ``MGRSProjector`` ignores its origin and
+    always emits coordinates relative to each point's own 100 km grid square.
+
+    Args:
+        effective_osm: OSM path actually used (may be a preprocessed variant).
+        origin_lat: Frame-origin latitude recovered from the geoReference.
+        origin_lon: Frame-origin longitude recovered from the geoReference.
+
+    Returns:
+        The resolved projection whose :meth:`make_projector` reproduces the
+        converter's frame.
+    """
+    from .projection import latlon_to_lanelet2_origin
+    from .projection_resolver import (
+        ResolvedProjection,
+        resolve_projection_from_map_info,
+    )
+
+    resolved = resolve_projection_from_map_info(effective_osm)
+    if resolved is not None:
+        return resolved
+
+    return ResolvedProjection(
+        origin=latlon_to_lanelet2_origin(origin_lat, origin_lon),
+        mgrs_code=None,
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
+    )
 
 
 def _load_validation_context(
@@ -377,9 +433,7 @@ def _load_validation_context(
 
     import lanelet2
     import lxml.etree as ET
-    from autoware_lanelet2_extension_python.projection import MGRSProjector  # noqa: F401
 
-    from .projection import latlon_to_lanelet2_origin
     from .road_lanelet_geo_mapping import (
         GeoRoadLaneletMapping,
         _cache_path_for,
@@ -420,9 +474,25 @@ def _load_validation_context(
         print("  WARNING: Cannot parse lat_0/lon_0 from geoReference; skipping.")
         return None
 
-    origin = latlon_to_lanelet2_origin(frame.origin_lat, frame.origin_lon)
-    projector = MGRSProjector(origin)
+    # Resolve the projector the same way the converter does. Importing
+    # .projection_resolver also registers the autoware extension types, which
+    # has to happen before the map is loaded.
+    resolved = _resolve_analysis_projection(
+        effective_osm, frame.origin_lat, frame.origin_lon
+    )
+    projector = resolved.make_projector()
     lanelet_map = lanelet2.io.load(str(effective_osm), projector)
+
+    offset_x, offset_y = frame.offset_x, frame.offset_y
+    if not frame.offset_is_exact:
+        # The offset was probed by projecting the frame origin, and that probe
+        # belongs to whichever projector actually loaded the map: a
+        # TransverseMercator origin is the projection centre and lands on
+        # (0, 0), where an MGRSProjector reports its grid-square offset.
+        fwd = projector.forward(
+            lanelet2.core.GPSPoint(frame.origin_lat, frame.origin_lon, 0.0)
+        )
+        offset_x, offset_y = fwd.x, fwd.y
 
     # Restore TrafficLightConfig from the mapping sidecar (if saved)
     tl_config = None
@@ -439,8 +509,8 @@ def _load_validation_context(
 
     return ValidationContext(
         lanelet_map=lanelet_map,
-        offset_x=frame.offset_x,
-        offset_y=frame.offset_y,
+        offset_x=offset_x,
+        offset_y=offset_y,
         conv_mapping=conv_mapping,
         effective_osm=effective_osm,
         xodr_root=tree.getroot(),
@@ -491,6 +561,14 @@ def run_mapping_validation(
         (ctx.offset_x, ctx.offset_y),
         ctx.conv_mapping.xodr_sha256,
         ctx.conv_mapping.osm_sha256,
+        # The XODR carries no trace of which connecting roads are
+        # chain-merged, so the roads parsed back from it cannot tell the
+        # geometric pass; the conversion sidecar records it.
+        chain_roads=ctx.conv_mapping.chain_merged_roads,
+        # Same reason for the copies of an exit-forking junction group: the
+        # XODR shows two identical connecting roads with no record of which
+        # one claimed the source lanelets.
+        duplicate_roads=ctx.conv_mapping.exit_fork_duplicate_roads,
     )
 
     try:
@@ -513,6 +591,33 @@ _STOP_LINE_SIGNAL_RE = re.compile(r"^(StopLine|StopSign|YieldSign)_(\d+)$")
 
 # Signal name pattern for traffic light signals: TrafficLight_{regelem_id}_{linestring_id}
 _TRAFFIC_LIGHT_SIGNAL_RE = re.compile(r"^TrafficLight_(\d+)_(\d+)$")
+
+# Object @name of a stop line: the CARLA stencil, or the standard form's
+# "stop_line_<linestring id>".
+_STOP_LINE_OBJECT_NAME_RE = re.compile(r"^(Stencil_STOP|stop_line_\d+)$")
+
+# Object @type values that denote a stop line. "roadMark" is the standard
+# (schema-conforming) form and the only one of the three that is an ASAM
+# e_objectType member; "-1" is the CARLA dialect emitted under target=carla;
+# "stopLine" is the pre-fix standard form, accepted so this reader stays
+# backwards compatible with .xodr files produced before the change.
+_STOP_LINE_OBJECT_TYPES = frozenset({"roadMark", "stopLine", "-1"})
+
+
+def _is_stop_line_object(obj_type: str, obj_name: str) -> bool:
+    """Return True when an ``<object>`` is one of the converter's stop lines.
+
+    Args:
+        obj_type: The object's ``@type`` attribute.
+        obj_name: The object's ``@name`` attribute.
+
+    Returns:
+        True if the (type, name) pair identifies a stop line emitted by this
+        converter, in either the standard or the CARLA ``Stencil_STOP`` form.
+    """
+    return obj_type in _STOP_LINE_OBJECT_TYPES and bool(
+        _STOP_LINE_OBJECT_NAME_RE.match(obj_name)
+    )
 
 
 def _parse_stop_lines_from_xodr(
@@ -565,10 +670,9 @@ def _parse_stop_lines_from_xodr(
             obj_id_str = obj_elem.get("id", "")
             if not obj_id_str:
                 continue
-            # Standard: type="stopLine", CARLA: type="-1" + name="Stencil_STOP"
-            if obj_type == "stopLine" or (
-                obj_type == "-1" and obj_name == "Stencil_STOP"
-            ):
+            # Standard form: type="roadMark" name="stop_line_<id>".
+            # CARLA dialect:  type="-1"       name="Stencil_STOP".
+            if _is_stop_line_object(obj_type, obj_name):
                 obj_id = int(obj_id_str)
                 object_to_road[obj_id] = road_id
                 object_positions[obj_id] = (
@@ -1190,6 +1294,49 @@ def run_junction_lanelet_validation(
 # ---------------------------------------------------------------------------
 
 
+def run_structural_invariant_validation(xodr_path: Path) -> bool:
+    """Report this repository's own structural invariants over the document.
+
+    The ASAM bundle does not cover them: 25 of its 26 checkers complete on
+    the customer map and none reports a lane whose ``<successor>`` names a
+    lane the linked road does not have, which is the document shape CARLA
+    exits 139 on. ``<predecessor>`` is inert, so the asymmetry makes the
+    crash look random. Running the checker here puts every conversion behind
+    it, not only the maps that have a test of their own.
+
+    Every invariant counts, ``linked_endpoints_apart`` included. It carried an
+    exemption here at first, on the strength of that module's own docstring
+    ("22 violations over 15 joins on Nishi-Shinjuku, worst 0.071 m"); the
+    prose is stale. Measured 2026-11-06, a Nishi-Shinjuku conversion violates
+    nothing at all, and ``test_xodr_structural_invariants`` already pins
+    ``_KNOWN_GAP_VIOLATIONS = 0`` with the note that excluding the code
+    "would only hide a reappearance".
+
+    Returns:
+        True when the document satisfies every invariant.
+    """
+    from autoware_lanelet2_to_opendrive.xodr_invariants import (
+        check_invariants,
+        format_violations,
+    )
+
+    try:
+        violations = check_invariants(xodr_path)
+    except Exception as exc:
+        # A checker that cannot read the document must not discard the rest
+        # of the analysis, which has already printed its findings by now.
+        print(f"  Structural invariants: could not be checked ({exc})")
+        return True
+
+    if not violations:
+        print("  Structural invariants: PASSED")
+        return True
+
+    print(format_violations(violations))
+    print(f"  Structural invariants: FAILED ({len(violations)} violation(s))")
+    return False
+
+
 def run_analysis(
     xodr_path: Path,
     osm_path: Path,
@@ -1305,6 +1452,15 @@ def run_analysis(
         xodr_path, osm_path, validation_context=val_ctx
     )
     if not tl_pos_ok:
+        error_count += 1
+
+    # ── Structural invariants ─────────────────────────────────────────────
+    print(f"\n{'=' * 72}")
+    print("  Structural Invariants")
+    print(f"{'=' * 72}")
+
+    invariants_ok = run_structural_invariant_validation(xodr_path)
+    if not invariants_ok:
         error_count += 1
 
     # ── Final summary ──────────────────────────────────────────────────────
