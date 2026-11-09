@@ -967,6 +967,11 @@ def lanelet_end_has_contact(
     uses.  Longitudinal successors share the whole end cut; a lateral
     neighbour shares one of the two points.
 
+    Both orientations of each linestring have to be asked for: a lanelet
+    digitised against the direction of travel holds the inverted view, and
+    laneletLayer.findUsages only answers for the view the lanelet
+    registered.
+
     This is deliberately wider than the routing graph: a routing graph is
     built for one participant class, so a walkway is not even a node in the
     vehicle graph, and an end that is in truth untouched cannot be told apart
@@ -988,9 +993,18 @@ def lanelet_end_has_contact(
             continue
         point = boundary[index]
         for linestring in lanelet_map.lineStringLayer.findUsages(point):
-            for other in lanelet_map.laneletLayer.findUsages(linestring):
-                if other.id != lanelet.id:
-                    return True
+            # A lanelet that traverses a linestring backwards registers the
+            # *inverted* view of it, and laneletLayer.findUsages is keyed
+            # on the view that was registered: asked for the other one it
+            # returns nothing at all, not even the lanelet itself. The
+            # lineStringLayer hands back the forward view, because that is
+            # the way as digitised, so without asking for both the neighbours
+            # missed are exactly the longitudinal ones -- the ones that share
+            # only nodes, and the only ones this question is asked about.
+            for view in (linestring, linestring.invert()):
+                for other in lanelet_map.laneletLayer.findUsages(view):
+                    if other.id != lanelet.id:
+                        return True
     return False
 
 
