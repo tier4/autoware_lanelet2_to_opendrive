@@ -954,6 +954,46 @@ def sort_adjacent_groups(
     return sorted_lanelets
 
 
+def lanelet_end_has_contact(
+    lanelet_map: lanelet2.core.LaneletMap,
+    lanelet: lanelet2.core.Lanelet,
+    at_start: bool,
+) -> bool:
+    """Does any other lanelet share this end of ``lanelet``?
+
+    Lanelet2 states connectivity by *sharing points*, so the question is
+    answered exactly -- no tolerance -- by asking whether either boundary's
+    endpoint at this end is used by a linestring that some other lanelet also
+    uses.  Longitudinal successors share the whole end cut; a lateral
+    neighbour shares one of the two points.
+
+    This is deliberately wider than the routing graph: a routing graph is
+    built for one participant class, so a walkway is not even a node in the
+    vehicle graph, and an end that is in truth untouched cannot be told apart
+    from one whose neighbour the graph simply does not model.
+
+    Args:
+        lanelet_map: The map the lanelet belongs to, used for the reverse
+            point -> linestring -> lanelet lookups.
+        lanelet: The lanelet whose end is in question.
+        at_start: True for the first boundary points, False for the last.
+
+    Returns:
+        True when at least one other lanelet uses a linestring through either
+        endpoint at this end.
+    """
+    index = 0 if at_start else -1
+    for boundary in (lanelet.leftBound, lanelet.rightBound):
+        if len(boundary) < 1:
+            continue
+        point = boundary[index]
+        for linestring in lanelet_map.lineStringLayer.findUsages(point):
+            for other in lanelet_map.laneletLayer.findUsages(linestring):
+                if other.id != lanelet.id:
+                    return True
+    return False
+
+
 # Mapping from element_type property names to lanelet2 subtype attribute values.
 # When lanelet2 loads a regulatory element as a generic RegulatoryElement
 # instead of the specific subclass (e.g. TrafficLight), the property-based
