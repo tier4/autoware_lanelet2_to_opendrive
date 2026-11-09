@@ -19,7 +19,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Container, Optional
 
 import numpy as np
 
@@ -688,6 +688,49 @@ def _polyline_length(pts: np.ndarray) -> float:
 #: whichever level won — they are all recomputed with this single metric, and
 #: the name is carried in the summary so it cannot be mistaken for another.
 _REPORT_METRIC_NAME: str = "symmetric_point_to_segment_max"
+
+
+def _accuracy_report_key(
+    walk_result: list[tuple[int, int, int]],
+    is_rht: bool,
+    taken: "Container[int]",
+) -> int:
+    """Lanelet the road's positional accuracy should be reported under.
+
+    ``walk_result`` is the adjacency walk's output as
+    ``(lanelet id, road id, lane id)``, outermost lane first.  ``taken``
+    holds the lanelets already reported on, so that two roads cannot be
+    filed under one key.
+
+    The reference line is a boundary of exactly one lanelet of the walk --
+    its left boundary under RHT, its right boundary under LHT -- so that is
+    the only lanelet the road's positional accuracy can be measured against.
+
+    This is not in general the lanelet the walk started from.  The walk
+    starts at the outermost lanelet of the whole cross-section, and since the
+    road reference line follows the outermost *vehicle* lanelet, an attached
+    shoulder or footway sits outside it and is where the walk begins.
+    Measuring the reference line against that lanelet's own boundary charges
+    the road the attached lane's full width for geometry that is exact.
+
+    Falls back to the walk start in two cases, which leaves the figure where
+    it used to be rather than dropping the road from the report altogether:
+    when the walk never reached the reference lane, and when another road has
+    already been filed under that lanelet.
+
+    The second case is why ``taken`` exists.  The walk start cannot collide
+    -- it is the lanelet Phase 1 matched and Phase 2 made unique per road --
+    but the reference-lane lanelet sits *inside* the walk, and the walk
+    covers the whole cross-section, which two roads can overlap on.  The
+    report is a plain dict keyed by lanelet, so a collision does not merge
+    the two figures: it deletes one.
+    """
+    reference_lane_id = -1 if is_rht else 1
+    start = walk_result[0][0]
+    for lanelet_id, _road_id, lane_id in walk_result:
+        if lane_id == reference_lane_id:
+            return start if lanelet_id in taken else lanelet_id
+    return start
 
 
 def _polyline_direction(pts: np.ndarray) -> np.ndarray:
@@ -1814,11 +1857,31 @@ def build_mapping(
         boundary = boundaries.get(lanelet_id)
         if boundary is None:
             return
-        reference_match_distances[lanelet_id] = ReferenceMatchDistance(
+        record = ReferenceMatchDistance(
             max_m=_symmetric_max_polyline_distance(rc.ref_line, boundary),
             mean_m=_symmetric_mean_polyline_distance(rc.ref_line, boundary),
             boundary_length_m=_polyline_length(boundary),
         )
+        # ``_accuracy_report_key`` keeps roads off each other's keys, and the
+        # rescue pass writes the lanelet it matched, which is unmatched by
+        # definition.  If a collision happens anyway, keep the larger figure
+        # and say so: a plain assignment would drop one road from the counts
+        # silently, and silently lowering a total is how this report has been
+        # wrong before.
+        previous = reference_match_distances.get(lanelet_id)
+        if previous is not None:
+            logger.warning(
+                "Reference accuracy collision on lanelet %d: road %d reports "
+                "max %.3f m where %.3f m was already recorded; keeping the "
+                "larger. One road is missing from the accuracy counts.",
+                lanelet_id,
+                rc.road_id,
+                record.max_m,
+                previous.max_m,
+            )
+            if previous.max_m >= record.max_m:
+                return
+        reference_match_distances[lanelet_id] = record
         if rescued:
             rescued_reference_lanelets.add(lanelet_id)
 
@@ -1929,11 +1992,16 @@ def build_mapping(
         # Commit walk results
         _commit(walk_result)
 
-        # Record accuracy under the lanelet the walk actually started from:
-        # the pre-walk above may have corrected the reference away from
-        # ``best_lid``, and the distance belongs to the lanelet that was used.
+        # Record accuracy under the lanelet whose boundary the reference line
+        # was generated from -- the one carrying the reference lane id -- and
+        # not under whichever lanelet the walk started from.  See
+        # ``_accuracy_report_key``.
         if walk_result:
-            _record_reference_accuracy(walk_result[0][0], rc, rescued=False)
+            _record_reference_accuracy(
+                _accuracy_report_key(walk_result, rc.is_rht, reference_match_distances),
+                rc,
+                rescued=False,
+            )
 
     # -- Rescue pass: attempt to assign dropped roads -----------------------
     # Roads that had candidates in Phase 1 but were dropped in Phase 2
@@ -1995,6 +2063,13 @@ def build_mapping(
             # Rescued roads carry positional error like any other match — and
             # more of it, since they are accepted up to the relaxed rescue
             # threshold.  Leaving them out understates ``max`` and ``p95``.
+            # ``best_lid`` is right here, where ``_accuracy_report_key``
+            # would be wrong: this pass has no pre-walk, so the walk starts
+            # at the lanelet matched against the reference-side boundary --
+            # the reference lanelet itself -- and the lane ids it then writes
+            # from ``walk_lane_ids`` are shifted on a road with lanes on both
+            # sides.  Reading the key off those ids would follow the shift;
+            # the match does not.
             _record_reference_accuracy(best_lid, rc, rescued=True)
             rescued_road_ids.add(rc.road_id)
             logger.info(
