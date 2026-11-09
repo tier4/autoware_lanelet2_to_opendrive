@@ -234,7 +234,7 @@ each is also overridable from the command line.
 | | `carla_stop_line` | `false` | Emit `<object type="-1" name="Stencil_STOP">` instead of the conforming `<object type="roadMark" name="stop_line_<id>">` |
 | `traffic_light` | `offset_x/y/z`, `hdg_offset` | 0 / 0 / 0 / π/2 | CARLA actor placement |
 | `width_estimation` | `adaptive_sampling` | `true` | Sample width based on road length |
-| | `default_sample_interval` | 5.0 m | Spacing between width samples |
+| | `default_sample_interval` | 2.0 m | Spacing between width samples; 5 m leaves a p95 of ~74 mm and 10 m ~153 mm between the emitted envelope and the source boundary |
 | `parking_lot` | `enabled` | `true` | Emit synthetic parking-lot roads |
 | | `default_stall_width` | `2.5` m | Stall width |
 | | `nearest_area_threshold_m` | 30 m | Stall ↔ area association radius |
