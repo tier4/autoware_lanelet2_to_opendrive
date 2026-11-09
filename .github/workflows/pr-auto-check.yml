@@ -1,9 +1,11 @@
 name: PR Auto Check
 
 on:
+  # See the note in ci.yml: no `branches:` filter, so the version-bump-label
+  # check runs on every pull request rather than only on those targeting a
+  # long-lived branch.
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [ master, main, develop ]
 
 jobs:
   workflow-yaml-check:
