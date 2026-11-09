@@ -5,13 +5,14 @@ to convert Lanelet2 maps to OpenDRIVE format.
 
 ## Console Scripts
 
-The package registers five console scripts (see `[project.scripts]` in
+The package registers six console scripts (see `[project.scripts]` in
 [`pyproject.toml`](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/autoware_lanelet2_to_opendrive/pyproject.toml)):
 
 | Script | Purpose |
 |--------|---------|
 | `convert` | Run the full Lanelet2 → OpenDRIVE pipeline (Hydra CLI) |
 | `preprocess-lanelet` | Run preprocessing operations only (argparse CLI) |
+| `map-preflight` | Report the structural problems that stop a Lanelet2 `.osm` loading |
 | `analyze` | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | Run ASAM QC checker on an existing `.xodr` |
 | `carla-import-test` | Smoke-test loading the `.xodr` in a running CARLA server |
@@ -46,6 +47,7 @@ conf/
 | `output_map_path` | no | Output `.xodr` (defaults to `<input>.xodr`) |
 | `dry_run` | no | Validate only, no save (default `false`) |
 | `verbose` | no | Enable debug logging (default `false`) |
+| `preflight` | no | Report the input map's structural problems before loading it (default `true`) |
 | `map=<name>` | no | Selects `conf/map/<name>.yaml` (default `example`) |
 | `target=<name>` | no | Selects `conf/target/<name>.yaml` (default `default`) |
 
@@ -304,6 +306,40 @@ Default ignore patterns suppress the known false-positive
 `attribute 'rule' is not allowed` reported by the 1.4 schema validator (see
 [ASAM Schema Compliance](limitations/asam-schema-compliance.md)). Pass
 `--no-default-ignores` to see them.
+
+## `map-preflight`
+
+`lanelet2.io.load` refuses a structurally broken map with a single
+`RuntimeError` whose payload is an unordered wall of per-primitive lines.
+Nothing in it says how many distinct problems there are, which lines are the
+cause and which are its knock-on effect, or what a map author would have to
+change. On the map this was written against, 38 such lines described **one**
+problem class with 19 instances, plus its own cascade.
+
+`map-preflight` reads the OSM XML directly -- before, and independently of,
+`lanelet2.io.load` -- and reports the problems it recognises grouped by class,
+with a count and a capped list of element ids per class.
+
+```
+map-preflight <map.osm> [--max-ids N]
+```
+
+Exit code 0 when nothing blocking was found, 1 otherwise, so it can gate a
+pipeline.
+
+It is deliberately a **diagnostic only**:
+
+- it never edits the map and never hands the converter a patched copy;
+- it never makes the converter tolerate input it would otherwise reject;
+- a **blocking** finding corresponds to a constraint `lanelet2.io.load` itself
+  enforces, so it means the load *will* fail -- the report replaces the raw
+  exception rather than adding a new class of rejection;
+- anything that is a smell but still loads is reported as **non-blocking** and
+  conversion goes ahead, because rejecting a map that converts today would be a
+  worse failure than leaving a smell unenforced.
+
+`convert` runs the same inspection itself, controlled by the `preflight` key
+(default `true`); set `preflight=false` to get the raw parser exception back.
 
 ## `qc-validate`
 

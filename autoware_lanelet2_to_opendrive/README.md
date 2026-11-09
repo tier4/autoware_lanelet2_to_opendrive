@@ -15,6 +15,8 @@ This package is a workspace member of the [`autoware_lanelet2_to_opendrive` repo
 - Parking-lot `Area`s emitted as synthetic parking roads with `<lane type="parking">` and `<object type="parkingSpace">` per stall.
 - Traffic-light extraction from Autoware regulatory elements with arrow-bulb subtype encoding.
 - Right-of-way regulatory elements emitted as `<junction><priority>` records.
+- Pre-flight structural inspection of the input map, reporting each problem class with its
+  count and element ids instead of the parser's flat error wall (`map-preflight`).
 - Built-in ASAM QC validation and Lanelet2-to-road geometric cross-validation (`analyze`, `qc-validate`).
 - CARLA import smoke test (`carla-import-test`).
 - Pure Python 3.10 with full type hints (`py.typed`); managed by `uv`.
@@ -32,12 +34,13 @@ This pulls `lanelet2-python-api-for-autoware`, which builds from source against 
 
 ## Quick usage
 
-The package registers five console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
+The package registers six console scripts (see `[project.scripts]` in [`pyproject.toml`](pyproject.toml)):
 
 | Command | Framework | Purpose |
 |---------|-----------|---------|
 | `convert` | Hydra | Run the full Lanelet2 → OpenDRIVE pipeline |
 | `preprocess-lanelet` | argparse | Run preprocessing operations only |
+| `map-preflight` | argparse | Report the structural problems that stop a Lanelet2 `.osm` loading |
 | `analyze` | argparse | ASAM QC + cross-validate `lanelet → (road, lane)` mapping |
 | `qc-validate` | argparse | Run the ASAM QC checker on an existing `.xodr` |
 | `carla-import-test` | argparse | Smoke-test loading the `.xodr` in a running CARLA server |

@@ -336,6 +336,27 @@ class GeoMappingConstants:
 
 
 @dataclass(frozen=True)
+class PreflightConstants:
+    """Constants for the pre-flight inspection of an input Lanelet2 map.
+
+    These govern :mod:`autoware_lanelet2_to_opendrive.map_preflight`, which
+    names and counts the structural problems that make ``lanelet2.io.load``
+    refuse a map, instead of letting the raw parser exception through.
+
+    Attributes:
+        max_reported_ids: Maximum number of OSM element ids printed per
+            problem class before the rest is summarised as a count.  The
+            report always states the full count, so the cap only bounds the
+            listing.  Twenty is enough to spot a pattern in the ids (they
+            are usually consecutive, because a map editor produced them in
+            one pass) without burying the rest of the report when a class
+            has thousands of members.
+    """
+
+    max_reported_ids: int = 20
+
+
+@dataclass(frozen=True)
 class ConversionConstants:
     """Main container for all internal constants used in the conversion process.
 
@@ -379,6 +400,7 @@ class ConversionConstants:
         utm: Standard UTM projection constants
         projection: Map projection resolution constants
         geo_mapping: Geometric mapping cross-validation constants
+        preflight: Input-map pre-flight inspection constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -391,6 +413,7 @@ class ConversionConstants:
     utm: UtmConstants = UtmConstants()
     projection: ProjectionConstants = ProjectionConstants()
     geo_mapping: GeoMappingConstants = GeoMappingConstants()
+    preflight: PreflightConstants = PreflightConstants()
 
 
 @dataclass(frozen=True)
