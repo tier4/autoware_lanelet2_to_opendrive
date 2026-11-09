@@ -256,16 +256,18 @@ def sanity_gate_passes(
                 return (
                     False,
                     f"lane-aware endpoint distance for lane pair {lane_pair} "
-                    f"exceeds {endpoint_tolerance:.3f} m",
+                    f"is {lane_pair_distances[lane_pair]:.3f} m, over "
+                    f"{endpoint_tolerance:.3f} m",
                 )
     else:
         for cand_id in site.candidate_road_ids:
             cand_endpoint = inputs.endpoints_candidates[cand_id]
-            if _distance(inputs.endpoint_road, cand_endpoint) > endpoint_tolerance:
+            separation = _distance(inputs.endpoint_road, cand_endpoint)
+            if separation > endpoint_tolerance:
                 return (
                     False,
-                    f"endpoint distance for candidate {cand_id} exceeds "
-                    f"{endpoint_tolerance:.3f} m",
+                    f"endpoint distance for candidate {cand_id} is "
+                    f"{separation:.3f} m, over {endpoint_tolerance:.3f} m",
                 )
 
     # 2. Lane uniqueness: each (candidate_road, candidate_lane) appears at most once.
@@ -1201,32 +1203,41 @@ def _lane_anchor_xyz(
     lane_id: int,
     *,
     at_start: bool,
-    traffic_rule: TrafficRule,
 ) -> Tuple[float, float, float] | None:
     """Resolve ``Road.evaluate_lane_anchor_xyz`` for a given OpenDRIVE lane id.
 
-    Maps the lane id (negative for RHT, positive for LHT) to the road's
-    ``sorted_lanelet_ids`` index (``0..n-1`` left-to-right) and forwards
-    the call. Returns ``None`` when the road lacks the metadata required
-    by the helper, mirroring its own ``None`` semantics so callers can
-    fall back to the road's reference endpoint.  Uses ``getattr`` for
-    defence against mock road stubs that omit the attribute from their
-    ``spec``.
+    The index comes from ``Road.sorted_index_for_lane_id``, which is the
+    exact inverse of the forward map the evaluator itself uses. This function
+    used to compute it as ``n - lane_id`` for LHT and ``-lane_id - 1`` for
+    RHT, which is that inverse **reduced** to the case where the reference
+    line is the outermost lanelet. Since the reference line became the
+    outermost *vehicle* lanelet, an attached sidewalk or shoulder can sort
+    outside it, and on those roads the shortcut asked for a different
+    lanelet's anchor: measured on a 6,672-lanelet map, all 178 divergence
+    sites the sanity gate rejected reported a lane-pair separation clustered
+    at p50 2.975 m -- one lane width -- while their reference lines coincided
+    to 0.000 m.
+
+    The traffic rule is no longer a parameter: the road carries its own, and
+    two sources for one fact is how the shortcut above survived.
+
+    Returns ``None`` when the road lacks the metadata required by the
+    helper, mirroring its own ``None`` semantics so callers can fall back to
+    the road's reference endpoint.  Uses ``getattr`` for defence against mock
+    road stubs that omit the attribute from their ``spec``.
     """
     if road is None:
         return None
-    sorted_lanelet_ids = getattr(road, "sorted_lanelet_ids", None)
-    if sorted_lanelet_ids is None:
+    if getattr(road, "sorted_lanelet_ids", None) is None:
         return None
     evaluator = getattr(road, "evaluate_lane_anchor_xyz", None)
     if evaluator is None:
         return None
-    n = len(sorted_lanelet_ids)
-    if traffic_rule == TrafficRule.LHT:
-        sorted_index = n - lane_id
-    else:
-        sorted_index = -lane_id - 1
-    if not (0 <= sorted_index < n):
+    resolver = getattr(road, "sorted_index_for_lane_id", None)
+    if resolver is None:
+        return None
+    sorted_index = resolver(lane_id)
+    if sorted_index is None:
         return None
     return evaluator(sorted_index=sorted_index, at_start=at_start)
 
@@ -1382,20 +1393,12 @@ def apply_divergence_synthesis(
         for src_lane, cand_road_id, cand_lane in lane_pairs:
             cand_road = roads_by_id.get(cand_road_id)
             if site.is_divergence:
-                src_anchor = _lane_anchor_xyz(
-                    source_road, src_lane, at_start=False, traffic_rule=traffic_rule
-                )
-                cand_anchor = _lane_anchor_xyz(
-                    cand_road, cand_lane, at_start=True, traffic_rule=traffic_rule
-                )
+                src_anchor = _lane_anchor_xyz(source_road, src_lane, at_start=False)
+                cand_anchor = _lane_anchor_xyz(cand_road, cand_lane, at_start=True)
                 start_anchor, end_anchor = src_anchor, cand_anchor
             else:
-                src_anchor = _lane_anchor_xyz(
-                    source_road, src_lane, at_start=True, traffic_rule=traffic_rule
-                )
-                cand_anchor = _lane_anchor_xyz(
-                    cand_road, cand_lane, at_start=False, traffic_rule=traffic_rule
-                )
+                src_anchor = _lane_anchor_xyz(source_road, src_lane, at_start=True)
+                cand_anchor = _lane_anchor_xyz(cand_road, cand_lane, at_start=False)
                 start_anchor, end_anchor = cand_anchor, src_anchor
             lane_pair_endpoints[(src_lane, cand_road_id, cand_lane)] = (
                 start_anchor,

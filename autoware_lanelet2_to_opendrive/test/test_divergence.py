@@ -341,6 +341,7 @@ def _build_road_stub(
             "plan_view",
             "sorted_lanelet_ids",
             "evaluate_lane_anchor_xyz",
+            "sorted_index_for_lane_id",
         ]
     )
     r.id = road_id
@@ -463,11 +464,19 @@ def _lane_anchor_road_stub(
     end_xyz=(0.0, 0.0, 0.0),
     sorted_lanelet_ids=None,
     anchors=None,
+    rule=TrafficRule.RHT,
 ):
     """Road stub whose ``evaluate_lane_anchor_xyz`` returns scripted anchors.
 
     ``anchors`` maps ``(sorted_index, at_start)`` to the rendered lane anchor,
     i.e. the point the synthetic connector actually terminates on.
+
+    ``sorted_index_for_lane_id`` is **delegated to a real** :class:`Road`
+    rather than re-implemented: the lane-id-to-index arithmetic is the thing
+    the caller under test gets wrong when it is written twice, so a stub that
+    carries its own copy would stop catching that. The delegate has
+    ``reference_lanelet_index=None`` -- nothing sorts outside the reference
+    line -- which is what these stubs model.
     """
     road = _build_road_stub(road_id, start_xyz=start_xyz, end_xyz=end_xyz)
     road.sorted_lanelet_ids = sorted_lanelet_ids or [road_id]
@@ -477,6 +486,12 @@ def _lane_anchor_road_stub(
         return scripted[(sorted_index, at_start)]
 
     road.evaluate_lane_anchor_xyz.side_effect = evaluate_lane_anchor_xyz
+    road.sorted_index_for_lane_id.side_effect = Road(
+        id=road_id,
+        rule=rule,
+        sorted_lanelet_ids=road.sorted_lanelet_ids,
+        reference_lanelet_index=None,
+    ).sorted_index_for_lane_id
     return road
 
 
