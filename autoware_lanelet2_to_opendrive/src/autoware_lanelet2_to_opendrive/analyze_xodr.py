@@ -1190,6 +1190,49 @@ def run_junction_lanelet_validation(
 # ---------------------------------------------------------------------------
 
 
+def run_structural_invariant_validation(xodr_path: Path) -> bool:
+    """Report this repository's own structural invariants over the document.
+
+    The ASAM bundle does not cover them: 25 of its 26 checkers complete on
+    the customer map and none reports a lane whose ``<successor>`` names a
+    lane the linked road does not have, which is the document shape CARLA
+    exits 139 on. ``<predecessor>`` is inert, so the asymmetry makes the
+    crash look random. Running the checker here puts every conversion behind
+    it, not only the maps that have a test of their own.
+
+    Every invariant counts, ``linked_endpoints_apart`` included. It carried an
+    exemption here at first, on the strength of that module's own docstring
+    ("22 violations over 15 joins on Nishi-Shinjuku, worst 0.071 m"); the
+    prose is stale. Measured 2026-11-06, a Nishi-Shinjuku conversion violates
+    nothing at all, and ``test_xodr_structural_invariants`` already pins
+    ``_KNOWN_GAP_VIOLATIONS = 0`` with the note that excluding the code
+    "would only hide a reappearance".
+
+    Returns:
+        True when the document satisfies every invariant.
+    """
+    from autoware_lanelet2_to_opendrive.xodr_invariants import (
+        check_invariants,
+        format_violations,
+    )
+
+    try:
+        violations = check_invariants(xodr_path)
+    except Exception as exc:
+        # A checker that cannot read the document must not discard the rest
+        # of the analysis, which has already printed its findings by now.
+        print(f"  Structural invariants: could not be checked ({exc})")
+        return True
+
+    if not violations:
+        print("  Structural invariants: PASSED")
+        return True
+
+    print(format_violations(violations))
+    print(f"  Structural invariants: FAILED ({len(violations)} violation(s))")
+    return False
+
+
 def run_analysis(
     xodr_path: Path,
     osm_path: Path,
@@ -1305,6 +1348,15 @@ def run_analysis(
         xodr_path, osm_path, validation_context=val_ctx
     )
     if not tl_pos_ok:
+        error_count += 1
+
+    # ── Structural invariants ─────────────────────────────────────────────
+    print(f"\n{'=' * 72}")
+    print("  Structural Invariants")
+    print(f"{'=' * 72}")
+
+    invariants_ok = run_structural_invariant_validation(xodr_path)
+    if not invariants_ok:
         error_count += 1
 
     # ── Final summary ──────────────────────────────────────────────────────
