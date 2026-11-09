@@ -337,3 +337,89 @@ def test_lht_lane_widths_consistency(lanelet_map):
             assert (
                 width_max - width_min < 0.5 * width_mean
             ), f"Lane {lane_id} segment {i} width varies too much: min={width_min:.3f}m, max={width_max:.3f}m, mean={width_mean:.3f}m"
+
+
+# The two tests above build the same group under both rules but never look at
+# *which* boundary became the reference line, so they would both still pass if
+# the rule stopped reaching the reference-line fit.  The two tests below close
+# that: the first shows the choice is observable, the second shows the signal
+# code makes it.
+LHT_GROUP_IDS = (3002094, 3002093)
+
+
+def _group(lanelet_map):
+    return [lanelet_map.laneletLayer.get(lid) for lid in LHT_GROUP_IDS]
+
+
+def test_the_traffic_rule_changes_the_reference_line(lanelet_map):
+    """RHT and LHT pick different boundaries, so the rule is observable.
+
+    RHT takes the leftmost lanelet's left bound, LHT the rightmost lanelet's
+    right bound.  On this group the two curves differ by about 2 m over 88 m.
+    Without this difference the next test could pass vacuously.
+    """
+    group = _group(lanelet_map)
+    rht = ReferenceLine.construct_from_lanelet_groups(
+        lanelet_map, group, traffic_rule="RHT"
+    )
+    lht = ReferenceLine.construct_from_lanelet_groups(
+        lanelet_map, group, traffic_rule="LHT"
+    )
+    difference = abs(rht.centerline_2d.total_length - lht.centerline_2d.total_length)
+    assert difference > 1.0, (
+        "the two rules must select different reference lines for this test to"
+        f" mean anything (difference {difference:.3f} m)"
+    )
+
+
+def test_signal_position_uses_the_road_s_own_traffic_rule(lanelet_map):
+    """A signal's ``s`` must be measured along its own road's reference line.
+
+    ``_calculate_signal_position`` refits the reference line to turn the
+    signal's (x, y) into an ``s``, and that ``s`` is written next to a
+    ``planView`` that was fitted with the road's ``rule``.  If the refit
+    defaults to RHT, an LHT road measures its signals along a curve it does
+    not have.
+    """
+    from unittest.mock import Mock, patch
+
+    from autoware_lanelet2_to_opendrive.opendrive import SignalsAndControllers
+
+    road = Road.construct_from_lanelet_groups(
+        lanelet_map, _group(lanelet_map), road_id=1, s_offset=0.0, traffic_rule="LHT"
+    )
+    reference_line = ReferenceLine.construct_from_lanelet_groups(
+        lanelet_map, _group(lanelet_map), traffic_rule="LHT"
+    )
+
+    traffic_light = Mock()
+    traffic_light.stopLine = None
+    traffic_light.id = 1
+    point = Mock(x=10.0, y=5.0, z=2.0)
+    linestring = Mock()
+    linestring.__len__ = Mock(return_value=1)
+    linestring.__getitem__ = Mock(return_value=point)
+    traffic_light.trafficLights = [linestring]
+
+    mapping = Mock()
+    mapping.get_lanelets_for_road.return_value = list(LHT_GROUP_IDS)
+
+    with patch(
+        "autoware_lanelet2_to_opendrive.opendrive.reference_line.ReferenceLine"
+    ) as mock_rl:
+        mock_rl.construct_from_lanelet_groups.return_value = reference_line
+        SignalsAndControllers._calculate_signal_position(
+            traffic_light=traffic_light,
+            light_linestring=linestring,
+            road_id=1,
+            lanelet_map=lanelet_map,
+            road_lanelet_mapping=mapping,
+            road=road,
+        )
+
+    passed = mock_rl.construct_from_lanelet_groups.call_args.kwargs.get("traffic_rule")
+    assert passed is not None, (
+        "the reference line was refitted without a traffic rule, so it"
+        " defaulted to RHT while the road is LHT"
+    )
+    assert str(getattr(passed, "value", passed)).upper() == "LHT"
