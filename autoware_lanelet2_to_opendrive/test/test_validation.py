@@ -1,7 +1,8 @@
 """Tests for OpenDRIVE validation functionality."""
 
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.opendrive.lane import Lane
-from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink
+from autoware_lanelet2_to_opendrive.opendrive.lane_elements import LaneLink, LaneWidth
 from autoware_lanelet2_to_opendrive.opendrive.lane_section import LaneSection
 from autoware_lanelet2_to_opendrive.opendrive.lane_sections import Lanes
 from autoware_lanelet2_to_opendrive.opendrive.opendrive_dataclass import LaneType
@@ -13,6 +14,7 @@ from autoware_lanelet2_to_opendrive.opendrive.road_links import (
 )
 from autoware_lanelet2_to_opendrive.opendrive.enums import ContactPoint, ElementType
 from autoware_lanelet2_to_opendrive.opendrive.validation import (
+    check_lane_width_plausibility,
     validate_lane_road_link_consistency,
 )
 
@@ -238,3 +240,89 @@ class TestLaneRoadLinkConsistency:
 
         assert result.is_valid
         assert result.error_count == 0
+
+
+class TestLaneWidthPlausibility:
+    """Test suite for the output-side lane-width plausibility check.
+
+    See ``check_lane_width_plausibility``'s docstring for what this catches
+    (a plain upper bound on sampled width, calibrated on a single map) and
+    what it does not (shape changes that leave sampled min/max/mean
+    unchanged; legitimately wide lanes on a different map).
+    """
+
+    def test_healthy_width_does_not_fire(self):
+        """A constant, in-distribution lane width produces no violations."""
+        road = create_test_road(road_id=1)
+        lane = create_test_lane(lane_id=-1)
+        lane.widths.append(LaneWidth(s_offset=0.0, a=3.5))
+        road.lanes.lane_sections[0].right_lanes = {-1: lane}
+
+        violations = check_lane_width_plausibility([road])
+
+        assert violations == []
+
+    def test_width_above_threshold_is_detected(self):
+        """A lane sampled above the default threshold is reported once."""
+        road = create_test_road(road_id=7)
+        lane = create_test_lane(lane_id=-2)
+        lane.widths.append(LaneWidth(s_offset=0.0, a=22.0))
+        road.lanes.lane_sections[0].right_lanes = {-2: lane}
+
+        violations = check_lane_width_plausibility([road])
+
+        assert len(violations) == 1
+        violation = violations[0]
+        assert violation.road_id == 7
+        assert violation.lane_id == -2
+        assert violation.width_max_m == 22.0
+        assert violation.width_min_m == 22.0
+        assert (
+            violation.threshold_m
+            == DEFAULT_CONFIG.lane_width_validation.implausible_width_threshold_m
+        )
+        assert "22.00m" in str(violation)
+
+    def test_custom_threshold_is_respected(self):
+        """An explicit ``threshold_m`` overrides the config default."""
+        road = create_test_road(road_id=1)
+        lane = create_test_lane(lane_id=-1)
+        lane.widths.append(LaneWidth(s_offset=0.0, a=5.0))
+        road.lanes.lane_sections[0].right_lanes = {-1: lane}
+
+        assert check_lane_width_plausibility([road], threshold_m=10.0) == []
+        violations = check_lane_width_plausibility([road], threshold_m=4.0)
+        assert len(violations) == 1
+        assert violations[0].threshold_m == 4.0
+
+    def test_road_without_lanes_is_skipped(self):
+        """A road with ``lanes=None`` is skipped rather than raising."""
+        road = Road(id=1, name="test_road_1", length=100.0, junction=-1, lanes=None)
+
+        assert check_lane_width_plausibility([road]) == []
+
+    def test_multiple_lane_sections_use_correct_span(self):
+        """A lane in a non-final section is sampled against its own span.
+
+        Regression guard for the ``section_span`` computation: it must use
+        the *next* section's ``s_offset`` (not ``road.length``) for every
+        section but the last.
+        """
+        road = create_test_road(road_id=1)
+        road.length = 100.0
+        first_section = road.lanes.lane_sections[0]
+        second_section = LaneSection(s_offset=40.0)
+        road.lanes.lane_sections.append(second_section)
+
+        first_lane = create_test_lane(lane_id=-1)
+        first_lane.widths.append(LaneWidth(s_offset=0.0, a=3.5))
+        first_section.right_lanes = {-1: first_lane}
+
+        second_lane = create_test_lane(lane_id=-1)
+        second_lane.widths.append(LaneWidth(s_offset=0.0, a=20.0))
+        second_section.right_lanes = {-1: second_lane}
+
+        violations = check_lane_width_plausibility([road])
+
+        assert len(violations) == 1
+        assert violations[0].width_max_m == 20.0

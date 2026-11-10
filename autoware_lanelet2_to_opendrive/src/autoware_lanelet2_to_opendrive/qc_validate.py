@@ -20,6 +20,9 @@ from qc_baselib.models.result import StatusType
 from qc_opendrive import constants
 from qc_opendrive.main import run_checks
 
+from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
+from autoware_lanelet2_to_opendrive.xodr_digest import build_digest
+
 DEFAULT_IGNORE_FILE: Path = Path(__file__).parent / "conf" / "qc_ignore_patterns.txt"
 
 
@@ -73,11 +76,73 @@ def count_errors(
     return errors
 
 
+def find_implausible_lane_widths(
+    xodr_path: Path,
+    threshold_m: float | None = None,
+) -> list[str]:
+    """Return one message per non-center lane whose sampled width is implausible.
+
+    Neither the ``asam-qc-opendrive`` spec-compliance bundle this module
+    otherwise runs, nor the topology checks in ``opendrive/validation.py``,
+    inspect a lane's ``<width>`` values at all - an inflated lane (e.g. from
+    a corrupted source coordinate) is legal OpenDRIVE and passes both
+    silently. This reuses ``xodr_digest.build_digest`` (which samples every
+    ``<width>`` polynomial segment via ``_lane_width_samples``/
+    ``_width_stats`` - see those functions' docstrings) against the written
+    ``.xodr`` file, rather than re-parsing it or re-implementing the
+    sampling, so the CI-facing check and the ``xodr-digest`` tool always
+    agree on what a lane's width is.
+
+    This is the same heuristic threshold as
+    ``opendrive.validation.check_lane_width_plausibility`` (used, warning
+    only, during conversion in ``main.py``) - see
+    ``config.LaneWidthValidationConstants`` for how ``threshold_m`` was
+    calibrated and its caveats, in particular that it is tuned on a single
+    reference map and cannot catch a shape change that leaves the sampled
+    min, max, and mean all unchanged. Unlike the conversion-time check, a
+    non-empty result here is meant to fail the build (see ``validate``
+    below) - `qc-validate` is a CI gate, so unlike the converter itself it
+    is expected to be re-run against a corrected map rather than silently
+    tolerate a questionable one.
+
+    Args:
+        xodr_path: Path to an already-written ``.xodr`` file.
+        threshold_m: Width (metres) above which a lane is reported. Defaults
+            to ``DEFAULT_CONFIG.lane_width_validation.implausible_width_threshold_m``.
+
+    Returns:
+        One human-readable message per implausible (road, lane) pair, in
+        ``digest["roads"]`` order (ascending road id). Empty if none exceed
+        the threshold.
+    """
+    if threshold_m is None:
+        threshold_m = DEFAULT_CONFIG.lane_width_validation.implausible_width_threshold_m
+
+    digest = build_digest(xodr_path)
+    messages: list[str] = []
+    for road in digest["roads"]:
+        for lane in road["lanes"]:
+            if lane["width_max_m"] > threshold_m:
+                messages.append(
+                    f"Road {road['id']} Lane {lane['id']}: sampled width reaches "
+                    f"{lane['width_max_m']:.2f}m (min {lane['width_min_m']:.2f}m), "
+                    f"above the {threshold_m:.1f}m plausibility threshold"
+                )
+    return messages
+
+
 def validate(
     xodr_path: Path,
     ignore_patterns: Iterable[str] | None = None,
 ) -> int:
-    """Run the qc-framework OpenDRIVE bundle and return the ERROR count."""
+    """Run the qc-framework OpenDRIVE bundle and return the ERROR count.
+
+    The returned count also includes lane-width plausibility violations
+    (``find_implausible_lane_widths``) - a failure mode the
+    ``asam-qc-opendrive`` bundle itself cannot see, since an implausibly
+    wide lane is still spec-legal OpenDRIVE. See that function's docstring
+    for what it checks and its calibration caveats.
+    """
     patterns = (
         list(ignore_patterns) if ignore_patterns is not None else load_ignore_patterns()
     )
@@ -104,6 +169,12 @@ def validate(
         run_checks(config, result)
 
         errors = count_errors(result, patterns)
+
+        width_violations = find_implausible_lane_widths(xodr_path)
+        for message in width_violations:
+            print(f"qc-validate: implausible lane width: {message}", file=sys.stderr)
+        errors += len(width_violations)
+
         return errors
     finally:
         try:

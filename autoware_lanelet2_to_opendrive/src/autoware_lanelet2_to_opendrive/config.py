@@ -152,6 +152,42 @@ class PreprocessingConstants:
 
 
 @dataclass(frozen=True)
+class LaneWidthValidationConstants:
+    """Constants for the output-side lane-width plausibility check.
+
+    A lane whose sampled effective width (see
+    ``xodr_digest._lane_width_samples``/``_width_stats``, reused unchanged
+    by ``opendrive.validation.check_lane_width_plausibility``) exceeds
+    ``implausible_width_threshold_m`` is reported: as a non-fatal warning
+    during conversion (``main.py``), and as a CI-failing error by
+    ``qc_validate.py``. Neither the topology checks in this module's
+    ``validate_*`` functions nor the spec-compliance checks in
+    ``qc_validate.py``'s ``asam-qc-opendrive`` bundle catch this failure
+    mode: a 22m-wide lane is legal OpenDRIVE, so nothing else in the
+    pipeline flags it.
+
+    Attributes:
+        implausible_width_threshold_m: Sampled width (metres) above which a
+            non-center lane is reported. Calibrated 2026-08 against the
+            only real map fixture in this repository (nishishinjuku, 693
+            roads / 938 non-center lanes): the healthy distribution tops
+            out at 11.83m (a genuine turn-pocket taper), while six known
+            corrupted-input incidents ranged 19.30-31.54m. 15.0m sits in
+            the 7.5m gap between them, with margin on both sides.
+            **This is a single-map calibration, not a physical limit** -
+            a different map could legitimately contain a wider lane (a
+            multi-lane turn pocket, a wide shoulder merge, etc.) and
+            trigger a false warning. That is why the conversion-time check
+            warns rather than aborts. It is also a plain upper bound: a
+            shape change that leaves the sampled min, max, *and* mean
+            unchanged (see ``_width_stats``'s docstring) is invisible to
+            it regardless of how the threshold is set.
+    """
+
+    implausible_width_threshold_m: float = 15.0
+
+
+@dataclass(frozen=True)
 class OpenDriveConstants:
     """Constants for OpenDRIVE format and ID management.
 
@@ -379,6 +415,7 @@ class ConversionConstants:
         utm: Standard UTM projection constants
         projection: Map projection resolution constants
         geo_mapping: Geometric mapping cross-validation constants
+        lane_width_validation: Output-side lane-width plausibility check constants
     """
 
     geometry: GeometryConstants = GeometryConstants()
@@ -391,6 +428,7 @@ class ConversionConstants:
     utm: UtmConstants = UtmConstants()
     projection: ProjectionConstants = ProjectionConstants()
     geo_mapping: GeoMappingConstants = GeoMappingConstants()
+    lane_width_validation: LaneWidthValidationConstants = LaneWidthValidationConstants()
 
 
 @dataclass(frozen=True)
