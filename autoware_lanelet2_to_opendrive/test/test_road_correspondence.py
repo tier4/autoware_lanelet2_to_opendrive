@@ -18,11 +18,6 @@ import pytest
 from autoware_lanelet2_to_opendrive import xodr_digest
 from autoware_lanelet2_to_opendrive.road_correspondence import match_roads
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="road correspondence is a stub: match_roads() returns an empty result",
-)
-
 
 def _mapping(lanelet_to_road: dict[int, int], **extra) -> dict:
     """A mapping document with every lanelet on lane -1 of its road."""

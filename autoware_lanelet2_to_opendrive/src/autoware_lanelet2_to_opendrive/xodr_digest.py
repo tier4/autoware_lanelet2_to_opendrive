@@ -45,14 +45,18 @@ unrelated roads that happen to share a number, not one road that changed.
 A digest diff keyed by road ``id`` (this tool sorts `roads` by `id`, and an
 external `diff` between two digest files relies on that same ordering to
 line entries up) is therefore only a meaningful comparison for changes
-that preserve road composition. This tool does not close that gap for
-changes that don't: it has no alternative key today, so an id-based diff
-across a structural change like `merge_operations` cannot be trusted
-either way - a changed field is not evidence the road changed, and an
-unchanged one is not evidence it didn't. A correspondence that survives
-regrouping would have to come from data this tool does not read, e.g.
-matching each road's anchor lanelet(s) via the companion `mapping.json`'s
-`lanelet_to_road_and_lane` field.
+that preserve road composition. Across a change that does not, an id-based
+diff cannot be trusted either way - a changed field is not evidence the
+road changed, and an unchanged one is not evidence it didn't.
+
+The digest itself still has no other key: it reads only the `.xodr`, and
+the `.xodr` does not say what a road was built from. The key that survives
+regrouping is in the companion `mapping.json`, and `--match-roads` reads it:
+given the two mapping files it reports which road on one side corresponds
+to which on the other by the source lanelets they share (see
+`road_correspondence`). Use that correspondence, not the id, to decide
+which two digest entries describe the same road. It does not cover roads
+with no source lanelet (synthetic connectors); it lists them instead.
 
 Extracted, per road: ``length``; ``<planView>`` geometry-primitive types and
 the heading deltas between consecutive ones (module comment above
