@@ -247,6 +247,21 @@ class RouteFidelity:
         return (len(self.missing) / self.stated) if self.stated else 0.0
 
 
+def transitions_required(
+    sources: Sequence[Slot], targets: Sequence[Slot]
+) -> Optional[frozenset]:
+    """The slot pairs any one of which would realise a succession.
+
+    ``sources`` and ``targets`` are the slots the two lanelets of a succession
+    were emitted as. Returns ``None`` when the succession is internal to one
+    road and so needs no transition at all.
+    """
+    options = {
+        (source, target) for source in sources for target in targets if source != target
+    }
+    return frozenset(options) if options else None
+
+
 def measure(
     map_path: Path,
     xodr_path: Path,
@@ -278,16 +293,11 @@ def measure(
             if not sources or not targets:
                 result.unmapped += 1
                 continue
-            options = {
-                (source, target)
-                for source in sources
-                for target in targets
-                if source != target
-            }
-            if not options:
+            options = transitions_required(sources, targets)
+            if options is None:
                 result.internal += 1
                 continue
-            successions.append(Succession(lanelet.id, following.id, frozenset(options)))
+            successions.append(Succession(lanelet.id, following.id, options))
 
     network = EmittedNetwork(xodr_path)
     backed = {slot[0] for slot in primary.values()}
