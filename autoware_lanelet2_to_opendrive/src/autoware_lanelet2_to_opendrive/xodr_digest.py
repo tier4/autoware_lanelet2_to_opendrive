@@ -807,6 +807,23 @@ def format_digest(digest: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _write_road_correspondence(mapping_paths: list[Path], output: Path | None) -> None:
+    """Match the roads of two mapping files and write the result as JSON."""
+    from .road_correspondence import match_roads
+
+    mappings = []
+    for path in mapping_paths:
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            sys.exit(2)
+        mappings.append(json.loads(path.read_text(encoding="utf-8")))
+    text = json.dumps(match_roads(*mappings), indent=2, sort_keys=True) + "\n"
+    if output is not None:
+        output.write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+
+
 def main() -> None:
     """Entry point for the `xodr-digest` command."""
     parser = argparse.ArgumentParser(
@@ -817,7 +834,22 @@ def main() -> None:
             "conversion output in the absence of golden files."
         ),
     )
-    parser.add_argument("xodr", type=Path, help=".xodr file to summarize")
+    parser.add_argument(
+        "xodr", type=Path, nargs="?", default=None, help=".xodr file to summarize"
+    )
+    parser.add_argument(
+        "--match-roads",
+        nargs=2,
+        type=Path,
+        default=None,
+        metavar=("BASELINE_MAPPING", "COMPARISON_MAPPING"),
+        help=(
+            "Instead of digesting an .xodr, match the roads of two conversions "
+            "of the same map by their source lanelets, from the two "
+            ".mapping.json files. Road ids are reassigned whenever road "
+            "grouping changes, so two digests cannot be lined up by id."
+        ),
+    )
     parser.add_argument(
         "--output",
         "-o",
@@ -826,6 +858,14 @@ def main() -> None:
         help="Write the digest JSON to this file instead of stdout.",
     )
     args = parser.parse_args()
+
+    if args.match_roads is not None:
+        if args.xodr is not None:
+            parser.error("--match-roads takes two mapping files and no .xodr")
+        _write_road_correspondence(args.match_roads, args.output)
+        return
+    if args.xodr is None:
+        parser.error("an .xodr file is required unless --match-roads is given")
 
     if not args.xodr.exists():
         print(f"Error: file not found: {args.xodr}", file=sys.stderr)
