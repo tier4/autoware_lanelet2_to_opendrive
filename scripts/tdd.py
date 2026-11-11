@@ -14,7 +14,10 @@ detect the missing behaviour:
 
 - the test passes already, so it does not constrain the change;
 - it errors in setup or teardown, or is never collected (an import error);
-- it is skipped, or nothing was selected at all.
+- it is skipped, or nothing was selected at all;
+- it fails only because a name is missing (an ``ImportError``, a
+  ``NameError``, or an ``AttributeError`` on a module), which shows that the
+  name does not exist yet, not that the behaviour does not.
 
 ``green`` succeeds only when every selected test *passed*: a skip or a leftover
 ``xfail`` marker is not green.
@@ -35,6 +38,7 @@ standard library, so it runs with any host Python 3.10+.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -92,16 +96,30 @@ def parse_junit(xml_text: Optional[str]) -> list[tuple[str, str]]:
     return outcomes
 
 
-def _failure_messages(xml_text: str) -> list[str]:
-    """``test id: message`` for every failed test case, in report order."""
-    lines = []
+def _failures(xml_text: str) -> list[tuple[str, str]]:
+    """``(test id, first line of the message)`` for every failed test case."""
+    failures = []
     for case in ET.fromstring(xml_text).iter("testcase"):
         failure = case.find("failure")
         if failure is not None:
             test_id = f"{case.get('classname', '')}::{case.get('name', '')}"
             message = (failure.get("message") or "").splitlines()
-            lines.append(f"{test_id}: {message[0] if message else '(no message)'}")
-    return lines
+            failures.append((test_id, message[0] if message else "(no message)"))
+    return failures
+
+
+def _failure_messages(xml_text: str) -> list[str]:
+    """``test id: message`` for every failed test case, in report order."""
+    return [f"{test_id}: {message}" for test_id, message in _failures(xml_text)]
+
+
+# A failure that only shows that a name does not exist yet. An AttributeError
+# on an object is left out: ``'NoneType' object has no attribute`` can be the
+# defect itself.
+_MISSING_NAME = re.compile(
+    r"^(?:ModuleNotFoundError|ImportError|NameError):"
+    r"|^AttributeError: module '[^']+' has no attribute "
+)
 
 
 def _list(outcomes: list[tuple[str, str]], wanted: str) -> list[str]:
@@ -144,9 +162,21 @@ def judge(mode: str, exit_code: int, junit_xml: Optional[str]) -> Verdict:
                 "NOT RED: passes already, so it does not constrain the change:"
                 f"{_bullets(passed)}",
             )
-        # A failure is not necessarily the right failure: an ImportError in the
-        # test body fails too. Show every reason rather than only a count.
         assert junit_xml is not None
+        missing = [
+            f"{test_id}: {message}"
+            for test_id, message in _failures(junit_xml)
+            if _MISSING_NAME.match(message)
+        ]
+        if missing:
+            return Verdict(
+                False,
+                "NOT RED: fails only on a missing name, before reaching the "
+                "behaviour -- add a stub that returns a wrong value:"
+                f"{_bullets(missing)}",
+            )
+        # Any other failure can still be the wrong one. Show every reason
+        # rather than only a count.
         return Verdict(
             True,
             f"RED: {len(outcomes)} test(s) ran and failed -- check each reason is "

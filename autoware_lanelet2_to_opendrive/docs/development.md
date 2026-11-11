@@ -336,9 +336,9 @@ exhaust the host's memory; the command above overrides it with `-n 4`.
 
 `red` accepts only tests that ran and failed; the
 [Docker guide](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
-lists everything it rejects. It prints each failure message: **read them**. A
-test that fails with an `ImportError` or `AttributeError` for the thing under
-test has shown only that the name is missing, not that the behaviour is.
+lists everything it rejects, including a test that fails only because the name
+under test does not exist yet. It prints each remaining failure message:
+**read them**, because any other exception can still be the wrong reason.
 
 `tdd.py` is run with the host's `python`, not `uv run python`: it uses only the
 standard library, and `uv run` would first try to build the workspace on the

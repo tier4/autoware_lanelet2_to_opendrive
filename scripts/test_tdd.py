@@ -83,18 +83,55 @@ def test_red_accepts_only_assertion_failures() -> None:
 
 
 def test_red_shows_why_each_test_failed() -> None:
-    """A failure inside the test body can still be the wrong reason (an
-    ImportError, say), so the verdict lists every failure message for a
-    human to read rather than hiding them behind a count."""
-    import_error = (
-        '<testcase classname="pkg.test_a" name="test_imports" time="0.01">'
-        "<failure message=\"ModuleNotFoundError: No module named 'x'\">E"
-        "</failure></testcase>"
+    """A failure inside the test body can still be the wrong one, so the
+    verdict lists every failure message for a human to read rather than
+    hiding them behind a count."""
+    other = (
+        '<testcase classname="pkg.test_a" name="test_other" time="0.01">'
+        '<failure message="TypeError: unsupported operand">E</failure></testcase>'
     )
-    verdict = judge("red", 1, _junit(FAILED, import_error))
+    verdict = judge("red", 1, _junit(FAILED, other))
     assert verdict.ok
     assert "pkg.test_a::test_fails: assert 1 == 2" in verdict.message
-    assert "ModuleNotFoundError: No module named 'x'" in verdict.message
+    assert "pkg.test_a::test_other: TypeError: unsupported operand" in verdict.message
+
+
+def _failing(name: str, message: str) -> str:
+    return (
+        f'<testcase classname="pkg.test_a" name="{name}" time="0.01">'
+        f'<failure message="{message}">E</failure></testcase>'
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "ModuleNotFoundError: No module named &apos;x&apos;",
+        "ImportError: cannot import name &apos;f&apos; from &apos;pkg.mod&apos;",
+        "NameError: name &apos;f&apos; is not defined",
+        "AttributeError: module &apos;pkg.mod&apos; has no attribute &apos;f&apos;",
+    ],
+    ids=["ModuleNotFoundError", "ImportError", "NameError", "AttributeError"],
+)
+def test_red_rejects_a_failure_that_only_shows_a_missing_name(message: str) -> None:
+    """A missing import or attribute fails the test before it reaches the
+    behaviour, so it shows that the name is missing, not that the behaviour
+    is. One such failure is enough to reject the run."""
+    verdict = judge("red", 1, _junit(FAILED, _failing("test_missing", message)))
+    assert not verdict.ok
+    assert "missing name" in verdict.message
+    assert "pkg.test_a::test_missing" in verdict.message
+    assert "pkg.test_a::test_fails" not in verdict.message
+
+
+def test_red_accepts_an_attribute_error_on_an_object() -> None:
+    """An AttributeError on an object, not a module, can be the defect itself
+    (a method returning ``None``, say), so it is left for a human to judge."""
+    message = (
+        "AttributeError: &apos;NoneType&apos; object has no attribute &apos;s&apos;"
+    )
+    verdict = judge("red", 1, _junit(_failing("test_none", message)))
+    assert verdict.ok, verdict.message
 
 
 @pytest.mark.parametrize(

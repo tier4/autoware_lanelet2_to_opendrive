@@ -43,7 +43,7 @@ every selected test failed inside its body; it does not say why:
 | reason looks like | meaning | what to do |
 | --- | --- | --- |
 | an `assert` on the behaviour | a genuine red | continue |
-| `ImportError` / `AttributeError` / `NameError` for the thing under test | only the name is missing | add a stub that exists and returns a wrong value, rerun |
+| `AttributeError` on an object (`'NoneType' object has no attribute ...`) | either the defect itself or a mistake in the test | decide which, as for any other exception |
 | `NotImplementedError` from your own stub | only the stub is reached, not the behaviour | make the stub return a wrong value instead of raising, rerun |
 | any other exception (`TypeError`, `KeyError`, `CalledProcessError`, ...) | either the defect itself or a mistake in the test | decide which; if it is the defect, say so in the PR |
 
@@ -53,6 +53,9 @@ it as `NOT RED`.
 If the verdict is `NOT RED`, **fix the test, not the verdict**:
 
 - `passes already` -- the test does not constrain the change. Tighten it.
+- `fails only on a missing name` -- an `ImportError`, a `NameError`, or an
+  `AttributeError` on a module. Add a stub that exists and returns a wrong
+  value, and rerun.
 - `error outside the test body` -- a fixture or setup failed before the
   assertion.
 - `skipped` -- a skip condition fired; the test proves nothing until it runs.
