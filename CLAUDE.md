@@ -84,11 +84,13 @@ When the user asks to "run the tests", "verify locally", or otherwise validate a
 with `python scripts/tdd.py red <node id>` that it runs and fails for the
 reason you expect, then implement until `python scripts/tdd.py green <node id>`
 passes. Refactorings have no red step; say in the PR how unchanged behaviour
-was verified instead.
+was verified instead. Run `tdd.py` with the host's `python`, not `uv run
+python` (the exception to "Run Python scripts" above): `uv run` would build the
+workspace on the host, which fails.
 
 - **Procedure for Claude Code**: the `red-green` skill
   (`.claude/skills/red-green/SKILL.md`). Load it before writing the test.
-- **Team convention** (cycle, commit shape, choosing a map):
+- **Team convention** (cycle, the evidence a PR carries, choosing a map):
   [`autoware_lanelet2_to_opendrive/docs/development.md`](autoware_lanelet2_to_opendrive/docs/development.md#redgreen-development).
 - **What `tdd.py` accepts and rejects**:
   [`docs/docker.md`](docs/docker.md#redgreen-runs-for-test-driven-development).

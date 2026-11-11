@@ -69,7 +69,7 @@ Manual testing:
 <!-- Describe manual testing performed -->
 
 Red/green evidence:
-<!-- For bug fixes and features: paste the verdicts from `python scripts/tdd.py`. -->
+<!-- For bug fixes and features: paste the verdicts from `python scripts/tdd.py`, failure reasons included. The repository squash-merges, so this block is the only record of the red that survives the merge. -->
 <!-- For a refactoring, write "none (refactoring)" and say how unchanged behaviour was verified. -->
 ```
 $ python scripts/tdd.py red <node id>      # before the implementation
