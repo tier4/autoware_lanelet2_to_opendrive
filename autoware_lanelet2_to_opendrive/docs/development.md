@@ -367,6 +367,15 @@ convert again. When the defect can be reproduced on a small map, add one to
 `test/data/` (the `*_mini.osm` fixtures convert in about 5 s) and write the red
 against it.
 
+When the defect has only been seen on a large map, shrink that map instead of
+drawing one by hand: `test/data/tools/reduce_lanelet2_map.py` removes lanelets
+for as long as a command you give it still reports the same failure, and
+records how the result was made in a `.provenance.json` beside it. Its
+docstring covers how to make that command specific enough, and why the map
+config's preprocessing operations must be switched off for the candidates.
+The result keeps its lanelets' surveyed geometry, so a map reduced from one
+that cannot be published cannot be committed either.
+
 ## Release process
 
 Versioning is driven by the version-bump label on each merged PR. The
