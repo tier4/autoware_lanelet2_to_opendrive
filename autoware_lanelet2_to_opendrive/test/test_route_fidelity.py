@@ -24,7 +24,6 @@ written naively:
 
 from pathlib import Path
 
-import pytest
 from autoware_lanelet2_to_opendrive.route_fidelity import (
     EmittedNetwork,
     measure,
@@ -168,10 +167,6 @@ def test_any_slot_pair_realises_a_succession() -> None:
     }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a shared slot is only recognised when it is the lanelets' only slot",
-)
 def test_lanelets_sharing_one_of_several_slots_need_no_transition() -> None:
     """Sharing a slot is enough; the other slots do not make it a requirement.
 
