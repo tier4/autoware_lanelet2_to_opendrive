@@ -340,6 +340,46 @@ is not hypothetical, since an earlier revision extracted no lane-width metrics
 and reported as unchanged two roads whose sampled lane width had moved from
 about 3.0 m to about 31.5 m.
 
+### Lining up two digests: `--match-roads`
+
+Road ids are assigned in emission order, so a change that adds, removes or
+regroups a road renumbers every road after it. The same id then names unrelated
+roads in the two outputs, and a digest diff lined up by id compares roads that
+have nothing to do with each other.
+
+What survives is what a road was built from. Each conversion writes a
+`.mapping.json` next to the `.xodr`; `--match-roads` takes the two mapping files
+and matches roads by the source lanelets they share:
+
+```
+xodr-digest --match-roads <baseline.mapping.json> <comparison.mapping.json> [--output FILE]
+```
+
+For every baseline road it reports the best-matching comparison road and the
+Jaccard index of the two lanelet sets (1.0 means built from exactly the same
+lanelets). There is no geometric threshold. The result also lists:
+
+| field | meaning |
+| --- | --- |
+| `unmatched_baseline`, `new_in_comparison` | roads sharing no lanelet with any road on the other side |
+| `many_to_one` | baseline roads that now share one comparison road (merged) |
+| `one_to_many` | a baseline road whose lanelets are now on several roads (split or duplicated) |
+| `not_matchable` | roads with no source lanelet, per side |
+| `summary.is_identity_map` | every road matches the road of the same id exactly, i.e. ids can be compared directly |
+
+Two limits to keep in mind when reading it:
+
+- **Merged lanelets are followed through `preprocessing_log`.** A
+  `merge_operations` entry replaces the listed lanelets by one lanelet under a
+  new id. The mapping records the merge, and the match expands that id back to
+  the original lanelets. A mapping written without the log (for example one
+  rebuilt from an `.xodr` alone) cannot be expanded, and its merged roads will
+  show up as unmatched.
+- **Synthetic connectors are not matched.** A road with no source lanelet has
+  nothing to match on. Such roads are listed under `not_matchable` and counted
+  in the summary; they are not part of any other list, so "0 unmatched" does not
+  include them.
+
 ## `carla-import-test`
 
 Connects to a running CARLA server and verifies that the generated `.xodr`

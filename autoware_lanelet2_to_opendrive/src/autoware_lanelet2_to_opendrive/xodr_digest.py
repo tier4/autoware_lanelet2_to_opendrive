@@ -45,14 +45,18 @@ unrelated roads that happen to share a number, not one road that changed.
 A digest diff keyed by road ``id`` (this tool sorts `roads` by `id`, and an
 external `diff` between two digest files relies on that same ordering to
 line entries up) is therefore only a meaningful comparison for changes
-that preserve road composition. This tool does not close that gap for
-changes that don't: it has no alternative key today, so an id-based diff
-across a structural change like `merge_operations` cannot be trusted
-either way - a changed field is not evidence the road changed, and an
-unchanged one is not evidence it didn't. A correspondence that survives
-regrouping would have to come from data this tool does not read, e.g.
-matching each road's anchor lanelet(s) via the companion `mapping.json`'s
-`lanelet_to_road_and_lane` field.
+that preserve road composition. Across a change that does not, an id-based
+diff cannot be trusted either way - a changed field is not evidence the
+road changed, and an unchanged one is not evidence it didn't.
+
+The digest itself still has no other key: it reads only the `.xodr`, and
+the `.xodr` does not say what a road was built from. The key that survives
+regrouping is in the companion `mapping.json`, and `--match-roads` reads it:
+given the two mapping files it reports which road on one side corresponds
+to which on the other by the source lanelets they share (see
+`road_correspondence`). Use that correspondence, not the id, to decide
+which two digest entries describe the same road. It does not cover roads
+with no source lanelet (synthetic connectors); it lists them instead.
 
 Extracted, per road: ``length``; ``<planView>`` geometry-primitive types and
 the heading deltas between consecutive ones (module comment above
@@ -807,6 +811,23 @@ def format_digest(digest: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _write_road_correspondence(mapping_paths: list[Path], output: Path | None) -> None:
+    """Match the roads of two mapping files and write the result as JSON."""
+    from .road_correspondence import match_roads
+
+    mappings = []
+    for path in mapping_paths:
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            sys.exit(2)
+        mappings.append(json.loads(path.read_text(encoding="utf-8")))
+    text = json.dumps(match_roads(*mappings), indent=2, sort_keys=True) + "\n"
+    if output is not None:
+        output.write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+
+
 def main() -> None:
     """Entry point for the `xodr-digest` command."""
     parser = argparse.ArgumentParser(
@@ -817,7 +838,22 @@ def main() -> None:
             "conversion output in the absence of golden files."
         ),
     )
-    parser.add_argument("xodr", type=Path, help=".xodr file to summarize")
+    parser.add_argument(
+        "xodr", type=Path, nargs="?", default=None, help=".xodr file to summarize"
+    )
+    parser.add_argument(
+        "--match-roads",
+        nargs=2,
+        type=Path,
+        default=None,
+        metavar=("BASELINE_MAPPING", "COMPARISON_MAPPING"),
+        help=(
+            "Instead of digesting an .xodr, match the roads of two conversions "
+            "of the same map by their source lanelets, from the two "
+            ".mapping.json files. Road ids are reassigned whenever road "
+            "grouping changes, so two digests cannot be lined up by id."
+        ),
+    )
     parser.add_argument(
         "--output",
         "-o",
@@ -826,6 +862,14 @@ def main() -> None:
         help="Write the digest JSON to this file instead of stdout.",
     )
     args = parser.parse_args()
+
+    if args.match_roads is not None:
+        if args.xodr is not None:
+            parser.error("--match-roads takes two mapping files and no .xodr")
+        _write_road_correspondence(args.match_roads, args.output)
+        return
+    if args.xodr is None:
+        parser.error("an .xodr file is required unless --match-roads is given")
 
     if not args.xodr.exists():
         print(f"Error: file not found: {args.xodr}", file=sys.stderr)
