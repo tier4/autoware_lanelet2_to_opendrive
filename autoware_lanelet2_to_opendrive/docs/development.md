@@ -324,9 +324,15 @@ python scripts/tdd.py red   autoware_lanelet2_to_opendrive/test/test_x.py::test_
 # 2. Implement until it passes
 python scripts/tdd.py green autoware_lanelet2_to_opendrive/test/test_x.py::test_y
 
-# 3. Refactor, then run the full suite
-docker compose --profile test run --rm pytest
+# 3. Refactor, then run the full suite with a bounded worker count
+docker compose --profile test-native run --rm pytest-native pytest -v --tb=short -n 4
+
+# 4. Stop the resident container tdd.py started
+python scripts/tdd.py stop
 ```
+
+The compose services default to `-n auto`, one worker per core, which can
+exhaust the host's memory; the command above overrides it with `-n 4`.
 
 `red` accepts only tests that ran and failed; the
 [Docker guide](https://github.com/tier4/autoware_lanelet2_to_opendrive/blob/master/docs/docker.md)
@@ -334,19 +340,24 @@ lists everything it rejects. It prints each failure message: **read them**. A
 test that fails with an `ImportError` or `AttributeError` for the thing under
 test has shown only that the name is missing, not that the behaviour is.
 
-### Commit shape
+`tdd.py` is run with the host's `python`, not `uv run python`: it uses only the
+standard library, and `uv run` would first try to build the workspace on the
+host, which fails on the `lanelet2-python-api-for-autoware` build. Without
+Docker there is no red or green to check; say so in the PR and leave the
+verification to CI.
 
-Record the red in history without ever committing a failing suite:
+### Red/green evidence
 
-1. `test: ...` -- the new test, marked
-   `@pytest.mark.xfail(strict=True, reason="#<issue>")`. The suite stays green,
-   and `tdd.py red` still checks it as failing (it passes `--runxfail`).
-2. `fix: ...` / `feat: ...` -- the implementation, and the marker removed.
-   `strict=True` makes a forgotten marker fail the suite as `XPASS(strict)`.
+The repository merges by squash only, so a separate red commit does not survive
+the merge. The record of the red is the PR itself: paste the `red` and `green`
+verdicts, as printed, into the "Red/green evidence" block of the PR template,
+including the failure reasons under `RED`. Commit the test and the
+implementation in whatever shape is easiest to review, as long as the pushed
+branch passes the suite.
 
-A reviewer can check out the first commit alone to see what the test asserts
-and that it fails. Paste both verdicts into the PR's "Red/green evidence"
-block.
+For a refactoring write `none (refactoring)` in that block, and say how
+unchanged behaviour was verified (for example a before/after `.xodr` diff; the
+file records its build date in `<header>`, so a byte comparison always differs).
 
 ### Choosing the map a test converts
 
@@ -355,6 +366,15 @@ the shared `nishishinjuku_xodr` fixture, because a changed converter has to
 convert again. When the defect can be reproduced on a small map, add one to
 `test/data/` (the `*_mini.osm` fixtures convert in about 5 s) and write the red
 against it.
+
+When the defect has only been seen on a large map, shrink that map instead of
+drawing one by hand: `test/data/tools/reduce_lanelet2_map.py` removes lanelets
+for as long as a command you give it still reports the same failure, and
+records how the result was made in a `.provenance.json` beside it. Its
+docstring covers how to make that command specific enough, and why the map
+config's preprocessing operations must be switched off for the candidates.
+The result keeps its lanelets' surveyed geometry, so a map reduced from one
+that cannot be published cannot be committed either.
 
 ## Release process
 

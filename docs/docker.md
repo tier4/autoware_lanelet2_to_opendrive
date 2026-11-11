@@ -167,16 +167,20 @@ Everything after the subcommand is passed to pytest.
 
 | | accepted only when | rejected, with the reason |
 | --- | --- | --- |
-| `red` | every selected test ran and **failed** | passes already; error in setup/teardown; skipped; collection error (e.g. an import failure at module level); nothing selected |
+| `red` | every selected test ran and **failed** | passes already; error in setup/teardown; skipped; collection error (e.g. an import failure at module level); nothing selected (a wrong node id, or `-k`/`-m` deselecting everything); internal pytest error |
 | `green` | every selected test **passed** | failed; error; skipped; still marked `xfail`; nothing selected |
 
 A `red` verdict lists each failure message. A failure inside the test body can
 still be the wrong one -- an `ImportError` of the function under test fails
 too -- so read the reasons, not only the verdict.
 
-`red` passes `--runxfail`, so a test committed as red under
-`@pytest.mark.xfail(strict=True)` is still checked as failing; `green` does
-not, so a leftover marker shows up as `XPASS(strict)`.
+`red` passes `--runxfail`, so a test under `@pytest.mark.xfail` is checked as
+if it had no marker. `green` does not: a test still failing under the marker is
+reported as `still marked xfail`, and a `strict=True` marker on a test that now
+passes as a `[XPASS(strict)]` failure. A non-strict marker on a passing test is
+not detected. The convention for what a PR records
+is in
+[`development.md`](../autoware_lanelet2_to_opendrive/docs/development.md#redgreen-evidence).
 
 Both clear `addopts` and disable pytest-testmon (`-p no:pytest-testmon`), so an
 `addopts` added to the project later, or a stray `--testmon`, cannot change
