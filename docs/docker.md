@@ -167,12 +167,13 @@ Everything after the subcommand is passed to pytest.
 
 | | accepted only when | rejected, with the reason |
 | --- | --- | --- |
-| `red` | every selected test ran and **failed** | passes already; error in setup/teardown; skipped; collection error (e.g. an import failure at module level); nothing selected (a wrong node id, or `-k`/`-m` deselecting everything); internal pytest error |
+| `red` | every selected test ran and **failed** | passes already; error in setup/teardown; skipped; collection error (e.g. an import failure at module level); a failure that only shows a missing name (`ImportError`, `NameError`, or `AttributeError` on a module); nothing selected (a wrong node id, or `-k`/`-m` deselecting everything); internal pytest error |
 | `green` | every selected test **passed** | failed; error; skipped; still marked `xfail`; nothing selected |
 
 A `red` verdict lists each failure message. A failure inside the test body can
-still be the wrong one -- an `ImportError` of the function under test fails
-too -- so read the reasons, not only the verdict.
+still be the wrong one -- `red` rejects only the missing-name failures above,
+and an `AttributeError` on an object is left alone because it can be the defect
+itself -- so read the reasons, not only the verdict.
 
 `red` passes `--runxfail`, so a test under `@pytest.mark.xfail` is checked as
 if it had no marker. `green` does not: a test still failing under the marker is
