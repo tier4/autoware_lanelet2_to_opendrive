@@ -698,7 +698,10 @@ def _mean(values: Sequence[float]) -> float:
 
 
 def leak_check(
-    public: Path, source: Optional[Path], reduced: Optional[Path]
+    public: Path,
+    source: Optional[Path],
+    reduced: Optional[Path],
+    withheld: Sequence[str] = (),
 ) -> List[Check]:
     """Verify nothing under *public* carries the source map's identity.
 
@@ -809,6 +812,10 @@ def leak_check(
             forbidden[f"{label} file name"] = path.name
             forbidden[f"{label} sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
             forbidden[f"{label} directory"] = str(path.resolve().parent)
+    for value in withheld:
+        # Short values would match by accident; a preset name is a word.
+        if len(value) >= 3:
+            forbidden[f"withheld preset name '{value[0]}...'"] = value
     source_ids: Set[str] = set()
     if reduced_root is not None:
         # Only ids long enough not to collide with a count by accident.
@@ -856,13 +863,45 @@ def _split_overrides(argv: Sequence[str]) -> Tuple[List[str], List[str]]:
     return argv, []
 
 
+#: Map presets whose name says nothing about whose map was converted. Any
+#: other preset is named after a place or a customer -- ``map=odaiba`` tells
+#: a reader which map it was as surely as the file name would -- so its name
+#: is withheld from everything published.
+GENERIC_PRESETS = frozenset({"example", "example_mgrs_offset", "junction_cluster"})
+
+
+def _withheld_values(overrides: Sequence[str]) -> List[str]:
+    """Override values that identify the map and must not be published."""
+    withheld = []
+    for override in overrides:
+        key, _, value = override.partition("=")
+        if key == "map" and value not in GENERIC_PRESETS:
+            withheld.append(value)
+    return withheld
+
+
 def _public_overrides(overrides: Sequence[str]) -> List[str]:
-    """Overrides as they may be published: keys kept, any path value withheld."""
+    """Overrides as they may be published.
+
+    Keys are kept. A path value is withheld, and so is the name of a map
+    preset that is not one of the generic ones.
+    """
     shown = []
     for override in overrides:
         key, _, value = override.partition("=")
-        shown.append(f"{key}=<path>" if _PATH.fullmatch(value) else override)
+        if _PATH.fullmatch(value):
+            shown.append(f"{key}=<path>")
+        elif value in _withheld_values([override]):
+            shown.append(f"{key}=<preset>")
+        else:
+            shown.append(override)
     return shown
+
+
+def _withheld_for(out: Path) -> List[str]:
+    """The values `fingerprint` recorded as withheld for this report."""
+    recorded = _read_json(out / "private" / "locations.json").get("withheld", [])
+    return [str(value) for value in recorded]  # type: ignore[union-attr]
 
 
 def _converter_identity() -> Dict[str, object]:
@@ -938,6 +977,7 @@ def cmd_fingerprint(args: argparse.Namespace, overrides: List[str]) -> int:
         {
             "source": str(Path(args.map).resolve()),
             "preprocessing_ran": conversion.preprocessed is not None,
+            "withheld": _withheld_values(overrides),
             "lanelets_by_finding": located,
         },
     )
@@ -1151,7 +1191,7 @@ def cmd_sanitize(args: argparse.Namespace, overrides: List[str]) -> int:
             private / "sanitize.json",
             {"seed": seed, "rotate_degrees": rotate, "level": level},
         )
-        checks = leak_check(public, source, reduced)
+        checks = leak_check(public, source, reduced, _withheld_for(out))
         print(format_checks(checks))
         if not all(c.ok for c in checks):
             repro.unlink()
@@ -1180,7 +1220,12 @@ def cmd_leak_check(args: argparse.Namespace, _overrides: List[str]) -> int:
     private = out / "private"
     source = Path(_read_json(private / "locations.json")["source"])  # type: ignore[arg-type]
     reduced = private / "reduced.osm"
-    checks = leak_check(out / "public", source, reduced if reduced.is_file() else None)
+    checks = leak_check(
+        out / "public",
+        source,
+        reduced if reduced.is_file() else None,
+        _withheld_for(out),
+    )
     print(format_checks(checks))
     return 0 if all(c.ok for c in checks) else 1
 
@@ -1308,7 +1353,9 @@ def cmd_draft(args: argparse.Namespace, _overrides: List[str]) -> int:
     )
     source = Path(_read_json(private / "locations.json")["source"])  # type: ignore[arg-type]
     reduced = private / "reduced.osm"
-    checks = leak_check(public, source, reduced if reduced.is_file() else None)
+    checks = leak_check(
+        public, source, reduced if reduced.is_file() else None, _withheld_for(out)
+    )
     print(format_checks(checks))
     if not all(c.ok for c in checks):
         (public / "issue.md").unlink()

@@ -35,7 +35,9 @@ converter's Hydra overrides. Keep `OUT` **outside the repository**:
 with `git add -A`.
 
 The first time, read [example.md](example.md): one report carried through
-every step, with the output each command printed and how it was read.
+every step, with the output each command printed and how it was read -- and
+with the finding turning out to be the instrument's mistake, not the
+converter's.
 
 ## 1. Convert and fingerprint
 
@@ -49,6 +51,12 @@ Read the output in this order: `conversion: DID NOT COMPLETE` (the finding
 is `crash:...`); `instrument '<name>' incomplete` and
 `qc checkers: {... 'errored': N}` (that instrument's counts are a lower
 bound -- say so); then the findings, `instrument:code xN (M located)`.
+
+A preset named after a place or a customer identifies the map as surely as
+its file name, so the tool publishes it as `map=<preset>` and the leak check
+rejects the name if it is typed back in. A reproducer's command has to be
+runnable by someone else, which is one more reason to reduce and rebuild
+with the generic `map=junction_cluster`.
 
 Why twice: a preset's preprocessing names lanelet and point ids, and an
 excerpt that lacks them cannot be converted with it. Only what **also shows
@@ -82,6 +90,40 @@ It resolves the place to lanelets, remembers them for step 4, and lists for
   server) rather than by reading the `.xodr`.
 - **Nothing is reported there**, or nothing that would produce the symptom
   -> step 3.
+
+### Before going on: is the output wrong, or the instrument?
+
+A finding at the place that matches the symptom is still only what one
+instrument says. The instruments are younger than the converter and have
+been wrong before, and everything after this step works just as smoothly on
+a false positive as on a defect -- the reduction shrinks it, the rebuild
+keeps it, the issue reads well. So check it once, here, by a reading that
+does **not** go through that instrument:
+
+- look at the thing itself in the output at the place -- the road and lane
+  `<link>`s, the junction's `<connection>` rows, the geometry endpoints --
+  or at the mapping sidecar (`lanelet_to_road_and_lane` **and**
+  `lanelet_additional_road_lanes`: a lanelet can be emitted on several
+  roads), and ask whether what the instrument reports is actually there;
+- or execute the consumer on the output and see whether the symptom occurs.
+
+Then count: of the finding's N instances on the map, how many have the same
+shape as the one at the place? The issue is about those, not about N.
+
+Three outcomes:
+
+- **The output is wrong** -> continue to step 4.
+- **The instrument is wrong** -> the report changes subject. It is now an
+  issue about the instrument, the same steps produce a reproducer for the
+  false positive, and whether it explains what the reporter saw becomes a
+  question to put to them. [example.md](example.md) is exactly this case.
+- **Some instances are one and some the other** -> say which the issue
+  covers and how many; the rest are a separate report or not one at all.
+
+Before reducing a private map, also try the public one: convert
+`autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm` and see whether
+the same finding, of the same shape, shows there. If it does, build the
+issue on the public map and the private one never has to be reduced at all.
 
 ## 3. No instrument sees it: write a probe
 

@@ -258,6 +258,34 @@ def test_published_overrides_withhold_path_values() -> None:
     ) == ["map=junction_cluster", "map.projector_info=<path>"]
 
 
+def test_a_preset_named_after_a_place_is_withheld_and_leak_checked(
+    bundle: dict,
+) -> None:
+    """``map=<a place>`` says which map it was as surely as its file name."""
+    overrides = ["map=harbourtown", "target=default", "map.traffic_rule=LHT"]
+    assert map_issue._public_overrides(overrides) == [
+        "map=<preset>",
+        "target=default",
+        "map.traffic_rule=LHT",
+    ]
+    assert map_issue._withheld_values(overrides) == ["harbourtown"]
+    assert map_issue._withheld_values(["map=junction_cluster"]) == []
+
+    def check(text: str) -> list:
+        (bundle["public"] / "issue.md").write_text(text, encoding="utf-8")
+        return _failed(
+            map_issue.leak_check(
+                bundle["public"], bundle["source"], bundle["reduced"], ["harbourtown"]
+            )
+        )
+
+    assert check("Converted with `map=<preset> target=default`.\n") == []
+    # Typed back in by hand, the name is caught.
+    assert check("Converted with `map=harbourtown`.\n") == [
+        "issue.md: no source path, hash, id or coordinate"
+    ]
+
+
 def test_the_issue_draft_is_built_from_public_documents_only() -> None:
     fingerprint = {
         "converter": {"version": "2.62.0", "commit": "abc1234"},

@@ -7,6 +7,11 @@ in your terminal and under `private/`.
 Measured on `integration/2026-11-09` at `3386cdd7`, 2026-11-12, in the
 project container, with `map=junction_cluster`.
 
+This example is kept because of how it turned out: the finding at the place
+was real output of a real instrument, it matched the symptom, it reduced and
+rebuilt cleanly -- and **it was not a defect of the converter**. Step 3 is
+where that was caught, and the report changed subject there.
+
 ## The report
 
 > On this map, around lanelet 3002118, a route planned through the junction
@@ -14,7 +19,7 @@ project container, with `map=junction_cluster`.
 > The owner agreed to a reproducer.
 
 Map: yes. Place: a lanelet id. Symptom: a route that cannot continue, seen
-when planning. Level: L1 was agreed.
+when following the route on the converted file. Level: L1 was agreed.
 
 ## 1. Fingerprint
 
@@ -44,12 +49,43 @@ with 2 rounds of neighbours: 12 lanelets
 How it was read: the qc finding is somewhere else on the map -- not this
 report. `route:missing_succession` has three instances here, and "a
 succession the map states is not traversable in the output" is exactly a
-route that cannot continue. The symptom and the finding are the same kind of
-thing, so no probe is needed. Had the symptom been "the lane is 30 m wide
-here", three missing successions would have explained nothing, and the next
-step would have been a probe.
+route that cannot continue. A candidate. Not yet an explanation.
 
-## 3. Reduce
+## 3. Is it the output that is wrong, or the instrument?
+
+The instrument says lanelet 3002118 cannot be followed into lanelet 425. A
+second reading that does not go through the instrument: which roads were
+those two lanelets emitted on?
+
+```
+3002118 -> 425   source slots [(647, 1), (648, 1)]   target slots [(647, 1)]   shared [(647, 1)]
+3002118 -> 526   source slots [(647, 1), (648, 1)]   target slots [(648, 1)]   shared [(648, 1)]
+```
+
+(read from `lanelet_to_road_and_lane` and `lanelet_additional_road_lanes` in
+the mapping sidecar.) Both lanelets of each pair sit on the **same road and
+lane**: the succession happens inside one road and needs no link at all. The
+output is right. The instrument counted a succession between the lanelet's
+*other* copy and the target, which no file would state.
+
+All nine instances on the map have that shape. Run with the corrected
+instrument, the same conversion reports 0 missing successions and 9 internal
+ones.
+
+So the report changed subject. Not "the converter drops a succession", but
+"`route-fidelity` reports a succession as missing when the two lanelets
+share one of several roads" -- and the reporter's symptom is explained only
+if they followed the route the way the instrument does (through the first
+slot of each lanelet). That went into the issue as an open question to
+them, not as a conclusion.
+
+Had this step been skipped, everything below would still have worked, and
+the issue would have asked a maintainer to fix a defect that does not exist.
+
+## 4. Reduce
+
+The same machinery reduces a false positive as well as a defect; the
+reproducer is now a test case for the instrument.
 
 ```
 $ python scripts/map_issue.py reduce nishishinjuku.osm --from OUT \
@@ -61,10 +97,10 @@ reduce: starting from 5 lanelets
 wrote OUT/private/reduced.osm  (PRIVATE: real ids and coordinates)
 ```
 
-How it was read: one round of neighbours (5 lanelets) already showed the
-finding, and four of them are needed. 979 lanelets became 4.
+One round of neighbours (5 lanelets) already showed the finding, and four
+of them are needed. 979 lanelets became 4.
 
-## 4. Rebuild
+## 5. Rebuild
 
 Without the flag the command refuses, which is the point:
 
@@ -92,11 +128,11 @@ sanitize: level 'perturbed' (warp 0.25 m, jitter 0.02 m): finding survives
 leak-check: PASS
 ```
 
-How it was read: the strongest level kept the finding, so the defect is
-topological rather than a matter of centimetres, and the reproducer carries
-no surveyed coordinate.
+The strongest level kept the finding, so it does not depend on
+centimetre-scale geometry, and the reproducer carries no surveyed
+coordinate.
 
-## 5. Draft
+## 6. Draft
 
 ```
 $ python scripts/map_issue.py draft --from OUT \
@@ -117,24 +153,26 @@ Findings on the reproducer:
 - `route:missing_succession` x2
 ```
 
-How it was read -- and this is the step that is easy to skip:
+How it was read:
 
-- `route:missing_succession` is there. Good. But the place had three
-  instances and the reproducer has two: **the reproducer shows the finding,
-  not necessarily every instance of it.** The issue says "x2 on the
-  reproducer, x9 on the map".
+- The place had three instances and the reproducer has two: **a reproducer
+  shows the finding, not necessarily every instance of it.** The issue says
+  "x2 on the reproducer, x9 on the map".
 - `xml.valid_schema` is **new**: the full map does not show it. A cut can
   introduce a finding of its own. It went into the issue as a note
   ("appears on the reproducer only; may be an effect of the cut"), not as
-  part of the defect.
+  part of the report.
+- The draft is a starting point. The paragraph from step 3 -- what is
+  actually wrong, how it was established, and what is still an open question
+  for the reporter -- was written by hand under "Expected / Actual", and the
+  leak check was run again afterwards.
 
-Then: "Expected / Actual" filled in by hand, a search for an existing issue
-with `route:missing_succession`, the whole body shown to the reporter, and
-`gh issue create` only after they said yes.
+Then: a search for an existing issue, the whole body shown to the reporter,
+and `gh issue create` only after they said yes.
 
 ## If the owner had not agreed
 
-Steps 1 and 2 are the same. Steps 3 and 4 are skipped: nothing is reduced,
+Steps 1 to 3 are the same. Steps 4 and 5 are skipped: nothing is reduced,
 no `repro.osm` exists. `draft` writes the same fingerprint table and, under
 "Reproducer", `None attached: this report is L0 only`. That issue is still
 actionable: it names the finding, its count, the converter commit and the
