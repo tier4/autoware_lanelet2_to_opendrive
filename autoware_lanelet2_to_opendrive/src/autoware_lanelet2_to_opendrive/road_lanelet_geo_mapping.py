@@ -19,7 +19,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
 from tqdm import tqdm
@@ -33,7 +33,11 @@ from .opendrive.geometry import (
     evaluate_plan_view_world,
     param_for_offset,
 )
-from .util import CONVERTIBLE_LANELET_SUBTYPES, filter_lanelets_by_subtype
+from .util import (
+    CONVERTIBLE_LANELET_SUBTYPES,
+    filter_lanelets_by_subtype,
+    is_boundary_attached_lanelet,
+)
 
 if TYPE_CHECKING:
     import lanelet2.core
@@ -921,6 +925,65 @@ def _compute_all_candidates(
     return all_rc, no_candidate_diag, skipped_synthetic
 
 
+def _assign_lane_ids(
+    reference_lanelet: int,
+    walk_lane_ids: list[int],
+    is_rht: bool,
+    step_inward: Callable[[int], Optional[int]],
+    step_outward: Callable[[int], Optional[int]],
+    reference_is_attached: bool = False,
+) -> list[tuple[int, int]]:
+    """Give the lanelets of one road their lane ids, starting from the reference lanelet.
+
+    ``reference_lanelet`` is the lanelet whose boundary matched the road's
+    reference line. ``walk_lane_ids`` is the road's lane ids in geometric
+    order across the road. ``step_inward`` returns the next lanelet in that
+    order, ``step_outward`` the next one against it; either returns ``None``
+    where the walk has to stop. ``reference_is_attached`` says the reference
+    lanelet is a shoulder, pedestrian or bicycle lane rather than a vehicle
+    lane (:func:`~.util.is_boundary_attached_lanelet`).
+
+    On a road with lanes of one sign the reference lanelet is the first lane
+    and the ids are handed out in order.
+
+    On a road with lanes of both signs, which lane the reference lanelet is
+    depends on what it is, because the converter puts the centre lane between
+    the carriageway and the lanes attached beyond it:
+
+    - an **attached** lanelet that matched the reference line is the outer
+      edge of the road, so it takes the first id and the walk runs in order;
+    - a **vehicle** lanelet that matched it is the lane next to the centre
+      lane -- 1 under LHT, -1 under RHT -- and the attached lanes lie behind
+      it. The two sides are walked separately from it, so an attached lanelet
+      that cannot be reached is left without an answer instead of every
+      driving lane taking its neighbour's id.
+
+    Returns ``(lanelet id, lane id)`` pairs.
+    """
+    own_side = sorted((lid for lid in walk_lane_ids if (lid < 0) == is_rht), key=abs)
+    far_side = sorted((lid for lid in walk_lane_ids if (lid < 0) != is_rht), key=abs)
+    if reference_is_attached or not own_side or not far_side:
+        own_side, far_side = list(walk_lane_ids), []
+
+    assigned: list[tuple[int, int]] = []
+    current = reference_lanelet
+    for lane_id in own_side:
+        assigned.append((current, lane_id))
+        following = step_inward(current)
+        if following is None:
+            break
+        current = following
+
+    current = reference_lanelet
+    for lane_id in far_side:
+        following = step_outward(current)
+        if following is None:
+            break
+        assigned.append((following, lane_id))
+        current = following
+    return assigned
+
+
 def _resolve_conflicts(
     all_rc: list[_RoadCandidates],
 ) -> dict[int, int]:
@@ -1367,23 +1430,61 @@ def build_mapping(
         # opposite direction to find the true edge lanelet.  This
         # corrects for spline fitting error causing Phase 1 to pick a
         # non-edge lanelet (e.g. 2nd instead of 1st).
-        current = best_lid
-        walk_result: list[tuple[int, int, int]] = []  # [(lid, road_id, lane_id)]
+        def _claimed_elsewhere(lanelet_id: int, rc_idx: int = rc_idx) -> bool:
+            return (
+                lanelet_id in resolved_references
+                and resolved_references[lanelet_id] != rc_idx
+            )
 
-        for lane_id in rc.walk_lane_ids:
-            walk_result.append((current, int(road_id), lane_id))
-            next_ll = _right_neighbor(current) if rc.is_rht else _left_neighbor(current)
-            if next_ll is None:
-                break
+        def _step_inward(lanelet_id: int, rc: _RoadCandidates = rc) -> Optional[int]:
+            following = (
+                _right_neighbor(lanelet_id) if rc.is_rht else _left_neighbor(lanelet_id)
+            )
+            if following is None or _claimed_elsewhere(following):
+                return None
+            return following
+
+        def _step_outward(lanelet_id: int, rc: _RoadCandidates = rc) -> Optional[int]:
+            following = (
+                _left_neighbor(lanelet_id) if rc.is_rht else _right_neighbor(lanelet_id)
+            )
             if (
-                next_ll in resolved_references
-                and resolved_references[next_ll] != rc_idx
+                following is None
+                or following in matched_lanelets
+                or _claimed_elsewhere(following)
             ):
-                break
-            current = next_ll
+                return None
+            return following
 
-        # Fallback pre-walk: only when initial walk is incomplete
-        if len(walk_result) < len(rc.walk_lane_ids) and len(rc.walk_lane_ids) > 1:
+        reference_is_attached = is_boundary_attached_lanelet(
+            lanelet_map.laneletLayer[best_lid]
+        )
+        walk_result: list[tuple[int, int, int]] = [  # [(lid, road_id, lane_id)]
+            (lanelet_id, int(road_id), lane_id)
+            for lanelet_id, lane_id in _assign_lane_ids(
+                best_lid,
+                rc.walk_lane_ids,
+                rc.is_rht,
+                _step_inward,
+                _step_outward,
+                reference_is_attached,
+            )
+        ]
+
+        # Fallback pre-walk: only when initial walk is incomplete.  It looks
+        # for the true edge lanelet and hands the ids out from there, so it
+        # applies where the ids were handed out in order.  A vehicle
+        # reference lanelet on a road with lanes of both signs was walked
+        # from the centre lane in both directions above, and restarting from
+        # an edge would bring back the shift that walk avoids.
+        in_order = (
+            reference_is_attached or len({lid < 0 for lid in rc.walk_lane_ids}) == 1
+        )
+        if (
+            in_order
+            and len(walk_result) < len(rc.walk_lane_ids)
+            and len(rc.walk_lane_ids) > 1
+        ):
             max_prewalk = len(rc.walk_lane_ids) - 1
             edge = best_lid
             for _ in range(max_prewalk):
@@ -1495,16 +1596,41 @@ def build_mapping(
 
         if best_lid is not None:
             # Assign reference lanelet and walk
-            current = best_lid
-            walk_result_rescue: list[tuple[int, int, int]] = []
-            for lane_id in rc.walk_lane_ids:
-                walk_result_rescue.append((current, int(rc.road_id), lane_id))
-                next_ll = (
-                    _right_neighbor(current) if rc.is_rht else _left_neighbor(current)
+            def _rescue_inward(
+                lanelet_id: int, rc: _RoadCandidates = rc
+            ) -> Optional[int]:
+                following = (
+                    _right_neighbor(lanelet_id)
+                    if rc.is_rht
+                    else _left_neighbor(lanelet_id)
                 )
-                if next_ll is None or next_ll in matched_lanelets:
-                    break
-                current = next_ll
+                if following is None or following in matched_lanelets:
+                    return None
+                return following
+
+            def _rescue_outward(
+                lanelet_id: int, rc: _RoadCandidates = rc
+            ) -> Optional[int]:
+                following = (
+                    _left_neighbor(lanelet_id)
+                    if rc.is_rht
+                    else _right_neighbor(lanelet_id)
+                )
+                if following is None or following in matched_lanelets:
+                    return None
+                return following
+
+            walk_result_rescue: list[tuple[int, int, int]] = [
+                (lanelet_id, int(rc.road_id), lane_id)
+                for lanelet_id, lane_id in _assign_lane_ids(
+                    best_lid,
+                    rc.walk_lane_ids,
+                    rc.is_rht,
+                    _rescue_inward,
+                    _rescue_outward,
+                    is_boundary_attached_lanelet(lanelet_map.laneletLayer[best_lid]),
+                )
+            ]
             _commit(walk_result_rescue)
             rescued_road_ids.add(rc.road_id)
             logger.info(

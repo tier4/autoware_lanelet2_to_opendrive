@@ -22,6 +22,7 @@ from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.road_lanelet_geo_mapping import (
     GeoRoadLaneletMapping,
     MappingMismatchError,
+    _assign_lane_ids,
     _bbox,
     _bboxes_overlap,
     _build_boundary_grid,
@@ -843,3 +844,82 @@ class TestBoundaryGridPreFilter:
             grid.lids[_grid_candidate_positions(grid, (0.0, 0.0, 1.0, 1.0), 10.0)[0]]
             == 1
         )
+
+
+class TestAssignLaneIds:
+    """Which lane id each lanelet of a road gets, walking from the reference lanelet.
+
+    On a road with lanes of both signs the centre lane lies between the
+    carriageway and the shoulder or pedestrian lanes attached beyond it. The
+    lanelet that matched the reference line is the outer edge of the road
+    when it is itself an attached lane, and the lane next to the centre lane
+    -- 1 under LHT, -1 under RHT -- when it is a vehicle lane.
+    """
+
+    @staticmethod
+    def _chain(*lanelets: int):
+        """A step function following ``lanelets`` in order."""
+        following = dict(zip(lanelets, lanelets[1:]))
+        return following.get
+
+    def test_one_sided_left_hand_road(self) -> None:
+        """Lanes 1, 2, 3 in order from the reference lanelet."""
+        assigned = _assign_lane_ids(
+            10, [1, 2, 3], False, self._chain(10, 11, 12), self._chain(10)
+        )
+        assert dict(assigned) == {10: 1, 11: 2, 12: 3}
+
+    def test_one_sided_right_hand_road(self) -> None:
+        assigned = _assign_lane_ids(
+            10, [-1, -2], True, self._chain(10, 11), self._chain(10)
+        )
+        assert dict(assigned) == {10: -1, 11: -2}
+
+    def test_attached_reference_lanelet_is_the_outer_edge(self) -> None:
+        """LHT, lanelet 20 is a pedestrian lane and matched the reference line.
+
+        It is lane -1, the first id, and the driving lanes follow in order.
+        """
+        assigned = _assign_lane_ids(
+            20,
+            [-1, 1, 2],
+            False,
+            self._chain(20, 10, 11),
+            self._chain(20),
+            reference_is_attached=True,
+        )
+        assert dict(assigned) == {20: -1, 10: 1, 11: 2}
+
+    def test_vehicle_reference_lanelet_keeps_lane_one(self) -> None:
+        """LHT, lanelet 10 is a driving lane and matched the reference line.
+
+        It is lane 1; the shoulder behind it is lane -1.
+        """
+        assigned = _assign_lane_ids(
+            10, [-1, 1, 2], False, self._chain(10, 11), self._chain(10, 20)
+        )
+        assert dict(assigned) == {10: 1, 11: 2, 20: -1}
+
+    def test_an_unreachable_attached_lane_does_not_shift_the_others(self) -> None:
+        """The attached lanelets share no boundary the walk can follow.
+
+        The driving lanes still get their own ids; the attached lanes are
+        left without an answer rather than their ids going to driving lanes.
+        """
+        assigned = _assign_lane_ids(
+            10, [-2, -1, 1, 2], False, self._chain(10, 11), self._chain(10)
+        )
+        assert dict(assigned) == {10: 1, 11: 2}
+
+    def test_right_hand_road_with_a_vehicle_reference_lanelet(self) -> None:
+        """RHT mirrors it: the reference lanelet is lane -1, the attached lane 1."""
+        assigned = _assign_lane_ids(
+            10, [1, -1, -2], True, self._chain(10, 11), self._chain(10, 20)
+        )
+        assert dict(assigned) == {10: -1, 11: -2, 20: 1}
+
+    def test_several_attached_lanes_are_numbered_outward(self) -> None:
+        assigned = _assign_lane_ids(
+            10, [-2, -1, 1], False, self._chain(10), self._chain(10, 20, 21)
+        )
+        assert dict(assigned) == {10: 1, 20: -1, 21: -2}
