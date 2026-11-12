@@ -13,14 +13,23 @@ A report arrives as three things. Get all three before running anything:
 | **the place** | whatever they were looking at: lanelet ids, a road id or x,y in the `.xodr`, a `carla.Location`, or a latitude and longitude | ids, coordinates, screenshots |
 | **the symptom** | what was seen, in which consumer and version, doing what | -- (it goes in, described by *kind* of place: "at a merge", not where) |
 
-The map stays where it is. What leaves is at most three levels, and each
-step up is a decision of **the owner of the map** -- not yours, and not the
-tool's. Ask which level the reporter is authorised for before producing L1;
-if they do not know, stop at L0.
+The map stays where it is. What leaves is decided by **the owner of the
+map** -- not by you, and not by the tool. There are two things to get their
+agreement on, and the tool withholds each until you pass its flag:
+
+| ask the reporter | if yes | if no, or they do not know |
+| --- | --- | --- |
+| "May counts measured on the map be published -- how many lanelets it has, how often each finding occurs?" | `draft --figures-agreed` | the issue names the findings and says the figures are withheld |
+| "May a rebuilt excerpt of a few lanelets be published? Its ids and coordinates are new; its layout is real." | `sanitize --owner-agreed` | no reproducer is made; nothing is reduced |
+
+Ask both questions at the start, in those words, and write down the answers.
+"The map can't be shared" answers neither: someone who may not share a map
+may still be allowed to say it has 36,000 lanelets, or may not. An agreement
+given for an earlier report does not carry over.
 
 | level | file | contains |
 | --- | --- | --- |
-| **L0** | `public/fingerprint.json`, `public/issue.md` | finding codes, counts, scrubbed messages, lanelet counts by subtype, converter version, the symptom |
+| **L0** | `public/fingerprint.json`, `public/issue.md` | finding codes, scrubbed messages, converter version, the symptom -- and the counts, only with `--figures-agreed` |
 | **L1** | `public/repro.osm` | a few lanelets, renumbered, relocated, rotated, perturbed |
 | **L2** | `private/reduced.osm` | the same lanelets with real ids and coordinates -- never public |
 
@@ -213,13 +222,17 @@ that is a result -- report at L0 and say so.
 ## 6. Draft, check for leaks, review with the user, file
 
 ```bash
-python scripts/map_issue.py draft --from <OUT>/neutral \
+python scripts/map_issue.py draft --from <OUT>/neutral [--figures-agreed] \
     --symptom "<what was seen, at what kind of place>" --seen-in "<consumer and version>"
 python scripts/map_issue.py leak-check --from <OUT>/neutral     # again after any edit under public/
 ```
 
 `draft` writes `public/issue.md` in the shape of
-`.github/ISSUE_TEMPLATE/map_defect_report.md`. `sanitize` and `draft` run
+`.github/ISSUE_TEMPLATE/map_defect_report.md`. Without `--figures-agreed`
+the table shows each finding with its count withheld and the map's size is
+not stated; the terminal still shows you the counts (and
+`private/fingerprint.json` keeps them), so you can reason with them -- just
+do not type them into the issue by hand. `sanitize` and `draft` run
 the leak check and remove their output when it fails. It inspects the files
 themselves: ids are a fresh counter, no tag carries a source id or position,
 elevation and local coordinates are re-origined, no node keeps its latitude

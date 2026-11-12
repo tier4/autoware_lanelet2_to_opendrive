@@ -36,7 +36,9 @@ kind of place ("at a merge", "where a lane ends") -- never the place itself. -->
 - **Converter**: <!-- version and commit -->
 - **Overrides**: <!-- e.g. `map=junction_cluster target=carla`; withhold path values -->
 - **Conversion**: <!-- completed / did not complete, seconds, whether preprocessing ran -->
-- **Map**: <!-- lanelet count by subtype; no name, no location -->
+- **Map**: <!-- lanelet count by subtype, only if the map's owner agreed to
+  publishing figures measured on it; otherwise "figures withheld". Never a
+  name or a location. The same goes for the counts in the table below. -->
 - **qc checkers**: <!-- total / completed / skipped / errored. An error count is
   a lower bound unless every checker completed. -->
 

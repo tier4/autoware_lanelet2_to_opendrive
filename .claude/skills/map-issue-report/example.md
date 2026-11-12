@@ -19,7 +19,11 @@ where that was caught, and the report changed subject there.
 > The owner agreed to a reproducer.
 
 Map: yes. Place: a lanelet id. Symptom: a route that cannot continue, seen
-when following the route on the converted file. Level: L1 was agreed.
+when following the route on the converted file.
+
+The two questions, asked before anything else: may counts measured on the
+map be published -- yes (it is the public test map); may a rebuilt excerpt
+be published -- yes, the reporter said so.
 
 ## 1. Fingerprint
 
@@ -135,7 +139,7 @@ coordinate.
 ## 6. Draft
 
 ```
-$ python scripts/map_issue.py draft --from OUT \
+$ python scripts/map_issue.py draft --from OUT --figures-agreed \
       --symptom "A route planned through a junction stops: the lane it should continue into cannot be reached in the converted map." \
       --seen-in "route-fidelity on the converted .xodr"
 ...
@@ -172,8 +176,16 @@ and `gh issue create` only after they said yes.
 
 ## If the owner had not agreed
 
-Steps 1 to 3 are the same. Steps 4 and 5 are skipped: nothing is reduced,
-no `repro.osm` exists. `draft` writes the same fingerprint table and, under
-"Reproducer", `None attached: this report is L0 only`. That issue is still
-actionable: it names the finding, its count, the converter commit and the
-kind of place.
+**Not to a reproducer:** steps 1 to 3 are the same. Steps 4 and 5 are
+skipped: nothing is reduced, no `repro.osm` exists. `draft` writes, under
+"Reproducer", `None attached: this report is L0 only`.
+
+**Not to the figures either:** `draft` without `--figures-agreed` writes
+
+```
+- **Map**: figures withheld -- the owner has not agreed to publishing measurements of the map
+| `route:missing_succession` | withheld | a succession the map states is not traversable in the output |
+```
+
+That issue is still actionable: it names the finding, what kind of defect
+it is, the converter commit and the kind of place.

@@ -518,9 +518,15 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
         )
         == 0
     )
-    fingerprint = json.loads((out / "public" / "fingerprint.json").read_text())
+    fingerprint = json.loads((out / "private" / "fingerprint.json").read_text())
     located = json.loads((out / "private" / "locations.json").read_text())
     assert finding in [row["finding"] for row in fingerprint["findings"]]
+    # What is written for publication names the finding and nothing measured
+    # on the map: no count, no census.
+    published = json.loads((out / "public" / "fingerprint.json").read_text())
+    assert finding in [row["finding"] for row in published["findings"]]
+    assert all(row["count"] is None for row in published["findings"])
+    assert published["map_census"] == {}
     instances = located["lanelets_by_finding"][finding]
     assert instances, "the probe's roads were not traced back to lanelets"
 
@@ -554,14 +560,23 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
     assert not (out / "public" / "repro.osm").exists()
     assert map_issue.main([*sanitize, "--owner-agreed", *with_probe, *neutral]) == 0
     symptom = "Two lanes are emitted side by side on one road at a fork."
-    assert (
-        map_issue.main(
-            ["draft", "--from", str(out), "--symptom", symptom]
-            + ["--seen-in", "a structural probe"]
-        )
-        == 0
-    )
-    assert symptom in (out / "public" / "issue.md").read_text(encoding="utf-8")
+    draft = ["draft", "--from", str(out), "--symptom", symptom]
+    draft += ["--seen-in", "a structural probe"]
+    count = next(r["count"] for r in fingerprint["findings"] if r["finding"] == finding)
+    row_with_count = f"| `{finding}` | {count} |"
+
+    # Figures of the map are published only when the owner agreed to them.
+    assert map_issue.main(draft) == 0
+    issue = (out / "public" / "issue.md").read_text(encoding="utf-8")
+    assert symptom in issue
+    assert f"| `{finding}` | withheld |" in issue
+    assert row_with_count not in issue
+    assert "figures withheld" in issue
+
+    assert map_issue.main([*draft, "--figures-agreed"]) == 0
+    issue = (out / "public" / "issue.md").read_text(encoding="utf-8")
+    assert row_with_count in issue
+    assert '"lanelets": ' in issue
 
     repro = json.loads((out / "public" / "repro.json").read_text())
     assert repro["reproduces"] == finding

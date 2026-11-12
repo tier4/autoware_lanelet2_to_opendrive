@@ -7,9 +7,10 @@ three levels of disclosure -- each one a deliberate step, never a default:
 
 * **L0 -- fingerprint.** Convert the map, run every instrument, and write
   what was found as *codes and counts*: no element id, no coordinate, no
-  path. ``fingerprint`` writes it. It cannot be used to rebuild any part of
-  the map, but it is still measurement data about someone's map: publishing
-  it needs the owner's agreement once, not a judgement call per report.
+  path. ``fingerprint`` writes it. The counts cannot be used to rebuild any
+  part of the map, but they are measurements of someone's map, so what is
+  written for publication names the findings and withholds the figures
+  until ``draft --figures-agreed`` says the owner agreed to them.
 * **L1 -- synthetic reproducer.** Shrink the map to the few lanelets on which
   the same finding still shows (``reduce``), then renumber, relocate, rotate
   and perturb them (``sanitize``) and confirm the finding survived. The
@@ -963,6 +964,31 @@ def fingerprint_document(
     }
 
 
+def without_figures(document: Dict[str, object]) -> Dict[str, object]:
+    """*document* with every measurement of the source map taken out.
+
+    Which findings occur, and the scrubbed message of each, say what kind of
+    defect was seen. How many lanelets the map has and how many times each
+    finding occurs are measurements of someone's map: they cannot rebuild
+    any of it, but publishing them is the owner's decision, the same as
+    publishing a reproducer is. The qc checker tally stays, because it
+    describes how much of the check ran, and a finding cannot be read
+    without it.
+    """
+    notes = dict(document.get("notes") or {})  # type: ignore[call-overload]
+    notes.pop("route", None)
+    return {
+        **document,
+        "figures_withheld": True,
+        "map_census": {},
+        "notes": notes,
+        "findings": [
+            {**row, "count": None}
+            for row in document.get("findings", [])  # type: ignore[union-attr]
+        ],
+    }
+
+
 def cmd_fingerprint(args: argparse.Namespace, overrides: List[str]) -> int:
     out = Path(args.out)
     conversion = run_conversion(
@@ -970,7 +996,11 @@ def cmd_fingerprint(args: argparse.Namespace, overrides: List[str]) -> int:
     )
     findings = measure_findings(conversion, probe=_probe(args))
     document = fingerprint_document(Path(args.map), conversion, findings, overrides)
-    _write_json(out / "public" / "fingerprint.json", document)
+    # The whole fingerprint is kept privately. What is written for
+    # publication carries no figure about the map until the owner has agreed
+    # to that -- `draft --figures-agreed` puts them back.
+    _write_json(out / "private" / "fingerprint.json", document)
+    _write_json(out / "public" / "fingerprint.json", without_figures(document))
     located = locate(conversion, findings) if conversion.complete else {}
     _write_json(
         out / "private" / "locations.json",
@@ -1274,7 +1304,12 @@ def draft_issue(
         f"- **Conversion**: {'completed' if conversion['completed'] else 'did not complete'}"  # type: ignore[index]
         f" in {conversion['seconds']} s; preprocessing "  # type: ignore[index]
         f"{'ran' if conversion['preprocessing_ran'] else 'did not run'}",  # type: ignore[index]
-        f"- **Map**: `{json.dumps(fingerprint['map_census'], sort_keys=True)}`",
+        (
+            "- **Map**: figures withheld -- the owner has not agreed to "
+            "publishing measurements of the map"
+            if fingerprint.get("figures_withheld")
+            else f"- **Map**: `{json.dumps(fingerprint['map_census'], sort_keys=True)}`"
+        ),
     ]
     notes = fingerprint.get("notes") or {}
     if "qc_checkers" in notes:  # type: ignore[operator]
@@ -1291,7 +1326,8 @@ def draft_issue(
     ]
     for row in fingerprint["findings"]:  # type: ignore[union-attr]
         example = (row["examples"] or [""])[0].replace("|", "\\|")
-        lines.append(f"| `{row['finding']}` | {row['count']} | {example} |")
+        count = "withheld" if row.get("count") is None else row["count"]
+        lines.append(f"| `{row['finding']}` | {count} | {example} |")
     if not fingerprint["findings"]:
         lines.append("| (none) | 0 | |")
     lines += ["", "## 🔁 Reproducer", ""]
@@ -1345,7 +1381,13 @@ def draft_issue(
 def cmd_draft(args: argparse.Namespace, _overrides: List[str]) -> int:
     out = Path(getattr(args, "from"))
     public, private = out / "public", out / "private"
-    fingerprint = _read_json(public / "fingerprint.json")
+    full = private / "fingerprint.json"
+    fingerprint = _read_json(full if full.is_file() else public / "fingerprint.json")
+    if not args.figures_agreed:
+        fingerprint = without_figures(fingerprint)
+    # public/ always matches what the issue says: with the figures only when
+    # the owner agreed to them.
+    _write_json(public / "fingerprint.json", fingerprint)
     repro_path = public / "repro.json"
     repro = _read_json(repro_path) if repro_path.is_file() else None
     (public / "issue.md").write_text(
@@ -1710,6 +1752,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub.add_argument("--from", required=True)
     sub.add_argument("--symptom", help="what was seen, in the reporter's words")
     sub.add_argument("--seen-in", help="the consumer and version it was seen in")
+    sub.add_argument(
+        "--figures-agreed",
+        action="store_true",
+        help="the map's owner agreed to publishing counts measured on the map "
+        "(lanelet counts, how often each finding occurs); withheld otherwise",
+    )
 
     args = parser.parse_args(own)
     return int(args.handler(args, overrides))
