@@ -61,6 +61,46 @@ excerpt that lacks them cannot be converted with it. Only a finding that
 - Only in `neutral` -> the preset hides it. Worth its own L0 note; it is not
   the user's defect.
 
+## 1b. When the report is a place, not a finding
+
+"Something looks wrong around here" arrives as a place -- a few lanelet ids
+read off a map viewer -- and no finding code. Do not guess which finding it
+is. Ask the instruments what they see there:
+
+```bash
+python scripts/map_issue.py near <MAP>.osm --from <OUT>/neutral --lanelets <id>,<id> --hops 2
+```
+
+It lists, for every finding, how many of its located instances touch those
+lanelets and their neighbours.
+
+- **A finding has instances there** -> that is the candidate. Continue with
+  step 2, adding `--lanelets <id>,<id>` so the reduction starts from the
+  place the reporter named rather than from some other instance.
+- **Nothing is reported there** -> either the output is right, or no
+  instrument asks this question yet. Then the work is a new instrument:
+
+  1. Get the symptom as an observation: which consumer, doing what, saw
+     what (a waypoint that turns back, a lane that ends, a load that
+     crashes). Reproduce it by *executing* the consumer on the output, not
+     by reading the `.xodr`.
+  2. Write a **probe**: a script run as
+     `python PROBE out.xodr map.osm out.mapping.json` that prints one JSON
+     object per instance --
+     `{"code": "...", "message": "...", "roads": [...], "lanelets": [...]}`.
+     `code` names the *kind* of defect; `roads`/`lanelets` say where and
+     stay private. Keep it outside the tracked tree.
+  3. **Check the probe before believing it** (the `map-measurement` skill,
+     step 3): it must report the place the reporter named (positive
+     control) and must stay quiet on a part of the map known to be fine
+     (control group). Count how many instances it finds on the whole map --
+     one odd place and four hundred are different reports.
+  4. Pass `--probe <PROBE>` to `fingerprint`, `reduce` and `sanitize`. The
+     finding is `probe:<code>`, and everything below applies unchanged.
+  5. Attach the probe to the issue: it is the definition of the defect, and
+     it contains nothing of the map. A probe that keeps earning its place
+     becomes a built-in instrument with tests.
+
 ## 2. Reduce to the lanelets that still show it
 
 ```bash

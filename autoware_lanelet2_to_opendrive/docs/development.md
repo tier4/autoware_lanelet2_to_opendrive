@@ -391,6 +391,12 @@ python scripts/map_issue.py sanitize --from OUT --finding <instrument:code> -- m
 python scripts/map_issue.py draft --from OUT
 ```
 
+When the report is a place ("it looks wrong around these lanelets") rather
+than a finding, `near --lanelets <ids>` lists what the instruments see there,
+`reduce --lanelets <ids>` starts the reduction there, and `--probe SCRIPT`
+adds an instrument of your own when none of the built-in ones asks the
+question.
+
 `fingerprint` reports findings as codes and counts (no id, no coordinate).
 `reduce` shrinks the map to the lanelets on which the same finding still
 shows. `sanitize` renumbers, relocates, rotates and perturbs them and checks

@@ -101,3 +101,9 @@ the tracked tree (`_lcprobe/` and `.claude/state/` are ignored). Give it:
 Then read [vacuous-checks.md](vacuous-checks.md) and decide what a pass
 would look like if the property were false. A probe that keeps earning its
 place becomes a console script with tests, as `route-fidelity` did.
+
+To put a probe through the same locate / reduce / report procedure as the
+built-in instruments, make it print one JSON object per instance --
+`{"code": "...", "message": "...", "roads": [...], "lanelets": [...]}` --
+and pass it as `python scripts/map_issue.py fingerprint ... --probe <PROBE>`.
+Its findings are `probe:<code>`.

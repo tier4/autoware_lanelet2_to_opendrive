@@ -277,12 +277,93 @@ def test_the_issue_draft_is_built_from_public_documents_only() -> None:
     assert "L0 only" in body
 
 
+# --- a report that starts from a place, and a probe -------------------------
+
+
+def test_findings_near_counts_instances_touching_the_area() -> None:
+    located = {
+        "invariant:a": [[1, 2], [7, 8], [9]],
+        "qc:b": [[100]],
+        "route:c": [],
+    }
+    assert map_issue.findings_near(located, [2, 9, 55]) == {
+        "invariant:a": (2, 3),
+        # Kept, at zero: "nothing here" is the answer that calls for a probe.
+        "qc:b": (0, 1),
+        "route:c": (0, 0),
+    }
+
+
+def _completed_conversion(directory: Path) -> "map_issue.Conversion":
+    (directory / "out.xodr").write_text("<OpenDRIVE></OpenDRIVE>\n", encoding="utf-8")
+    (directory / "out.mapping.json").write_text("{}", encoding="utf-8")
+    return map_issue.Conversion(directory / "m.osm", directory, 0, 0.0, "")
+
+
+def test_a_probe_becomes_an_instrument(tmp_path: Path) -> None:
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import json, sys\n"
+        "assert len(sys.argv) == 4\n"
+        "print('a human-readable line the tool ignores')\n"
+        "print(json.dumps({'code': 'odd', 'message': 'road 12 is odd',"
+        " 'roads': [12], 'lanelets': [3401]}))\n"
+        "print(json.dumps({'code': 'odd', 'message': 'road 13 is odd',"
+        " 'roads': [13]}))\n",
+        encoding="utf-8",
+    )
+    findings = map_issue.measure_findings(
+        _completed_conversion(tmp_path), ["probe"], probe=probe
+    )
+    assert findings.incomplete == {}
+    found = findings.by_key["probe:odd"]
+    assert found.count == 2
+    assert found.public()["examples"] == ["road <n> is odd"]
+    assert found.roads == [[12], [13]]
+    assert found.lanelets == [[3401], []]
+
+
+def test_a_probe_that_fails_is_incomplete_not_clean(tmp_path: Path) -> None:
+    probe = tmp_path / "probe.py"
+    probe.write_text("raise SystemExit('boom')\n", encoding="utf-8")
+    findings = map_issue.measure_findings(
+        _completed_conversion(tmp_path), ["probe"], probe=probe
+    )
+    assert findings.by_key == {}
+    assert "probe" in findings.incomplete
+    assert not map_issue.still_fails(findings, "probe:odd")
+
+
+def test_a_probe_finding_without_a_probe_is_incomplete(tmp_path: Path) -> None:
+    findings = map_issue.measure_findings(_completed_conversion(tmp_path), ["probe"])
+    assert "probe" in findings.incomplete
+
+
 # --- the whole procedure, on a committed map --------------------------------
+
+# Reports every road that carries two or more lanes on one side. It stands in
+# for a real instrument: it is not a defect, but it is located, it survives
+# only while two adjacent lanelets do, and it does not depend on which
+# built-in instruments this checkout has or on what they currently find.
+_PROBE = """
+import json, sys
+import xml.etree.ElementTree as ET
+
+for road in ET.parse(sys.argv[1]).getroot().iter("road"):
+    for side in ("left", "right"):
+        lanes = [l for s in road.iter(side) for l in s.findall("lane")]
+        if len(lanes) >= 2:
+            print(json.dumps({
+                "code": "several_lanes_on_one_side",
+                "message": f"road {road.get('id')} has {len(lanes)} {side} lanes",
+                "roads": [int(road.get("id"))],
+            }))
+"""
 
 
 @pytest.mark.slow
 def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
-    """fingerprint -> reduce -> sanitize -> draft, and the leak check holds.
+    """fingerprint -> near -> reduce -> sanitize -> draft, and nothing leaks.
 
     Runs the real converter, so it needs the project environment; on a host
     that cannot build it (see CLAUDE.md) the pure tests above still run.
@@ -297,33 +378,46 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
         / "junction_fanout_mini.osm"
     )
     out = tmp_path / "report"
+    probe = tmp_path / "probe.py"
+    probe.write_text(_PROBE, encoding="utf-8")
+    finding = "probe:several_lanes_on_one_side"
+    with_probe = ["--probe", str(probe)]
     neutral = ["--", "map=junction_cluster"]
 
     assert (
-        map_issue.main(["fingerprint", str(source), "--out", str(out), *neutral]) == 0
+        map_issue.main(
+            ["fingerprint", str(source), "--out", str(out), *with_probe, *neutral]
+        )
+        == 0
     )
     fingerprint = json.loads((out / "public" / "fingerprint.json").read_text())
     located = json.loads((out / "private" / "locations.json").read_text())
-    candidates = [
-        row["finding"]
-        for row in fingerprint["findings"]
-        if located["lanelets_by_finding"].get(row["finding"])
-    ]
-    if not candidates:
-        # The fixture converts clean: nothing to report, so nothing to
-        # reduce. Point this test at a fixture that still shows a finding.
-        pytest.skip("junction_fanout_mini.osm no longer shows a located finding")
-    finding = candidates[0]
+    assert finding in [row["finding"] for row in fingerprint["findings"]]
+    instances = located["lanelets_by_finding"][finding]
+    assert instances, "the probe's roads were not traced back to lanelets"
+
+    # A reporter who points at one of those lanelets is shown the finding.
+    area = [str(instances[0][0])]
+    assert (
+        map_issue.main(
+            ["near", str(source), "--from", str(out), "--lanelets", ",".join(area)]
+        )
+        == 0
+    )
 
     before = fingerprint["map_census"]["lanelets"]
     assert (
         map_issue.main(
-            ["reduce", str(source), "--from", str(out), "--finding", finding, *neutral]
+            ["reduce", str(source), "--from", str(out), "--finding", finding]
+            + ["--lanelets", ",".join(area), *with_probe, *neutral]
         )
         == 0
     )
     assert (
-        map_issue.main(["sanitize", "--from", str(out), "--finding", finding, *neutral])
+        map_issue.main(
+            ["sanitize", "--from", str(out), "--finding", finding]
+            + [*with_probe, *neutral]
+        )
         == 0
     )
     assert map_issue.main(["draft", "--from", str(out)]) == 0
@@ -331,7 +425,8 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
     repro = json.loads((out / "public" / "repro.json").read_text())
     assert repro["reproduces"] == finding
     assert finding in [row["finding"] for row in repro["findings"]]
-    assert 0 < repro["map_census"]["lanelets"] <= before
+    # Two adjacent lanelets are the least that can make a two-lane road.
+    assert 2 <= repro["map_census"]["lanelets"] < before
     assert sorted(p.name for p in (out / "public").iterdir()) == sorted(
         map_issue.PUBLIC_FILES
     )

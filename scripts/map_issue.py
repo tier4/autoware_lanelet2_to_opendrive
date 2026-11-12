@@ -40,6 +40,11 @@ Usage (inside the project container; ``--`` separates Hydra overrides)::
 ``still-fails`` is the predicate ``reduce`` hands to the delta debugger; it is
 exposed so the same question can be asked of any map by hand.
 
+A report that starts from a place rather than a finding: ``near`` lists the
+findings located around given lanelets, ``reduce --lanelets`` starts the
+reduction there, and ``--probe SCRIPT`` adds an instrument of your own for a
+question none of the built-in ones asks (see :func:`_measure_probe`).
+
 Procedure, and what each step is allowed to conclude:
 ``.claude/skills/map-issue-report/SKILL.md``.
 """
@@ -414,12 +419,72 @@ _MEASURES = {
 }
 
 
+def _measure_probe(conversion: Conversion, findings: Findings, probe: Path) -> None:
+    """Run a user-supplied instrument and record what it prints.
+
+    The built-in instruments answer the questions somebody already thought to
+    ask. A report that starts from "this place behaves oddly" often needs a
+    new one, and a probe is how it joins the procedure without being merged
+    first: it is run as
+
+        python PROBE <out.xodr> <map.osm> <out.mapping.json>
+
+    and prints one JSON object per instance of what it found::
+
+        {"code": "lane_narrows_to_zero", "message": "road 12 lane -1 ...",
+         "roads": [12], "lanelets": [3401]}
+
+    ``code`` names the kind of defect and becomes the finding
+    ``probe:<code>``; ``message`` is scrubbed before it is published;
+    ``roads`` and ``lanelets`` say where and stay private. Lines that are not
+    JSON objects are ignored, so the probe may print a human-readable report
+    as well. A non-zero exit means the probe itself failed.
+    """
+    source = conversion.preprocessed or conversion.map_path
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(probe),
+            str(conversion.xodr),
+            str(source),
+            str(conversion.mapping),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    (conversion.out_dir / "probe.log").write_text(
+        done.stdout + done.stderr, encoding="utf-8"
+    )
+    if done.returncode != 0:
+        tail = (done.stderr.strip().splitlines() or ["no output"])[-1]
+        raise RuntimeError(f"the probe exited {done.returncode}: {tail}")
+    for line in done.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        row = json.loads(line)
+        findings.get("probe", str(row["code"])).add(
+            str(row.get("message", "")),
+            roads=[int(r) for r in row.get("roads", ())],
+            lanelets=[int(i) for i in row.get("lanelets", ())],
+        )
+
+
 def measure_findings(
-    conversion: Conversion, instruments: Iterable[str] = INSTRUMENTS
+    conversion: Conversion,
+    instruments: Optional[Iterable[str]] = None,
+    probe: Optional[Path] = None,
 ) -> Findings:
-    """Run *instruments* over *conversion* and collect what they report."""
+    """Run *instruments* over *conversion* and collect what they report.
+
+    With no *instruments*, every built-in one runs, and the *probe* too when
+    one is given.
+    """
     findings = Findings()
-    wanted = set(instruments)
+    if instruments is None:
+        wanted = set(INSTRUMENTS) | ({"probe"} if probe is not None else set())
+    else:
+        wanted = set(instruments)
     _measure_crash(conversion, findings)
     if not conversion.complete:
         for name in sorted(wanted - {"crash"}):
@@ -427,7 +492,12 @@ def measure_findings(
         return findings
     for name in sorted(wanted - {"crash"}):
         try:
-            _MEASURES[name](conversion, findings)
+            if name == "probe":
+                if probe is None:
+                    raise ValueError("a probe: finding needs --probe PATH")
+                _measure_probe(conversion, findings, probe)
+            else:
+                _MEASURES[name](conversion, findings)
         except Exception as failure:  # an instrument failing is a datum
             findings.incomplete[name] = scrub(f"{type(failure).__name__}: {failure}")
     return findings
@@ -854,7 +924,7 @@ def cmd_fingerprint(args: argparse.Namespace, overrides: List[str]) -> int:
     conversion = run_conversion(
         Path(args.map), out / "private" / "conversion", overrides, args.timeout
     )
-    findings = measure_findings(conversion)
+    findings = measure_findings(conversion, probe=_probe(args))
     document = fingerprint_document(Path(args.map), conversion, findings, overrides)
     _write_json(out / "public" / "fingerprint.json", document)
     located = locate(conversion, findings) if conversion.complete else {}
@@ -894,7 +964,7 @@ def cmd_still_fails(args: argparse.Namespace, overrides: List[str]) -> int:
         # and calling it interesting is how a reduction ends on a broken map.
         print("not interesting: the conversion did not complete")
         return 1
-    findings = measure_findings(conversion, [instrument])
+    findings = measure_findings(conversion, [instrument], probe=_probe(args))
     if instrument in findings.incomplete:
         print(f"not interesting: {findings.incomplete[instrument]}")
         return 1
@@ -932,19 +1002,26 @@ def cmd_reduce(args: argparse.Namespace, overrides: List[str]) -> int:
         command += ["--match", args.match]
     if args.timeout:
         command += ["--timeout", str(args.timeout)]
+    if _probe(args) is not None:
+        command += ["--probe", str(_probe(args))]
     command += ["{map}", "--", *overrides]
 
     def log(message: str) -> None:
         print(message, file=sys.stderr, flush=True)
 
+    starts: List[Optional[List[int]]]
     destination = out / "private" / "reduced.osm"
-    if not instances:
+    if args.lanelets:
+        # The reporter pointed at a place. Start there instead of at an
+        # instance the fingerprint located: "around here" is the evidence.
+        starts = [expand(source, args.lanelets, hops) for hops in args.hops]
+    elif not instances:
         log(
             f"reduce: {args.finding} has no located instance (a crash has none); "
             "starting from the whole map. Every evaluation converts a large "
             "candidate until the search has narrowed."
         )
-        starts: List[Optional[List[int]]] = [None]
+        starts = [None]
     else:
         # The smallest instance, by size then by ids: the cheapest start, and
         # the same choice on every run.
@@ -1012,7 +1089,7 @@ def cmd_sanitize(args: argparse.Namespace, overrides: List[str]) -> int:
         conversion = run_conversion(
             repro, private / f"sanitize-{level}", overrides, args.timeout
         )
-        findings = measure_findings(conversion, [instrument])
+        findings = measure_findings(conversion, [instrument], probe=_probe(args))
         survived = (
             (instrument == "crash" or conversion.complete)
             and instrument not in findings.incomplete
@@ -1024,7 +1101,7 @@ def cmd_sanitize(args: argparse.Namespace, overrides: List[str]) -> int:
         )
         if not survived:
             continue
-        everything = measure_findings(conversion)
+        everything = measure_findings(conversion, probe=_probe(args))
         _write_json(
             public / "repro.json",
             {
@@ -1206,6 +1283,56 @@ def _hops(text: str) -> List[int]:
     return [int(part) for part in text.split(",") if part]
 
 
+def _probe(args: argparse.Namespace) -> Optional[Path]:
+    value = getattr(args, "probe", None)
+    return Path(value).resolve() if value else None
+
+
+def findings_near(
+    lanelets_by_finding: Dict[str, List[List[int]]], area: Iterable[int]
+) -> Dict[str, Tuple[int, int]]:
+    """For each finding, how many of its located instances touch *area*.
+
+    Returns ``{finding: (instances in the area, located instances)}`` for
+    every finding, including those with none in the area: "no instrument
+    reports anything here" is the answer that says a new instrument is
+    needed, so it has to be visible rather than an empty list.
+    """
+    here = set(area)
+    return {
+        finding: (sum(1 for ids in instances if here & set(ids)), len(instances))
+        for finding, instances in sorted(lanelets_by_finding.items())
+    }
+
+
+def cmd_near(args: argparse.Namespace, _overrides: List[str]) -> int:
+    out = Path(getattr(args, "from"))
+    locations = _read_json(out / "private" / "locations.json")
+    if locations.get("preprocessing_ran"):
+        print(
+            "near: the fingerprint was taken with preprocessing on, so its "
+            "lanelet ids are those of the preprocessed map; ids read off the "
+            "input map may not match.",
+            file=sys.stderr,
+        )
+    area = expand(Path(args.map), args.lanelets, args.hops)
+    missing = sorted(set(args.lanelets) - set(area))
+    if missing:
+        print(f"near: not lanelets of this map: {missing}", file=sys.stderr)
+        return 2
+    print(f"{len(args.lanelets)} lanelets + {args.hops} rounds = {len(area)} lanelets")
+    counts = findings_near(locations.get("lanelets_by_finding", {}), area)  # type: ignore[arg-type]
+    for finding, (inside, total) in counts.items():
+        print(f"  {finding}: {inside} of {total} located instances in this area")
+    if not any(inside for inside, _total in counts.values()):
+        print(
+            "  no instrument reports anything in this area. Either the output "
+            "is right here, or no instrument asks this question yet -- write a "
+            "probe (see `fingerprint --probe`)."
+        )
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     # The qc bundle logs one INFO line per check to the root logger.
     logging.disable(logging.INFO)
@@ -1221,16 +1348,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sub.set_defaults(handler=handler)
         return sub
 
+    probe_help = (
+        "a script run as `python PROBE out.xodr map.osm out.mapping.json` that "
+        "prints one JSON object per instance; its findings are `probe:<code>`"
+    )
+
     sub = add("fingerprint", cmd_fingerprint, "convert MAP and write its L0 report")
     sub.add_argument("map")
     sub.add_argument("--out", required=True, help="directory for public/ and private/")
     sub.add_argument("--timeout", type=float, help="seconds for the conversion")
+    sub.add_argument("--probe", help=probe_help)
+
+    sub = add("near", cmd_near, "list the findings located around given lanelets")
+    sub.add_argument("map")
+    sub.add_argument("--from", required=True, help="the fingerprint's --out directory")
+    sub.add_argument(
+        "--lanelets", type=_hops, required=True, help="ids, comma-separated"
+    )
+    sub.add_argument("--hops", type=int, default=2, help="neighbour rounds (default 2)")
 
     sub = add("still-fails", cmd_still_fails, "exit 0 when MAP still shows the finding")
     sub.add_argument("map")
     sub.add_argument("--finding", required=True, help="instrument:code")
     sub.add_argument("--match", help="regex an example message must match")
     sub.add_argument("--timeout", type=float)
+    sub.add_argument("--probe", help=probe_help)
 
     sub = add("reduce", cmd_reduce, "shrink MAP to the lanelets that still show it")
     sub.add_argument("map")
@@ -1244,8 +1386,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="neighbour rounds to try, in order (default 1,2,4)",
     )
     sub.add_argument("--timeout", type=float, help="seconds per evaluation")
+    sub.add_argument("--probe", help=probe_help)
+    sub.add_argument(
+        "--lanelets",
+        type=_hops,
+        help="start from these lanelet ids instead of a located instance",
+    )
 
     sub = add("sanitize", cmd_sanitize, "rebuild the reduced map as a synthetic one")
+    sub.add_argument("--probe", help=probe_help)
     sub.add_argument("--from", required=True, help="the directory `reduce` wrote into")
     sub.add_argument("--finding", required=True, help="instrument:code")
     sub.add_argument("--match", help="regex an example message must match")
