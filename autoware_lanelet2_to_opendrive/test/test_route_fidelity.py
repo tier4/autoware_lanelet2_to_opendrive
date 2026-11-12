@@ -24,7 +24,11 @@ written naively:
 
 from pathlib import Path
 
-from autoware_lanelet2_to_opendrive.route_fidelity import EmittedNetwork, measure
+from autoware_lanelet2_to_opendrive.route_fidelity import (
+    EmittedNetwork,
+    measure,
+    transitions_required,
+)
 
 NISHISHINJUKU_MIN_SUCCESSIONS = 900
 """Below this the measurement did not run; the map states roughly 970."""
@@ -131,6 +135,51 @@ def test_a_connector_with_no_backing_lanelet_is_walked_through(
     assert network.transitions(walk_through={2}) == {((1, 1), (3, 1))}
     # Counting the connector as a node is the mistake this pins against.
     assert ((1, 1), (2, 1)) in network.transitions(walk_through=set())
+
+
+# ---------------------------------------------------------------------------
+# Which successions need a transition at all
+#
+# A lanelet can be emitted on several roads: the mapping names one
+# ``(road, lane)`` for it and lists the rest. Two consecutive lanelets inside a
+# junction are routinely emitted *together* on one connecting road that spans
+# the whole manoeuvre, and each of them on other connecting roads as well.
+# Such a succession is realised inside the road they share. It needs no link,
+# and no link exists for it.
+# ---------------------------------------------------------------------------
+
+
+def test_lanelets_on_different_roads_need_a_transition() -> None:
+    """Two lanelets with one slot each, on different roads: one transition."""
+    assert transitions_required([(1, 1)], [(2, 1)]) == {((1, 1), (2, 1))}
+
+
+def test_lanelets_on_the_same_slot_need_none() -> None:
+    """Both lanelets were merged into one lane of one road."""
+    assert transitions_required([(1, 1)], [(1, 1)]) is None
+
+
+def test_any_slot_pair_realises_a_succession() -> None:
+    """A stage duplicated onto two roads may be reached on either copy."""
+    assert transitions_required([(1, 1)], [(2, 1), (3, 1)]) == {
+        ((1, 1), (2, 1)),
+        ((1, 1), (3, 1)),
+    }
+
+
+def test_lanelets_sharing_one_of_several_slots_need_no_transition() -> None:
+    """Sharing a slot is enough; the other slots do not make it a requirement.
+
+    Road 10 spans a manoeuvre through both lanelets. The second lanelet is
+    also the first stage of another manoeuvre, emitted on road 11. Roads 10
+    and 11 are alternatives leaving the same junction entry, not consecutive
+    roads, so no transition from road 10 to road 11 exists or should. Asking
+    for one reports the succession as missing although road 10 carries it
+    whole. Measured on a 36,249-lanelet map: 443 of the 446 successions
+    reported missing were this case, and the other 3 were real.
+    """
+    assert transitions_required([(10, 1)], [(11, 1), (10, 1)]) is None
+    assert transitions_required([(10, 1), (12, 1)], [(10, 1)]) is None
 
 
 def test_shipped_conversion_preserves_the_stated_successions(

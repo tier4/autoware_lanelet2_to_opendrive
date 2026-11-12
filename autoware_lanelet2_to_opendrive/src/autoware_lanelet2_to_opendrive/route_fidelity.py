@@ -19,7 +19,8 @@ emitted as, read from the conversion's mapping file. Two cases are not
 transitions and are reported separately rather than counted as losses:
 
 * a succession whose two lanelets land on the *same* slot is internal to one
-  road and carries no link;
+  road and carries no link. With several slots each, sharing one of them is
+  enough: the succession is carried inside the road they share;
 * a lanelet can be emitted as *several* slots -- a duplicated fork stage is
   one lanelet on several connecting roads -- and the succession is then
   satisfied by **any** of the slot pairs, not by all of them. Treating the
@@ -247,6 +248,28 @@ class RouteFidelity:
         return (len(self.missing) / self.stated) if self.stated else 0.0
 
 
+def transitions_required(
+    sources: Sequence[Slot], targets: Sequence[Slot]
+) -> Optional[frozenset]:
+    """The slot pairs any one of which would realise a succession.
+
+    ``sources`` and ``targets`` are the slots the two lanelets of a succession
+    were emitted as. Returns ``None`` when the succession is internal to one
+    road and so needs no transition at all.
+
+    Sharing **one** slot is enough for that. A lanelet inside a junction is
+    typically emitted on a connecting road that spans a whole manoeuvre and on
+    further connecting roads for the other manoeuvres it is a stage of. When
+    the two lanelets share one of those roads the succession is carried inside
+    it, and the remaining slots name alternatives leaving the same entry, not
+    roads that follow one another. Requiring a transition between them reports
+    a succession the file carries whole as missing.
+    """
+    if set(sources) & set(targets):
+        return None
+    return frozenset((source, target) for source in sources for target in targets)
+
+
 def measure(
     map_path: Path,
     xodr_path: Path,
@@ -278,16 +301,11 @@ def measure(
             if not sources or not targets:
                 result.unmapped += 1
                 continue
-            options = {
-                (source, target)
-                for source in sources
-                for target in targets
-                if source != target
-            }
-            if not options:
+            options = transitions_required(sources, targets)
+            if options is None:
                 result.internal += 1
                 continue
-            successions.append(Succession(lanelet.id, following.id, frozenset(options)))
+            successions.append(Succession(lanelet.id, following.id, options))
 
     network = EmittedNetwork(xodr_path)
     backed = {slot[0] for slot in primary.values()}
