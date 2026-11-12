@@ -520,13 +520,11 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
         )
         == 0
     )
-    assert (
-        map_issue.main(
-            ["sanitize", "--from", str(out), "--finding", finding]
-            + [*with_probe, *neutral]
-        )
-        == 0
-    )
+    sanitize = ["sanitize", "--from", str(out), "--finding", finding]
+    # Without the owner's agreement no reproducer is written at all.
+    assert map_issue.main([*sanitize, *with_probe, *neutral]) == 2
+    assert not (out / "public" / "repro.osm").exists()
+    assert map_issue.main([*sanitize, "--owner-agreed", *with_probe, *neutral]) == 0
     symptom = "Two lanes are emitted side by side on one road at a fork."
     assert (
         map_issue.main(

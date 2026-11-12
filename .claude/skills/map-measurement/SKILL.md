@@ -1,6 +1,6 @@
 ---
 name: map-measurement
-description: Measurement-driven procedure for working on the converter -- turn a question about conversion quality into a number with a stated basis, check the instrument before believing it, locate the defect, fix it test-first, and re-measure both states the same way. Use when asked how good the conversion is, when comparing output before and after a change, when investigating a defect seen on a real map, and before quoting any figure about converter output in a PR, issue or report.
+description: How to measure this converter's output on a real map without fooling yourself -- which instrument answers which question, how to check the instrument before believing its number, how to compare two code states, and how to write a figure down with its basis. Use this before quoting any number about converter output in a PR, issue, report or chat ("how many errors", "did it improve", "is it accurate enough"), when comparing output before and after a change, when a result looks too good, too bad or exactly zero, when writing or trusting a checker, probe or test that inspects an .xodr, and when asked how good the conversion is -- even if nobody said "measure".
 ---
 
 # Measuring the conversion on a real map
@@ -14,10 +14,20 @@ question -> instrument -> baseline -> check the instrument -> locate
          -> make it small -> red/green fix -> re-measure both states -> second map -> record
 ```
 
-Instruments, their commands and what each one cannot see:
-[instruments.md](instruments.md). Checks that pass while verifying nothing:
-[vacuous-checks.md](vacuous-checks.md). Read the second before writing a
-checker, a probe, or the sentence "0 found".
+You rarely need the whole loop. Start from where you are:
+
+| you are about to... | read | and open |
+| --- | --- | --- |
+| answer "how good is it?" / "is it good enough?" | §1, §2, §3 | [instruments.md](instruments.md) to pick the instrument |
+| write a number into a PR, issue or report | §3, §8 | -- |
+| say "0 found", "no change" or "all N pass" | §3 | [vacuous-checks.md](vacuous-checks.md) -- every row is a way this was wrong before |
+| compare before and after a change | §6, §8 | [instruments.md](instruments.md) for what each instrument cannot see |
+| chase a defect an instrument reported | §4, §5 | -- |
+| write a checker, a probe or a test that inspects an `.xodr` | §3 | both |
+| handle a defect on a map that cannot be shared | -- | the `map-issue-report` skill instead |
+
+The sections are numbered in the order of the full loop, so a later one may
+assume an earlier one was done; when you jump in, skim the ones above it.
 
 ## 1. State the question as a quantity
 

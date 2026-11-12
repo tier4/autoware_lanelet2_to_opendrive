@@ -1,6 +1,6 @@
 ---
 name: map-issue-report
-description: Procedure for a report of the form "on this map, around here, I see this defect" when the map cannot be uploaded -- resolve the place to lanelets, ask the instruments what they see there, add a probe when none of them sees the symptom, reduce the map to the few lanelets that still show it, rebuild those as a synthetic map, verify nothing of the source leaks, and draft the issue. Use when a defect is seen on a private or customer map, when someone points at a place on a map and describes a symptom, when asked to file an issue without attaching the map, or when a real-map defect needs a small reproducer.
+description: Turns a report of the form "on this map, around here, I see this defect" into a filed issue without the map leaving its owner -- resolves the place to lanelets, asks the instruments what they see there, adds a probe when none of them sees the symptom, reduces the map to the few lanelets that still show it, rebuilds those as a synthetic map, verifies nothing of the source leaks, and drafts the issue. Use this whenever someone points at a place on a Lanelet2 or converted OpenDRIVE map and says something looks wrong there (a lanelet id, a road id, coordinates, a simulator position), whenever a defect shows on a private or customer map that cannot be shared or uploaded, whenever asked to file or draft an issue about converter output on a specific map, and whenever a real-map defect needs a small reproducer -- even if the request does not mention an issue or a reproducer.
 ---
 
 # "On this map, around here, I see this"
@@ -24,12 +24,18 @@ if they do not know, stop at L0.
 | **L1** | `public/repro.osm` | a few lanelets, renumbered, relocated, rotated, perturbed |
 | **L2** | `private/reduced.osm` | the same lanelets with real ids and coordinates -- never public |
 
-Run everything in the project container from the repository root
+The tool is `scripts/map_issue.py` in this repository rather than in the
+skill folder, because it imports the converter and its instruments and so
+only runs in this repository's environment. Run everything in the project
+container from the repository root
 (`docker compose --profile dev-native run --rm dev-native`, see
 `docs/docker.md`), with the map mounted read-only. `--` separates the
 converter's Hydra overrides. Keep `OUT` **outside the repository**:
 `private/` holds map data, and the commit sequence in `CLAUDE.md` starts
 with `git add -A`.
+
+The first time, read [example.md](example.md): one report carried through
+every step, with the output each command printed and how it was read.
 
 ## 1. Convert and fingerprint
 
@@ -91,11 +97,14 @@ this question yet. Find out by measuring:
    `{"code": "...", "message": "...", "roads": [...], "lanelets": [...]}`.
    `code` names the *kind* of defect; `roads`/`lanelets` say where and stay
    private.
-3. **Check the probe before believing it** (the `map-measurement` skill,
-   step 3). It must report the place the reporter named (positive control),
-   stay quiet on a part of the map known to be fine (control group), and
-   you must know how many instances it finds on the whole map -- one odd
-   place and four hundred are different reports.
+3. **Check the probe before believing it.** A new instrument is wrong more
+   often than the converter is, and a probe that fires everywhere or
+   nowhere proves nothing about the place. Three checks, all cheap:
+   - it reports the place the reporter named (positive control);
+   - it stays quiet on a part of the map known to be fine (control group);
+   - you know how many instances it finds on the whole map -- one odd
+     place and four hundred are different reports, and an implausible
+     count is a statement about the probe.
 4. Take both fingerprints again with `--probe <PROBE>`, and re-run `near`.
    The finding is `probe:<code>`; pass `--probe` to every later command.
 5. Attach the probe to the issue: it is the definition of the defect and
@@ -129,10 +138,13 @@ each evaluation converts a small map.
 
 ## 5. Rebuild it as a synthetic map (L1)
 
-Only with the owner's agreement to publish a reproducer.
+Only with the owner's agreement to publish a reproducer. The command
+refuses to run without `--owner-agreed`; pass it when the reporter has told
+you the owner agreed, never because an earlier report had it. Without that
+agreement skip to step 6: the report is L0.
 
 ```bash
-python scripts/map_issue.py sanitize --from <OUT>/neutral \
+python scripts/map_issue.py sanitize --from <OUT>/neutral --owner-agreed \
     --finding <instrument:code> -- <the neutral overrides>
 ```
 

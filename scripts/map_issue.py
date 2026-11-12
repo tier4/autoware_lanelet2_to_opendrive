@@ -1071,6 +1071,19 @@ def cmd_sanitize(args: argparse.Namespace, overrides: List[str]) -> int:
     from rebuild_as_synthetic import rebuild  # type: ignore[import-not-found]
 
     out = Path(getattr(args, "from"))
+    if not args.owner_agreed:
+        # A reproducer keeps the layout of real lanelets, so producing one is
+        # the step that needs the map owner's agreement. Asking for the flag
+        # puts that question in front of whoever runs this, instead of
+        # leaving it to a sentence in a procedure that may not be read.
+        print(
+            "sanitize: a reproducer carries the layout of a few real lanelets. "
+            "Produce one only when the owner of the map has agreed to publish "
+            "it, and then pass --owner-agreed. Without that agreement, report "
+            "at L0: run `draft`.",
+            file=sys.stderr,
+        )
+        return 2
     public, private = out / "public", out / "private"
     reduced = private / "reduced.osm"
     source = Path(_read_json(private / "locations.json")["source"])  # type: ignore[arg-type]
@@ -1628,6 +1641,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub.add_argument("--from", required=True, help="the directory `reduce` wrote into")
     sub.add_argument("--finding", required=True, help="instrument:code")
     sub.add_argument("--match", help="regex an example message must match")
+    sub.add_argument(
+        "--owner-agreed",
+        action="store_true",
+        help="the map's owner agreed to publishing a reproducer (required)",
+    )
     sub.add_argument("--to-lat", type=float, default=DEFAULT_PLACEMENT[0])
     sub.add_argument("--to-lon", type=float, default=DEFAULT_PLACEMENT[1])
     sub.add_argument(
