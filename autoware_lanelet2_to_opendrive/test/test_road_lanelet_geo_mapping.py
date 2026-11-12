@@ -890,11 +890,6 @@ class TestAssignLaneIds:
         )
         assert dict(assigned) == {20: -1, 10: 1, 11: 2}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the walk hands out the lane ids from the first one, whatever "
-        "the reference lanelet is",
-    )
     def test_vehicle_reference_lanelet_keeps_lane_one(self) -> None:
         """LHT, lanelet 10 is a driving lane and matched the reference line.
 
@@ -905,11 +900,6 @@ class TestAssignLaneIds:
         )
         assert dict(assigned) == {10: 1, 11: 2, 20: -1}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the walk hands out the lane ids from the first one, whatever "
-        "the reference lanelet is",
-    )
     def test_an_unreachable_attached_lane_does_not_shift_the_others(self) -> None:
         """The attached lanelets share no boundary the walk can follow.
 
@@ -921,11 +911,6 @@ class TestAssignLaneIds:
         )
         assert dict(assigned) == {10: 1, 11: 2}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the walk hands out the lane ids from the first one, whatever "
-        "the reference lanelet is",
-    )
     def test_right_hand_road_with_a_vehicle_reference_lanelet(self) -> None:
         """RHT mirrors it: the reference lanelet is lane -1, the attached lane 1."""
         assigned = _assign_lane_ids(
@@ -933,11 +918,6 @@ class TestAssignLaneIds:
         )
         assert dict(assigned) == {10: -1, 11: -2, 20: 1}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the walk hands out the lane ids from the first one, whatever "
-        "the reference lanelet is",
-    )
     def test_several_attached_lanes_are_numbered_outward(self) -> None:
         assigned = _assign_lane_ids(
             10, [-2, -1, 1], False, self._chain(10), self._chain(10, 20, 21)
