@@ -56,8 +56,12 @@ grep -E "Traceback|Checkers :|Issues   :|Structural invariants|FINAL RESULT" <lo
 
 ## Reading each one correctly
 
-**qc.** A schema violation makes every checker that requires a valid document
-skip, so one defect can silence most of the bundle and leave "0 errors".
+**qc.** Which checker revision ran is part of the basis: read
+`asam_qc_opendrive-*.dist-info/direct_url.json` in the environment and
+compare it with the revision `pyproject.toml` pins. An environment that was
+built before the pin moved keeps the old checker until it is synced, and an
+`errored` checker is the usual sign. A schema violation makes every checker
+that requires a valid document skip, so one defect can silence most of the bundle and leave "0 errors".
 There is no configuration in which all 26 run (declaring 1.7 skips one
 1.8-only rule). When a fix lets a checker run that was skipped before, the
 total can go *up*; compare per rule, and recompute every share.

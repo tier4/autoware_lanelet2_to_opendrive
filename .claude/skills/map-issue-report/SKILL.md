@@ -119,9 +119,23 @@ does **not** go through that instrument:
 Then count: of the finding's N instances on the map, how many have the same
 shape as the one at the place? The issue is about those, not about N.
 
-Three outcomes:
+Your own checking script is an instrument too, and the newest one in the
+room. A script that measures the source lanelet's "width" between the end
+points of its two bounds will report 22 m for a 3 m lane whose bounds end
+at different places, and conclude the map is at fault. Before a script's
+verdict decides the outcome, show it one case where you know the answer.
+
+Four outcomes:
 
 - **The output is wrong** -> continue to step 4.
+- **The input is unusual, and the output misrepresents it** -> still the
+  converter's issue. A lanelet whose bounds differ in length, a point shared
+  by an odd number of ways, an elevation step in the source: these are
+  things real maps contain. Ask what the source *says* (the shape a reader
+  of the Lanelet2 map would draw) and what the output says. If they differ,
+  the converter turned a strange input into a wrong output, and "the map is
+  like that" is a note for the map's author *in addition to* the issue, not
+  instead of it.
 - **The instrument is wrong** -> the report changes subject. It is now an
   issue about the instrument, the same steps produce a reproducer for the
   false positive, and whether it explains what the reporter saw becomes a
@@ -133,6 +147,15 @@ Before reducing a private map, also try the public one: convert
 `autoware_lanelet2_to_opendrive/test/data/nishishinjuku.osm` and see whether
 the same finding, of the same shape, shows there. If it does, build the
 issue on the public map and the private one never has to be reduced at all.
+"The same shape" is a claim to check, not to assume: a fork and a merge
+trigger many of the same code paths and not all of them. If the public
+reproducer is a fork and the reported place is a merge, say so in the issue.
+
+A reduced excerpt is one more copy of the map, even when it never leaves
+`private/`. Do not cut the private map out of curiosity, "so it is ready if
+the owner agrees", or to speed up your own investigation when the full
+conversion already answers the question. Reduce it when a reproducer was
+agreed and the public map does not show the finding.
 
 ## 3. No instrument sees it: write a probe
 
@@ -140,8 +163,16 @@ Either the output is right and the consumer is wrong, or no instrument asks
 this question yet. Find out by measuring:
 
 1. Reproduce the symptom on the full output, at the place, by executing the
-   consumer. If it does not reproduce, the report is about something else
-   (their consumer version, their conversion); say so and stop.
+   consumer -- or, when the consumer is not available, by reading from the
+   output the quantity the symptom is about (a width, a length, a height).
+   If it does not reproduce **at the place**, say so plainly, and then look
+   for the same symptom on the whole output: a mistyped coordinate or a
+   position from another frame is more common than a phantom. Whatever you
+   find elsewhere is a finding in its own right -- check it like any other
+   -- and whether it is what the reporter saw is a question for them, not
+   something to assume in the issue. Only when nothing like the symptom
+   exists anywhere is the report about something else (their consumer
+   version, their conversion).
 2. Write a **probe** outside the tracked tree: a script run as
    `python PROBE out.xodr map.osm out.mapping.json` that prints one JSON
    object per instance --

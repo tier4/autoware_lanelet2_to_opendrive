@@ -30,15 +30,24 @@ be published -- yes, the reporter said so.
 ```
 $ python scripts/map_issue.py fingerprint nishishinjuku.osm --out OUT -- map=junction_cluster
 conversion: completed in 132 s
-  qc checkers: {'total': 26, 'completed': 24, 'skipped': 1, 'errored': 1, 'errors_matching_the_ignore_list': 0}
+  qc checkers: {'total': 26, 'completed': 25, 'skipped': 1, 'errored': 0, 'errors_matching_the_ignore_list': 0}
   qc:asam.net:xodr:1.7.0:lane_smoothness.contact_point_no_horizontal_gaps  x1  (1 located)
   route:missing_succession  x9  (9 located)
 ```
 
-How it was read: the conversion completed, so nothing is a crash. One qc
-checker **errored**, so "1 qc error" is a lower bound and the issue has to
-say so. Two kinds of finding, both located. This map's preset is the neutral
-one already, so one fingerprint was enough.
+How it was read: the conversion completed, so nothing is a crash. 25 of the
+26 qc checkers completed; the one skipped is a rule for OpenDRIVE 1.8 and
+the file declares 1.7, so "1 qc error" speaks for everything that applies.
+Two kinds of finding, both located. This map's preset is the neutral one
+already, so one fingerprint was enough.
+
+The first time this was run it read `'completed': 24, ..., 'errored': 1`,
+and the note above said "a lower bound". The checker that errored was fixed
+in the revision `pyproject.toml` pins; the container's environment still
+held the previous one. If a checker errors, look at
+`asam_qc_opendrive-*.dist-info/direct_url.json` in the environment before
+writing the tally down: after the pin moves, the first run measures the old
+checker (`uv sync --frozen --dev`, then read the second run).
 
 ## 2. What do the instruments see at the place?
 
