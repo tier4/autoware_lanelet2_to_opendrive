@@ -381,21 +381,21 @@ Three rules carry most of the weight:
 
 ### Reporting a defect on a map you cannot share
 
-`scripts/map_issue.py` turns "it fails on my map" into an issue a maintainer
-can act on, without the map leaving its owner:
+`scripts/map_issue.py` turns "on this map, around here, I see this" into an
+issue a maintainer can act on, without the map leaving its owner:
 
 ```bash
 python scripts/map_issue.py fingerprint MAP.osm --out OUT -- map=junction_cluster
-python scripts/map_issue.py reduce MAP.osm --from OUT --finding <instrument:code> -- map=junction_cluster
+python scripts/map_issue.py near MAP.osm --from OUT --xy=<X>,<Y>
+python scripts/map_issue.py reduce MAP.osm --from OUT --finding <instrument:code> --place -- map=junction_cluster
 python scripts/map_issue.py sanitize --from OUT --finding <instrument:code> -- map=junction_cluster
-python scripts/map_issue.py draft --from OUT
+python scripts/map_issue.py draft --from OUT --symptom "<what was seen>"
 ```
 
-When the report is a place ("it looks wrong around these lanelets") rather
-than a finding, `near --lanelets <ids>` lists what the instruments see there,
-`reduce --lanelets <ids>` starts the reduction there, and `--probe SCRIPT`
-adds an instrument of your own when none of the built-in ones asks the
-question.
+`near` takes the place in whatever form the reporter has it -- `--lanelets`,
+`--roads`, `--xy` (the `.xodr`'s frame), `--carla-xy` or `--latlon` -- and
+lists what each instrument sees there. `--probe SCRIPT` adds an instrument
+of your own when none of the built-in ones sees the symptom.
 
 `fingerprint` reports findings as codes and counts (no id, no coordinate).
 `reduce` shrinks the map to the lanelets on which the same finding still

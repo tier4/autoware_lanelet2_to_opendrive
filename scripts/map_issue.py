@@ -40,10 +40,14 @@ Usage (inside the project container; ``--`` separates Hydra overrides)::
 ``still-fails`` is the predicate ``reduce`` hands to the delta debugger; it is
 exposed so the same question can be asked of any map by hand.
 
-A report that starts from a place rather than a finding: ``near`` lists the
-findings located around given lanelets, ``reduce --lanelets`` starts the
-reduction there, and ``--probe SCRIPT`` adds an instrument of your own for a
-question none of the built-in ones asks (see :func:`_measure_probe`).
+The usual report is "on this map, around here, I see this". ``near`` takes
+"here" in whatever form the reporter has it -- lanelet ids, road ids or a
+position in the converted file, a simulator position, a latitude and
+longitude -- and lists what each instrument sees there; ``reduce --place``
+starts the reduction there; ``--probe SCRIPT`` adds an instrument of your own
+when none of the built-in ones sees the symptom (see :func:`_measure_probe`);
+and ``draft --symptom`` puts the reporter's words into the issue, under the
+same leak check as everything else.
 
 Procedure, and what each step is allowed to conclude:
 ``.claude/skills/map-issue-report/SKILL.md``.
@@ -55,6 +59,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -1011,10 +1016,13 @@ def cmd_reduce(args: argparse.Namespace, overrides: List[str]) -> int:
 
     starts: List[Optional[List[int]]]
     destination = out / "private" / "reduced.osm"
-    if args.lanelets:
+    place = args.lanelets
+    if args.place:
+        place = _read_json(out / "private" / "place.json")["lanelets"]  # type: ignore[assignment]
+    if place:
         # The reporter pointed at a place. Start there instead of at an
         # instance the fingerprint located: "around here" is the evidence.
-        starts = [expand(source, args.lanelets, hops) for hops in args.hops]
+        starts = [expand(source, place, hops) for hops in args.hops]
     elif not instances:
         log(
             f"reduce: {args.finding} has no located instance (a crash has none); "
@@ -1165,13 +1173,28 @@ def cmd_leak_check(args: argparse.Namespace, _overrides: List[str]) -> int:
 
 
 def draft_issue(
-    fingerprint: Dict[str, object], repro: Optional[Dict[str, object]]
+    fingerprint: Dict[str, object],
+    repro: Optional[Dict[str, object]],
+    symptom: Optional[str] = None,
+    seen_in: Optional[str] = None,
 ) -> str:
-    """The issue body, from the public documents alone."""
+    """The issue body, from the public documents and the reporter's words."""
     converter = fingerprint["converter"]  # type: ignore[assignment]
     conversion = fingerprint["conversion"]  # type: ignore[assignment]
     lines: List[str] = []
     target = repro["reproduces"] if repro else None
+    lines += ["## 👀 Symptom", ""]
+    if symptom:
+        lines += [symptom, ""]
+        if seen_in:
+            lines += [f"Seen in: {seen_in}", ""]
+    else:
+        lines += [
+            "<!-- What was seen, in which consumer, doing what. Describe the "
+            "kind of place (a merge, a T-junction, a lane drop) -- never the "
+            "place itself. -->",
+            "",
+        ]
     lines += ["## 🐛 Finding", ""]
     if target:
         lines += [f"`{target}` -- reproduced on the attached `repro.osm`.", ""]
@@ -1267,7 +1290,9 @@ def cmd_draft(args: argparse.Namespace, _overrides: List[str]) -> int:
     fingerprint = _read_json(public / "fingerprint.json")
     repro_path = public / "repro.json"
     repro = _read_json(repro_path) if repro_path.is_file() else None
-    (public / "issue.md").write_text(draft_issue(fingerprint, repro), encoding="utf-8")
+    (public / "issue.md").write_text(
+        draft_issue(fingerprint, repro, args.symptom, args.seen_in), encoding="utf-8"
+    )
     source = Path(_read_json(private / "locations.json")["source"])  # type: ignore[arg-type]
     reduced = private / "reduced.osm"
     checks = leak_check(public, source, reduced if reduced.is_file() else None)
@@ -1281,6 +1306,11 @@ def cmd_draft(args: argparse.Namespace, _overrides: List[str]) -> int:
 
 def _hops(text: str) -> List[int]:
     return [int(part) for part in text.split(",") if part]
+
+
+def _pair(text: str) -> Tuple[float, float]:
+    first, second = text.split(",")
+    return float(first), float(second)
 
 
 def _probe(args: argparse.Namespace) -> Optional[Path]:
@@ -1305,6 +1335,158 @@ def findings_near(
     }
 
 
+def reference_line_samples(
+    xodr: Path, spacing: float = 2.0
+) -> Dict[int, List[Tuple[float, float]]]:
+    """Points along every road's reference line, in the document's own frame.
+
+    Lines, arcs and paramPoly3 are evaluated along their length; any other
+    primitive contributes its start point only, which is enough to tell
+    which roads pass a place.
+    """
+    samples: Dict[int, List[Tuple[float, float]]] = defaultdict(list)
+    for road in ET.parse(str(xodr)).getroot().iter("road"):
+        road_id = road.get("id") or ""
+        if not road_id.lstrip("-").isdigit():
+            continue
+        for geometry in road.iter("geometry"):
+            x0 = float(geometry.get("x", "0"))
+            y0 = float(geometry.get("y", "0"))
+            heading = float(geometry.get("hdg", "0"))
+            length = float(geometry.get("length", "0"))
+            cos_h, sin_h = math.cos(heading), math.sin(heading)
+            steps = max(1, int(length / spacing))
+            shape = next(iter(geometry), None)
+            for step in range(steps + 1):
+                s = length * step / steps
+                if shape is not None and shape.tag == "paramPoly3":
+                    p = s if shape.get("pRange") == "arcLength" else step / steps
+                    u, v = (
+                        sum(
+                            float(shape.get(f"{c}{axis}", "0")) * p**power
+                            for power, c in enumerate("abcd")
+                        )
+                        for axis in "UV"
+                    )
+                elif shape is not None and shape.tag == "arc":
+                    k = float(shape.get("curvature", "0"))
+                    u = math.sin(k * s) / k if k else s
+                    v = (1 - math.cos(k * s)) / k if k else 0.0
+                elif shape is not None and shape.tag == "line":
+                    u, v = s, 0.0
+                else:
+                    u, v = 0.0, 0.0
+                samples[int(road_id)].append(
+                    (x0 + u * cos_h - v * sin_h, y0 + u * sin_h + v * cos_h)
+                )
+    return samples
+
+
+def _distance_to_polyline(
+    point: Tuple[float, float], polyline: Sequence[Tuple[float, float]]
+) -> float:
+    """Distance from *point* to the nearest *segment* of *polyline*.
+
+    To the segments, not to the vertices: measured against the samples
+    alone, a point lying on the line between two of them is reported as up
+    to half the sample spacing away, and a tight radius misses the road it
+    is standing on.
+    """
+    px, py = point
+    best = math.inf
+    for (ax, ay), (bx, by) in zip(polyline, polyline[1:] or polyline):
+        dx, dy = bx - ax, by - ay
+        length_squared = dx * dx + dy * dy
+        t = (
+            0.0
+            if length_squared == 0.0
+            else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_squared))
+        )
+        best = min(best, math.hypot(px - (ax + t * dx), py - (ay + t * dy)))
+    if len(polyline) == 1:
+        best = math.hypot(px - polyline[0][0], py - polyline[0][1])
+    return best
+
+
+def lanelets_near_latlon(osm: Path, lat: float, lon: float, radius: float) -> List[int]:
+    """Lanelets with a boundary vertex within *radius* metres of a position."""
+    root = _parse_osm(osm)
+    metres_per_degree = 111_320.0
+    east_scale = metres_per_degree * math.cos(math.radians(lat))
+    close = {
+        node.get("id")
+        for node in root
+        if node.tag == "node"
+        and math.hypot(
+            (float(node.get("lon", "nan")) - lon) * east_scale,
+            (float(node.get("lat", "nan")) - lat) * metres_per_degree,
+        )
+        <= radius
+    }
+    ways = {
+        way.get("id")
+        for way in root
+        if way.tag == "way" and any(nd.get("ref") in close for nd in way.findall("nd"))
+    }
+    return sorted(
+        int(relation.get("id", "0"))
+        for relation in root
+        if relation.tag == "relation"
+        and _tags(relation).get("type") == "lanelet"
+        and any(
+            member.get("type") == "way" and member.get("ref") in ways
+            for member in relation.findall("member")
+        )
+    )
+
+
+def resolve_place(
+    source: Path,
+    xodr: Path,
+    mapping: Path,
+    lanelets: Optional[Sequence[int]] = None,
+    roads: Optional[Sequence[int]] = None,
+    xy: Optional[Tuple[float, float]] = None,
+    latlon: Optional[Tuple[float, float]] = None,
+    radius: float = 15.0,
+) -> List[int]:
+    """Turn "around here" into lanelets of the source map.
+
+    A report names a place in whatever the reporter was looking at: lanelet
+    ids in a map editor, a road id or a position in the converted file, a
+    position in the simulator, or a latitude and longitude. All of them end
+    as lanelets, because that is the unit the map can be cut by.
+    """
+    if lanelets:
+        return sorted(set(lanelets))
+    if latlon is not None:
+        return lanelets_near_latlon(source, latlon[0], latlon[1], radius)
+    if xy is not None:
+        if not xodr.is_file():
+            raise ValueError("a position in the output needs a completed conversion")
+        roads = sorted(
+            road
+            for road, points in reference_line_samples(xodr).items()
+            if _distance_to_polyline(xy, points) <= radius
+        )
+    if roads is None:
+        raise ValueError(
+            "name a place: --lanelets, --roads, --xy, --carla-xy or --latlon"
+        )
+    by_road = lanelets_of_roads(mapping)
+    neighbours = _road_neighbours(xodr)
+    found: Set[int] = set()
+    for road in roads:
+        if by_road.get(road):
+            found |= by_road[road]
+        else:
+            # A synthetic connector has no lanelet of its own; the ones on
+            # either side of it are where it came from.
+            for other in neighbours.get(road, ()):
+                found |= by_road.get(other, set())
+    return sorted(found)
+
+
 def cmd_near(args: argparse.Namespace, _overrides: List[str]) -> int:
     out = Path(getattr(args, "from"))
     locations = _read_json(out / "private" / "locations.json")
@@ -1315,12 +1497,38 @@ def cmd_near(args: argparse.Namespace, _overrides: List[str]) -> int:
             "input map may not match.",
             file=sys.stderr,
         )
-    area = expand(Path(args.map), args.lanelets, args.hops)
-    missing = sorted(set(args.lanelets) - set(area))
+    conversion_dir = out / "private" / "conversion"
+    try:
+        named = resolve_place(
+            Path(args.map),
+            conversion_dir / "out.xodr",
+            conversion_dir / "out.mapping.json",
+            lanelets=args.lanelets,
+            roads=args.roads,
+            xy=args.xy or (args.carla_xy and (args.carla_xy[0], -args.carla_xy[1])),
+            latlon=args.latlon,
+            radius=args.radius,
+        )
+    except ValueError as unusable:
+        print(f"near: {unusable}", file=sys.stderr)
+        return 2
+    if not named:
+        print(
+            "near: no lanelet at that place. Check the frame (--xy is the "
+            ".xodr's own x,y; --carla-xy flips y), or raise --radius.",
+            file=sys.stderr,
+        )
+        return 2
+    area = expand(Path(args.map), named, args.hops)
+    missing = sorted(set(named) - set(area))
     if missing:
         print(f"near: not lanelets of this map: {missing}", file=sys.stderr)
         return 2
-    print(f"{len(args.lanelets)} lanelets + {args.hops} rounds = {len(area)} lanelets")
+    # Kept for `reduce --place`, so the reduction starts where the reporter
+    # pointed. Private: these are the source map's own ids.
+    _write_json(out / "private" / "place.json", {"lanelets": named})
+    print(f"the place is {len(named)} lanelets: {named}")
+    print(f"with {args.hops} rounds of neighbours: {len(area)} lanelets")
     counts = findings_near(locations.get("lanelets_by_finding", {}), area)  # type: ignore[arg-type]
     for finding, (inside, total) in counts.items():
         print(f"  {finding}: {inside} of {total} located instances in this area")
@@ -1362,8 +1570,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub = add("near", cmd_near, "list the findings located around given lanelets")
     sub.add_argument("map")
     sub.add_argument("--from", required=True, help="the fingerprint's --out directory")
+    place = sub.add_mutually_exclusive_group(required=True)
+    place.add_argument("--lanelets", type=_hops, help="lanelet ids, comma-separated")
+    place.add_argument("--roads", type=_hops, help="road ids of the converted file")
+    place.add_argument(
+        "--xy",
+        type=_pair,
+        help="X,Y in the .xodr's frame (write --xy=-1.5,2 if negative)",
+    )
+    place.add_argument(
+        "--carla-xy",
+        type=_pair,
+        help="X,Y of a carla.Location (its y is the .xodr's -y)",
+    )
+    place.add_argument("--latlon", type=_pair, help="LAT,LON in degrees")
     sub.add_argument(
-        "--lanelets", type=_hops, required=True, help="ids, comma-separated"
+        "--radius",
+        type=float,
+        default=15.0,
+        help="metres, for --xy/--carla-xy/--latlon",
     )
     sub.add_argument("--hops", type=int, default=2, help="neighbour rounds (default 2)")
 
@@ -1392,6 +1617,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         type=_hops,
         help="start from these lanelet ids instead of a located instance",
     )
+    sub.add_argument(
+        "--place",
+        action="store_true",
+        help="start from the place the last `near` resolved",
+    )
 
     sub = add("sanitize", cmd_sanitize, "rebuild the reduced map as a synthetic one")
     sub.add_argument("--probe", help=probe_help)
@@ -1413,6 +1643,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     sub = add("draft", cmd_draft, "write public/issue.md from the public documents")
     sub.add_argument("--from", required=True)
+    sub.add_argument("--symptom", help="what was seen, in the reporter's words")
+    sub.add_argument("--seen-in", help="the consumer and version it was seen in")
 
     args = parser.parse_args(own)
     return int(args.handler(args, overrides))

@@ -339,6 +339,106 @@ def test_a_probe_finding_without_a_probe_is_incomplete(tmp_path: Path) -> None:
     assert "probe" in findings.incomplete
 
 
+# --- "around here": every way a reporter may name a place -------------------
+
+_XODR = """<OpenDRIVE>
+  <road id="1" length="10" junction="-1">
+    <link><successor elementType="road" elementId="2"/></link>
+    <planView><geometry s="0" x="0" y="0" hdg="0" length="10"><line/></geometry></planView>
+  </road>
+  <road id="2" length="10" junction="-1">
+    <link><predecessor elementType="road" elementId="1"/>
+          <successor elementType="road" elementId="3"/></link>
+    <planView>
+      <geometry s="0" x="10" y="0" hdg="0" length="10">
+        <paramPoly3 aU="0" bU="10" cU="0" dU="0" aV="0" bV="0" cV="5" dV="0"
+                    pRange="normalized"/>
+      </geometry>
+    </planView>
+  </road>
+  <road id="3" length="15.707963" junction="-1">
+    <link><predecessor elementType="road" elementId="2"/></link>
+    <planView>
+      <geometry s="0" x="100" y="0" hdg="0" length="15.707963">
+        <arc curvature="0.1"/>
+      </geometry>
+    </planView>
+  </road>
+</OpenDRIVE>
+"""
+
+
+@pytest.fixture
+def converted(tmp_path: Path) -> dict:
+    xodr = tmp_path / "out.xodr"
+    xodr.write_text(_XODR, encoding="utf-8")
+    mapping = tmp_path / "out.mapping.json"
+    # Road 2 has no lanelet of its own: a synthetic connector.
+    mapping.write_text(
+        json.dumps({"lanelet_to_road_and_lane": {"501": [1, 1], "503": [3, 1]}}),
+        encoding="utf-8",
+    )
+    return {
+        "xodr": xodr,
+        "mapping": mapping,
+        "source": _write_source(tmp_path / "m.osm"),
+    }
+
+
+def test_reference_lines_are_sampled_along_each_primitive(converted: dict) -> None:
+    samples = map_issue.reference_line_samples(converted["xodr"])
+    assert samples[1][0] == (0.0, 0.0)
+    assert samples[1][-1] == pytest.approx((10.0, 0.0))
+    # paramPoly3, normalized: u = 10p, v = 5p^2.
+    assert samples[2][-1] == pytest.approx((20.0, 5.0))
+    # A quarter circle of radius 10 turning left ends at (+10, +10).
+    assert samples[3][-1] == pytest.approx((110.0, 10.0), abs=1e-4)
+
+
+def _place(converted: dict, **how: object) -> list:
+    return map_issue.resolve_place(
+        converted["source"], converted["xodr"], converted["mapping"], **how
+    )
+
+
+def test_a_place_can_be_a_road_or_a_position_in_the_output(converted: dict) -> None:
+    assert _place(converted, lanelets=[7, 3, 7]) == [3, 7]
+    assert _place(converted, roads=[1]) == [501]
+    # A connector is located by the roads on either side of it.
+    assert _place(converted, roads=[2]) == [501, 503]
+    assert _place(converted, xy=(5.0, 0.5), radius=1.0) == [501]
+    assert _place(converted, xy=(110.0, 10.0), radius=1.0) == [503]
+    assert _place(converted, xy=(5.0, 500.0), radius=1.0) == []
+    with pytest.raises(ValueError):
+        _place(converted)
+
+
+def test_a_place_can_be_a_latitude_and_longitude(converted: dict) -> None:
+    assert _place(converted, latlon=(35.6500001, 139.7400001), radius=5.0) == [50001]
+    assert _place(converted, latlon=(35.7, 139.8), radius=5.0) == []
+
+
+def test_the_symptom_goes_into_the_issue_and_is_leak_checked(bundle: dict) -> None:
+    fingerprint = {
+        "converter": {"version": "1", "commit": "abc"},
+        "overrides": [],
+        "conversion": {"completed": True, "seconds": 1.0, "preprocessing_ran": False},
+        "map_census": {"lanelets": 1},
+        "findings": [],
+    }
+    clean = map_issue.draft_issue(
+        fingerprint, None, "The lane ends in the middle of a merge.", "CARLA <version>"
+    )
+    assert "The lane ends in the middle of a merge." in clean
+    assert "Seen in: CARLA <version>" in clean
+    (bundle["public"] / "issue.md").write_text(clean, encoding="utf-8")
+    assert _failed(_check(bundle)) == []
+    # A reporter's own words are where a place slips in.
+    leaky = map_issue.draft_issue(fingerprint, None, "It breaks at lanelet 50001.")
+    (bundle["public"] / "issue.md").write_text(leaky, encoding="utf-8")
+    assert "issue.md: no source path, hash, id or coordinate" in _failed(_check(bundle))
+
+
 # --- the whole procedure, on a committed map --------------------------------
 
 # Reports every road that carries two or more lanes on one side. It stands in
@@ -396,20 +496,27 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
     instances = located["lanelets_by_finding"][finding]
     assert instances, "the probe's roads were not traced back to lanelets"
 
-    # A reporter who points at one of those lanelets is shown the finding.
-    area = [str(instances[0][0])]
+    # The report is "on this map, around here, I see this". "Here" is a
+    # position in the converted file: the middle of a road the probe flagged.
+    conversion = out / "private" / "conversion"
+    by_road = map_issue.lanelets_of_roads(conversion / "out.mapping.json")
+    flagged = next(r for r, ids in sorted(by_road.items()) if sorted(ids) in instances)
+    points = map_issue.reference_line_samples(conversion / "out.xodr")[flagged]
+    x, y = points[len(points) // 2]
     assert (
         map_issue.main(
-            ["near", str(source), "--from", str(out), "--lanelets", ",".join(area)]
+            ["near", str(source), "--from", str(out), f"--xy={x},{y}", "--radius", "1"]
         )
         == 0
     )
+    place = json.loads((out / "private" / "place.json").read_text())["lanelets"]
+    assert set(by_road[flagged]) <= set(place)
 
     before = fingerprint["map_census"]["lanelets"]
     assert (
         map_issue.main(
             ["reduce", str(source), "--from", str(out), "--finding", finding]
-            + ["--lanelets", ",".join(area), *with_probe, *neutral]
+            + ["--place", *with_probe, *neutral]
         )
         == 0
     )
@@ -420,7 +527,15 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
         )
         == 0
     )
-    assert map_issue.main(["draft", "--from", str(out)]) == 0
+    symptom = "Two lanes are emitted side by side on one road at a fork."
+    assert (
+        map_issue.main(
+            ["draft", "--from", str(out), "--symptom", symptom]
+            + ["--seen-in", "a structural probe"]
+        )
+        == 0
+    )
+    assert symptom in (out / "public" / "issue.md").read_text(encoding="utf-8")
 
     repro = json.loads((out / "public" / "repro.json").read_text())
     assert repro["reproduces"] == finding

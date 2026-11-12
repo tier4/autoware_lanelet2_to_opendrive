@@ -15,6 +15,13 @@ fingerprint, and refuses to if its leak check fails. The procedure is in
 .claude/skills/map-issue-report/SKILL.md.
 -->
 
+## 👀 Symptom
+
+<!-- What was seen, in which consumer and version, doing what. Describe the
+kind of place ("at a merge", "where a lane ends") -- never the place itself. -->
+
+---
+
 ## 🐛 Finding
 
 <!-- One `instrument:code` from the fingerprint table, e.g.
