@@ -66,6 +66,7 @@ import random
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
@@ -971,16 +972,20 @@ def without_figures(document: Dict[str, object]) -> Dict[str, object]:
     defect was seen. How many lanelets the map has and how many times each
     finding occurs are measurements of someone's map: they cannot rebuild
     any of it, but publishing them is the owner's decision, the same as
-    publishing a reproducer is. The qc checker tally stays, because it
-    describes how much of the check ran, and a finding cannot be read
-    without it.
+    publishing a reproducer is. So is how long the conversion took: forty
+    minutes says "a city" as plainly as a lanelet count does. The qc checker
+    tally stays, because it describes how much of the check ran, and a
+    finding cannot be read without it.
     """
     notes = dict(document.get("notes") or {})  # type: ignore[call-overload]
     notes.pop("route", None)
+    conversion = dict(document.get("conversion") or {})  # type: ignore[call-overload]
+    conversion["seconds"] = None
     return {
         **document,
         "figures_withheld": True,
         "map_census": {},
+        "conversion": conversion,
         "notes": notes,
         "findings": [
             {**row, "count": None}
@@ -1028,11 +1033,27 @@ def cmd_fingerprint(args: argparse.Namespace, overrides: List[str]) -> int:
     return 0
 
 
+def conversion_dir_for(candidate: Path) -> Path:
+    """Where `still-fails` converts *candidate*: beside it, unless that is here.
+
+    The reducer gives every candidate a directory of its own, so the
+    conversion belongs next to it. Asked by hand about a map that sits in
+    this repository -- or named by a relative path from its root -- "beside
+    it" would be the working tree, and a conversion of someone's map would
+    be one `git add -A` away from a commit. Those go to a temporary
+    directory instead.
+    """
+    parent = candidate.resolve().parent
+    if parent == REPO or REPO in parent.parents:
+        return Path(tempfile.mkdtemp(prefix="map-issue-"))
+    return parent / "conversion"
+
+
 def cmd_still_fails(args: argparse.Namespace, overrides: List[str]) -> int:
-    candidate = Path(args.map)
+    candidate = Path(args.map).resolve()
     instrument = args.finding.split(":", 1)[0]
     conversion = run_conversion(
-        candidate, candidate.parent / "conversion", overrides, args.timeout
+        candidate, conversion_dir_for(candidate), overrides, args.timeout
     )
     if instrument != "crash" and not conversion.complete:
         # A candidate the converter cannot convert is a *different* failure,
@@ -1302,7 +1323,12 @@ def draft_issue(
         ),  # type: ignore[union-attr]
         f"- **Overrides**: `{' '.join(fingerprint['overrides']) or '(none)'}`",  # type: ignore[arg-type]
         f"- **Conversion**: {'completed' if conversion['completed'] else 'did not complete'}"  # type: ignore[index]
-        f" in {conversion['seconds']} s; preprocessing "  # type: ignore[index]
+        + (
+            ""
+            if conversion.get("seconds") is None  # type: ignore[union-attr]
+            else f" in {conversion['seconds']} s"  # type: ignore[index]
+        )
+        + "; preprocessing "
         f"{'ran' if conversion['preprocessing_ran'] else 'did not run'}",  # type: ignore[index]
         (
             "- **Map**: figures withheld -- the owner has not agreed to "

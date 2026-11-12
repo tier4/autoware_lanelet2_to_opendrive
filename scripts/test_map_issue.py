@@ -572,11 +572,14 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
     assert f"| `{finding}` | withheld |" in issue
     assert row_with_count not in issue
     assert "figures withheld" in issue
+    # How long the conversion took is a measure of the map's size too.
+    assert "**Conversion**: completed; preprocessing" in issue
 
     assert map_issue.main([*draft, "--figures-agreed"]) == 0
     issue = (out / "public" / "issue.md").read_text(encoding="utf-8")
     assert row_with_count in issue
     assert '"lanelets": ' in issue
+    assert "**Conversion**: completed in " in issue
 
     repro = json.loads((out / "public" / "repro.json").read_text())
     assert repro["reproduces"] == finding
@@ -590,3 +593,19 @@ def test_the_procedure_end_to_end_on_a_committed_map(tmp_path: Path) -> None:
         out / "public", source, out / "private" / "reduced.osm"
     )
     assert [c.name for c in checks if not c.ok] == []
+
+
+def test_a_map_inside_the_repository_is_not_converted_into_the_working_tree(
+    tmp_path: Path,
+) -> None:
+    """Asked by hand about a map in the tree, the conversion goes elsewhere."""
+    outside = tmp_path / "eval-0001" / "candidate.osm"
+    assert map_issue.conversion_dir_for(outside) == outside.parent / "conversion"
+
+    for inside in (
+        map_issue.REPO / "repro.osm",
+        map_issue.REPO / "autoware_lanelet2_to_opendrive" / "test" / "data" / "m.osm",
+    ):
+        chosen = map_issue.conversion_dir_for(inside)
+        assert map_issue.REPO != chosen
+        assert map_issue.REPO not in chosen.parents
