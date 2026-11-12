@@ -356,6 +356,50 @@ convert again. When the defect can be reproduced on a small map, add one to
 `test/data/` (the `*_mini.osm` fixtures convert in about 5 s) and write the red
 against it.
 
+## Measuring on a real map
+
+The converter is developed by measuring what it emits for a real map. The
+loop is: state the question as a quantity, convert, measure with a named
+instrument, **check the instrument before believing the number**, locate the
+finding through the source lanelets, make it small, fix it red/green, and
+re-measure both states with the same instrument.
+
+| what | where |
+|---|---|
+| the procedure, step by step | `.claude/skills/map-measurement/SKILL.md` |
+| which instrument answers which question, and what each cannot see | `.claude/skills/map-measurement/instruments.md` |
+| checks that pass while verifying nothing | `.claude/skills/map-measurement/vacuous-checks.md` |
+
+Three rules carry most of the weight:
+
+- **Name the basis.** A figure is quoted with its map, commit, date and
+  instrument.
+- **A qc error count is a lower bound** until the `Checkers :` line shows
+  every checker completed.
+- **Never match roads of two conversions by id.** Ids are assigned by
+  enumeration order; pair roads by their source lanelets.
+
+### Reporting a defect on a map you cannot share
+
+`scripts/map_issue.py` turns "it fails on my map" into an issue a maintainer
+can act on, without the map leaving its owner:
+
+```bash
+python scripts/map_issue.py fingerprint MAP.osm --out OUT -- map=junction_cluster
+python scripts/map_issue.py reduce MAP.osm --from OUT --finding <instrument:code> -- map=junction_cluster
+python scripts/map_issue.py sanitize --from OUT --finding <instrument:code> -- map=junction_cluster
+python scripts/map_issue.py draft --from OUT
+```
+
+`fingerprint` reports findings as codes and counts (no id, no coordinate).
+`reduce` shrinks the map to the lanelets on which the same finding still
+shows. `sanitize` renumbers, relocates, rotates and perturbs them and checks
+that the finding survived. Every step that writes something publishable runs
+a leak check and refuses to finish if it fails. The full procedure --
+including what needs the map owner's agreement -- is
+`.claude/skills/map-issue-report/SKILL.md`; the issue form is
+`.github/ISSUE_TEMPLATE/map_defect_report.md`.
+
 ## Release process
 
 Versioning is driven by the version-bump label on each merged PR. The

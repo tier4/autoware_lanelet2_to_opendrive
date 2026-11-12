@@ -93,6 +93,27 @@ was verified instead.
 - **What `tdd.py` accepts and rejects**:
   [`docs/docker.md`](docs/docker.md#redgreen-runs-for-test-driven-development).
 
+## Measuring on a Real Map
+
+**A claim about converter output is a measurement, with its basis stated.**
+Convert a real map, measure the output with a named instrument, check the
+instrument before believing the number, and re-measure both states the same
+way after a change. Every figure that leaves a session carries the map, the
+commit, the date and the instrument that produced it.
+
+- **Procedure for Claude Code**: the `map-measurement` skill
+  (`.claude/skills/map-measurement/SKILL.md`). Load it before quoting a
+  figure, comparing two outputs, or writing a checker or probe.
+- **A defect on a map that cannot be shared**: the `map-issue-report` skill
+  (`.claude/skills/map-issue-report/SKILL.md`) and `scripts/map_issue.py`.
+  It reports the defect as codes and counts, reduces the map to the few
+  lanelets that still show it, rebuilds those as a synthetic map, and
+  refuses to finish if anything of the source would leak.
+- **Never copy a private map, an excerpt of one, or anything under a
+  report's `private/` directory into this repository or into an issue or
+  PR.** Whether a rebuilt reproducer may be published is the map owner's
+  decision, not something the rebuild establishes.
+
 ## Pre-commit Hooks and Lint Checking
 
 **CRITICAL**: This project uses pre-commit hooks to ensure code quality and prevent lint errors. All commits must pass these checks before being pushed.
