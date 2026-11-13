@@ -15,7 +15,7 @@ import logging
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 
@@ -165,25 +165,39 @@ def sanity_gate_passes(
     site: DivergenceSite,
     inputs: SanityGateInputs,
     endpoint_tolerance: float,
+    expected_separation: Optional[Mapping[int, float]] = None,
 ) -> Tuple[bool, str]:
     """Return ``(passed, reason)``.
 
     The gate fails fast on the first violation; the second-level reason
     string is logged by the caller. Order matches the spec: endpoint
     coincidence, lane uniqueness, group exhaustiveness.
+
+    ``expected_separation`` maps a candidate road id to the distance the
+    junction carve deliberately put between the two anchors -- the carve
+    taken off this road's end plus the carve taken off that candidate's
+    start, both of which happen at a divergence. Without it the carve fails
+    check 1 by construction, since the chosen 1 m exceeds the 0.5 m
+    tolerance. The separation is measured *against* that distance rather
+    than the tolerance being widened by it, so a candidate that is
+    implausibly far away is still refused at a carved end.
     """
     candidate_set = set(site.candidate_road_ids)
+    expected = expected_separation or {}
 
-    # 1. Endpoint coincidence.
+    # 1. Endpoint coincidence, up to what the carve deliberately separated.
     for cand_id in site.candidate_road_ids:
         cand_endpoint = inputs.endpoints_candidates.get(cand_id)
         if cand_endpoint is None:
             return False, f"missing endpoint for candidate road {cand_id}"
-        if _distance(inputs.endpoint_road, cand_endpoint) > endpoint_tolerance:
+        separation = _distance(inputs.endpoint_road, cand_endpoint)
+        carved = expected.get(cand_id, 0.0)
+        if abs(separation - carved) > endpoint_tolerance:
+            carved_note = f" (carve expects {carved:.3f} m)" if carved > 0.0 else ""
             return (
                 False,
                 f"endpoint distance for candidate {cand_id} exceeds "
-                f"{endpoint_tolerance:.3f} m",
+                f"{endpoint_tolerance:.3f} m{carved_note}",
             )
 
     # 2. Lane uniqueness: each (candidate_road, candidate_lane) appears at most once.
@@ -720,7 +734,17 @@ def apply_divergence_synthesis(
             )
             continue
 
+        # The carve ends this road short of the junction, so the two anchors
+        # are a known distance apart instead of coincident: what came off
+        # this road's own end plus what came off the candidate's start (at a
+        # divergence the carve takes both, since the group feeding the
+        # candidates fans out).  A road refused for want of length carries
+        # 0.0 and is therefore still held to plain coincidence.
+        source_carve = (
+            source_road.carved_end if site.is_divergence else source_road.carved_start
+        )
         endpoints_candidates: Dict[int, Tuple[float, float, float]] = {}
+        expected_separation: Dict[int, float] = {}
         for cand_id in site.candidate_road_ids:
             cand_road = roads_by_id.get(cand_id)
             if cand_road is None:
@@ -734,6 +758,10 @@ def apply_divergence_synthesis(
             )
             if cand_endpoint is not None:
                 endpoints_candidates[cand_id] = cand_endpoint
+            candidate_carve = (
+                cand_road.carved_start if site.is_divergence else cand_road.carved_end
+            )
+            expected_separation[cand_id] = source_carve + candidate_carve
 
         lane_pairs, neighbour_road_ids = _lane_pairs_for_site(
             site, roads_by_id, lanelet_map, routing_graph, lanelet_to_road
@@ -745,7 +773,9 @@ def apply_divergence_synthesis(
             lane_pairs=lane_pairs,
             all_successor_lanelet_road_ids=neighbour_road_ids,
         )
-        ok, reason = sanity_gate_passes(site, gate_inputs, endpoint_tolerance)
+        ok, reason = sanity_gate_passes(
+            site, gate_inputs, endpoint_tolerance, expected_separation
+        )
         if not ok:
             log.warning(
                 "divergence: sanity gate failed for road %d (%s side): %s; "

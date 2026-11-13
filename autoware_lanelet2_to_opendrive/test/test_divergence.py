@@ -3,6 +3,7 @@
 import inspect
 from unittest.mock import MagicMock
 
+
 from autoware_lanelet2_to_opendrive.config import DEFAULT_CONFIG
 from autoware_lanelet2_to_opendrive.divergence import (
     DivergenceSide,
@@ -324,11 +325,17 @@ def _build_road_stub(
             "plan_view",
             "sorted_lanelet_ids",
             "evaluate_lane_anchor_xyz",
+            "carved_start",
+            "carved_end",
         ]
     )
     r.id = road_id
     r.reference_start_xyz = start_xyz
     r.reference_end_xyz = end_xyz
+    # Uncarved, which is what these two tests describe: the anchors are two
+    # renderings of the same point and the gate holds them to coincidence.
+    r.carved_start = 0.0
+    r.carved_end = 0.0
     # Lane-aware anchor metadata is intentionally absent so the driver
     # falls back to the road reference endpoint (the synthesiser tests
     # the per-lane override path through the integration suite, not here).
@@ -432,3 +439,75 @@ def test_apply_divergence_synthesis_falls_back_on_gate_failure(monkeypatch):
     args, kwargs = roads_by_id[185].add_successor.call_args
     assert kwargs["element_type"] == ElementType.ROAD
     assert kwargs["element_id"] == 186
+
+
+def test_sanity_gate_accepts_the_separation_the_carve_deliberately_made():
+    """A carved end's anchors are a known distance apart, not coincident.
+
+    The gate's first check reads *any* separation between the two anchors as
+    reconstruction error, because Lanelet2 defines connectivity by shared
+    points, so a successor lanelet starts on the very points its predecessor
+    ends on.  The junction carve breaks that premise on purpose: it ends the
+    incoming road ``carve`` metres short so the junction has extent, which
+    puts the anchors ``carve`` metres apart by construction.
+
+    At a 1 m carve against the 0.5 m tolerance the gate therefore refuses
+    every carved site, and the connector is not synthesised at all.  Measured
+    on 2026-11-06 at ``31af4b33``: gate failures 438 -> 690 on the customer
+    map and 29 -> 39 on Nishishinjuku, with 589 of 929 sub-0.1 m connecting
+    roads disappearing -- the carve opens a hole and nothing fills it.
+
+    The gate must therefore measure the separation against what the carve
+    deliberately made, keeping the tolerance for the reconstruction error it
+    was written to catch.  It is per candidate, not per site: a candidate too
+    short to spare the length is rebuilt uncarved and is still held to plain
+    coincidence.
+    """
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (1.0, 0.0, 0.0),  # exactly the carve length away
+            187: (1.2, 0.0, 0.0),  # plus fit error, inside the tolerance
+            188: (0.8, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+    )
+
+    ok, reason = sanity_gate_passes(
+        _site(),
+        inputs,
+        endpoint_tolerance=0.5,
+        expected_separation={186: 1.0, 187: 1.0, 188: 1.0},
+    )
+    assert ok is True, reason
+    assert reason == ""
+
+
+def test_sanity_gate_still_rejects_an_implausible_pairing_at_a_carved_end():
+    """Allowing for the carve must not disarm the check.
+
+    The guard rail for the test above: with the same 1 m carve, a candidate
+    road whose anchor is 5 m away is still a pairing the gate must refuse.
+    Widening the tolerance by the carve length would let it through; measuring
+    the separation *against* the carve keeps it out.
+    """
+    inputs = SanityGateInputs(
+        endpoint_road=(0.0, 0.0, 0.0),
+        endpoints_candidates={
+            186: (5.0, 0.0, 0.0),
+            187: (1.0, 0.0, 0.0),
+            188: (1.0, 0.0, 0.0),
+        },
+        lane_pairs=[(-1, 186, -1), (-2, 187, -1), (-3, 188, -1)],
+        all_successor_lanelet_road_ids={186, 187, 188},
+    )
+
+    ok, reason = sanity_gate_passes(
+        _site(),
+        inputs,
+        endpoint_tolerance=0.5,
+        expected_separation={186: 1.0, 187: 1.0, 188: 1.0},
+    )
+    assert ok is False
+    assert "endpoint" in reason
