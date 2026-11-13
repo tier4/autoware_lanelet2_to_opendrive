@@ -35,6 +35,7 @@ import sys
 from collections import Counter
 from typing import Any, Optional
 
+from lxml import etree
 
 #: Class boundaries for the yaw difference, in degrees.
 AGREE_DEG = 5.0
@@ -58,22 +59,59 @@ def read_short_roads(
     point)`` when the road's ``<predecessor>`` is a road and ``None``
     otherwise. ``lengths`` maps every road id in the file to its length.
     """
-    raise NotImplementedError
+    short: list[ShortRoad] = []
+    lengths: dict[int, float] = {}
+    context = etree.iterparse(path, events=("end",), tag="road", huge_tree=True)
+    for _event, element in context:
+        road_id = int(element.get("id"))
+        length = float(element.get("length") or 0.0)
+        lengths[road_id] = length
+        if length < limit:
+            predecessor: Optional[tuple[int, str]] = None
+            child = element.find("link/predecessor")
+            if child is not None and child.get("elementType") == "road":
+                predecessor = (
+                    int(child.get("elementId")),
+                    child.get("contactPoint") or "end",
+                )
+            lanes = sorted(
+                {
+                    int(lane.get("id"))
+                    for lane in element.iterfind("lanes/laneSection/*/lane")
+                    if lane.get("type") == "driving"
+                }
+            )
+            if lanes:
+                short.append((road_id, length, lanes, predecessor))
+        element.clear()
+        while element.getprevious() is not None:
+            del element.getparent()[0]
+    del context
+    return short, lengths
 
 
 def angle_between(a: float, b: float) -> float:
     """Absolute difference of two headings in degrees, in ``[0, 180]``."""
-    raise NotImplementedError
+    return abs((b - a + 180.0) % 360.0 - 180.0)
 
 
 def classify(delta: float) -> str:
     """Name the class a yaw difference (degrees) falls into."""
-    raise NotImplementedError
+    if delta > REVERSED_DEG:
+        return "reversed (over 150 deg)"
+    if delta > CROSSWISE_DEG:
+        return "crosswise (80 to 150 deg)"
+    if delta > AGREE_DEG:
+        return "off by 5 to 80 deg"
+    return "agrees within 5 deg"
 
 
 def percentile(values: list[float], fraction: float) -> float:
     """Nearest-rank percentile of ``values``; ``nan`` when empty."""
-    raise NotImplementedError
+    if not values:
+        return float("nan")
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
 
 
 def measure(
@@ -86,14 +124,63 @@ def measure(
     class (including the reasons a lane could not be compared) and the yaw
     differences that were measured.
     """
-    raise NotImplementedError
+    verdict: Counter[str] = Counter()
+    deltas: list[float] = []
+    for road_id, length, lanes, predecessor in short:
+        for lane_id in lanes:
+            middle = carla_map.get_waypoint_xodr(road_id, lane_id, length * 0.5)
+            if middle is None:
+                verdict["no waypoint on the short road"] += 1
+                continue
+            if predecessor is None:
+                verdict["no road predecessor to compare against"] += 1
+                continue
+            feeder_id, contact = predecessor
+            feeder_length = lengths.get(feeder_id)
+            if feeder_length is None:
+                verdict["predecessor not in the file"] += 1
+                continue
+            s = (
+                max(0.0, feeder_length - FEEDER_BACK_OFF_M)
+                if contact == "end"
+                else min(feeder_length, FEEDER_BACK_OFF_M)
+            )
+            feeder = None
+            for candidate_lane in (lane_id, -lane_id, 1, -1):
+                feeder = carla_map.get_waypoint_xodr(feeder_id, candidate_lane, s)
+                if feeder is not None:
+                    break
+            if feeder is None:
+                verdict["no waypoint on the feeding road"] += 1
+                continue
+            delta = angle_between(
+                feeder.transform.rotation.yaw, middle.transform.rotation.yaw
+            )
+            deltas.append(delta)
+            verdict[classify(delta)] += 1
+    return verdict, deltas
 
 
 def report(
     label: str, limit: float, n_roads: int, verdict: Counter[str], deltas: list[float]
 ) -> str:
     """Format the result: counts with their denominator, then percentiles."""
-    raise NotImplementedError
+    total = sum(verdict.values())
+    lines = [
+        f"===== {label} =====",
+        f"roads under {limit} m carrying a driving lane: {n_roads}",
+        f"driving lanes on them: {total}; compared with a feeding road: {len(deltas)}",
+        "yaw on the short road against the road feeding it:",
+    ]
+    for key, count in sorted(verdict.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"  {count:6d}  {key}")
+    if deltas:
+        lines.append(
+            "yaw difference (deg): "
+            f"median {percentile(deltas, 0.5):.2f}, "
+            f"p95 {percentile(deltas, 0.95):.2f}, max {max(deltas):.2f}"
+        )
+    return "\n".join(lines)
 
 
 def main(argv: Optional[list[str]] = None) -> int:

@@ -29,10 +29,6 @@ def _load(name: str):
 yaw = _load("carla_connector_yaw")
 judge = _load("carla_mapping_judge")
 
-pytestmark = pytest.mark.xfail(
-    strict=True, raises=NotImplementedError, reason="the probes are not written yet"
-)
-
 
 XODR = """<?xml version="1.0"?>
 <OpenDRIVE>

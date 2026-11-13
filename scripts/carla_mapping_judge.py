@@ -55,22 +55,44 @@ def verdict(
     conversion-time mapping's and ``cross_check`` the geometric
     re-derivation's (``None`` when it has no answer for the lanelet).
     """
-    raise NotImplementedError
+    if answer is None:
+        return "carla has no waypoint there"
+    if answer == conversion and answer == cross_check:
+        return "carla = both"
+    if answer == conversion:
+        return "carla = conversion mapping"
+    if answer == cross_check:
+        return "carla = geometric cross-check"
+    if answer[0] == conversion[0]:
+        return "carla = conversion's road, a third lane"
+    return "carla = another road"
 
 
 def disagreement_kind(conversion: Slot, cross_check: Optional[Slot]) -> Optional[str]:
     """Classify a pair of answers; ``None`` when the two mappings agree."""
-    raise NotImplementedError
+    if cross_check is None:
+        return "the cross-check has no answer"
+    if cross_check == conversion:
+        return None
+    if cross_check[0] == conversion[0]:
+        return "same road, other lane"
+    return "other road"
 
 
 def two_sided_roads(conversion: dict[int, Slot]) -> set[int]:
     """Roads that carry lanes of both signs in the conversion-time mapping."""
-    raise NotImplementedError
+    signs: dict[int, set[bool]] = {}
+    for road, lane in conversion.values():
+        signs.setdefault(road, set()).add(lane > 0)
+    return {road for road, seen in signs.items() if len(seen) == 2}
 
 
 def percentile(values: list[float], fraction: float) -> float:
     """Nearest-rank percentile of ``values``; ``nan`` when empty."""
-    raise NotImplementedError
+    if not values:
+        return float("nan")
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
 
 
 def judge(
@@ -84,12 +106,27 @@ def judge(
     ``ask(lanelet)`` returns the consumer's ``(road, lane)`` and the distance
     from the query point to the waypoint it snapped to, or ``(None, None)``.
     """
-    raise NotImplementedError
+    tally: Counter[str] = Counter()
+    distances: list[float] = []
+    for lanelet in lanelets:
+        answer, distance = ask(lanelet)
+        if answer is not None and distance is not None:
+            distances.append(distance)
+        tally[verdict(answer, conversion[lanelet], cross_check.get(lanelet))] += 1
+    return tally, distances
 
 
 def format_block(title: str, tally: Counter[str], distances: list[float]) -> str:
     """One population: its size, the snapping distance, and the shares."""
-    raise NotImplementedError
+    total = sum(tally.values())
+    lines = [
+        f"{title}  (n={total}; waypoint to midpoint distance: "
+        f"median {percentile(distances, 0.5):.2f} m, "
+        f"p95 {percentile(distances, 0.95):.2f} m)"
+    ]
+    for key, count in sorted(tally.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"  {count:6d}  {100.0 * count / max(total, 1):5.1f}%  {key}")
+    return "\n".join(lines)
 
 
 def _as_slots(mapping: dict[Any, Any]) -> dict[int, Slot]:
