@@ -13,6 +13,8 @@ them run in the project container (`docs/docker.md`).
 | How far is the reference line from the source? | `reference_match_distances` in `<out>.mapping.json` (written by `convert`) | roads past 0.5 m / 1.0 m, per-road max | lanes other than the reference; elevation |
 | What changed structurally between two outputs? | `xodr-digest` | the fields it extracts, per road | every field it does not extract; roads re-identified across a regrouping |
 | Does the consumer accept it? | `carla-import-test`, or `carla.Map(name, xodr_text)` in a probe | load, waypoints, junctions | anything CARLA does not read (lane-level `<link>` semantics differ under `rule="LHT"`) |
+| Which way does the consumer face on a short connecting road? | `scripts/carla_connector_yaw.py` | driving lanes on roads under 0.5 m, by yaw difference to the road feeding them: within 5 deg, 5 to 80, crosswise, reversed | connectors whose `<predecessor>` is not a road (counted, not compared); roads over the limit |
+| Where the two lanelet -> (road, lane) mappings disagree, which one is right? | `scripts/carla_mapping_judge.py` | disagreeing lanelets by which mapping CARLA's answer matches, beside three controls where the mappings agree | inside junctions roads overlap, so CARLA names a neighbour for about one lanelet in eight even where the mappings agree |
 
 `python scripts/map_issue.py fingerprint` runs the crash, invariant, qc and
 route instruments in one go and reports codes and counts.
@@ -41,6 +43,11 @@ xodr-digest <OUT>.xodr -o <OUT>.digest.json
 
 # CARLA client-side load (needs the `carla` profile's image)
 carla-import-test <OUT>.xodr --skip-tm
+
+# CARLA as a third party (same image; `carla.Map()` needs no server).
+# Both print counts and shares only -- no id, no coordinate.
+python scripts/carla_connector_yaw.py <OUT>.xodr --label <COMMIT>
+python scripts/carla_mapping_judge.py <OUT>.xodr <MAP or OUT.preprocessed.osm> --label <COMMIT>
 ```
 
 What to read from the output, in this order:
@@ -90,6 +97,13 @@ grouped lanelets the same way.
 `carla.Map()` runs without a server. Probe at lane ends, not mid-road. A
 dangling `<successor>` at a road-typed end segfaults the client (exit 139)
 and no gate in this repository catches it.
+
+**Mapping cross-validation.** A failure of this section of `analyze` says
+the conversion-time mapping and the geometric re-derivation disagree, not
+which of them is wrong. `scripts/carla_mapping_judge.py` asks CARLA which
+lane lies under each disagreeing lanelet. Read its three controls first: if
+CARLA does not reproduce the answer where the two mappings agree, it cannot
+arbitrate where they do not.
 
 ## Writing a probe
 
