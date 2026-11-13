@@ -37,7 +37,10 @@ WORKDIR /workspace
 FROM base AS deps
 COPY pyproject.toml uv.lock .python-version ./
 COPY autoware_lanelet2_to_opendrive/ autoware_lanelet2_to_opendrive/
-RUN uv sync --frozen --dev --extra carla
+# Kept in the environment: scripts/check_container_env.py repeats this sync
+# as `uv sync --check` to tell whether the venv volume still matches uv.lock.
+ENV L2O_SYNC_ARGS="--dev --extra carla"
+RUN uv sync --frozen $L2O_SYNC_ARGS
 
 FROM deps AS dev
 ENV PATH="/workspace/.venv/bin:${PATH}"
@@ -50,7 +53,8 @@ CMD ["bash"]
 FROM base AS deps-nocarla
 COPY pyproject.toml uv.lock .python-version ./
 COPY autoware_lanelet2_to_opendrive/ autoware_lanelet2_to_opendrive/
-RUN uv sync --frozen --dev
+ENV L2O_SYNC_ARGS="--dev"
+RUN uv sync --frozen $L2O_SYNC_ARGS
 
 FROM deps-nocarla AS dev-nocarla
 ENV PATH="/workspace/.venv/bin:${PATH}"
