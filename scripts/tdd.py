@@ -221,6 +221,10 @@ def main(argv: Sequence[str]) -> int:
         return subprocess.run(_compose("stop", SERVICE)).returncode
 
     _ensure_service()
+    # The resident container outlives changes to uv.lock, so check every run.
+    if _exec(["/usr/bin/python3", "scripts/check_container_env.py"]).returncode:
+        print("\ntdd.py: not run -- the container's .venv does not match uv.lock")
+        return 1
     junit_path = f"/tmp/tdd-junit-{os.getpid()}.xml"
     color = ["--color=yes"] if sys.stdout.isatty() else []
     exit_code = _exec(build_pytest_command(mode, color + args, junit_path)).returncode

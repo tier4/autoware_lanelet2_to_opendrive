@@ -195,6 +195,10 @@ yourself to parallelise.
 The tests run in a resident `tdd` compose service (`sleep infinity`, profile
 `tdd`), started on first use, so each run is a `docker compose exec` of a few
 seconds rather than a fresh container. Stop it with `python scripts/tdd.py stop`.
+Because that container outlives changes to `uv.lock`, every run first checks
+that its `.venv` still matches the lock, and stops with uv's list of what
+differs if it does not (see
+[Troubleshooting](#the-containers-venv-volume--no-longer-matches-uvlock)).
 
 ## Using the `convert` distribution image
 
@@ -220,6 +224,37 @@ container runs as root by default; on Linux you can run with `--user
 "$(id -u):$(id -g)"` to retain host ownership.
 
 ## Troubleshooting
+
+### `the container's .venv (volume ...) no longer matches uv.lock`
+
+`/workspace/.venv` is a named volume (`venv-cache`, or `venv-nocarla-cache`
+for the native services). It is filled from the image when it is first
+created and then survives every image rebuild, so after `uv.lock` changes the
+tests would run against the dependencies of an older lock. `pytest`,
+`pytest-native` and `scripts/tdd.py` therefore run
+`scripts/check_container_env.py` first, which repeats the image's own sync as
+`uv sync --frozen --check` and refuses to continue when a locked dependency is
+missing or at another version, printing uv's list of what differs. The
+workspace's own packages and packages the lock no longer names are not
+compared.
+
+Either sync the volume in place, with the arguments the message prints:
+
+```bash
+docker compose --profile test-native run --rm -e L2O_ALLOW_STALE_VENV=1 pytest-native uv sync --frozen --dev
+```
+
+or rebuild the image and let the volume be filled from it again:
+
+```bash
+docker compose --profile test-native build
+docker volume rm "$(basename "$PWD")_venv-nocarla-cache"
+```
+
+`L2O_ALLOW_STALE_VENV=1` skips the check, which is what lets the in-place sync
+run at all. An image built before the check existed has no `L2O_SYNC_ARGS`, so
+it is not checked; the message says to rebuild it. The `dev` shells are not
+checked.
 
 ### `the --frozen flag was used but the lockfile is out of date`
 

@@ -22,6 +22,9 @@ x-carla-base: &carla-base
     # so exporting it to run `docker compose` would redirect every later
     # git command in the same shell. Do not rename it back.
     - ${L2O_GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}:${L2O_GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}
+  environment:
+    # Named in scripts/check_container_env.py's advice when the venv is stale.
+    L2O_VENV_VOLUME: venv-cache
   working_dir: /workspace
 
 x-native-base: &native-base
@@ -47,7 +50,16 @@ x-native-base: &native-base
     # so exporting it to run `docker compose` would redirect every later
     # git command in the same shell. Do not rename it back.
     - ${L2O_GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}:${L2O_GIT_COMMON_DIR:-/tmp/l2o-git-common-dir-unset}
+  environment:
+    L2O_VENV_VOLUME: venv-nocarla-cache
   working_dir: /workspace
+
+# Test services refuse to start against a venv that no longer matches
+# uv.lock: the venv volume survives image rebuilds, so it goes stale silently
+# whenever the lock moves. The system python3, because a venv from the wrong
+# architecture cannot start its own. See scripts/check_container_env.py.
+x-checked-venv: &checked-venv
+  entrypoint: ["/usr/bin/python3", "scripts/check_container_env.py", "--"]
 
 services:
   dev:
@@ -66,7 +78,7 @@ services:
   # source on every invocation, which can rebuild workspace packages and
   # destabilize the carefully-built native dependencies in the image.
   pytest:
-    <<: *carla-base
+    <<: [*carla-base, *checked-venv]
     command: pytest -v --tb=short -n auto
     profiles: ["test"]
 
@@ -79,7 +91,7 @@ services:
     profiles: ["tdd"]
 
   pytest-native:
-    <<: *native-base
+    <<: [*native-base, *checked-venv]
     # No test module imports the CARLA client (only the `carla-import-test`
     # entrypoint does), so the suite collects and runs in full without the
     # `carla` extra. Use the `carla` profile to exercise the CARLA path.
